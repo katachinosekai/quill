@@ -202,5 +202,7 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	ph := panel.MinSize().Height
 	y := max(8, (size.Height-ph)/2)
 	panel.Resize(fyne.NewSize(pw, ph))
-	panel.Move(fyne.NewPos(size.Width-pw-usageEdge, y))
+	left := x + w + usageGap/2
+	px := left + (size.Width-usageEdge-left-pw)/2
+	panel.Move(fyne.NewPos(max(px, x+w+usageGap/2), y))
 }
