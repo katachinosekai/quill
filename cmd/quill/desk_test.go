@@ -103,6 +103,7 @@ func newHarness(t *testing.T) *harness {
 	h.w = test.NewWindow(nil)
 	t.Cleanup(h.w.Close)
 	h.d = newDesk(a, h.w, config{ProjectsRoot: projects, SessionsDir: sessions, ClaudeBin: exe})
+	h.d.planFirst = false
 	h.d.do = func(f func()) {
 		uiMu.Lock()
 		defer uiMu.Unlock()
@@ -835,6 +836,56 @@ func TestFlatSessionsUnderMainFolders(t *testing.T) {
 		}
 		if !sub {
 			t.Fatal("grouping by project should bring the subfolders back")
+		}
+	})
+}
+
+func TestPlanFirstApproval(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		h.d.planFirst = true
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("write")
+	})
+	var plan *chat.Item
+	h.eventually("plan card after the held request", func() bool {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.Plan && it.PermState == chat.PermPending {
+				plan = it
+			}
+		}
+		return plan != nil && !s.conv.Busy
+	})
+	h.ui(func() {
+		held := false
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.Permission && it.PermState == chat.PermPlanAsked {
+				held = true
+			}
+		}
+		if !held || !strings.Contains(h.args(), "") {
+			t.Fatal("the first permission request should be held and Claude asked for a plan")
+		}
+		h.d.answerPlan(s, plan, true)
+		if !s.runAll || plan.PermState != chat.PermAllowed {
+			t.Fatal("approving the plan should pre-approve the request")
+		}
+	})
+	h.eventually("approval turn done", func() bool { return !s.conv.Busy && !s.runAll })
+	h.ui(func() {
+		s.runAll = true
+		h.d.send("write")
+	})
+	h.eventually("tool auto-approved", func() bool {
+		it := lastItem(s)
+		return it != nil && it.Text == "done allow"
+	})
+	h.ui(func() {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.Permission && it.PermState == chat.PermPending {
+				t.Fatal("no prompt should wait for the user during an approved plan")
+			}
 		}
 	})
 }

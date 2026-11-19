@@ -443,6 +443,10 @@ func (p *Process) Respond(requestID string, d protocol.Decision, req *protocol.C
 	return p.write(protocol.PermissionResponse(requestID, d, req, ""))
 }
 
+func (p *Process) DenyWith(requestID string, req *protocol.ControlRequest, message string) error {
+	return p.write(protocol.PermissionResponse(requestID, protocol.Deny, req, message))
+}
+
 var ErrHandedOff = errors.New("session: process was handed to another Quill")
 
 func (p *Process) Stop(grace time.Duration) error {

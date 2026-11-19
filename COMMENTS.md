@@ -32,6 +32,8 @@ Go code in this repo carries no comments; notes live here.
 
 ## Permission prompts
 
+Plan-first approval (default on, sidebar "Plan first, then approve all", preference `planFirst`; `planGate`): the first `can_use_tool` of a request is denied with `planAskMessage` (nothing runs; Claude is asked to list every command/change and stop), shown as a small "held" line. When that turn ends, a Plan card appears ("Approve plan & run all" / "Don't run"). Approving sends `planGoMessage` and sets `runAll`, so every `can_use_tool` until the next `result` is allowed automatically (shown as "Approved with the plan"). With the option off, prompts work one by one as below.
+
 - `--permission-prompts host` alone does not route anything to the app (the real Write was denied). With `--permission-prompt-tool stdio` the CLI emits `control_request` subtype `can_use_tool` (tool_name, input, tool_use_id, permission_suggestions).
 - Answer: `control_response` success with `{behavior:"allow", updatedInput}` or `{behavior:"deny", message}`. "Allow always (this session)" also sends `updatedPermissions`: the CLI's own suggestions re-targeted to destination `session`, or an `addRules` rule for the tool name. Verified for real.
 - `control_cancel_request` and the end of a turn mark open prompts "No longer needed". Other incoming control requests get an error reply so the CLI never waits.

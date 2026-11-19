@@ -20,6 +20,7 @@ const (
 	Notice
 	Error
 	Thinking
+	Plan
 )
 
 type PermState int
@@ -30,6 +31,8 @@ const (
 	PermAllowedAlways
 	PermDenied
 	PermCancelled
+	PermAutoAllowed
+	PermPlanAsked
 )
 
 type Item struct {
@@ -99,6 +102,10 @@ func (c *Conversation) AddUser(text string) *Item {
 	return c.add(&Item{Kind: User, Text: text})
 }
 
+func (c *Conversation) AddPlan() *Item {
+	return c.add(&Item{Kind: Plan, PermState: PermPending})
+}
+
 func (c *Conversation) AddNotice(text string) *Item {
 	return c.add(&Item{Kind: Notice, Text: text})
 }
@@ -110,7 +117,7 @@ func (c *Conversation) AddError(text string) *Item {
 func (c *Conversation) PendingPermissions() []*Item {
 	var out []*Item
 	for _, it := range c.Items {
-		if it.Kind == Permission && it.PermState == PermPending {
+		if (it.Kind == Permission || it.Kind == Plan) && it.PermState == PermPending {
 			out = append(out, it)
 		}
 	}

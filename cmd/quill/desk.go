@@ -74,6 +74,8 @@ type deskSession struct {
 	failed    string
 	stopping  bool
 	terminal  *live.Process
+	planWait  bool
+	runAll    bool
 	takeover  bool
 	loading   bool
 	rcURL     string
@@ -168,6 +170,7 @@ type desk struct {
 	stt           *speech
 	autoRC        bool
 	groupProjects bool
+	planFirst     bool
 	alignSel      *widget.RadioGroup
 	suppressAlign bool
 	forceSwap     bool
@@ -212,6 +215,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		center:        a.Preferences().BoolWithFallback("centerText", true),
 		autoRC:        a.Preferences().BoolWithFallback("autoRemoteControl", true),
 		groupProjects: a.Preferences().Bool("groupByProject"),
+		planFirst:     a.Preferences().BoolWithFallback("planFirst", true),
 		created:       map[string]bool{},
 		do:            fyne.Do,
 		doWait:        fyne.DoAndWait,
@@ -263,6 +267,11 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		}
 	})
 	rcChk.Checked = d.autoRC
+	planChk := widget.NewCheck("Plan first, then approve all", func(on bool) {
+		d.planFirst = on
+		d.app.Preferences().SetBool("planFirst", on)
+	})
+	planChk.Checked = d.planFirst
 	legend := container.NewHBox(
 		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
 	)
@@ -273,7 +282,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, alignRow, legend)
+	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, alignRow, legend)
 	r := canvas.NewRectangle(colSidebar)
 	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
 	return container.NewStack(r, container.NewPadded(d.sideBody))
@@ -1012,6 +1021,7 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	if ev.Type == "system" && ev.Subtype == "init" && ev.SessionID != "" && ev.SessionID != s.id {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
+	items = append(items, d.planGate(s, ev, items)...)
 	if d.current == s {
 		d.queueUI(s, items)
 	} else {
@@ -1643,5 +1653,65 @@ func (d *desk) setCenter(on bool) {
 	d.app.Preferences().SetBool("centerText", on)
 	if d.current != nil {
 		d.chat.show(d.current)
+	}
+}
+
+const (
+	planAskMessage = "Quill plan-first approval: nothing was run. Before running anything that needs approval, list everything you are going to do for this request (every command, file change and tool, in order, with a short reason), then stop and wait. The user will approve the whole plan at once."
+	planGoMessage  = "Plan approved. Go ahead and carry out the whole plan; every tool call for this request is pre-approved."
+)
+
+func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
+	switch {
+	case ev.Type == "control_request" && ev.Request != nil && ev.Request.Subtype == "can_use_tool":
+		var it *chat.Item
+		for _, x := range items {
+			if x.Kind == chat.Permission && x.RequestID == ev.RequestID {
+				it = x
+			}
+		}
+		if it == nil || it.PermState != chat.PermPending || s.proc == nil {
+			return nil
+		}
+		if s.runAll {
+			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
+				it.PermState = chat.PermAutoAllowed
+			}
+			return nil
+		}
+		if !d.planFirst {
+			return nil
+		}
+		if s.proc.DenyWith(it.RequestID, it.Request, planAskMessage) == nil {
+			it.PermState = chat.PermPlanAsked
+			s.planWait = true
+		}
+	case ev.Type == "result":
+		s.runAll = false
+		if s.planWait {
+			s.planWait = false
+			return []*chat.Item{s.conv.AddPlan()}
+		}
+	}
+	return nil
+}
+
+func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
+	if it.PermState != chat.PermPending {
+		return
+	}
+	if !ok {
+		it.PermState = chat.PermDenied
+		d.chatFor(s, []*chat.Item{it})
+		d.updateChrome()
+		d.refreshSidebar()
+		return
+	}
+	it.PermState = chat.PermAllowed
+	s.runAll = true
+	d.chatFor(s, []*chat.Item{it})
+	d.sendTo(s, planGoMessage)
+	if !s.running() {
+		s.runAll = false
 	}
 }

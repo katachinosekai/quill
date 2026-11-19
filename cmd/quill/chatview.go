@@ -405,7 +405,17 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		}
 		return v.renderTool(it, iv)
 	case chat.Permission:
+		if it.PermState == chat.PermAutoAllowed || it.PermState == chat.PermPlanAsked {
+			l := widget.NewLabel(it.ToolName + ": " + permStateText(it.PermState))
+			l.Importance = widget.LowImportance
+			l.SizeName = theme.SizeNameCaptionText
+			l.Alignment = v.align()
+			l.Wrapping = fyne.TextWrapWord
+			return l
+		}
 		return v.renderPermission(it)
+	case chat.Plan:
+		return v.renderPlan(it)
 	case chat.Thinking:
 		return v.renderThinking(it, iv)
 	case chat.Notice:
@@ -684,6 +694,10 @@ func permStateText(s chat.PermState) string {
 		return "Denied"
 	case chat.PermCancelled:
 		return "No longer needed"
+	case chat.PermAutoAllowed:
+		return "Approved with the plan"
+	case chat.PermPlanAsked:
+		return "Held: asked Claude for its full plan first"
 	}
 	return ""
 }
@@ -1028,4 +1042,38 @@ func centerLists(segs []widget.RichTextSegment, indent string) []widget.RichText
 		}
 	}
 	return out
+}
+
+func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
+	title := widget.NewLabel("Approve this plan?")
+	title.TextStyle = fyne.TextStyle{Bold: true}
+	msg := widget.NewLabel("Claude listed everything it will do above. Approving runs all of it: every command and change for this request is approved automatically until Claude finishes.")
+	msg.Wrapping = fyne.TextWrapWord
+	parts := []fyne.CanvasObject{title, msg}
+	border := colAccent
+	if it.PermState == chat.PermPending {
+		run := widget.NewButtonWithIcon("Approve plan & run all", theme.ConfirmIcon(), func() { v.d.answerPlan(v.s, it, true) })
+		run.Importance = widget.HighImportance
+		no := widget.NewButtonWithIcon("Don't run", theme.CancelIcon(), func() { v.d.answerPlan(v.s, it, false) })
+		no.Importance = widget.DangerImportance
+		if !v.d.canAnswer(v.s) {
+			run.Disable()
+		}
+		parts = append(parts, container.NewHBox(run, no))
+	} else {
+		text := "Not run"
+		switch it.PermState {
+		case chat.PermAllowed:
+			text = "Approved: running the whole plan"
+		case chat.PermCancelled:
+			text = "No longer needed"
+		}
+		parts = append(parts, mutedText(text, 13))
+		border = color.NRGBA{0x44, 0x44, 0x40, 0xff}
+	}
+	r := canvas.NewRectangle(colCard)
+	r.CornerRadius = 10
+	r.StrokeColor = border
+	r.StrokeWidth = 1.5
+	return container.NewVBox(padTop(4), container.NewStack(r, container.NewPadded(container.NewVBox(parts...))), padTop(4))
 }
