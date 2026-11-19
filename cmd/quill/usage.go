@@ -19,6 +19,7 @@ const (
 	usageMinMargin = 230
 	usageMaxWidth  = 280
 	usageGap       = 36
+	usageEdge      = 16
 )
 
 type usagePanel struct {
@@ -33,13 +34,19 @@ type usagePanel struct {
 	today   *widget.Label
 }
 
+func usageText(s string) *canvas.Text {
+	t := canvas.NewText(s, colText)
+	t.TextSize = 12
+	return t
+}
+
 func newUsagePanel(d *desk) *usagePanel {
 	u := &usagePanel{d: d}
 	u.five = widget.NewProgressBar()
 	u.week = widget.NewProgressBar()
-	u.fiveTxt = mutedText("", 11)
-	u.weekTxt = mutedText("", 11)
-	u.asOf = mutedText("", 10)
+	u.fiveTxt = usageText("")
+	u.weekTxt = usageText("")
+	u.asOf = usageText("")
 	label := func() *widget.Label {
 		l := widget.NewLabel("")
 		l.Wrapping = fyne.TextWrapWord
@@ -55,8 +62,8 @@ func newUsagePanel(d *desk) *usagePanel {
 	}
 	body := container.NewVBox(
 		head("Plan usage"),
-		mutedText("5-hour session", 11), u.five, u.fiveTxt,
-		mutedText("Weekly", 11), u.week, u.weekTxt, u.asOf,
+		usageText("5-hour session"), u.five, u.fiveTxt,
+		usageText("Weekly"), u.week, u.weekTxt, u.asOf,
 		padTop(8), head("This session"), u.sess,
 		padTop(8), head("All sessions"), u.today,
 	)
@@ -195,5 +202,5 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	ph := panel.MinSize().Height
 	y := max(8, (size.Height-ph)/2)
 	panel.Resize(fyne.NewSize(pw, ph))
-	panel.Move(fyne.NewPos(x+w+usageGap, y))
+	panel.Move(fyne.NewPos(size.Width-pw-usageEdge, y))
 }
