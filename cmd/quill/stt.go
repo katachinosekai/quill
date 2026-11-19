@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
-	"syscall"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -16,29 +17,81 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/katachinosekai/quill/internal/whisper"
 )
 
-const sttNotice = "Speech to text runs entirely on this computer (whisper.cpp).\n\n" +
-	"Your voice recording and the text made from it are not collected, stored or sent to Anthropic or anyone else. " +
-	"The recording is deleted right after it is turned into text, and the text only goes into your message box. " +
+const sttNotice = "Speech to text runs entirely on this computer.\n\n" +
+	"Your voice and the text made from it are not collected, stored or sent to Anthropic or anyone else. " +
+	"Audio is kept in memory only while you speak, and the text only goes into your message box. " +
 	"Nothing is sent until you press Send.\n\nThis is just a convenience for you."
+
+const (
+	modelBaseURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
+	modelIdle    = 5 * time.Minute
+	minModelSize = 30 << 20
+)
 
 type sttState int
 
 const (
 	sttIdle sttState = iota
 	sttRecording
-	sttTranscribing
+	sttFinishing
 )
 
+type liveSession interface{ Stop() }
+
 type speech struct {
-	d         *desk
-	btn       *widget.Button
-	state     sttState
-	stop      func() (string, error)
-	record    func() (func() (string, error), error)
-	recognize func(ctx context.Context, wav string) (string, error)
-	ready     func() error
+	d       *desk
+	btn     *widget.Button
+	langBtn *widget.Button
+	state   sttState
+	live    liveSession
+	base    string
+	ready   func(lang string) error
+	start   func(lang string, update func(whisper.Update)) (liveSession, error)
+
+	modelMu   sync.Mutex
+	model     *whisper.Model
+	modelPath string
+	idle      *time.Timer
+}
+
+type language struct{ code, name string }
+
+var languages = []language{
+	{"en", "English"}, {"zh", "Chinese"}, {"de", "German"}, {"es", "Spanish"}, {"ru", "Russian"}, {"ko", "Korean"},
+	{"fr", "French"}, {"ja", "Japanese"}, {"pt", "Portuguese"}, {"tr", "Turkish"}, {"pl", "Polish"}, {"ca", "Catalan"},
+	{"nl", "Dutch"}, {"ar", "Arabic"}, {"sv", "Swedish"}, {"it", "Italian"}, {"id", "Indonesian"}, {"hi", "Hindi"},
+	{"fi", "Finnish"}, {"vi", "Vietnamese"}, {"he", "Hebrew"}, {"uk", "Ukrainian"}, {"el", "Greek"}, {"ms", "Malay"},
+	{"cs", "Czech"}, {"ro", "Romanian"}, {"da", "Danish"}, {"hu", "Hungarian"}, {"ta", "Tamil"}, {"no", "Norwegian"},
+	{"th", "Thai"}, {"ur", "Urdu"}, {"hr", "Croatian"}, {"bg", "Bulgarian"}, {"lt", "Lithuanian"}, {"la", "Latin"},
+	{"mi", "Maori"}, {"ml", "Malayalam"}, {"cy", "Welsh"}, {"sk", "Slovak"}, {"te", "Telugu"}, {"fa", "Persian"},
+	{"lv", "Latvian"}, {"bn", "Bengali"}, {"sr", "Serbian"}, {"az", "Azerbaijani"}, {"sl", "Slovenian"}, {"kn", "Kannada"},
+	{"et", "Estonian"}, {"mk", "Macedonian"}, {"br", "Breton"}, {"eu", "Basque"}, {"is", "Icelandic"}, {"hy", "Armenian"},
+	{"ne", "Nepali"}, {"mn", "Mongolian"}, {"bs", "Bosnian"}, {"kk", "Kazakh"}, {"sq", "Albanian"}, {"sw", "Swahili"},
+	{"gl", "Galician"}, {"mr", "Marathi"}, {"pa", "Punjabi"}, {"si", "Sinhala"}, {"km", "Khmer"}, {"sn", "Shona"},
+	{"yo", "Yoruba"}, {"so", "Somali"}, {"af", "Afrikaans"}, {"oc", "Occitan"}, {"ka", "Georgian"}, {"be", "Belarusian"},
+	{"tg", "Tajik"}, {"sd", "Sindhi"}, {"gu", "Gujarati"}, {"am", "Amharic"}, {"yi", "Yiddish"}, {"lo", "Lao"},
+	{"uz", "Uzbek"}, {"fo", "Faroese"}, {"ht", "Haitian Creole"}, {"ps", "Pashto"}, {"tk", "Turkmen"}, {"nn", "Nynorsk"},
+	{"mt", "Maltese"}, {"sa", "Sanskrit"}, {"lb", "Luxembourgish"}, {"my", "Myanmar"}, {"bo", "Tibetan"}, {"tl", "Tagalog"},
+	{"mg", "Malagasy"}, {"as", "Assamese"}, {"tt", "Tatar"}, {"haw", "Hawaiian"}, {"ln", "Lingala"}, {"ha", "Hausa"},
+	{"ba", "Bashkir"}, {"jw", "Javanese"}, {"su", "Sundanese"}, {"yue", "Cantonese"},
+}
+
+func init() {
+	rest := languages[1:]
+	sort.Slice(rest, func(i, j int) bool { return rest[i].name < rest[j].name })
+}
+
+func languageName(code string) string {
+	for _, l := range languages {
+		if l.code == code {
+			return l.name
+		}
+	}
+	return code
 }
 
 func sttHome() string {
@@ -48,106 +101,151 @@ func sttHome() string {
 	return ""
 }
 
-func whisperBin() string {
-	if p := os.Getenv("QUILL_WHISPER"); p != "" {
-		return p
+func modelFile(lang string) string {
+	if lang == "en" {
+		return "ggml-base.en-q5_1.bin"
 	}
-	local := filepath.Join(sttHome(), "whisper.cpp", "build", "bin", "whisper-cli")
-	if st, err := os.Stat(local); err == nil && st.Mode()&0o111 != 0 {
-		return local
-	}
-	if p, err := exec.LookPath("whisper-cli"); err == nil {
-		return p
-	}
-	return local
+	return "ggml-base-q5_1.bin"
 }
 
-func whisperModel() string {
+func modelPath(lang string) string {
 	if p := os.Getenv("QUILL_WHISPER_MODEL"); p != "" {
 		return p
 	}
-	return filepath.Join(sttHome(), "models", "ggml-base.en.bin")
+	return filepath.Join(sttHome(), "models", modelFile(lang))
 }
 
-func sttSetupCommand() string {
-	return `D=~/.local/share/quill; mkdir -p $D/models && cd $D && git clone --depth 1 --branch v1.7.6 https://github.com/ggml-org/whisper.cpp.git && cd whisper.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j --target whisper-cli && curl -L -o $D/models/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin`
-}
-
-func sttReady() error {
-	if _, err := exec.LookPath("pw-record"); err != nil {
-		return errors.New("pw-record (PipeWire) is not installed")
-	}
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		return errors.New("ffmpeg is not installed")
-	}
-	if st, err := os.Stat(whisperBin()); err != nil || st.Mode()&0o111 == 0 {
-		return errors.New("whisper.cpp is not installed")
-	}
-	if _, err := os.Stat(whisperModel()); err != nil {
-		return errors.New("the speech model is not downloaded")
+func modelReady(lang string) error {
+	st, err := os.Stat(modelPath(lang))
+	if err != nil || st.Size() < minModelSize {
+		return fmt.Errorf("the %s speech model is not downloaded", languageName(lang))
 	}
 	return nil
 }
 
-func pwRecord() (func() (string, error), error) {
-	dir, err := os.MkdirTemp("", "quill-stt-")
+func downloadModel(ctx context.Context, lang string, progress func(float64)) error {
+	dst := modelPath(lang)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelBaseURL+modelFile(lang), nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	raw := filepath.Join(dir, "rec.wav")
-	cmd := exec.Command("pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", raw)
-	if err := cmd.Start(); err != nil {
-		os.RemoveAll(dir)
-		return nil, err
-	}
-	return func() (string, error) {
-		_ = cmd.Process.Signal(syscall.SIGINT)
-		done := make(chan struct{})
-		go func() { _ = cmd.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			_ = cmd.Process.Kill()
-			<-done
-		}
-		out := filepath.Join(dir, "clean.wav")
-		conv := exec.Command("ffmpeg", "-loglevel", "error", "-y", "-i", raw, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", out)
-		if b, err := conv.CombinedOutput(); err != nil {
-			os.RemoveAll(dir)
-			return "", fmt.Errorf("could not read the recording: %s", strings.TrimSpace(string(b)))
-		}
-		os.Remove(raw)
-		return out, nil
-	}, nil
-}
-
-func whisperRecognize(ctx context.Context, wav string) (string, error) {
-	defer os.RemoveAll(filepath.Dir(wav))
-	cmd := exec.CommandContext(ctx, whisperBin(), "-m", whisperModel(), "-f", wav, "-nt", "-np", "-t", "8")
-	b, err := cmd.Output()
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("whisper.cpp failed: %v", err)
+		return err
 	}
-	return cleanTranscript(string(b)), nil
-}
-
-func cleanTranscript(s string) string {
-	var parts []string
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || line == "[BLANK_AUDIO]" || strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			continue
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed: %s", resp.Status)
+	}
+	tmp := dst + ".part"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	total := resp.ContentLength
+	var got int64
+	buf := make([]byte, 256<<10)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := f.Write(buf[:n]); werr != nil {
+				f.Close()
+				os.Remove(tmp)
+				return werr
+			}
+			got += int64(n)
+			if total > 0 {
+				progress(float64(got) / float64(total))
+			}
 		}
-		parts = append(parts, line)
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			f.Close()
+			os.Remove(tmp)
+			return rerr
+		}
 	}
-	return strings.Join(parts, " ")
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if got < minModelSize {
+		os.Remove(tmp)
+		return fmt.Errorf("download was incomplete")
+	}
+	return os.Rename(tmp, dst)
 }
 
 func newSpeech(d *desk) *speech {
-	sp := &speech{d: d, record: pwRecord, recognize: whisperRecognize, ready: sttReady}
+	sp := &speech{d: d, ready: modelReady}
+	sp.start = sp.startLive
 	sp.btn = widget.NewButtonWithIcon("", theme.MediaRecordIcon(), sp.click)
 	sp.btn.Importance = widget.LowImportance
+	sp.langBtn = widget.NewButton("Voice: "+strings.ToUpper(sp.lang()), func() {
+		d.pickLanguage(sp.lang(), func(code string) { sp.setLang(code) })
+	})
+	sp.langBtn.Importance = widget.LowImportance
 	return sp
+}
+
+func (sp *speech) lang() string {
+	return sp.d.app.Preferences().StringWithFallback("sttLang", "en")
+}
+
+func (sp *speech) setLang(code string) {
+	sp.d.app.Preferences().SetString("sttLang", code)
+	sp.langBtn.SetText("Voice: " + strings.ToUpper(code))
+}
+
+func (sp *speech) loadModel(lang string) (*whisper.Model, error) {
+	sp.modelMu.Lock()
+	defer sp.modelMu.Unlock()
+	if sp.idle != nil {
+		sp.idle.Stop()
+	}
+	path := modelPath(lang)
+	if sp.model != nil && sp.modelPath == path {
+		return sp.model, nil
+	}
+	if sp.model != nil {
+		sp.model.Close()
+		sp.model = nil
+	}
+	m, err := whisper.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	sp.model, sp.modelPath = m, path
+	return m, nil
+}
+
+func (sp *speech) releaseLater() {
+	sp.modelMu.Lock()
+	defer sp.modelMu.Unlock()
+	if sp.idle != nil {
+		sp.idle.Stop()
+	}
+	sp.idle = time.AfterFunc(modelIdle, func() {
+		sp.modelMu.Lock()
+		defer sp.modelMu.Unlock()
+		if sp.model != nil {
+			sp.model.Close()
+			sp.model = nil
+		}
+	})
+}
+
+func (sp *speech) startLive(lang string, update func(whisper.Update)) (liveSession, error) {
+	m, err := sp.loadModel(lang)
+	if err != nil {
+		return nil, err
+	}
+	return whisper.StartLive(m, whisper.NewMic(), lang, update)
 }
 
 func (sp *speech) click() {
@@ -156,7 +254,7 @@ func (sp *speech) click() {
 	case sttRecording:
 		sp.finish()
 		return
-	case sttTranscribing:
+	case sttFinishing:
 		return
 	}
 	if !d.app.Preferences().Bool("sttNoticeShown") {
@@ -174,66 +272,185 @@ func (sp *speech) click() {
 
 func (sp *speech) begin() {
 	d := sp.d
-	if err := sp.ready(); err != nil {
-		cmd := widget.NewEntry()
-		cmd.SetText(sttSetupCommand())
-		cmd.MultiLine = true
-		cmd.Wrapping = fyne.TextWrapBreak
-		msg := widget.NewLabel("Speech to text needs a local speech engine: " + err.Error() + ".\n\nRun this once in a terminal (it builds whisper.cpp and downloads a 142 MB English model into ~/.local/share/quill). Everything stays on this computer.")
-		msg.Wrapping = fyne.TextWrapWord
-		copyBtn := widget.NewButtonWithIcon("Copy command", theme.ContentCopyIcon(), func() {
-			d.app.Clipboard().SetContent(sttSetupCommand())
-		})
-		dlg := dialog.NewCustom("Set up speech to text", "Close", container.NewVBox(msg, cmd, copyBtn), d.win)
-		dlg.Resize(fyne.NewSize(620, 340))
-		dlg.Show()
+	lang := sp.lang()
+	if err := sp.ready(lang); err != nil {
+		sp.setup(lang)
 		return
 	}
-	stop, err := sp.record()
-	if err != nil {
-		dialog.ShowError(fmt.Errorf("could not start recording: %w", err), d.win)
-		return
+	sp.base = strings.TrimRight(d.input.Text, " ")
+	if sp.base != "" {
+		sp.base += " "
 	}
-	sp.stop = stop
 	sp.state = sttRecording
 	sp.sync()
+	go func() {
+		live, err := sp.start(lang, func(u whisper.Update) { d.do(func() { sp.apply(u) }) })
+		d.do(func() {
+			if err != nil {
+				sp.state = sttIdle
+				sp.sync()
+				dialog.ShowError(fmt.Errorf("could not start speech to text: %w", err), d.win)
+				return
+			}
+			sp.live = live
+			if sp.state != sttRecording {
+				go live.Stop()
+			}
+		})
+	}()
+}
+
+func (sp *speech) apply(u whisper.Update) {
+	d := sp.d
+	if u.Err != nil && u.Committed == "" && u.Partial == "" {
+		return
+	}
+	text := u.Committed
+	if u.Partial != "" {
+		if text != "" {
+			text += " "
+		}
+		text += u.Partial
+	}
+	if sp.state == sttIdle {
+		return
+	}
+	full := sp.base + text
+	if d.input.Text != full {
+		d.input.SetText(full)
+		d.input.CursorRow = strings.Count(full, "\n")
+		d.input.CursorColumn = len([]rune(full[strings.LastIndex(full, "\n")+1:]))
+		d.input.Refresh()
+	}
+	if u.Final {
+		sp.state = sttIdle
+		sp.live = nil
+		sp.sync()
+		d.win.Canvas().Focus(d.input)
+		sp.releaseLater()
+	}
 }
 
 func (sp *speech) finish() {
-	d := sp.d
-	stop := sp.stop
-	sp.stop = nil
-	sp.state = sttTranscribing
+	live := sp.live
+	sp.state = sttFinishing
 	sp.sync()
-	go func() {
-		text, err := "", error(nil)
-		wav, err := stop()
-		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			text, err = sp.recognize(ctx, wav)
-			cancel()
-		}
-		d.do(func() {
-			sp.state = sttIdle
-			sp.sync()
-			if err != nil {
-				dialog.ShowError(err, d.win)
-				return
-			}
-			if text == "" {
-				return
-			}
-			cur := strings.TrimRight(d.input.Text, " ")
-			if cur != "" {
-				cur += " "
-			}
-			d.input.SetText(cur + text)
-			d.input.CursorRow = strings.Count(d.input.Text, "\n")
-			d.input.CursorColumn = len([]rune(d.input.Text[strings.LastIndex(d.input.Text, "\n")+1:]))
-			d.input.Refresh()
-			d.win.Canvas().Focus(d.input)
+	if live == nil {
+		return
+	}
+	go live.Stop()
+}
+
+func (sp *speech) setup(lang string) {
+	d := sp.d
+	chosen := lang
+	pick := widget.NewButton(languageName(lang), nil)
+	size := widget.NewLabel("")
+	info := func() {
+		pick.SetText(languageName(chosen))
+		size.SetText(fmt.Sprintf("Downloads the %s speech model once (about 57 MB) into ~/.local/share/quill. After that it works offline and nothing leaves this computer.", languageName(chosen)))
+	}
+	size.Wrapping = fyne.TextWrapWord
+	pick.OnTapped = func() {
+		d.pickLanguage(chosen, func(code string) {
+			chosen = code
+			info()
 		})
-	}()
+	}
+	info()
+	bar := widget.NewProgressBar()
+	bar.Hide()
+	var dlg dialog.Dialog
+	ctx, cancel := context.WithCancel(context.Background())
+	get := widget.NewButtonWithIcon("Download and start", theme.DownloadIcon(), nil)
+	get.Importance = widget.HighImportance
+	get.OnTapped = func() {
+		get.Disable()
+		pick.Disable()
+		bar.Show()
+		code := chosen
+		go func() {
+			err := downloadModel(ctx, code, func(f float64) { d.do(func() { bar.SetValue(f) }) })
+			d.do(func() {
+				if err != nil {
+					get.Enable()
+					pick.Enable()
+					bar.Hide()
+					if ctx.Err() == nil {
+						dialog.ShowError(err, d.win)
+					}
+					return
+				}
+				dlg.Hide()
+				sp.setLang(code)
+				sp.begin()
+			})
+		}()
+	}
+	body := container.NewVBox(container.NewHBox(widget.NewLabel("Language"), pick), size, bar, get)
+	dlg = dialog.NewCustom("Set up speech to text", "Cancel", body, d.win)
+	dlg.SetOnClosed(cancel)
+	dlg.Resize(fyne.NewSize(520, 260))
+	dlg.Show()
+}
+
+func (d *desk) pickLanguage(current string, onPick func(code string)) {
+	search := widget.NewEntry()
+	search.SetPlaceHolder("Search languages")
+	shown := languages
+	list := widget.NewList(
+		func() int { return len(shown) },
+		func() fyne.CanvasObject { return widget.NewLabel("") },
+		func(i widget.ListItemID, o fyne.CanvasObject) {
+			l := shown[i]
+			o.(*widget.Label).SetText(l.name + "  (" + l.code + ")")
+		},
+	)
+	var pop *widget.PopUp
+	list.OnSelected = func(i widget.ListItemID) {
+		if i < len(shown) {
+			onPick(shown[i].code)
+			pop.Hide()
+		}
+	}
+	selectCurrent := func() {
+		for i, l := range shown {
+			if l.code == current {
+				list.Select(i)
+				list.ScrollTo(i)
+				return
+			}
+		}
+		list.UnselectAll()
+	}
+	search.OnChanged = func(q string) {
+		q = strings.ToLower(strings.TrimSpace(q))
+		shown = nil
+		for _, l := range languages {
+			if q == "" || strings.Contains(strings.ToLower(l.name), q) || strings.HasPrefix(l.code, q) {
+				shown = append(shown, l)
+			}
+		}
+		list.Refresh()
+		sel := list.OnSelected
+		list.OnSelected = nil
+		selectCurrent()
+		list.OnSelected = sel
+	}
+	search.OnSubmitted = func(string) {
+		if len(shown) > 0 {
+			onPick(shown[0].code)
+			pop.Hide()
+		}
+	}
+	box := container.NewBorder(search, nil, nil, nil, list)
+	pop = widget.NewModalPopUp(container.NewPadded(sized(320, 380, box)), d.win.Canvas())
+	sel := list.OnSelected
+	list.OnSelected = nil
+	selectCurrent()
+	list.OnSelected = sel
+	pop.Show()
+	d.win.Canvas().Focus(search)
 }
 
 func (sp *speech) sync() {
@@ -241,12 +458,12 @@ func (sp *speech) sync() {
 	case sttRecording:
 		sp.btn.SetIcon(theme.MediaStopIcon())
 		sp.btn.Importance = widget.DangerImportance
-		sp.d.chat.setLive("● Listening... click the mic again to stop")
-	case sttTranscribing:
+		sp.d.chat.setLive("● Listening (" + languageName(sp.lang()) + ")... click the mic again to stop")
+	case sttFinishing:
 		sp.btn.SetIcon(theme.MediaRecordIcon())
 		sp.btn.Importance = widget.MediumImportance
 		sp.btn.Disable()
-		sp.d.chat.setLive("Turning speech into text (on this computer)...")
+		sp.d.chat.setLive("Finishing the last words...")
 	default:
 		sp.btn.SetIcon(theme.MediaRecordIcon())
 		sp.btn.Importance = widget.LowImportance

@@ -2,7 +2,10 @@ module github.com/katachinosekai/quill
 
 go 1.26.0
 
-require fyne.io/fyne/v2 v2.8.2
+require (
+	fyne.io/fyne/v2 v2.8.2
+	github.com/gen2brain/malgo v0.11.24
+)
 
 require (
 	fyne.io/systray v1.12.3-0.20260810170012-af4e8e793ec4 // indirect

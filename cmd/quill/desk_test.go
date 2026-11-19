@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"image/color"
 	"os"
@@ -23,6 +22,7 @@ import (
 	"github.com/katachinosekai/quill/internal/fakeclaude"
 	"github.com/katachinosekai/quill/internal/protocol"
 	"github.com/katachinosekai/quill/internal/transcript"
+	"github.com/katachinosekai/quill/internal/whisper"
 )
 
 const (
@@ -752,6 +752,10 @@ func TestStepChipsToggleInline(t *testing.T) {
 	})
 }
 
+type fakeLive struct{ stop func() }
+
+func (f *fakeLive) Stop() { f.stop() }
+
 func TestSpeechToText(t *testing.T) {
 	h := newHarness(t)
 	h.d.do = func(f func()) {
@@ -762,19 +766,27 @@ func TestSpeechToText(t *testing.T) {
 		}()
 	}
 	sp := h.d.stt
-	recorded := false
-	sp.ready = func() error { return nil }
-	sp.record = func() (func() (string, error), error) {
-		recorded = true
-		return func() (string, error) { return "/tmp/fake.wav", nil }, nil
+	var startMu sync.Mutex
+	started := ""
+	getStarted := func() string {
+		startMu.Lock()
+		defer startMu.Unlock()
+		return started
 	}
-	sp.recognize = func(ctx context.Context, wav string) (string, error) { return "hello from my voice", nil }
+	sp.ready = func(string) error { return nil }
+	sp.start = func(lang string, update func(whisper.Update)) (liveSession, error) {
+		startMu.Lock()
+		started = lang
+		startMu.Unlock()
+		update(whisper.Update{Partial: "hello from"})
+		return &fakeLive{stop: func() { update(whisper.Update{Committed: "hello from my voice", Final: true}) }}, nil
+	}
 	h.ui(func() {
 		h.d.createSession(h.proj, "default", "default")
 		h.d.app.Preferences().SetBool("sttNoticeShown", false)
 		sp.click()
-		if recorded || len(h.w.Canvas().Overlays().List()) == 0 {
-			t.Fatal("first use must show the privacy notice before recording")
+		if getStarted() != "" || len(h.w.Canvas().Overlays().List()) == 0 {
+			t.Fatal("first use must show the privacy notice before listening")
 		}
 		for _, o := range h.w.Canvas().Overlays().List() {
 			h.w.Canvas().Overlays().Remove(o)
@@ -782,18 +794,34 @@ func TestSpeechToText(t *testing.T) {
 		h.d.app.Preferences().SetBool("sttNoticeShown", true)
 		h.d.input.SetText("note:")
 		sp.click()
-		if !recorded || sp.state != sttRecording {
-			t.Fatal("second click should record")
+	})
+	h.eventually("live partial shown", func() bool { return getStarted() == "en" && h.d.input.Text == "note: hello from" && sp.live != nil })
+	h.ui(func() {
+		if sp.state != sttRecording {
+			t.Fatal("should be listening")
 		}
 		sp.click()
 	})
-	h.eventually("transcribed", func() bool { return sp.state == sttIdle && h.d.input.Text == "note: hello from my voice" })
-}
-
-func TestCleanTranscript(t *testing.T) {
-	if got := cleanTranscript("\n [BLANK_AUDIO]\n Hello there.\n  How are you?\n"); got != "Hello there. How are you?" {
-		t.Fatalf("%q", got)
-	}
+	h.eventually("final text", func() bool { return sp.state == sttIdle && h.d.input.Text == "note: hello from my voice" })
+	h.ui(func() {
+		sp.setLang("de")
+		if sp.lang() != "de" || modelFile("de") != "ggml-base-q5_1.bin" || modelFile("en") != "ggml-base.en-q5_1.bin" {
+			t.Fatal("language choice and model mapping")
+		}
+		sp.setLang("en")
+		sp.ready = func(string) error { return fmt.Errorf("missing") }
+		sp.click()
+		if len(h.w.Canvas().Overlays().List()) == 0 {
+			t.Fatal("missing model should open the setup dialog")
+		}
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+		h.d.pickLanguage("en", func(string) {})
+		if languages[0].code != "en" {
+			t.Fatal("English should be first")
+		}
+	})
 }
 
 func TestChatFollowsAndJumpButton(t *testing.T) {

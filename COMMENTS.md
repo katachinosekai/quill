@@ -143,3 +143,11 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 Quill builds against a patched copy of Fyne v2.8.2 in `third_party/fyne` (go.mod `replace`). The only change is in `widget/entry.go`: an `Alignment` field on `Entry`, applied to the text and placeholder segments, and `CursorPosition` adds `rowAlignOffset` so the cursor lines up with centered text (clicks and selection already handle alignment upstream). The diff is `third_party/fyne-entry-align.patch`.
 
 To upgrade Fyne: copy the new version from the module cache into `third_party/fyne` (without `_test.go`/`testdata`), re-apply the patch (`patch -p1 -d third_party/fyne < third_party/fyne-entry-align.patch`), fix any rejected hunks by hand, run the tests (`TestCenteredTyping`).
+
+## Built-in speech to text (internal/whisper)
+
+whisper.cpp v1.7.6 is bundled in `third_party/whisper.cpp` (CPU backend only; the GPU backends, examples, tests and bindings were left out) and linked statically through cgo. Run `scripts/build-whisper.sh` once before `go build`/`go test`; it builds the static libraries into `third_party/whisper.cpp/build` (git-ignored) with AVX2/FMA/F16C so the binary runs on any x86-64 CPU from about 2013 on. `-f` forces a rebuild.
+
+Microphone capture uses malgo (miniaudio), which loads PipeWire/PulseAudio/ALSA at runtime, so users need no extra packages. Models are downloaded inside Quill on first use into `~/.local/share/quill/models`: `ggml-base.en-q5_1.bin` for English, `ggml-base-q5_1.bin` for every other language (about 57 MB each).
+
+Live transcription (`live.go`): audio stays in memory; every 400 ms the audio since the last pause is re-transcribed with `audio_ctx` shrunk to the clip length (the main speed-up), nothing runs during silence, and a phrase is committed after 0.7 s of quiet or 20 s of speech. The model is freed 5 minutes after the last use.
