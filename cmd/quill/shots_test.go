@@ -161,6 +161,9 @@ func TestScreenshots(t *testing.T) {
 	h.ui(func() { h.d.open(editsID) })
 	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
 	snap("history.png")
+	h.ui(func() { h.d.act.setOpen(true) })
+	snap("steps-open.png")
+	h.ui(func() { h.d.act.setOpen(false) })
 
 	var s *deskSession
 	h.ui(func() {

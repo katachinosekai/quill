@@ -278,9 +278,6 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	case chat.Permission:
 		return v.renderPermission(it)
 	case chat.Thinking:
-		if !v.steps {
-			return v.stepLine(it)
-		}
 		return v.renderThinking(it, iv)
 	case chat.Notice:
 		l := widget.NewLabel(it.Text)

@@ -27,11 +27,11 @@ type activity struct {
 }
 
 func isStep(it *chat.Item) bool {
-	return it.Kind == chat.Tool || it.Kind == chat.Thinking && (it.Text != "" || it.Streaming)
+	return it.Kind == chat.Tool
 }
 
 func newActivity(d *desk) *activity {
-	a := &activity{d: d, open: !d.app.Preferences().Bool("activityClosed")}
+	a := &activity{d: d, open: d.app.Preferences().Bool("activityOpen")}
 	a.v = &chatView{d: d, views: map[int]*itemView{}, steps: true}
 	a.v.box = container.NewVBox()
 	a.scroll = container.NewVScroll(a.v.box)
@@ -44,15 +44,19 @@ func newActivity(d *desk) *activity {
 	head := container.NewBorder(nil, nil, a.arrow, nil, a.status)
 	r := canvas.NewRectangle(colCard)
 	r.CornerRadius = 12
-	a.root = container.NewStack(r, container.NewPadded(container.NewBorder(head, nil, nil, nil, a.body)))
+	a.root = container.NewStack(container.NewThemeOverride(container.NewStack(r, container.NewPadded(container.NewBorder(head, nil, nil, nil, a.body))), smallTheme{}))
 	a.root.Hide()
+	if !a.open {
+		a.body.Hide()
+		a.arrow.icon.SetResource(theme.NewPrimaryThemedResource(theme.NavigateNextIcon()))
+	}
 	a.v.scroll = a.scroll
 	return a
 }
 
 func (a *activity) setOpen(open bool) {
 	a.open = open
-	a.d.app.Preferences().SetBool("activityClosed", !open)
+	a.d.app.Preferences().SetBool("activityOpen", open)
 	a.layout()
 }
 

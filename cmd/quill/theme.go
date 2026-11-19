@@ -60,6 +60,22 @@ func (deskTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
 func (deskTheme) Font(s fyne.TextStyle) fyne.Resource     { return theme.DefaultTheme().Font(s) }
 func (deskTheme) Icon(n fyne.ThemeIconName) fyne.Resource { return theme.DefaultTheme().Icon(n) }
 
+type smallTheme struct{ deskTheme }
+
+func (t smallTheme) Size(n fyne.ThemeSizeName) float32 {
+	switch n {
+	case theme.SizeNameText:
+		return 12
+	case theme.SizeNameCaptionText:
+		return 11
+	case theme.SizeNameLineSpacing:
+		return 3
+	case theme.SizeNamePadding:
+		return 3
+	}
+	return t.deskTheme.Size(n)
+}
+
 func (deskTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
 	case theme.SizeNameText:
