@@ -1135,3 +1135,47 @@ func TestReviewFixes(t *testing.T) {
 		}
 	})
 }
+
+func TestTypedApproval(t *testing.T) {
+	for in, want := range map[string]bool{"yes": true, "Yes!": true, "go ahead": true, "yes, do it": true, "ok.": true,
+		"yes but change the second step": false, "no": false, "write a test": false, "": false} {
+		if isApproval(in) != want {
+			t.Errorf("isApproval(%q) = %v", in, !want)
+		}
+	}
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		h.d.planFirst = true
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("write")
+	})
+	var plan *chat.Item
+	h.eventually("plan card", func() bool {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.Plan && it.PermState == chat.PermPending {
+				plan = it
+			}
+		}
+		return plan != nil && !s.conv.Busy
+	})
+	h.ui(func() {
+		h.d.send("yes")
+		if plan.PermState != chat.PermAllowed || !s.runAll {
+			t.Fatal("typing yes should approve the plan, no second approval needed")
+		}
+	})
+	h.eventually("turn done", func() bool { return !s.conv.Busy && !s.runAll })
+	h.ui(func() {
+		s.conv.Busy = true
+		h.d.approveByText(s)
+		if s.runAll || !s.runAllNext {
+			t.Fatal("approval typed during a turn should apply to the next request")
+		}
+		h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
+		if !s.runAll || s.runAllNext {
+			t.Fatal("next request should run pre-approved")
+		}
+		s.conv.Busy = false
+	})
+}

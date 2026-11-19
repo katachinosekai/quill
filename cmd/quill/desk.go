@@ -62,26 +62,27 @@ func (s status) String() string {
 }
 
 type deskSession struct {
-	id        string
-	cwd       string
-	title     string
-	conv      *chat.Conversation
-	loaded    bool
-	loadedMod time.Time
-	persisted bool
-	proc      *session.Process
-	model     string
-	mode      string
-	failed    string
-	stopping  bool
-	terminal  *live.Process
-	planWait  bool
-	runAll    bool
-	takeover  bool
-	loading   bool
-	rcURL     string
-	rcOn      bool
-	created   time.Time
+	id         string
+	cwd        string
+	title      string
+	conv       *chat.Conversation
+	loaded     bool
+	loadedMod  time.Time
+	persisted  bool
+	proc       *session.Process
+	model      string
+	mode       string
+	failed     string
+	stopping   bool
+	terminal   *live.Process
+	planWait   bool
+	runAll     bool
+	runAllNext bool
+	takeover   bool
+	loading    bool
+	rcURL      string
+	rcOn       bool
+	created    time.Time
 }
 
 func (s *deskSession) running() bool {
@@ -1235,6 +1236,9 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		d.updateChrome()
 		return
 	}
+	if d.planFirst && isApproval(text) {
+		d.approveByText(s)
+	}
 	it := s.conv.AddUser(text)
 	if s.title == "" {
 		s.title = oneLine(text, 60)
@@ -1809,7 +1813,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			s.planWait = true
 		}
 	case ev.Type == "result":
-		s.runAll = false
+		s.runAll, s.runAllNext = s.runAllNext, false
 		if s.planWait {
 			s.planWait = false
 			marked := s.conv.MarkPlanText()
@@ -1817,6 +1821,44 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		}
 	}
 	return nil
+}
+
+var approvalWords = map[string]bool{
+	"yes": true, "y": true, "yeah": true, "yep": true, "yup": true, "ok": true, "okay": true, "sure": true,
+	"approve": true, "approved": true, "go": true, "go ahead": true, "do it": true, "proceed": true,
+	"continue": true, "lgtm": true, "run it": true, "sounds good": true, "yes please": true, "please do": true,
+	"approve plan": true, "approve it": true, "go for it": true, "ship it": true,
+}
+
+func isApproval(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	t = strings.TrimRight(t, ".!? ")
+	if len(t) > 30 {
+		return false
+	}
+	if approvalWords[t] {
+		return true
+	}
+	for _, p := range []string{"yes ", "yes, ", "ok ", "okay ", "sure ", "go ahead ", "do it "} {
+		if strings.HasPrefix(t, p) && approvalWords[strings.TrimSpace(strings.TrimPrefix(t, p))] {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *desk) approveByText(s *deskSession) {
+	for _, it := range s.conv.PendingPermissions() {
+		if it.Kind == chat.Plan {
+			it.PermState = chat.PermAllowed
+			d.chatFor(s, []*chat.Item{it})
+		}
+	}
+	if s.conv.Busy || s.proc != nil && s.proc.Busy() {
+		s.runAllNext = true
+		return
+	}
+	s.runAll = true
 }
 
 func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
