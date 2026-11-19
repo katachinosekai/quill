@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Quill
+Comment=Desktop app for Claude Code sessions
+Exec=quill
+Icon=io.github.katachinosekai.quill
+Categories=Development;
+StartupWMClass=quill
+Terminal=false
