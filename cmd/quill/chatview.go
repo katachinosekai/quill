@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"image/color"
@@ -56,6 +55,7 @@ type chatView struct {
 	follow        bool
 	autoScrolling bool
 	gliding       bool
+	stickTimer    *time.Timer
 	qcards        map[*chat.Item]fyne.CanvasObject
 	moreObj       fyne.CanvasObject
 	lastY         float32
@@ -370,17 +370,16 @@ func (v *chatView) stick() {
 	}
 }
 
-func (v *chatView) followLoop(ctx context.Context) {
-	t := time.NewTicker(120 * time.Millisecond)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			v.d.do(v.stick)
-		}
+func (v *chatView) stickSoon() {
+	if v.stickTimer != nil || !v.follow {
+		return
 	}
+	v.stickTimer = time.AfterFunc(150*time.Millisecond, func() {
+		v.d.do(func() {
+			v.stickTimer = nil
+			v.stick()
+		})
+	})
 }
 
 func (v *chatView) keepUp() {
@@ -470,6 +469,7 @@ func (v *chatView) update(items []*chat.Item) {
 		v.box.Refresh()
 	}
 	v.keepUp()
+	v.stickSoon()
 }
 
 func (v *chatView) viewFor(it *chat.Item) *itemView {

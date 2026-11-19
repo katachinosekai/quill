@@ -55,10 +55,11 @@ type Scanner struct {
 	Root  string
 	mu    sync.Mutex
 	cache map[string]Info
+	scans map[string]*fileScan
 }
 
 func NewScanner(root string) *Scanner {
-	return &Scanner{Root: root, cache: map[string]Info{}}
+	return &Scanner{Root: root, cache: map[string]Info{}, scans: map[string]*fileScan{}}
 }
 
 func (s *Scanner) Scan() ([]Info, error) {
@@ -107,10 +108,19 @@ func (s *Scanner) Scan() ([]Info, error) {
 		sem <- struct{}{}
 		go func(i int, j job) {
 			defer func() { <-sem; wg.Done() }()
-			info, err := ScanFile(j.path)
-			if err != nil {
+			s.mu.Lock()
+			fs := s.scans[j.path]
+			s.mu.Unlock()
+			if fs == nil || j.fi.Size() < fs.offset || j.fi.Size() < c.Size {
+				fs = newFileScan(j.path)
+			}
+			if err := fs.feed(); err != nil {
 				return
 			}
+			s.mu.Lock()
+			s.scans[j.path] = fs
+			s.mu.Unlock()
+			info := fs.result()
 			if info.Cwd == "" {
 				info.Cwd = j.dir
 			}
@@ -153,99 +163,133 @@ var interesting = [][]byte{
 	[]byte(`"type":"custom-title"`), []byte(`"type":"summary"`),
 }
 
+type msgUse struct {
+	day string
+	t   Tokens
+}
+
+type fileScan struct {
+	info                                       Info
+	firstPrompt, aiTitle, customTitle, summary string
+	seenAssistant                              map[string]bool
+	uses                                       map[string]msgUse
+	offset                                     int64
+}
+
+func newFileScan(path string) *fileScan {
+	return &fileScan{
+		info:          Info{ID: strings.TrimSuffix(filepath.Base(path), ".jsonl"), Path: path},
+		seenAssistant: map[string]bool{},
+		uses:          map[string]msgUse{},
+	}
+}
+
 func ScanFile(path string) (Info, error) {
-	f, err := os.Open(path)
+	fs := newFileScan(path)
+	err := fs.feed()
+	return fs.result(), err
+}
+
+func (fs *fileScan) feed() error {
+	f, err := os.Open(fs.info.Path)
 	if err != nil {
-		return Info{}, err
+		return err
 	}
 	defer f.Close()
-	info := Info{ID: strings.TrimSuffix(filepath.Base(path), ".jsonl"), Path: path}
-	var firstPrompt, aiTitle, customTitle, summary string
-	seenAssistant := map[string]bool{}
-	type msgUse struct {
-		day string
-		t   Tokens
+	if _, err := f.Seek(fs.offset, io.SeekStart); err != nil {
+		return err
 	}
-	uses := map[string]msgUse{}
+	info := &fs.info
 	r := bufio.NewReaderSize(f, 1<<20)
 	for {
 		line, err := r.ReadBytes('\n')
-		if len(line) > 0 {
-			hit := false
-			for _, p := range interesting {
-				if bytes.Contains(line, p) {
-					hit = true
-					break
-				}
-			}
-			if hit {
-				var rec scanRec
-				if json.Unmarshal(line, &rec) == nil {
-					switch rec.Type {
-					case "ai-title":
-						aiTitle = rec.AiTitle
-					case "custom-title":
-						customTitle = rec.CustomTitle
-					case "summary":
-						summary = rec.Summary
-					case "user", "assistant":
-						if rec.IsSidechain || rec.IsMeta {
-							break
-						}
-						if rec.Cwd != "" && info.Cwd == "" {
-							info.Cwd = rec.Cwd
-						}
-						if rec.Entrypoint != "" && info.Entrypoint == "" {
-							info.Entrypoint = rec.Entrypoint
-						}
-						if t, e := time.Parse(time.RFC3339Nano, rec.Timestamp); e == nil && t.After(info.Last) {
-							info.Last = t
-						}
-						var m protocol.Message
-						if json.Unmarshal(rec.Message, &m) != nil {
-							break
-						}
-						if rec.Type == "assistant" && m.Usage != nil && m.ID != "" {
-							day := ""
-							if t, e := time.Parse(time.RFC3339Nano, rec.Timestamp); e == nil {
-								day = t.Local().Format("2006-01-02")
-							}
-							uses[m.ID] = msgUse{day, Tokens{In: int64(m.Usage.InputTokens), Out: int64(m.Usage.OutputTokens), CacheRead: int64(m.Usage.CacheReadInputTokens), CacheWrite: int64(m.Usage.CacheCreationInputTokens)}}
-						}
-						if rec.Type == "user" {
-							for _, b := range m.Blocks() {
-								if b.Type != "text" {
-									continue
-								}
-								t, ok := chat.CleanUserText(b.Text)
-								if !ok || strings.HasPrefix(t, "[Request interrupted") {
-									continue
-								}
-								info.Messages++
-								if firstPrompt == "" && !strings.HasPrefix(t, "/") {
-									firstPrompt = t
-								}
-							}
-						} else {
-							for _, b := range m.Blocks() {
-								if b.Type == "text" && strings.TrimSpace(b.Text) != "" && !seenAssistant[m.ID] {
-									seenAssistant[m.ID] = true
-									info.Messages++
-								}
-							}
-						}
-					}
-				}
-			}
-		}
 		if err == io.EOF {
-			break
+			return nil
 		}
 		if err != nil {
-			return info, err
+			return err
+		}
+		fs.offset += int64(len(line))
+		fs.line(line, info)
+	}
+}
+
+func (fs *fileScan) line(line []byte, info *Info) {
+	hit := false
+	for _, p := range interesting {
+		if bytes.Contains(line, p) {
+			hit = true
+			break
 		}
 	}
-	for _, u := range uses {
+	if !hit {
+		return
+	}
+	var rec scanRec
+	if json.Unmarshal(line, &rec) != nil {
+		return
+	}
+	switch rec.Type {
+	case "ai-title":
+		fs.aiTitle = rec.AiTitle
+	case "custom-title":
+		fs.customTitle = rec.CustomTitle
+	case "summary":
+		fs.summary = rec.Summary
+	case "user", "assistant":
+		if rec.IsSidechain || rec.IsMeta {
+			return
+		}
+		if rec.Cwd != "" && info.Cwd == "" {
+			info.Cwd = rec.Cwd
+		}
+		if rec.Entrypoint != "" && info.Entrypoint == "" {
+			info.Entrypoint = rec.Entrypoint
+		}
+		if t, e := time.Parse(time.RFC3339Nano, rec.Timestamp); e == nil && t.After(info.Last) {
+			info.Last = t
+		}
+		var m protocol.Message
+		if json.Unmarshal(rec.Message, &m) != nil {
+			return
+		}
+		if rec.Type == "assistant" && m.Usage != nil && m.ID != "" {
+			day := ""
+			if t, e := time.Parse(time.RFC3339Nano, rec.Timestamp); e == nil {
+				day = t.Local().Format("2006-01-02")
+			}
+			fs.uses[m.ID] = msgUse{day, Tokens{In: int64(m.Usage.InputTokens), Out: int64(m.Usage.OutputTokens), CacheRead: int64(m.Usage.CacheReadInputTokens), CacheWrite: int64(m.Usage.CacheCreationInputTokens)}}
+		}
+		if rec.Type == "user" {
+			for _, b := range m.Blocks() {
+				if b.Type != "text" {
+					continue
+				}
+				t, ok := chat.CleanUserText(b.Text)
+				if !ok || strings.HasPrefix(t, "[Request interrupted") {
+					continue
+				}
+				info.Messages++
+				if fs.firstPrompt == "" && !strings.HasPrefix(t, "/") {
+					fs.firstPrompt = t
+				}
+			}
+		} else {
+			for _, b := range m.Blocks() {
+				if b.Type == "text" && strings.TrimSpace(b.Text) != "" && !fs.seenAssistant[m.ID] {
+					fs.seenAssistant[m.ID] = true
+					info.Messages++
+				}
+			}
+		}
+	}
+}
+
+func (fs *fileScan) result() Info {
+	info := fs.info
+	info.Usage = Tokens{}
+	info.Days = nil
+	for _, u := range fs.uses {
 		info.Usage = info.Usage.Add(u.t)
 		if u.day != "" {
 			if info.Days == nil {
@@ -255,19 +299,19 @@ func ScanFile(path string) (Info, error) {
 		}
 	}
 	switch {
-	case customTitle != "":
-		info.Title = customTitle
-	case aiTitle != "":
-		info.Title = aiTitle
-	case summary != "":
-		info.Title = summary
+	case fs.customTitle != "":
+		info.Title = fs.customTitle
+	case fs.aiTitle != "":
+		info.Title = fs.aiTitle
+	case fs.summary != "":
+		info.Title = fs.summary
 	default:
-		info.Title = oneLine(firstPrompt, 80)
+		info.Title = oneLine(fs.firstPrompt, 80)
 	}
 	if info.Title == "" {
 		info.Title = "(untitled)"
 	}
-	return info, nil
+	return info
 }
 
 func oneLine(s string, n int) string {

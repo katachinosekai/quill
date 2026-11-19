@@ -14,6 +14,7 @@ const glowPeriod = 2400 * time.Millisecond
 type glow struct {
 	base     color.Color
 	strength float64
+	pulse    bool
 }
 
 func glowStrength(st status) float64 {
@@ -31,17 +32,19 @@ func (d *desk) setGlow(r *canvas.Rectangle, base color.Color, strength float64) 
 		d.glowBoxes = map[*canvas.Rectangle]glow{}
 	}
 	if base != nil && strength > 0 {
-		g := glow{base, strength}
-		if _, ok := d.glowBoxes[r]; !ok {
+		g := glow{base, strength, strength >= 1}
+		if old, ok := d.glowBoxes[r]; !ok || old != g {
 			paintGlow(r, g, 0.5)
 		}
 		d.glowBoxes[r] = g
+		d.countPulses()
 		return
 	}
 	if _, ok := d.glowBoxes[r]; ok {
 		delete(d.glowBoxes, r)
 		r.FillColor, r.StrokeColor = color.Transparent, color.Transparent
 		r.Refresh()
+		d.countPulses()
 	}
 }
 
@@ -57,6 +60,16 @@ func paintGlow(r *canvas.Rectangle, g glow, a float64) {
 	r.Refresh()
 }
 
+func (d *desk) countPulses() {
+	n := int32(0)
+	for _, g := range d.glowBoxes {
+		if g.pulse {
+			n++
+		}
+	}
+	d.pulsing.Store(n)
+}
+
 func (d *desk) glowLoop(ctx context.Context) {
 	t := time.NewTicker(80 * time.Millisecond)
 	defer t.Stop()
@@ -66,11 +79,16 @@ func (d *desk) glowLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
+			if d.pulsing.Load() == 0 {
+				continue
+			}
 			phase := float64(now.Sub(start)%glowPeriod) / float64(glowPeriod)
 			a := 0.5 - 0.5*math.Cos(2*math.Pi*phase)
 			d.do(func() {
 				for r, g := range d.glowBoxes {
-					paintGlow(r, g, a)
+					if g.pulse {
+						paintGlow(r, g, a)
+					}
 				}
 			})
 		}

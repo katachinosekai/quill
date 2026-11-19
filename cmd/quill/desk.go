@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -161,6 +162,7 @@ type desk struct {
 	acctErr        string
 	signingIn      context.CancelFunc
 	glowBoxes      map[*canvas.Rectangle]glow
+	pulsing        atomic.Int32
 	keeper         *keeperClient
 	keptView       string
 	keptHidden     bool
@@ -1543,7 +1545,6 @@ func (d *desk) watch(ctx context.Context) {
 	}
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
-	go d.chat.followLoop(ctx)
 	go d.fetchCommands()
 	d.refreshAccount()
 	t := time.NewTicker(5 * time.Second)

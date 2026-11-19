@@ -111,6 +111,7 @@ func runKeeper(args []string, initial *restoreState) int {
 	_ = os.Chmod(sock, 0o600)
 	defer os.Remove(sock)
 	go k.serve(l)
+	go k.reap()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
@@ -171,6 +172,25 @@ func runKeeper(args []string, initial *restoreState) int {
 		time.Sleep(delay)
 		delay = min(delay*2, keeperMaxDelay)
 		restore = k.writeRestore(false)
+	}
+}
+
+func (k *keeper) reap() {
+	seen := map[int]bool{}
+	for {
+		time.Sleep(2 * time.Second)
+		k.mu.Lock()
+		for _, ks := range k.held {
+			seen[ks.hs.Handle.PID] = true
+		}
+		k.mu.Unlock()
+		for pid := range seen {
+			var ws syscall.WaitStatus
+			got, err := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil)
+			if got == pid || err != nil {
+				delete(seen, pid)
+			}
+		}
 	}
 }
 
