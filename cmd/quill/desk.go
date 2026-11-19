@@ -158,6 +158,7 @@ type desk struct {
 	acct          account.Status
 	acctErr       string
 	signingIn     context.CancelFunc
+	flashDots     map[*canvas.Circle]color.Color
 	swapTo        string
 	swapping      bool
 	restore       *restoreState
@@ -359,6 +360,7 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			meta.Text = m
 			meta.Refresh()
 			dt.FillColor = st2.color()
+			d.setFlash(dt, st2.color(), needsFlash(st2) && (d.current == nil || d.current.id != r.id))
 			dt.Refresh()
 			row.Refresh()
 		},
@@ -1449,6 +1451,7 @@ func (d *desk) watch(ctx context.Context) {
 		d.do(func() { d.applyRestore(st) })
 	}
 	go d.watchBinary(ctx)
+	go d.flashLoop(ctx)
 	go d.fetchCommands()
 	d.refreshAccount()
 	t := time.NewTicker(5 * time.Second)
