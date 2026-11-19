@@ -21,6 +21,7 @@ type Process struct {
 	Status    string `json:"status"`
 	ProcStart string `json:"procStart"`
 	Entry     string `json:"entrypoint"`
+	JobID     string `json:"jobId"`
 }
 
 func DefaultDir() string {
@@ -99,7 +100,11 @@ func (f *Finder) Release(p Process, claudeBin string, timeout time.Duration) err
 		return nil
 	}
 	if p.Background() && claudeBin != "" {
-		_ = exec.Command(claudeBin, "stop", p.SessionID).Run()
+		id := p.JobID
+		if id == "" {
+			id = p.SessionID
+		}
+		_ = exec.Command(claudeBin, "stop", id).Run()
 		if f.waitGone(p, timeout) {
 			return nil
 		}

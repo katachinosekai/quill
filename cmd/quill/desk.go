@@ -77,6 +77,7 @@ type deskSession struct {
 	stopping  bool
 	terminal  *live.Process
 	takeover  bool
+	loading   bool
 	rcURL     string
 	rcOn      bool
 	created   time.Time
@@ -579,6 +580,9 @@ func (d *desk) updateChrome() {
 			d.rcLink.Hide()
 		}
 	}
+	if s.loading {
+		d.sendBtn.Disable()
+	}
 	d.modelSel.SetSelected(s.model)
 	d.modeSel.SetSelected(s.mode)
 	if st == stRunning || st == stWaiting {
@@ -651,11 +655,17 @@ func (d *desk) open(id string) {
 	needLoad := has && !s.running() && (!s.loaded || !info.ModTime.Equal(s.loadedMod))
 	if needLoad {
 		path, mod := info.Path, info.ModTime
+		s.loading = true
 		d.chat.show(nil)
 		d.updateChrome()
 		go func() {
 			conv, err := transcript.Load(path)
 			d.do(func() {
+				s.loading = false
+				if s.running() || s.takeover {
+					d.updateChrome()
+					return
+				}
 				if err != nil && conv == nil {
 					conv = chat.New()
 					conv.AddError("Could not read transcript: " + err.Error())
@@ -837,6 +847,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 		d.updateChrome()
 	}
 	d.refreshSidebar()
+	d.trySwap()
 }
 
 func lastLines(s string, n int) string {
@@ -853,7 +864,7 @@ func (d *desk) send(text string) {
 	if s == nil || text == "" {
 		return
 	}
-	if s.takeover {
+	if s.takeover || s.loading {
 		return
 	}
 	if s.terminal != nil && !s.running() {
@@ -894,7 +905,9 @@ func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
 			s.takeover = false
 			if err != nil {
 				d.chatFor(s, []*chat.Item{s.conv.AddError("Could not take the session over: " + err.Error())})
-				d.input.SetText(text)
+				if d.current == s && d.input.Text == "" {
+					d.input.SetText(text)
+				}
 				d.updateChrome()
 				return
 			}
@@ -1109,6 +1122,7 @@ func (d *desk) refresh() {
 			}
 		}
 		d.updateChrome()
+		d.trySwap()
 	})
 }
 

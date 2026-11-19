@@ -188,6 +188,7 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 			text, hidden = clipLines(it.Text, userPreviewLines, userPreviewChars)
 		}
 		l := widget.NewLabel(text)
+		l.Selectable = true
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = v.align()
 		if hidden == 0 && !iv.full {
@@ -582,6 +583,7 @@ func (c *wrapCode) Inline() bool    { return false }
 func (c *wrapCode) Textual() string { return c.text }
 func (c *wrapCode) Visual() fyne.CanvasObject {
 	l := widget.NewLabel(c.text)
+	l.Selectable = true
 	l.TextStyle = fyne.TextStyle{Monospace: true}
 	l.Wrapping = fyne.TextWrapBreak
 	l.SizeName = theme.SizeNameCaptionText

@@ -322,3 +322,39 @@ func TestNewSessionsRunSideBySide(t *testing.T) {
 		}
 	})
 }
+
+func TestSendWaitsForHistoryLoad(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.open(editsID)
+		s := h.d.sessions[editsID]
+		if !s.loading || !h.d.sendBtn.Disabled() {
+			t.Fatal("send should wait while the history loads")
+		}
+		h.d.send("too early")
+		if s.proc != nil {
+			t.Fatal("must not start claude before the history is loaded")
+		}
+	})
+	h.eventually("history", func() bool { s := h.d.sessions[editsID]; return s.loaded && !s.loading })
+	h.ui(func() {
+		if h.d.sendBtn.Disabled() {
+			t.Fatal("send should be enabled after loading")
+		}
+		h.d.send("hello")
+	})
+	h.eventually("echo", func() bool {
+		it := lastItem(h.d.sessions[editsID])
+		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "hello")
+	})
+	h.ui(func() {
+		s := h.d.sessions[editsID]
+		before := s.conv
+		h.d.infos[editsID] = transcript.Info{ID: editsID, Path: h.d.infos[editsID].Path, ModTime: time.Now()}
+		s.loaded = false
+		h.d.open(editsID)
+		if s.conv != before || s.loading {
+			t.Fatal("a running session must not reload its history")
+		}
+	})
+}

@@ -93,7 +93,7 @@ func (d *desk) watchBinary(ctx context.Context) {
 }
 
 func (d *desk) trySwap() {
-	if d.swapTo == "" || d.swapping {
+	if d.swapTo == "" || d.swapping || d.signingIn != nil {
 		return
 	}
 	for _, s := range d.runningSessions() {
