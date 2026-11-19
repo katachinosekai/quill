@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,4 +112,23 @@ func TestLateSendKeepsNewTyping(t *testing.T) {
 			t.Fatalf("input wiped: %q", h.d.input.Text)
 		}
 	})
+}
+
+func TestRestoreResumesRunningSessions(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() { h.d.applyRestore(&restoreState{Running: []string{editsID}}) })
+	h.eventually("resumed after update", func() bool { s := h.d.sessions[editsID]; return s != nil && s.running() })
+	h.eventually("resumed with --resume", func() bool { return strings.Contains(h.args(), "--resume "+editsID) })
+}
+
+func TestLiveIndicatorUnderChat(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("slow")
+	})
+	h.eventually("indicator", func() bool { return strings.TrimSpace(h.d.chat.live.Text) != "" && h.d.chat.live.Visible() })
+	h.ui(func() { h.d.interrupt(s) })
+	h.eventually("indicator clears", func() bool { return strings.TrimSpace(h.d.chat.live.Text) == "" })
 }

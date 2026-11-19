@@ -165,7 +165,6 @@ type desk struct {
 	pendingSeen   map[*chat.Item]bool
 	pendingChrome bool
 	pendingFor    *deskSession
-	act           *activity
 	lastTyped     time.Time
 	autoRC        bool
 	flushTimer    *time.Timer
@@ -206,7 +205,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		sessions: map[string]*deskSession{},
 		infos:    map[string]transcript.Info{},
 		terms:    map[string]live.Process{},
-		center:   a.Preferences().Bool("centerText"),
+		center:   a.Preferences().BoolWithFallback("centerText", true),
 		autoRC:   a.Preferences().BoolWithFallback("autoRemoteControl", true),
 		created:  map[string]bool{},
 		do:       fyne.Do,
@@ -652,8 +651,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	controls := container.NewHBox(d.modelSel, d.modeSel, layout.NewSpacer(), d.stopBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(layout.NewSpacer(), d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
-	d.act = newActivity(d)
-	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, d.act.root, statsRow)))
+	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow)))
 	d.usage = newUsagePanel(d)
 	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chat.root, d.usage.root))
 	d.updateChrome()
@@ -663,16 +661,10 @@ func (d *desk) buildMain() fyne.CanvasObject {
 func (d *desk) updateChrome() {
 	s := d.current
 	d.suppress = true
-	defer func() {
-		d.suppress = false
-		if d.mainPane != nil {
-			d.mainPane.Refresh()
-		}
-	}()
+	defer func() { d.suppress = false }()
 	if s == nil {
-		d.title.SetText("Quill")
-		d.subtitle.Text = ""
-		d.subtitle.Refresh()
+		setLabel(d.title, "Quill")
+		setText(d.subtitle, "")
 		d.note.Hide()
 		d.rcStatus.Hide()
 		d.rcLink.Hide()
@@ -682,21 +674,19 @@ func (d *desk) updateChrome() {
 		d.stopBtn.Disable()
 		d.modelSel.Disable()
 		d.modeSel.Disable()
-		d.stats.Text = ""
-		d.stats.Refresh()
+		setText(d.stats, "")
 		return
 	}
 	title, _, st := d.rowText(s.id)
-	d.title.SetText(title)
+	setLabel(d.title, title)
 	sub := tildePath(s.cwd)
 	if st != stNone {
 		sub += "  ·  " + st.String()
 	}
-	d.subtitle.Text = sub
-	d.subtitle.Refresh()
+	setText(d.subtitle, sub)
 	held := s.terminal != nil && !s.running()
 	if s.takeover {
-		d.note.SetText("Taking this session over from the terminal...")
+		setLabel(d.note, "Taking this session over from the terminal...")
 		d.note.Show()
 		d.input.Disable()
 		d.sendBtn.Disable()
@@ -707,7 +697,7 @@ func (d *desk) updateChrome() {
 		if s.terminal.Background() {
 			where = "a background Claude process"
 		}
-		d.note.SetText(fmt.Sprintf("This session is open in %s (pid %d). Sending a message here takes it over and closes it there.", where, s.terminal.PID))
+		setLabel(d.note, fmt.Sprintf("This session is open in %s (pid %d). Sending a message here takes it over and closes it there.", where, s.terminal.PID))
 		d.note.Show()
 		d.input.Enable()
 		d.sendBtn.Enable()
@@ -721,14 +711,17 @@ func (d *desk) updateChrome() {
 		d.sendBtn.Enable()
 		d.modelSel.Enable()
 		d.modeSel.Enable()
-		d.rcStatus.Text, d.rcStatus.Color = "Remote Control off", colMuted
+		rcText, rcCol := "Remote Control off", color.Color(colMuted)
 		if s.rcOn {
-			d.rcStatus.Text, d.rcStatus.Color = "● Remote Control on", colIdle
+			rcText, rcCol = "● Remote Control on", colIdle
 		} else if s.running() && d.autoRC {
-			d.rcStatus.Text = "Remote Control connecting..."
+			rcText = "Remote Control..."
+		}
+		if d.rcStatus.Text != rcText || d.rcStatus.Color != rcCol {
+			d.rcStatus.Text, d.rcStatus.Color = rcText, rcCol
+			d.rcStatus.Refresh()
 		}
 		d.rcStatus.Show()
-		d.rcStatus.Refresh()
 		if s.rcOn && s.rcURL != "" {
 			if u, err := url.Parse(s.rcURL); err == nil {
 				d.rcLink.SetText("Open remotely")
@@ -747,15 +740,18 @@ func (d *desk) updateChrome() {
 	} else {
 		d.input.setSuggestion(s.conv.Suggestion)
 	}
-	d.modelSel.SetSelected(s.model)
-	d.modeSel.SetSelected(s.mode)
+	if d.modelSel.Selected != s.model {
+		d.modelSel.SetSelected(s.model)
+	}
+	if d.modeSel.Selected != s.mode {
+		d.modeSel.SetSelected(s.mode)
+	}
 	if st == stRunning || st == stWaiting {
 		d.stopBtn.Enable()
 	} else {
 		d.stopBtn.Disable()
 	}
-	d.stats.Text = statsLine(s)
-	d.stats.Refresh()
+	setText(d.stats, statsLine(s))
 	if d.usage != nil {
 		d.usage.update()
 	}
@@ -1040,9 +1036,6 @@ func (d *desk) flushUI() {
 	d.pending, d.pendingSeen, d.pendingFor = nil, nil, nil
 	if owner != nil && d.chat.s == owner {
 		d.chat.update(items)
-	}
-	if owner != nil && d.act.v.s == owner {
-		d.act.update(items)
 	} else if owner != nil {
 		d.chat.forget(owner)
 	}
@@ -1602,4 +1595,17 @@ func liveText(s *deskSession) string {
 		}
 	}
 	return "✻ Working..."
+}
+
+func setLabel(l *widget.Label, text string) {
+	if l.Text != text {
+		l.SetText(text)
+	}
+}
+
+func setText(t *canvas.Text, text string) {
+	if t.Text != text {
+		t.Text = text
+		t.Refresh()
+	}
 }

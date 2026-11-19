@@ -684,3 +684,31 @@ func TestSidebarDragAndMenus(t *testing.T) {
 		}
 	})
 }
+
+func TestStepChipsToggleInline(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() { h.d.open(editsID) })
+	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
+	h.ui(func() {
+		var bash *chat.Item
+		for _, it := range h.d.sessions[editsID].conv.Items {
+			if it.Kind == chat.Tool && it.ToolName == "Bash" {
+				bash = it
+			}
+		}
+		if bash == nil {
+			t.Fatal("fixture has no Bash step")
+		}
+		h.d.chat.toggleStep(bash)
+		if !h.d.chat.stepOpen[bash] {
+			t.Fatal("chip should open its step")
+		}
+		other := h.d.createSession(h.proj, "default", "default")
+		other.conv.AddUser("x")
+		for _, it := range other.conv.Items {
+			if h.d.chat.stepOpen[it] {
+				t.Fatal("open state must not leak into another session")
+			}
+		}
+	})
+}

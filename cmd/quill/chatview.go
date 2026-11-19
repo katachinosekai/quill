@@ -45,6 +45,7 @@ type chatView struct {
 	root        fyne.CanvasObject
 	col         *fyne.Container
 	live        *widget.Label
+	stepOpen    map[*chat.Item]bool
 	frame       *fyne.Container
 	inner       *fyne.Container
 	steps       bool
@@ -136,9 +137,6 @@ func msgText(o fyne.CanvasObject) fyne.CanvasObject {
 }
 
 func (v *chatView) show(s *deskSession) {
-	if v.d.act != nil {
-		v.d.act.show(s)
-	}
 	if s != v.s {
 		v.stash()
 	}
@@ -267,7 +265,7 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 			iv.stream = widget.NewLabel(it.Text)
 			iv.stream.Wrapping = fyne.TextWrapWord
 			iv.stream.Alignment = v.align()
-			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, agentBubble(msgText(iv.stream)))}
+			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, msgText(iv.stream))}
 			iv.holder.Refresh()
 		} else {
 			iv.stream.SetText(it.Text)
@@ -294,15 +292,15 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
 		if strings.Contains(it.Text, "```") {
-			return userBubble(bgPad(colBubble, 14, 4, 10, msgText(v.markdown(it.Text))))
+			return bgPad(colBubble, 14, 4, 10, msgText(v.markdown(it.Text)))
 		}
 		l := widget.NewLabel(it.Text)
 		l.Selectable = true
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = v.align()
-		return userBubble(bgPad(colBubble, 14, 4, 10, msgText(l)))
+		return bgPad(colBubble, 14, 4, 10, msgText(l))
 	case chat.Assistant:
-		return agentBubble(msgText(v.markdown(it.Text)))
+		return msgText(v.markdown(it.Text))
 	case chat.Tool:
 		if !v.steps {
 			return v.stepRun(it)
@@ -396,6 +394,18 @@ func (v *chatView) renderTool(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	})
 	parts := []fyne.CanvasObject{head}
 	if iv.expanded {
+		parts = append(parts, v.toolBody(it, iv)...)
+	}
+	box := container.NewVBox(parts...)
+	if !iv.expanded {
+		return box
+	}
+	return bg(colCard, 8, box)
+}
+
+func (v *chatView) toolBody(it *chat.Item, iv *itemView) []fyne.CanvasObject {
+	var parts []fyne.CanvasObject
+	{
 		if len(it.Diff) > 0 {
 			parts = append(parts, v.diffView(it, iv))
 		} else if in := toolInputText(it); in != "" {
@@ -418,11 +428,7 @@ func (v *chatView) renderTool(it *chat.Item, iv *itemView) fyne.CanvasObject {
 			}
 		}
 	}
-	box := container.NewVBox(parts...)
-	if !iv.expanded {
-		return box
-	}
-	return bg(colCard, 8, box)
+	return parts
 }
 
 func toolInputText(it *chat.Item) string {
@@ -721,43 +727,8 @@ func (v *chatView) stepLine(it *chat.Item) fyne.CanvasObject {
 	l.Importance = widget.MediumImportance
 	l.SizeName = theme.SizeNameCaptionText
 	return newTapRow(l, func() {
-		if v.d.act != nil {
-			v.d.act.focus(it)
-		}
+		v.toggleStep(it)
 	})
-}
-
-const bubbleShare = 0.85
-
-type sideAlign struct{ right bool }
-
-func (l sideAlign) MinSize(objs []fyne.CanvasObject) fyne.Size {
-	var s fyne.Size
-	for _, o := range objs {
-		s = s.Max(o.MinSize())
-	}
-	return s
-}
-
-func (l sideAlign) Layout(objs []fyne.CanvasObject, size fyne.Size) {
-	w := size.Width * bubbleShare
-	x := float32(0)
-	if l.right {
-		x = size.Width - w
-	}
-	for _, o := range objs {
-		h := o.MinSize().Height
-		o.Resize(fyne.NewSize(w, max(h, size.Height)))
-		o.Move(fyne.NewPos(x, 0))
-	}
-}
-
-func userBubble(o fyne.CanvasObject) fyne.CanvasObject {
-	return container.New(sideAlign{}, o)
-}
-
-func agentBubble(o fyne.CanvasObject) fyne.CanvasObject {
-	return container.New(sideAlign{right: true}, bgPad(colAgent, 14, 4, 10, o))
 }
 
 func (v *chatView) runBounds(it *chat.Item) (int, int) {
@@ -804,11 +775,34 @@ func (v *chatView) stepRun(it *chat.Item) fyne.CanvasObject {
 	if v.s.conv.Items[start] != it {
 		return container.NewWithoutLayout()
 	}
-	var chips []fyne.CanvasObject
+	var chips, open []fyne.CanvasObject
 	for _, t := range v.s.conv.Items[start : end+1] {
 		chips = append(chips, v.stepChip(t))
+		if v.stepOpen[t] {
+			iv := v.views[t.Seq]
+			if iv == nil {
+				iv = &itemView{holder: container.NewStack()}
+			}
+			body := append([]fyne.CanvasObject{mutedText(toolHeader(t), 12)}, v.toolBody(t, iv)...)
+			open = append(open, container.NewThemeOverride(bg(colCard, 8, container.NewVBox(body...)), smallTheme{}))
+		}
 	}
-	return container.New(&flowLayout{gap: 6}, chips...)
+	row := container.New(&flowLayout{gap: 6}, chips...)
+	if len(open) == 0 {
+		return row
+	}
+	return container.NewVBox(append([]fyne.CanvasObject{row}, open...)...)
+}
+
+func (v *chatView) toggleStep(it *chat.Item) {
+	if v.stepOpen == nil {
+		v.stepOpen = map[*chat.Item]bool{}
+	}
+	v.stepOpen[it] = !v.stepOpen[it]
+	h := v.runHead(it)
+	if iv, ok := v.views[h.Seq]; ok {
+		v.refreshItem(h, iv)
+	}
 }
 
 func (v *chatView) stepChip(it *chat.Item) fyne.CanvasObject {
@@ -831,9 +825,7 @@ func (v *chatView) stepChip(it *chat.Item) fyne.CanvasObject {
 	bgr.CornerRadius = 8
 	chip := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(2, 2, 7, 7), container.NewHBox(m, n)))
 	return newTapRow(chip, func() {
-		if v.d.act != nil {
-			v.d.act.focus(it)
-		}
+		v.toggleStep(it)
 	})
 }
 

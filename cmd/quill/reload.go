@@ -21,12 +21,13 @@ const (
 )
 
 type restoreState struct {
-	Session string  `json:"session"`
-	Draft   string  `json:"draft"`
-	Width   float32 `json:"width"`
-	Height  float32 `json:"height"`
-	ScrollY float32 `json:"scrollY"`
-	Hidden  bool    `json:"hidden"`
+	Session string   `json:"session"`
+	Draft   string   `json:"draft"`
+	Width   float32  `json:"width"`
+	Height  float32  `json:"height"`
+	ScrollY float32  `json:"scrollY"`
+	Hidden  bool     `json:"hidden"`
+	Running []string `json:"running"`
 }
 
 type binWatch struct {
@@ -128,6 +129,11 @@ func (d *desk) trySwap() {
 		return
 	}
 	running := d.runningSessions()
+	for _, s := range running {
+		if s.persisted {
+			st.Running = append(st.Running, s.id)
+		}
+	}
 	target := d.swapTo
 	go func() {
 		d.stopAll(running)
@@ -170,6 +176,16 @@ func takeRestore() *restoreState {
 }
 
 func (d *desk) applyRestore(st *restoreState) {
+	for _, id := range st.Running {
+		if s := d.session(id); s != nil && !s.running() && s.terminal == nil {
+			if err := d.ensureProcess(s); err != nil {
+				d.notify(s, "Could not resume after the update: "+err.Error())
+			}
+		}
+	}
+	if len(st.Running) > 0 {
+		d.refreshSidebar()
+	}
 	if st.Draft != "" {
 		d.input.SetText(st.Draft)
 	}

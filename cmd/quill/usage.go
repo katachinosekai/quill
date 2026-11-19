@@ -119,22 +119,24 @@ func (u *usagePanel) update() {
 	setWin := func(bar *widget.ProgressBar, txt *canvas.Text, name string) {
 		w, ok := d.rate.Window(name)
 		if !ok {
-			bar.SetValue(0)
-			txt.Text = "no data yet (updates after a reply)"
-			txt.Refresh()
+			if bar.Value != 0 {
+				bar.SetValue(0)
+			}
+			setText(txt, "no data yet (updates after a reply)")
 			return
 		}
-		bar.SetValue(w.Utilization)
-		txt.Text = fmt.Sprintf("%d%% used · %s", int(w.Utilization*100+0.5), resetText(w.ResetsAt))
-		txt.Refresh()
+		if bar.Value != w.Utilization {
+			bar.SetValue(w.Utilization)
+		}
+		setText(txt, fmt.Sprintf("%d%% used · %s", int(w.Utilization*100+0.5), resetText(w.ResetsAt)))
 	}
 	setWin(u.five, u.fiveTxt, "five_hour")
 	setWin(u.week, u.weekTxt, "seven_day")
-	u.asOf.Text = ""
+	asOf := ""
 	if !d.rateAt.IsZero() {
-		u.asOf.Text = "as of " + ago(d.rateAt)
+		asOf = "as of " + ago(d.rateAt)
 	}
-	u.asOf.Refresh()
+	setText(u.asOf, asOf)
 
 	sess := "No session open"
 	if s := d.current; s != nil {
@@ -148,7 +150,7 @@ func (u *usagePanel) update() {
 			}
 		}
 	}
-	u.sess.SetText(sess)
+	setLabel(u.sess, sess)
 
 	var today, week transcript.Tokens
 	now := time.Now()
@@ -167,7 +169,7 @@ func (u *usagePanel) update() {
 			}
 		}
 	}
-	u.today.SetText("Today " + tok(today.Total()) + "  ·  7 days " + tok(week.Total()))
+	setLabel(u.today, "Today "+tok(today.Total())+"  ·  7 days "+tok(week.Total()))
 }
 
 type usageLayout struct{ d *desk }

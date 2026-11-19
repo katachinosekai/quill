@@ -169,9 +169,14 @@ func TestScreenshots(t *testing.T) {
 		h.d.setSidebar(true)
 		h.w.Resize(fyne.NewSize(1280, 860))
 	})
-	h.ui(func() { h.d.act.setOpen(true) })
+	h.ui(func() {
+		for _, it := range h.d.sessions[editsID].conv.Items {
+			if it.Kind == chat.Tool && it.ToolName == "Bash" {
+				h.d.chat.toggleStep(it)
+			}
+		}
+	})
 	snap("steps-open.png")
-	h.ui(func() { h.d.act.setOpen(false) })
 
 	var s *deskSession
 	h.ui(func() {
