@@ -68,14 +68,15 @@ func newChatView(d *desk) *chatView {
 	v.box = container.NewVBox()
 	v.cache = map[*deskSession]*sessView{}
 	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
-	v.col = windowCentered(d.chatWidth, d.sidebarWidth, v.inner)
-	v.scroll = container.NewVScroll(container.NewPadded(v.col))
+	v.col = v.inner
+	v.scroll = container.NewVScroll(v.inner)
 	border := canvas.NewRectangle(color.Transparent)
 	border.StrokeColor = color.NRGBA{0xff, 0xff, 0xff, 0x1c}
 	border.StrokeWidth = 1
 	border.CornerRadius = 16
-	v.frame = windowCentered(d.chatWidth, d.sidebarWidth, border)
-	v.root = container.NewStack(container.New(layout.NewCustomPaddedLayout(8, 8, 4, 4), container.NewPadded(v.frame)), v.scroll)
+	inside := container.New(layout.NewCustomPaddedLayout(2, 2, 2, 2), v.scroll)
+	v.frame = windowCentered(d.chatWidth, d.sidebarWidth, container.NewStack(border, inside))
+	v.root = container.New(layout.NewCustomPaddedLayout(8, 8, 4, 4), container.NewPadded(v.frame))
 	return v
 }
 
