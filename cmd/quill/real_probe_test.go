@@ -43,3 +43,24 @@ func TestRealTranscriptProbe(t *testing.T) {
 	d.chat.scroll.Refresh()
 	snap("real-up.png")
 }
+
+func TestRealSidebarProbe(t *testing.T) {
+	out := os.Getenv("QUILL_PROBE_OUT")
+	if out == "" || os.Getenv("QUILL_PROBE_SIDEBAR") == "" {
+		t.Skip()
+	}
+	a := test.NewTempApp(t)
+	a.Settings().SetTheme(deskTheme{})
+	w := test.NewWindow(nil)
+	defer w.Close()
+	d := newDesk(a, w, config{ProjectsRoot: transcript.DefaultRoot(), SessionsDir: t.TempDir(), ClaudeBin: "false"})
+	d.do = func(f func()) { f() }
+	d.doWait = d.do
+	w.SetContent(d.build())
+	w.Resize(fyne.NewSize(1280, 860))
+	d.refresh()
+	d.oldSec.open = true
+	d.rebuildRows()
+	time.Sleep(300 * time.Millisecond)
+	shot(t, w, out, "real-sidebar.png")
+}

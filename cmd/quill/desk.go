@@ -172,11 +172,9 @@ type desk struct {
 	root          *fyne.Container
 	expandBtn     *tapRow
 	sideOff       bool
-	autoList      *widget.List
-	autoRows      []sideRow
-	autoBtn       *widget.Button
-	autoArea      *fyne.Container
-	autoOpen      bool
+	autoSec       *foldSection
+	sideBody      *fyne.Container
+	oldSec        *foldSection
 	created       map[string]bool
 	suppress      bool
 	refreshMu     sync.Mutex
@@ -220,16 +218,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.search.SetPlaceHolder("Search sessions")
 	d.search.OnChanged = func(string) { d.rebuildRows() }
 	d.list = d.newSessionList(&d.rows)
-	d.autoList = d.newSessionList(&d.autoRows)
-	d.autoBtn = widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() {
-		d.autoOpen = !d.autoOpen
-		d.rebuildRows()
-	})
-	d.autoBtn.Alignment = widget.ButtonAlignLeading
-	d.autoBtn.Importance = widget.LowImportance
-	d.autoArea = container.NewStack(sized(0, 240, canvas.NewRectangle(color.Transparent)), d.autoList)
-	d.autoArea.Hide()
-	autoBox := container.NewVBox(widget.NewSeparator(), d.autoBtn, d.autoArea)
+	d.oldSec = d.newFold("Inactive")
+	d.autoSec = d.newFold("Created by Claude")
+	autoBox := container.NewVBox(padTop(10), d.oldSec.box, padTop(4), d.autoSec.box, padTop(10))
 	centerChk := widget.NewCheck("Center message text", func(on bool) {
 		d.center = on
 		d.app.Preferences().SetBool("centerText", on)
@@ -263,7 +254,8 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	top := container.NewVBox(brand, newBtn, d.search)
 	bottom := container.NewVBox(autoBox, widget.NewSeparator(), centerChk, rcChk, legend)
 	r := canvas.NewRectangle(colSidebar)
-	return container.NewStack(r, container.NewPadded(container.NewBorder(top, bottom, nil, nil, d.list)))
+	d.sideBody = container.NewBorder(top, bottom, nil, nil, d.list)
+	return container.NewStack(r, container.NewPadded(d.sideBody))
 }
 
 func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
@@ -444,12 +436,16 @@ func (d *desk) rebuildRows() {
 	for _, info := range d.order {
 		entries = append(entries, entry{info.ID, info.Cwd, info.Last})
 	}
-	var filtered, auto []entry
+	var filtered, auto, old []entry
 	for _, e := range entries {
 		if d.isAuto(e.id) {
 			if q == "" || d.matches(e.id, e.cwd, q) {
 				auto = append(auto, e)
 			}
+			continue
+		}
+		if q == "" && d.isInactive(e.id, e.last) {
+			old = append(old, e)
 			continue
 		}
 		if q != "" {
@@ -490,27 +486,23 @@ func (d *desk) rebuildRows() {
 		rows = append(rows, sideRow{id: e.id})
 	}
 	d.rows = rows
-	sort.SliceStable(auto, func(i, j int) bool { return auto[i].last.After(auto[j].last) })
-	d.autoRows = d.autoRows[:0]
-	for _, e := range auto {
-		d.autoRows = append(d.autoRows, sideRow{id: e.id})
-	}
-	icon := theme.NavigateNextIcon()
-	if d.autoOpen {
-		icon = theme.MenuDropDownIcon()
-	}
-	d.autoBtn.SetIcon(icon)
-	d.autoBtn.SetText(fmt.Sprintf("Created by Claude (%d)", len(auto)))
-	if d.autoOpen && len(auto) > 0 {
-		d.autoArea.Show()
-	} else {
-		d.autoArea.Hide()
+	for _, g := range []struct {
+		sec     *foldSection
+		entries []entry
+	}{{d.autoSec, auto}, {d.oldSec, old}} {
+		es := g.entries
+		sort.SliceStable(es, func(i, j int) bool { return es[i].last.After(es[j].last) })
+		g.sec.rows = g.sec.rows[:0]
+		for _, e := range es {
+			g.sec.rows = append(g.sec.rows, sideRow{id: e.id})
+		}
+		g.sec.refresh()
 	}
 	d.suppress = true
 	for _, l := range []struct {
 		list *widget.List
 		rows []sideRow
-	}{{d.list, d.rows}, {d.autoList, d.autoRows}} {
+	}{{d.list, d.rows}, {d.autoSec.list, d.autoSec.rows}, {d.oldSec.list, d.oldSec.rows}} {
 		l.list.UnselectAll()
 		for i, r := range l.rows {
 			if r.header != "" {
@@ -756,6 +748,12 @@ func (d *desk) open(id string) {
 		return
 	}
 	d.current = s
+	for _, r := range d.oldSec.rows {
+		if r.id == id {
+			d.rebuildRows()
+			break
+		}
+	}
 	info, has := d.infos[id]
 	needLoad := has && !s.running() && (!s.loaded || !info.ModTime.Equal(s.loadedMod))
 	if needLoad {

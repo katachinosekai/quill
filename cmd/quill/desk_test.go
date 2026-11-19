@@ -192,19 +192,19 @@ func TestSidebarAndTerminalSession(t *testing.T) {
 				headers++
 			}
 		}
-		if headers != 1 || len(h.d.rows) != 2 || len(h.d.autoRows) != 1 || h.d.autoRows[0].id != smokeID {
-			t.Fatalf("rows %+v auto %+v", h.d.rows, h.d.autoRows)
+		if headers != 1 || len(h.d.rows) != 2 || len(h.d.autoSec.rows) != 1 || h.d.autoSec.rows[0].id != smokeID {
+			t.Fatalf("rows %+v auto %+v", h.d.rows, h.d.autoSec.rows)
 		}
-		if h.d.autoArea.Visible() || !strings.Contains(h.d.autoBtn.Text, "Created by Claude (1)") {
+		if h.d.autoSec.area.Visible() || !strings.Contains(h.d.autoSec.btn.Text, "Created by Claude (1)") {
 			t.Fatal("headless sessions should sit in a collapsed section")
 		}
-		test.Tap(h.d.autoBtn)
-		if !h.d.autoArea.Visible() {
+		test.Tap(h.d.autoSec.btn)
+		if !h.d.autoSec.area.Visible() {
 			t.Fatal("section should open")
 		}
 		h.d.created[smokeID] = true
 		h.d.rebuildRows()
-		if len(h.d.rows) != 4 || len(h.d.autoRows) != 0 {
+		if len(h.d.rows) != 4 || len(h.d.autoSec.rows) != 0 {
 			t.Fatal("sessions made in Quill stay in the main list")
 		}
 		delete(h.d.created, smokeID)
@@ -506,6 +506,37 @@ func TestAutoRemoteControl(t *testing.T) {
 			if it.Kind == chat.Notice && strings.Contains(it.Text, "Remote Control") {
 				t.Fatal("auto Remote Control should not add chat notices")
 			}
+		}
+	})
+}
+
+func TestInactiveSection(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		for i, info := range h.d.order {
+			if info.ID == editsID {
+				info.Last = time.Now().Add(-30 * 24 * time.Hour)
+				h.d.order[i] = info
+				h.d.infos[editsID] = info
+			}
+		}
+		h.d.rebuildRows()
+		if len(h.d.oldSec.rows) != 1 || h.d.oldSec.rows[0].id != editsID || !h.d.oldSec.box.Visible() || h.d.oldSec.area.Visible() {
+			t.Fatalf("old %+v", h.d.oldSec.rows)
+		}
+		for _, r := range h.d.rows {
+			if r.id == editsID {
+				t.Fatal("inactive session should leave the main list")
+			}
+		}
+		h.d.search.SetText("proj")
+		if len(h.d.oldSec.rows) != 0 {
+			t.Fatal("search should find inactive sessions in the main list")
+		}
+		h.d.search.SetText("")
+		h.d.open(editsID)
+		if len(h.d.oldSec.rows) != 0 {
+			t.Fatal("the open session is never hidden")
 		}
 	})
 }

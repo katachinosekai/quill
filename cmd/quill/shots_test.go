@@ -100,8 +100,8 @@ func shot(t *testing.T, w fyne.Window, dir, name string) {
 func TestDeskWithFixtures(t *testing.T) {
 	d, w := fixtureDesk(t)
 	defer w.Close()
-	if len(d.rows) != 2 || len(d.autoRows) != 1 {
-		t.Fatalf("rows %+v auto %+v", d.rows, d.autoRows)
+	if len(d.rows) != 2 || len(d.autoSec.rows) != 1 {
+		t.Fatalf("rows %+v auto %+v", d.rows, d.autoSec.rows)
 	}
 	s := openLoaded(t, d, "11111111-2222-3333-4444-555555555555")
 	if len(d.chat.views) != len(s.conv.Items) || d.input.Disabled() {

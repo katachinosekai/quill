@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"time"
 
@@ -107,4 +108,69 @@ func smallArrow(res fyne.Resource, onTap func()) *tapRow {
 	r := newTapRow(container.NewCenter(sized(22, 22, container.NewStack(ring, container.NewPadded(icon)))), onTap)
 	r.icon = icon
 	return r
+}
+
+const inactiveAfter = 7 * 24 * time.Hour
+
+type foldSection struct {
+	d     *desk
+	title string
+	rows  []sideRow
+	list  *widget.List
+	btn   *widget.Button
+	area  *fyne.Container
+	box   *fyne.Container
+	open  bool
+}
+
+func (d *desk) newFold(title string) *foldSection {
+	f := &foldSection{title: title, d: d}
+	f.list = d.newSessionList(&f.rows)
+	f.btn = widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() {
+		f.open = !f.open
+		d.rebuildRows()
+	})
+	f.btn.Alignment = widget.ButtonAlignLeading
+	f.btn.Importance = widget.LowImportance
+	f.area = container.NewStack(sized(0, 220, canvas.NewRectangle(color.Transparent)), f.list)
+	f.area.Hide()
+	f.box = container.NewVBox(f.btn, f.area)
+	return f
+}
+
+func (f *foldSection) refresh() {
+	icon := theme.NavigateNextIcon()
+	if f.open {
+		icon = theme.MenuDropDownIcon()
+	}
+	f.btn.SetIcon(icon)
+	f.btn.SetText(fmt.Sprintf("%s (%d)", f.title, len(f.rows)))
+	was := f.box.Visible() && f.area.Visible()
+	if len(f.rows) == 0 {
+		f.box.Hide()
+	} else {
+		f.box.Show()
+		if f.open {
+			f.area.Show()
+		} else {
+			f.area.Hide()
+		}
+	}
+	if now := f.box.Visible() && f.area.Visible(); now != was && f.d.sideBody != nil {
+		f.d.sideBody.Refresh()
+	}
+}
+
+func (d *desk) isInactive(id string, last time.Time) bool {
+	if last.IsZero() || time.Since(last) < inactiveAfter {
+		return false
+	}
+	if d.current != nil && d.current.id == id {
+		return false
+	}
+	if s := d.sessions[id]; s != nil && (s.running() || s.terminal != nil) {
+		return false
+	}
+	_, held := d.terms[id]
+	return !held
 }
