@@ -14,9 +14,9 @@ import (
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/katachinosekai/claude-desk/internal/chat"
-	"github.com/katachinosekai/claude-desk/internal/fakeclaude"
-	"github.com/katachinosekai/claude-desk/internal/transcript"
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/fakeclaude"
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 const (

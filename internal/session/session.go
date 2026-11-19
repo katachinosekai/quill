@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/katachinosekai/claude-desk/internal/protocol"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 type Options struct {
@@ -154,7 +154,7 @@ func (p *Process) read(r io.Reader) {
 			}
 		case "control_request":
 			if ev.Request != nil && ev.Request.Subtype != "can_use_tool" {
-				_ = p.write(protocol.ControlErrorLine(ev.RequestID, "unsupported by Claude Desk: "+ev.Request.Subtype))
+				_ = p.write(protocol.ControlErrorLine(ev.RequestID, "unsupported by Quill: "+ev.Request.Subtype))
 			}
 		case "result":
 			p.busy.Store(false)

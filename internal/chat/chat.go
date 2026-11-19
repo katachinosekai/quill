@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/katachinosekai/claude-desk/internal/protocol"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 type Kind int

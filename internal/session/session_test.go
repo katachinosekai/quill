@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/katachinosekai/claude-desk/internal/chat"
-	"github.com/katachinosekai/claude-desk/internal/fakeclaude"
-	"github.com/katachinosekai/claude-desk/internal/protocol"
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/fakeclaude"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 func TestMain(m *testing.M) {

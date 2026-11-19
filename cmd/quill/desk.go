@@ -20,11 +20,11 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/katachinosekai/claude-desk/internal/chat"
-	"github.com/katachinosekai/claude-desk/internal/live"
-	"github.com/katachinosekai/claude-desk/internal/protocol"
-	"github.com/katachinosekai/claude-desk/internal/session"
-	"github.com/katachinosekai/claude-desk/internal/transcript"
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/live"
+	"github.com/katachinosekai/quill/internal/protocol"
+	"github.com/katachinosekai/quill/internal/session"
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 var modelChoices = []string{"default", "fable", "opus", "sonnet", "haiku"}
@@ -434,7 +434,7 @@ func (d *desk) refreshSidebar() {
 }
 
 func (d *desk) buildMain() fyne.CanvasObject {
-	d.title = widget.NewLabel("Claude Desk")
+	d.title = widget.NewLabel("Quill")
 	d.title.TextStyle = fyne.TextStyle{Bold: true}
 	d.title.Truncation = fyne.TextTruncateEllipsis
 	d.subtitle = mutedText("", 12)
@@ -499,7 +499,7 @@ func (d *desk) updateChrome() {
 		}
 	}()
 	if s == nil {
-		d.title.SetText("Claude Desk")
+		d.title.SetText("Quill")
 		d.subtitle.Text = ""
 		d.subtitle.Refresh()
 		d.note.Hide()

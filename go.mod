@@ -1,4 +1,4 @@
-module github.com/katachinosekai/claude-desk
+module github.com/katachinosekai/quill
 
 go 1.26.0
 

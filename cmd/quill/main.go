@@ -10,8 +10,8 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/storage"
 
-	"github.com/katachinosekai/claude-desk/internal/live"
-	"github.com/katachinosekai/claude-desk/internal/transcript"
+	"github.com/katachinosekai/quill/internal/live"
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 var version = "dev"
@@ -28,9 +28,9 @@ func main() {
 		fmt.Println(version)
 		return
 	}
-	a := app.NewWithID("io.github.katachinosekai.claudedesk")
+	a := app.NewWithID("io.github.katachinosekai.quill")
 	a.Settings().SetTheme(deskTheme{})
-	w := a.NewWindow("Claude Desk")
+	w := a.NewWindow("Quill")
 	d := newDesk(a, w, config{
 		ProjectsRoot: transcript.DefaultRoot(),
 		SessionsDir:  live.DefaultDir(),

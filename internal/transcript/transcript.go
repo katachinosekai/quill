@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/katachinosekai/claude-desk/internal/chat"
-	"github.com/katachinosekai/claude-desk/internal/protocol"
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 type Info struct {

@@ -13,8 +13,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/katachinosekai/claude-desk/internal/chat"
-	"github.com/katachinosekai/claude-desk/internal/protocol"
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 const (

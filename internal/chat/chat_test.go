@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/katachinosekai/claude-desk/internal/protocol"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 func replay(t *testing.T, c *Conversation, path string) {

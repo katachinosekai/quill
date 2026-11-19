@@ -11,10 +11,10 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
 
-	"github.com/katachinosekai/claude-desk/internal/chat"
-	"github.com/katachinosekai/claude-desk/internal/live"
-	"github.com/katachinosekai/claude-desk/internal/protocol"
-	"github.com/katachinosekai/claude-desk/internal/transcript"
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/live"
+	"github.com/katachinosekai/quill/internal/protocol"
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 func copyFixture(t *testing.T, root, cwd, id, src string) {

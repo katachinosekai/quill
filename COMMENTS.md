@@ -1,13 +1,13 @@
-# Claude Desk design notes
+# Quill design notes
 
 Go code in this repo carries no comments; notes live here.
 
 ## Build and test
 
 - `export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH`
-- GUI build on this machine: `go build -tags wayland ./cmd/claude-desk` (no X11 dev headers installed). Without the tag, anything that compiles `cmd/claude-desk` (vet, test) fails on missing X11 headers, so use the tag there too.
+- GUI build on this machine: `go build -tags wayland ./cmd/quill` (no X11 dev headers installed). Without the tag, anything that compiles `cmd/quill` (vet, test) fails on missing X11 headers, so use the tag there too.
 - Full check: `go vet ./internal/... && go vet -tags wayland ./cmd/... && go test -race -tags wayland ./...`
-- Screenshots: `DESK_SHOTS=1 go test -tags wayland -run Screenshots ./cmd/claude-desk/` writes `.shots/{history,permission,centered,terminal,new-session}.png` (git-ignored). They are rendered off-screen by Fyne's test driver with fixture transcripts and the fake claude.
+- Screenshots: `DESK_SHOTS=1 go test -tags wayland -run Screenshots ./cmd/quill/` writes `.shots/{history,permission,centered,terminal,new-session}.png` (git-ignored). They are rendered off-screen by Fyne's test driver with fixture transcripts and the fake claude.
 
 ## Layout
 
@@ -17,7 +17,7 @@ Go code in this repo carries no comments; notes live here.
 - `internal/session`: one headless `claude` process per app session.
 - `internal/live`: finds sessions open in a terminal.
 - `internal/fakeclaude`: a scripted stand-in for the CLI. Test binaries re-exec themselves with `CLAUDE_DESK_FAKE=1` to become it. Prompts: `write` (Write + permission prompt), `demo` (thinking, text, Bash with result, Edit + permission prompt), `slow` (streams until interrupted), anything else echoes. `FAKE_ARGS_OUT` records argv, `FAKE_IGNORE_EOF` simulates a hung process.
-- `cmd/claude-desk`: Fyne UI (`desk.go` sidebar, header, bottom bar, process wiring; `chatview.go` conversation rendering; `widgets.go` max-width layout, Enter/Shift+Enter entry; `theme.go` dark theme).
+- `cmd/quill`: Fyne UI (`desk.go` sidebar, header, bottom bar, process wiring; `chatview.go` conversation rendering; `widgets.go` max-width layout, Enter/Shift+Enter entry; `theme.go` dark theme).
 
 ## How a session is driven (verified with two tiny real haiku runs, fixtures in internal/protocol/testdata)
 

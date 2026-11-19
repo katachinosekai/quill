@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/katachinosekai/claude-desk/internal/chat"
+	"github.com/katachinosekai/quill/internal/chat"
 )
 
 func TestScanSynthetic(t *testing.T) {
