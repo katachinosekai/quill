@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -35,22 +36,29 @@ type itemView struct {
 }
 
 type chatView struct {
-	d           *desk
-	s           *deskSession
-	box         *fyne.Container
-	scroll      *container.Scroll
-	views       map[int]*itemView
-	shownFrom   int
-	placeholder bool
-	root        fyne.CanvasObject
-	col         *fyne.Container
-	live        *widget.Label
-	stepOpen    map[*chat.Item]bool
-	frame       *fyne.Container
-	inner       *fyne.Container
-	steps       bool
-	cache       map[*deskSession]*sessView
-	order       []*deskSession
+	d             *desk
+	s             *deskSession
+	box           *fyne.Container
+	scroll        *container.Scroll
+	views         map[int]*itemView
+	shownFrom     int
+	placeholder   bool
+	root          fyne.CanvasObject
+	col           *fyne.Container
+	follow        bool
+	autoScrolling bool
+	newBelow      bool
+	jump          *fyne.Container
+	glow          *canvas.Rectangle
+	glowAnim      *fyne.Animation
+	glide         *fyne.Animation
+	live          *widget.Label
+	stepOpen      map[*chat.Item]bool
+	frame         *fyne.Container
+	inner         *fyne.Container
+	steps         bool
+	cache         map[*deskSession]*sessView
+	order         []*deskSession
 }
 
 type sessView struct {
@@ -82,7 +90,18 @@ func newChatView(d *desk) *chatView {
 	inside := container.New(layout.NewCustomPaddedLayout(2, 2, 2, 2), v.scroll)
 	v.frame = windowCentered(d.chatWidth, d.sidebarWidth, container.NewStack(border, inside))
 	liveRow := windowCentered(d.chatWidth, d.sidebarWidth, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), v.live))
-	v.root = container.NewBorder(nil, liveRow, nil, nil, container.New(layout.NewCustomPaddedLayout(8, 2, 4, 4), container.NewPadded(v.frame)))
+	v.follow = true
+	v.scroll.OnScrolled = func(fyne.Position) {
+		if v.autoScrolling {
+			return
+		}
+		v.follow = v.atBottom()
+		v.syncJump()
+	}
+	v.jump = v.newJump()
+	overlay := container.NewVBox(layout.NewSpacer(), windowCentered(d.chatWidth, d.sidebarWidth, container.NewCenter(v.jump)), padTop(18))
+	framed := container.New(layout.NewCustomPaddedLayout(8, 2, 4, 4), container.NewPadded(v.frame))
+	v.root = container.NewBorder(nil, liveRow, nil, nil, container.NewStack(framed, overlay))
 	return v
 }
 
@@ -204,19 +223,97 @@ func (v *chatView) emptySession() fyne.CanvasObject {
 
 func (v *chatView) atBottom() bool {
 	content := v.scroll.Content.MinSize().Height
-	return v.scroll.Offset.Y+v.scroll.Size().Height >= content-60
+	return v.scroll.Offset.Y+v.scroll.Size().Height >= content-40
 }
 
 func (v *chatView) scrollBottom() {
+	v.autoScrolling = true
 	v.scroll.Refresh()
 	v.scroll.ScrollToBottom()
+	v.autoScrolling = false
+	v.follow = true
+	v.newBelow = false
+	v.syncJump()
+}
+
+func (v *chatView) glideBottom() {
+	from := v.scroll.Offset.Y
+	to := v.scroll.Content.MinSize().Height - v.scroll.Size().Height
+	if !v.d.animate || to <= from {
+		v.scrollBottom()
+		return
+	}
+	v.follow = true
+	v.syncJump()
+	if v.glide != nil {
+		v.glide.Stop()
+	}
+	v.glide = fyne.NewAnimation(320*time.Millisecond, func(p float32) {
+		target := v.scroll.Content.MinSize().Height - v.scroll.Size().Height
+		v.autoScrolling = true
+		v.scroll.Offset = fyne.NewPos(0, from+(target-from)*p)
+		v.scroll.Refresh()
+		v.autoScrolling = false
+		if p >= 1 {
+			v.scrollBottom()
+		}
+	})
+	v.glide.Curve = fyne.AnimationEaseInOut
+	v.glide.Start()
+}
+
+func (v *chatView) keepUp() {
+	if v.steps {
+		return
+	}
+	if v.follow {
+		v.scrollBottom()
+		return
+	}
+	v.newBelow = true
+	v.syncJump()
+}
+
+func (v *chatView) newJump() *fyne.Container {
+	glow := canvas.NewRectangle(colorAlpha(colAccent, 0x50))
+	glow.CornerRadius = 18
+	btn := widget.NewButtonWithIcon("Latest", theme.MoveDownIcon(), func() { v.glideBottom() })
+	btn.Importance = widget.HighImportance
+	v.glow = glow
+	v.glowAnim = fyne.NewAnimation(1100*time.Millisecond, func(p float32) {
+		glow.FillColor = colorAlpha(colAccent, uint8(0x30+p*0x90))
+		glow.Refresh()
+	})
+	v.glowAnim.AutoReverse = true
+	v.glowAnim.RepeatCount = fyne.AnimationRepeatForever
+	box := container.NewStack(glow, container.New(layout.NewCustomPaddedLayout(4, 4, 6, 6), btn))
+	box.Hide()
+	return box
+}
+
+func (v *chatView) syncJump() {
+	if v.jump == nil {
+		return
+	}
+	show := !v.follow && v.s != nil
+	if show == v.jump.Visible() {
+		return
+	}
+	if show {
+		v.jump.Show()
+		if v.d.animate {
+			v.glowAnim.Start()
+		}
+	} else {
+		v.glowAnim.Stop()
+		v.jump.Hide()
+	}
 }
 
 func (v *chatView) update(items []*chat.Item) {
 	if v.s == nil || len(items) == 0 {
 		return
 	}
-	stick := v.atBottom()
 	added := false
 	heads := map[*chat.Item]bool{}
 	for _, it := range items {
@@ -244,9 +341,7 @@ func (v *chatView) update(items []*chat.Item) {
 	if added {
 		v.box.Refresh()
 	}
-	if stick {
-		v.scrollBottom()
-	}
+	v.keepUp()
 }
 
 func (v *chatView) viewFor(it *chat.Item) *itemView {
@@ -278,6 +373,9 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 	if h := iv.holder.MinSize().Height; h != iv.height {
 		iv.height = h
 		v.box.Refresh()
+		if v.follow && !v.steps {
+			v.scrollBottom()
+		}
 	}
 }
 

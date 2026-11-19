@@ -33,10 +33,31 @@ func execStage2(raw string) int {
 	if json.Unmarshal([]byte(raw), &h) != nil {
 		return 3
 	}
+	h.FromExec = true
 	got := make(chan *protocol.Event, 256)
 	p, err := Attach(h, func(ev *protocol.Event) { got <- ev })
 	if err != nil {
 		return 4
+	}
+	if os.Getenv("QUILL_EXEC_ROUND") == "" {
+		select {
+		case <-got:
+		case <-time.After(5 * time.Second):
+			return 7
+		}
+		done := make(chan Handoff, 1)
+		go func() { h2, _ := p.Handoff(); done <- h2 }()
+		var h2 Handoff
+		select {
+		case h2 = <-done:
+		case <-time.After(5 * time.Second):
+			return 8
+		}
+		b, _ := json.Marshal(h2)
+		exe, _ := os.Executable()
+		env := append(os.Environ(), "QUILL_EXEC_STAGE2="+string(b), "QUILL_EXEC_ROUND=2")
+		_ = syscall.Exec(exe, []string{exe}, env)
+		return 9
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -375,4 +396,50 @@ func TestHandoffMidTurn(t *testing.T) {
 	if !q.Exited() {
 		t.Fatal("attached process should report its exit")
 	}
+}
+
+func TestHandoffTwice(t *testing.T) {
+	r1 := newRecorder()
+	p := start(t, Options{SessionID: "hand-2"}, r1)
+	if err := p.Send("slow"); err != nil {
+		t.Fatal(err)
+	}
+	r1.waitFor(t, isType("stream_event"))
+	h, err := p.Handoff()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := newRecorder()
+	q, err := Attach(h, r2.on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.waitFor(t, isType("stream_event"))
+	done := make(chan Handoff, 1)
+	go func() {
+		h2, err := q.Handoff()
+		if err != nil {
+			t.Error(err)
+		}
+		done <- h2
+	}()
+	var h2 Handoff
+	select {
+	case h2 = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second handoff hung")
+	}
+	r3 := newRecorder()
+	q2, err := Attach(h2, r3.on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { q2.Stop(2 * time.Second) })
+	r3.waitFor(t, isType("stream_event"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := q2.Interrupt(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r3.waitFor(t, isType("result"))
 }

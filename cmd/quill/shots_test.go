@@ -228,6 +228,13 @@ func TestScreenshots(t *testing.T) {
 	snap("long.png")
 	h.ui(func() { h.d.chat.scrollBottom() })
 	snap("long-bottom.png")
+	h.ui(func() {
+		h.d.chat.scroll.Offset = fyne.NewPos(0, 0)
+		h.d.chat.scroll.Refresh()
+		h.d.chat.scroll.OnScrolled(h.d.chat.scroll.Offset)
+	})
+	snap("jump.png")
+	h.ui(func() { h.d.chat.scrollBottom() })
 
 	h.ui(func() {
 		h.d.cmdList = []protocol.Command{

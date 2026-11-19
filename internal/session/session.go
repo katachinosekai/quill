@@ -150,6 +150,7 @@ type Handoff struct {
 	Leftover []byte  `json:"leftover"`
 	Busy     bool    `json:"busy"`
 	Seq      int64   `json:"seq"`
+	FromExec bool    `json:"-"`
 	Opts     Options `json:"opts"`
 }
 
@@ -159,15 +160,18 @@ func (p *Process) Handoff() (Handoff, error) {
 	}
 	p.handing.Store(true)
 	_ = p.stdout.SetReadDeadline(time.Now())
-	<-p.readDone
-	h := Handoff{PID: p.pid, ErrPath: p.errPath, Leftover: p.leftover, Busy: p.busy.Load(), Seq: p.seq.Load(), Opts: p.opts}
-	for _, f := range []*os.File{p.stdin, p.stdout} {
-		fd := f.Fd()
-		if _, _, e := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFD, 0); e != 0 {
-			return Handoff{}, e
-		}
+	select {
+	case <-p.readDone:
+	case <-time.After(3 * time.Second):
 	}
-	h.In, h.Out = p.stdin.Fd(), p.stdout.Fd()
+	h := Handoff{PID: p.pid, ErrPath: p.errPath, Leftover: p.leftover, Busy: p.busy.Load(), Seq: p.seq.Load(), Opts: p.opts}
+	var err error
+	if h.In, err = inheritFD(p.stdin); err != nil {
+		return Handoff{}, err
+	}
+	if h.Out, err = inheritFD(p.stdout); err != nil {
+		return Handoff{}, err
+	}
 	return h, nil
 }
 
@@ -183,8 +187,8 @@ func Attach(h Handoff, onEvent func(*protocol.Event)) (*Process, error) {
 		opts:    h.Opts,
 		pid:     h.PID,
 		osProc:  proc,
-		stdin:   os.NewFile(h.In, "claude-stdin"),
-		stdout:  os.NewFile(h.Out, "claude-stdout"),
+		stdin:   pollableFile(h.In, "claude-stdin", h.FromExec),
+		stdout:  pollableFile(h.Out, "claude-stdout", h.FromExec),
 		errPath: h.ErrPath,
 		onEvent: onEvent,
 		done:    make(chan struct{}),
@@ -515,4 +519,35 @@ func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, 
 		return nil, ctx.Err()
 	}
 	return nil, errors.New("no command list from claude")
+}
+
+func inheritFD(f *os.File) (uintptr, error) {
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	var fd uintptr
+	var ferr error
+	err = rc.Control(func(raw uintptr) {
+		fd = raw
+		if _, _, e := syscall.Syscall(syscall.SYS_FCNTL, raw, syscall.F_SETFD, 0); e != 0 {
+			ferr = e
+		}
+	})
+	if err != nil {
+		return 0, err
+	}
+	return fd, ferr
+}
+
+func pollableFile(fd uintptr, name string, inherited bool) *os.File {
+	n := int(fd)
+	if !inherited {
+		if d, err := syscall.Dup(n); err == nil {
+			n = d
+		}
+	}
+	syscall.CloseOnExec(n)
+	_ = syscall.SetNonblock(n, true)
+	return os.NewFile(uintptr(n), name)
 }

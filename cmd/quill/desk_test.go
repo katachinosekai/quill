@@ -757,3 +757,35 @@ func TestCleanTranscript(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestChatFollowsAndJumpButton(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		for i := 0; i < 40; i++ {
+			s.conv.AddUser(fmt.Sprintf("message %d with enough words to take some room in the chat", i))
+		}
+		h.d.chat.show(s)
+		if !h.d.chat.follow || h.d.chat.jump.Visible() {
+			t.Fatal("a freshly opened chat follows the bottom")
+		}
+		h.d.chat.scroll.Offset = fyne.NewPos(0, 0)
+		h.d.chat.scroll.OnScrolled(h.d.chat.scroll.Offset)
+		if h.d.chat.follow || !h.d.chat.jump.Visible() {
+			t.Fatal("scrolling up should stop following and show the Latest button")
+		}
+		h.d.chat.update([]*chat.Item{s.conv.AddUser("new while reading history")})
+		if h.d.chat.scroll.Offset.Y != 0 {
+			t.Fatal("must not scroll down while the user reads history")
+		}
+		h.d.chat.glideBottom()
+		if !h.d.chat.follow || h.d.chat.jump.Visible() || !h.d.chat.atBottom() {
+			t.Fatal("Latest should bring the view to the bottom and resume following")
+		}
+		h.d.chat.update([]*chat.Item{s.conv.AddUser("one more")})
+		if !h.d.chat.atBottom() {
+			t.Fatal("following view should stay at the bottom")
+		}
+	})
+}

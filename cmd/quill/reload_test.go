@@ -196,9 +196,9 @@ func TestSwapHandsOffAndReattachesOnFailure(t *testing.T) {
 		h.d.swapTo = "/nonexistent/quill"
 		h.d.forceSwap = true
 		h.d.trySwap()
-		if s.proc == before || !s.running() {
-			t.Fatal("session should be re-attached after a failed switch")
-		}
+	})
+	h.eventually("re-attached after a failed switch", func() bool { return !h.d.swapping && s.proc != before && s.running() })
+	h.ui(func() {
 		if s.proc.PID() != before.PID() {
 			t.Fatal("the same Claude process must keep running")
 		}

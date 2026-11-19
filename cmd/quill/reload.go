@@ -133,34 +133,50 @@ func (d *desk) trySwap() {
 	size := d.win.Canvas().Size()
 	st.Width, st.Height = size.Width, size.Height
 	st.ScrollY = d.chat.scroll.Offset.Y
-	var handed []*deskSession
-	for _, s := range d.runningSessions() {
-		h, err := s.proc.Handoff()
-		if err != nil {
-			if s.persisted {
-				st.Running = append(st.Running, s.id)
+	running := d.runningSessions()
+	type meta struct {
+		s  *deskSession
+		hs handedSession
+	}
+	var metas []meta
+	for _, s := range running {
+		metas = append(metas, meta{s, handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL}})
+	}
+	target := d.swapTo
+	go func() {
+		var handed []meta
+		for _, m := range metas {
+			h, err := m.s.proc.Handoff()
+			if err != nil {
+				if m.s.persisted {
+					st.Running = append(st.Running, m.s.id)
+				}
+				continue
 			}
-			continue
+			m.hs.Handle = h
+			st.Handed = append(st.Handed, m.hs)
+			handed = append(handed, m)
 		}
-		st.Handed = append(st.Handed, handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL, Handle: h})
-		handed = append(handed, s)
-	}
-	b, _ := json.Marshal(st)
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-restore-%d.json", os.Getpid()))
-	err := os.WriteFile(path, b, 0o600)
-	if err == nil {
-		env := append(os.Environ(), restoreEnv+"="+path)
-		err = syscall.Exec(d.swapTo, os.Args, env)
-	}
-	d.swapping = false
-	d.swapTo = ""
-	d.forceSwap = false
-	for i, s := range handed {
-		d.reattach(s, st.Handed[i])
-	}
-	if d.current != nil {
-		d.chat.update([]*chat.Item{d.current.conv.AddError("Could not switch to the new build: " + err.Error())})
-	}
+		b, _ := json.Marshal(st)
+		path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-restore-%d.json", os.Getpid()))
+		err := os.WriteFile(path, b, 0o600)
+		if err == nil {
+			env := append(os.Environ(), restoreEnv+"="+path)
+			err = syscall.Exec(target, os.Args, env)
+			os.Remove(path)
+		}
+		d.do(func() {
+			d.swapping = false
+			d.swapTo = ""
+			d.forceSwap = false
+			for _, m := range handed {
+				d.reattach(m.s, m.hs)
+			}
+			if d.current != nil {
+				d.chat.update([]*chat.Item{d.current.conv.AddError("Could not switch to the new build: " + err.Error())})
+			}
+		})
+	}()
 }
 
 func (d *desk) reattach(s *deskSession, hs handedSession) bool {
@@ -196,6 +212,7 @@ func takeRestore() *restoreState {
 
 func (d *desk) applyRestore(st *restoreState) {
 	for _, hs := range st.Handed {
+		hs.Handle.FromExec = true
 		s := d.session(hs.ID)
 		if s == nil {
 			s = &deskSession{id: hs.ID, cwd: hs.Cwd, title: hs.Title, model: hs.Model, mode: hs.Mode, conv: chat.New(), loaded: true, persisted: true, created: time.Now()}
