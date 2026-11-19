@@ -1212,14 +1212,25 @@ func TestTypedApproval(t *testing.T) {
 func TestCenteringOptions(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
-		h.d.alignSel.SetSelected("Left")
-		h.d.alignSel.SetSelected("Center")
+		h.d.centerAll.SetChecked(false)
+		h.d.centerAll.SetChecked(true)
 		if !h.d.center || h.d.input.Alignment != fyne.TextAlignCenter || h.d.chat.live.Alignment != fyne.TextAlignCenter {
-			t.Fatal("the global Center switch should center chat, typing and status")
+			t.Fatal("Center everything should center chat, typing and status")
 		}
-		h.d.alignFollowers[1].SetSelected("Left")
-		if h.d.chat.live.Alignment != fyne.TextAlignLeading || !h.d.center {
-			t.Fatal("status can be set on its own")
+		h.d.centerChecks[2].SetChecked(false)
+		if h.d.chat.live.Alignment != fyne.TextAlignLeading || !h.d.center || h.d.input.Alignment != fyne.TextAlignCenter {
+			t.Fatal("status toggles on its own")
+		}
+		if h.d.centerAll.Checked {
+			t.Fatal("the master toggle shows off when not everything is centered")
+		}
+		h.d.centerChecks[2].SetChecked(true)
+		if !h.d.centerAll.Checked {
+			t.Fatal("the master toggle shows on when everything is centered")
+		}
+		h.d.centerAll.SetChecked(false)
+		if h.d.center || h.d.input.Alignment != fyne.TextAlignLeading || h.d.chat.live.Alignment != fyne.TextAlignLeading {
+			t.Fatal("turning the master off uncenters everything")
 		}
 	})
 }

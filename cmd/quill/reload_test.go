@@ -166,11 +166,11 @@ func TestReloadCommandForcesSwap(t *testing.T) {
 func TestTextAlignSwitch(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
-		h.d.alignSel.SetSelected("Left")
+		h.d.centerChecks[0].SetChecked(false)
 		if h.d.center || h.d.chat.align() != fyne.TextAlignLeading {
 			t.Fatal("left alignment")
 		}
-		h.d.alignSel.SetSelected("Center")
+		h.d.centerChecks[0].SetChecked(true)
 		if !h.d.center || h.d.chat.align() != fyne.TextAlignCenter {
 			t.Fatal("center alignment")
 		}

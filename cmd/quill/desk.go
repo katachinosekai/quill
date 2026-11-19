@@ -139,81 +139,81 @@ type desk struct {
 	current  *deskSession
 	ownPIDs  sync.Map
 
-	rows           []sideRow
-	list           *widget.List
-	search         *widget.Entry
-	chat           *chatView
-	title          *widget.Label
-	subtitle       *canvas.Text
-	note           *widget.Label
-	rcStatus       *canvas.Text
-	usage          *usagePanel
-	rate           *protocol.RateLimit
-	rateAt         time.Time
-	input          *sendEntry
-	modelSel       *widget.Select
-	modeSel        *widget.Select
-	folder         *canvas.Text
-	stats          *canvas.Text
-	stopBtn        *widget.Button
-	sendBtn        *widget.Button
-	acctBtn        *widget.Button
-	acct           account.Status
-	acctErr        string
-	signingIn      context.CancelFunc
-	glowBoxes      map[*canvas.Rectangle]glow
-	pulsing        atomic.Int32
-	keeper         *keeperClient
-	keptView       string
-	keptHidden     bool
-	lightboxClose  func()
-	swapTo         string
-	swapping       bool
-	restore        *restoreState
-	cmdList        []protocol.Command
-	pending        []*chat.Item
-	pendingSeen    map[*chat.Item]bool
-	pendingChrome  bool
-	pendingFor     *deskSession
-	lastTyped      time.Time
-	stt            *speech
-	autoRC         bool
-	groupProjects  bool
-	planFirst      bool
-	collapseChips  bool
-	rules          sortRules
-	alignSel       *widget.RadioGroup
-	alignFollowers []*widget.RadioGroup
-	suppressAlign  bool
-	forceSwap      bool
-	flushTimer     *time.Timer
-	cmds           *cmdMenu
-	sidebar        fyne.CanvasObject
-	background     bool
-	hidden         bool
-	sideFrac       float32
-	sideAnim       *fyne.Animation
-	animate        bool
-	root           *fyne.Container
-	sideToggle     *tapRow
-	headPad        *canvas.Rectangle
-	chatFreeze     float32
-	sideOff        bool
-	sideBody       *fyne.Container
-	folderOpen     map[string]bool
-	sorted         sortState
-	sortDirty      bool
-	org            sideOrg
-	sideItems      []*sideItem
-	dragID         string
-	dragAt         fyne.Position
-	created        map[string]bool
-	suppress       bool
-	refreshMu      sync.Mutex
-	headerBox      *fyne.Container
-	mainPane       *fyne.Container
-	do             func(func())
-	doWait         func(func())
+	rows          []sideRow
+	list          *widget.List
+	search        *widget.Entry
+	chat          *chatView
+	title         *widget.Label
+	subtitle      *canvas.Text
+	note          *widget.Label
+	rcStatus      *canvas.Text
+	usage         *usagePanel
+	rate          *protocol.RateLimit
+	rateAt        time.Time
+	input         *sendEntry
+	modelSel      *widget.Select
+	modeSel       *widget.Select
+	folder        *canvas.Text
+	stats         *canvas.Text
+	stopBtn       *widget.Button
+	sendBtn       *widget.Button
+	acctBtn       *widget.Button
+	acct          account.Status
+	acctErr       string
+	signingIn     context.CancelFunc
+	glowBoxes     map[*canvas.Rectangle]glow
+	pulsing       atomic.Int32
+	keeper        *keeperClient
+	keptView      string
+	keptHidden    bool
+	lightboxClose func()
+	swapTo        string
+	swapping      bool
+	restore       *restoreState
+	cmdList       []protocol.Command
+	pending       []*chat.Item
+	pendingSeen   map[*chat.Item]bool
+	pendingChrome bool
+	pendingFor    *deskSession
+	lastTyped     time.Time
+	stt           *speech
+	autoRC        bool
+	groupProjects bool
+	planFirst     bool
+	collapseChips bool
+	rules         sortRules
+	centerAll     *widget.Check
+	centerChecks  []*widget.Check
+	suppressAlign bool
+	forceSwap     bool
+	flushTimer    *time.Timer
+	cmds          *cmdMenu
+	sidebar       fyne.CanvasObject
+	background    bool
+	hidden        bool
+	sideFrac      float32
+	sideAnim      *fyne.Animation
+	animate       bool
+	root          *fyne.Container
+	sideToggle    *tapRow
+	headPad       *canvas.Rectangle
+	chatFreeze    float32
+	sideOff       bool
+	sideBody      *fyne.Container
+	folderOpen    map[string]bool
+	sorted        sortState
+	sortDirty     bool
+	org           sideOrg
+	sideItems     []*sideItem
+	dragID        string
+	dragAt        fyne.Position
+	created       map[string]bool
+	suppress      bool
+	refreshMu     sync.Mutex
+	headerBox     *fyne.Container
+	mainPane      *fyne.Container
+	do            func(func())
+	doWait        func(func())
 }
 
 func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
@@ -256,46 +256,36 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.search.SetPlaceHolder("Search sessions")
 	d.search.OnChanged = func(string) { d.rebuildRows() }
 	d.list = d.newSessionList(&d.rows)
-	d.alignSel = widget.NewRadioGroup([]string{"Left", "Center"}, func(v string) {
-		if v == "" || d.suppressAlign {
+	prefs := d.app.Preferences()
+	centerChk := func(label string, on bool, apply func(bool)) *widget.Check {
+		c := widget.NewCheck(label, nil)
+		c.Checked = on
+		c.OnChanged = func(v bool) {
+			apply(v)
+			d.syncCenterAll()
+		}
+		return c
+	}
+	d.centerChecks = []*widget.Check{
+		centerChk("Chat text", d.center, d.setCenter),
+		centerChk("Typing", prefs.Bool("centerInput"), d.setInputCenter),
+		centerChk("Status", prefs.Bool("centerStatus"), d.setStatusCenter),
+	}
+	d.centerAll = widget.NewCheck("Center everything", func(on bool) {
+		if d.suppressAlign {
 			return
 		}
-		d.setCenter(v == "Center")
-		for _, f := range d.alignFollowers {
-			f.SetSelected(v)
+		for _, c := range d.centerChecks {
+			c.SetChecked(on)
 		}
 	})
-	d.alignSel.Horizontal = true
-	d.alignSel.Required = true
-	d.suppressAlign = true
-	if d.center {
-		d.alignSel.SetSelected("Center")
-	} else {
-		d.alignSel.SetSelected("Left")
+	d.syncCenterAll()
+	indent := func(o fyne.CanvasObject) fyne.CanvasObject {
+		pad := canvas.NewRectangle(color.Transparent)
+		pad.SetMinSize(fyne.NewSize(16, 1))
+		return container.NewHBox(pad, o)
 	}
-	d.suppressAlign = false
-	alignRow := container.NewHBox(container.NewCenter(mutedText("Text", 12)), d.alignSel)
-	subAlign := func(label, pref string, apply func(bool)) (*fyne.Container, *widget.RadioGroup) {
-		sel := widget.NewRadioGroup([]string{"Left", "Center"}, nil)
-		sel.Horizontal = true
-		sel.Required = true
-		if d.app.Preferences().BoolWithFallback(pref, d.center) {
-			sel.SetSelected("Center")
-		} else {
-			sel.SetSelected("Left")
-		}
-		sel.OnChanged = func(v string) {
-			if v != "" {
-				apply(v == "Center")
-			}
-		}
-		indent := canvas.NewRectangle(color.Transparent)
-		indent.SetMinSize(fyne.NewSize(12, 1))
-		return container.NewHBox(indent, container.NewCenter(mutedText(label, 11)), sel), sel
-	}
-	typeRow, typeSel := subAlign("Typing", "centerInput", d.setInputCenter)
-	statusRow, statusSel := subAlign("Status", "centerStatus", d.setStatusCenter)
-	d.alignFollowers = []*widget.RadioGroup{typeSel, statusSel}
+	alignRow := container.NewVBox(d.centerAll, container.NewGridWithColumns(3, indent(d.centerChecks[0]), d.centerChecks[1], d.centerChecks[2]))
 	rcChk := widget.NewCheck("Remote Control for every session", func(on bool) {
 		d.autoRC = on
 		d.app.Preferences().SetBool("autoRemoteControl", on)
@@ -328,7 +318,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, typeRow, statusRow, legend)
+	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, legend)
 	r := canvas.NewRectangle(colSidebar)
 	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
 	return container.NewStack(r, container.NewPadded(d.sideBody))
@@ -733,7 +723,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.onSendNow = d.sendNow
 	d.input.hint = "Message Claude"
 	d.input.SetPlaceHolder(d.input.hint)
-	if d.app.Preferences().BoolWithFallback("centerInput", d.center) {
+	if d.app.Preferences().Bool("centerInput") {
 		d.input.Alignment = fyne.TextAlignCenter
 	}
 	d.modelSel = widget.NewSelect(modelChoices, func(v string) {
@@ -1763,6 +1753,21 @@ func (d *desk) setInputCenter(on bool) {
 		d.input.Alignment = fyne.TextAlignCenter
 	}
 	d.input.Refresh()
+}
+
+func (d *desk) syncCenterAll() {
+	if d.centerAll == nil {
+		return
+	}
+	all := true
+	for _, c := range d.centerChecks {
+		all = all && c.Checked
+	}
+	if d.centerAll.Checked != all {
+		d.suppressAlign = true
+		d.centerAll.SetChecked(all)
+		d.suppressAlign = false
+	}
 }
 
 func (d *desk) setStatusCenter(on bool) {
