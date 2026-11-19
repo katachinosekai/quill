@@ -154,6 +154,19 @@ type desk struct {
 	swapTo    string
 	swapping  bool
 	restore   *restoreState
+	cmdList   []protocol.Command
+	cmds      *cmdMenu
+	sidebar   fyne.CanvasObject
+	split     *container.Split
+	root      *fyne.Container
+	expandBtn *widget.Button
+	sideOff   bool
+	autoList  *widget.List
+	autoRows  []sideRow
+	autoBtn   *widget.Button
+	autoArea  *fyne.Container
+	autoOpen  bool
+	created   map[string]bool
 	suppress  bool
 	refreshMu sync.Mutex
 	headerBox *fyne.Container
@@ -173,17 +186,54 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		infos:    map[string]transcript.Info{},
 		terms:    map[string]live.Process{},
 		center:   a.Preferences().Bool("centerText"),
+		created:  map[string]bool{},
 		do:       fyne.Do,
 		doWait:   fyne.DoAndWait,
+	}
+	for _, id := range a.Preferences().StringList("createdSessions") {
+		d.created[id] = true
 	}
 	return d
 }
 
+func (d *desk) isAuto(id string) bool {
+	info, ok := d.infos[id]
+	return ok && strings.HasPrefix(info.Entrypoint, "sdk") && !d.created[id]
+}
+
+func (d *desk) sidebarWidth() float32 {
+	if d.sidebar == nil || d.sideOff {
+		return 0
+	}
+	return d.sidebar.Size().Width + theme.Padding()
+}
+
 func (d *desk) build() fyne.CanvasObject {
 	d.chat = newChatView(d)
-	split := container.NewHSplit(d.buildSidebar(), d.buildMain())
-	split.Offset = 0.27
-	return split
+	d.sidebar = d.buildSidebar()
+	d.split = container.NewHSplit(d.sidebar, d.buildMain())
+	d.split.Offset = 0.27
+	d.root = container.NewStack(d.split)
+	if d.app.Preferences().Bool("sidebarHidden") {
+		d.setSidebar(false)
+	}
+	return d.root
+}
+
+func (d *desk) setSidebar(show bool) {
+	d.sideOff = !show
+	d.app.Preferences().SetBool("sidebarHidden", !show)
+	if show {
+		d.split.Leading = d.sidebar
+		d.split.Trailing = d.mainPane
+		d.root.Objects = []fyne.CanvasObject{d.split}
+		d.expandBtn.Hide()
+	} else {
+		d.root.Objects = []fyne.CanvasObject{d.mainPane}
+		d.expandBtn.Show()
+	}
+	d.split.Refresh()
+	d.root.Refresh()
 }
 
 func (d *desk) buildSidebar() fyne.CanvasObject {
@@ -192,8 +242,45 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.search = widget.NewEntry()
 	d.search.SetPlaceHolder("Search sessions")
 	d.search.OnChanged = func(string) { d.rebuildRows() }
-	d.list = widget.NewList(
-		func() int { return len(d.rows) },
+	d.list = d.newSessionList(&d.rows)
+	d.autoList = d.newSessionList(&d.autoRows)
+	d.autoBtn = widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() {
+		d.autoOpen = !d.autoOpen
+		d.rebuildRows()
+	})
+	d.autoBtn.Alignment = widget.ButtonAlignLeading
+	d.autoBtn.Importance = widget.LowImportance
+	d.autoArea = container.NewStack(sized(0, 240, canvas.NewRectangle(color.Transparent)), d.autoList)
+	d.autoArea.Hide()
+	autoBox := container.NewVBox(widget.NewSeparator(), d.autoBtn, d.autoArea)
+	centerChk := widget.NewCheck("Center message text", func(on bool) {
+		d.center = on
+		d.app.Preferences().SetBool("centerText", on)
+		if d.current != nil {
+			d.chat.show(d.current)
+		}
+	})
+	centerChk.Checked = d.center
+	legend := container.NewHBox(
+		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
+	)
+	logo := canvas.NewImageFromResource(appIcon)
+	logo.FillMode = canvas.ImageFillContain
+	brandName := canvas.NewText("Quill", colText)
+	brandName.TextSize = 18
+	brandName.TextStyle.Bold = true
+	collapse := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() { d.setSidebar(false) })
+	collapse.Importance = widget.LowImportance
+	brand := container.NewBorder(nil, nil, container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName)), container.NewCenter(collapse))
+	top := container.NewVBox(brand, newBtn, d.search)
+	bottom := container.NewVBox(autoBox, widget.NewSeparator(), centerChk, legend)
+	r := canvas.NewRectangle(colSidebar)
+	return container.NewStack(r, container.NewPadded(container.NewBorder(top, bottom, nil, nil, d.list)))
+}
+
+func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
+	list := widget.NewList(
+		func() int { return len((*rows)) },
 		func() fyne.CanvasObject {
 			head := canvas.NewText("", colMuted)
 			head.TextSize = 12
@@ -208,14 +295,14 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 			return container.NewStack(container.NewPadded(head), row)
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
-			if id >= len(d.rows) {
+			if id >= len((*rows)) {
 				return
 			}
 			st := o.(*fyne.Container)
 			headBox := st.Objects[0].(*fyne.Container)
 			head := headBox.Objects[0].(*canvas.Text)
 			row := st.Objects[1].(*fyne.Container)
-			r := d.rows[id]
+			r := (*rows)[id]
 			if r.header != "" {
 				head.Text = r.header
 				headBox.Show()
@@ -237,37 +324,17 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 			dt.Refresh()
 		},
 	)
-	d.list.OnSelected = func(id widget.ListItemID) {
-		if id >= len(d.rows) || d.suppress {
+	list.OnSelected = func(id widget.ListItemID) {
+		if id >= len((*rows)) || d.suppress {
 			return
 		}
-		if d.rows[id].header != "" {
-			d.list.Unselect(id)
+		if (*rows)[id].header != "" {
+			list.Unselect(id)
 			return
 		}
-		d.open(d.rows[id].id)
+		d.open((*rows)[id].id)
 	}
-	centerChk := widget.NewCheck("Center message text", func(on bool) {
-		d.center = on
-		d.app.Preferences().SetBool("centerText", on)
-		if d.current != nil {
-			d.chat.show(d.current)
-		}
-	})
-	centerChk.Checked = d.center
-	legend := container.NewHBox(
-		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
-	)
-	logo := canvas.NewImageFromResource(appIcon)
-	logo.FillMode = canvas.ImageFillContain
-	brandName := canvas.NewText("Quill", colText)
-	brandName.TextSize = 18
-	brandName.TextStyle.Bold = true
-	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
-	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(widget.NewSeparator(), centerChk, legend)
-	r := canvas.NewRectangle(colSidebar)
-	return container.NewStack(r, container.NewPadded(container.NewBorder(top, bottom, nil, nil, d.list)))
+	return list
 }
 
 func legendDot(s status) fyne.CanvasObject {
@@ -389,8 +456,14 @@ func (d *desk) rebuildRows() {
 	for _, info := range d.order {
 		entries = append(entries, entry{info.ID, info.Cwd, info.Last})
 	}
-	var filtered []entry
+	var filtered, auto []entry
 	for _, e := range entries {
+		if d.isAuto(e.id) {
+			if q == "" || d.matches(e.id, e.cwd, q) {
+				auto = append(auto, e)
+			}
+			continue
+		}
 		if q != "" {
 			t, _, _ := d.rowText(e.id)
 			if !strings.Contains(strings.ToLower(t), q) && !strings.Contains(strings.ToLower(e.cwd), q) {
@@ -429,20 +502,46 @@ func (d *desk) rebuildRows() {
 		rows = append(rows, sideRow{id: e.id})
 	}
 	d.rows = rows
+	sort.SliceStable(auto, func(i, j int) bool { return auto[i].last.After(auto[j].last) })
+	d.autoRows = d.autoRows[:0]
+	for _, e := range auto {
+		d.autoRows = append(d.autoRows, sideRow{id: e.id})
+	}
+	icon := theme.NavigateNextIcon()
+	if d.autoOpen {
+		icon = theme.MenuDropDownIcon()
+	}
+	d.autoBtn.SetIcon(icon)
+	d.autoBtn.SetText(fmt.Sprintf("Created by Claude (%d)", len(auto)))
+	if d.autoOpen && len(auto) > 0 {
+		d.autoArea.Show()
+	} else {
+		d.autoArea.Hide()
+	}
 	d.suppress = true
-	d.list.UnselectAll()
-	for i, r := range rows {
-		if r.header != "" {
-			d.list.SetItemHeight(i, 30)
-		} else {
-			d.list.SetItemHeight(i, 54)
+	for _, l := range []struct {
+		list *widget.List
+		rows []sideRow
+	}{{d.list, d.rows}, {d.autoList, d.autoRows}} {
+		l.list.UnselectAll()
+		for i, r := range l.rows {
+			if r.header != "" {
+				l.list.SetItemHeight(i, 30)
+			} else {
+				l.list.SetItemHeight(i, 54)
+			}
+			if d.current != nil && r.id == d.current.id {
+				l.list.Select(i)
+			}
 		}
-		if d.current != nil && r.id == d.current.id {
-			d.list.Select(i)
-		}
+		l.list.Refresh()
 	}
 	d.suppress = false
-	d.list.Refresh()
+}
+
+func (d *desk) matches(id, cwd, q string) bool {
+	t, _, _ := d.rowText(id)
+	return strings.Contains(strings.ToLower(t), q) || strings.Contains(strings.ToLower(cwd), q)
 }
 
 func (d *desk) refreshSidebar() {
@@ -468,13 +567,20 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	})
 	d.rcCheck.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
-	header := container.NewBorder(nil, nil, nil, container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
+	d.expandBtn = widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() { d.setSidebar(true) })
+	d.expandBtn.Importance = widget.LowImportance
+	d.expandBtn.Hide()
+	header := container.NewBorder(nil, nil, container.NewCenter(d.expandBtn), container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
 	headerBox := container.NewVBox(container.NewPadded(header), d.note, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
-	d.input.hint = "Message Claude (Enter to send, Shift+Enter for a new line)"
+	d.cmds = &cmdMenu{d: d}
+	d.input.onKey = d.cmds.key
+	d.input.menuOpen = d.cmds.visible
+	d.input.OnChanged = d.cmds.update
+	d.input.hint = "Message Claude (Enter to send, Shift+Enter for a new line, / for commands)"
 	d.input.SetPlaceHolder(d.input.hint)
 	d.modelSel = widget.NewSelect(modelChoices, func(v string) {
 		if d.suppress || d.current == nil {
@@ -501,7 +607,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	controls := container.NewHBox(d.modelSel, d.modeSel, container.NewCenter(d.folder), layout.NewSpacer(), d.stopBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(layout.NewSpacer(), d.sendBtn), d.input))
 	statsRow := container.New(&clipLayout{}, d.stats)
-	bottom := container.NewPadded(centered(chatMaxWidth, container.NewVBox(inputCard, statsRow)))
+	bottom := container.NewPadded(windowCentered(chatMaxWidth, d.sidebarWidth, container.NewVBox(inputCard, statsRow)))
 	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, d.chat.root)
 	d.updateChrome()
 	return d.mainPane
@@ -653,6 +759,9 @@ func (d *desk) session(id string) *deskSession {
 }
 
 func (d *desk) open(id string) {
+	if d.cmds != nil {
+		d.cmds.hide()
+	}
 	s := d.session(id)
 	if s == nil {
 		return
@@ -761,6 +870,12 @@ func (d *desk) newSessionDialog() {
 
 func (d *desk) createSession(cwd, model, mode string) *deskSession {
 	id := session.NewUUID()
+	d.created[id] = true
+	ids := append(d.app.Preferences().StringList("createdSessions"), id)
+	if len(ids) > 2000 {
+		ids = ids[len(ids)-2000:]
+	}
+	d.app.Preferences().SetStringList("createdSessions", ids)
 	s := &deskSession{id: id, cwd: cwd, model: model, mode: mode, conv: chat.New(), loaded: true, created: time.Now()}
 	d.sessions[id] = s
 	d.current = s
@@ -866,6 +981,7 @@ func lastLines(s string, n int) string {
 }
 
 func (d *desk) send(text string) {
+	d.cmds.hide()
 	s := d.current
 	text = strings.TrimSpace(text)
 	if s == nil || text == "" {
@@ -1140,6 +1256,7 @@ func (d *desk) watch(ctx context.Context) {
 		d.do(func() { d.applyRestore(st) })
 	}
 	go d.watchBinary(ctx)
+	go d.fetchCommands()
 	d.refreshAccount()
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()

@@ -23,7 +23,7 @@ const (
 	historyWindow = 200
 	maxResultLen  = 12000
 	maxDiffLines  = 2000
-	diffPreview   = 40
+	diffPreview   = 400
 )
 
 type itemView struct {
@@ -48,7 +48,7 @@ type chatView struct {
 func newChatView(d *desk) *chatView {
 	v := &chatView{d: d, views: map[int]*itemView{}}
 	v.box = container.NewVBox()
-	v.scroll = container.NewVScroll(container.NewPadded(centered(chatMaxWidth, v.box)))
+	v.scroll = container.NewVScroll(container.NewPadded(windowCentered(chatMaxWidth, v.d.sidebarWidth, v.box)))
 	v.root = v.scroll
 	return v
 }
@@ -143,7 +143,7 @@ func (v *chatView) update(items []*chat.Item) {
 
 func (v *chatView) viewFor(it *chat.Item) *itemView {
 	iv := &itemView{holder: container.NewStack()}
-	if it.Kind == chat.Tool && len(it.Diff) > 0 {
+	if it.Kind == chat.Tool || it.Kind == chat.Thinking {
 		iv.expanded = true
 	}
 	v.views[it.Seq] = iv

@@ -17,6 +17,7 @@ import (
 
 	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/fakeclaude"
+	"github.com/katachinosekai/quill/internal/protocol"
 	"github.com/katachinosekai/quill/internal/transcript"
 )
 
@@ -190,9 +191,23 @@ func TestSidebarAndTerminalSession(t *testing.T) {
 				headers++
 			}
 		}
-		if headers != 2 || len(h.d.rows) != 4 {
-			t.Fatalf("rows %+v", h.d.rows)
+		if headers != 1 || len(h.d.rows) != 2 || len(h.d.autoRows) != 1 || h.d.autoRows[0].id != smokeID {
+			t.Fatalf("rows %+v auto %+v", h.d.rows, h.d.autoRows)
 		}
+		if h.d.autoArea.Visible() || !strings.Contains(h.d.autoBtn.Text, "Created by Claude (1)") {
+			t.Fatal("headless sessions should sit in a collapsed section")
+		}
+		test.Tap(h.d.autoBtn)
+		if !h.d.autoArea.Visible() {
+			t.Fatal("section should open")
+		}
+		h.d.created[smokeID] = true
+		h.d.rebuildRows()
+		if len(h.d.rows) != 4 || len(h.d.autoRows) != 0 {
+			t.Fatal("sessions made in Quill stay in the main list")
+		}
+		delete(h.d.created, smokeID)
+		h.d.rebuildRows()
 		if _, meta, st := h.d.rowText(smokeID); st != stTerminal || !strings.Contains(meta, "open in a terminal") {
 			t.Fatalf("terminal row %q %v", meta, st)
 		}
@@ -378,6 +393,63 @@ func TestPromptSuggestion(t *testing.T) {
 		h.d.send(h.d.input.Text)
 		if s.conv.Suggestion != "" || strings.Contains(h.d.input.PlaceHolder, "next after hello") {
 			t.Fatal("suggestion should clear when a message is sent")
+		}
+	})
+}
+
+func TestSlashCommandMenu(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.cmdList = []protocol.Command{{Name: "help"}, {Name: "model"}}
+		h.d.input.SetText("/")
+		if !h.d.cmds.visible() || len(h.d.cmds.matches) != 2 {
+			t.Fatalf("startup list should show: %+v", h.d.cmds.matches)
+		}
+		h.d.send("hi")
+	})
+	h.eventually("session commands", func() bool { return len(s.proc.Commands()) == 3 })
+	h.ui(func() {
+		h.d.input.SetText("/c")
+		got := []string{}
+		for _, c := range h.d.cmds.matches {
+			got = append(got, c.Name)
+		}
+		if strings.Join(got, ",") != "clear,code-review,compact" {
+			t.Fatalf("matches %v", got)
+		}
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDown})
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyTab})
+		if h.d.input.Text != "/code-review " || h.d.cmds.visible() {
+			t.Fatalf("tab gave %q", h.d.input.Text)
+		}
+		h.d.input.SetText("/comp")
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+		if h.d.input.Text != "/compact " {
+			t.Fatalf("enter gave %q", h.d.input.Text)
+		}
+		h.d.input.SetText("/zzz")
+		if h.d.cmds.visible() {
+			t.Fatal("no matches should hide the menu")
+		}
+		h.d.input.SetText("/clear")
+		if h.d.cmds.visible() {
+			t.Fatal("an exact full command should not keep the menu open")
+		}
+	})
+}
+
+func TestSidebarCollapse(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.setSidebar(false)
+		if h.d.root.Objects[0] != h.d.mainPane || !h.d.expandBtn.Visible() || h.d.sidebarWidth() != 0 {
+			t.Fatal("sidebar should be hidden")
+		}
+		test.Tap(h.d.expandBtn)
+		if h.d.root.Objects[0] != h.d.split || h.d.expandBtn.Visible() {
+			t.Fatal("sidebar should be back")
 		}
 	})
 }

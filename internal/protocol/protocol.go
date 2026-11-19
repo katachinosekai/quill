@@ -336,3 +336,25 @@ func (e *Event) RemoteControlInfo() (RemoteControlInfo, bool) {
 	}
 	return info, true
 }
+
+type Command struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	ArgumentHint string `json:"argumentHint"`
+}
+
+func ParseCommands(raw json.RawMessage) []Command {
+	var body struct {
+		Commands []Command `json:"commands"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return nil
+	}
+	out := body.Commands[:0]
+	for _, c := range body.Commands {
+		if c.Name != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}

@@ -69,6 +69,12 @@ func Run() {
 				} else {
 					ack(m, nil)
 				}
+			case "initialize":
+				ack(m, map[string]any{"commands": []any{
+					map[string]any{"name": "compact", "description": "Clear history but keep a summary", "argumentHint": "<instructions>"},
+					map[string]any{"name": "clear", "description": "Start a new conversation"},
+					map[string]any{"name": "code-review", "description": "Review the current diff", "argumentHint": "[level]"},
+				}})
 			default:
 				ack(m, map[string]any{})
 			}

@@ -254,3 +254,15 @@ func TestStopWhileBusyInterruptsFirst(t *testing.T) {
 		t.Fatal("busy stop should interrupt the turn")
 	}
 }
+
+func TestFetchCommands(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_DESK_FAKE", "1")
+	cmds, err := FetchCommands(exe, t.TempDir(), 10*time.Second)
+	if err != nil || len(cmds) != 3 || cmds[0].Name != "compact" || cmds[0].ArgumentHint != "<instructions>" {
+		t.Fatalf("%+v %v", cmds, err)
+	}
+}

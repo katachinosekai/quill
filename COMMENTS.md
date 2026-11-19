@@ -70,6 +70,12 @@ Go can't hot-swap code, so a new build takes over in place: `watchBinary` polls 
 
 ## UI notes
 
+- Slash commands (commands.go): the list comes from the `initialize` control response (`commands`: name, description, argumentHint). `session.FetchCommands` gets it at startup from a throwaway process in $HOME (no prompt, so no transcript; it does fire SessionStart hooks); a running session's own list (`Process.Commands`, includes project skills) replaces it. Typing `/word` shows up to 8 matches (prefix first, then substring) in a popup above the input; Up/Down, Tab completes, Enter completes or sends when the full command is already typed, Esc closes.
+- Tool calls and thinking render expanded by default (user wants full output, like Bash/Read); diffs show up to 400 lines before "Show N more".
+- The chat column and input are centered on the WINDOW (`windowCentered` shifts by half the sidebar width, clamped to the pane).
+- Sidebar collapses with the arrow next to the logo and comes back with the arrow left of the title (`setSidebar`, preference `sidebarHidden`).
+- Sessions whose transcript starts with entrypoint `sdk*` (headless, started by Claude/scripts) and that Quill did not create go to a collapsed "Created by Claude (N)" section at the bottom of the sidebar. Quill remembers the sessions it created (preference `createdSessions`, last 2000) so they stay in the main list.
+
 - User messages always show in full (collapsing was removed at the user's request). Markdown code blocks are replaced by `wrapCode` segments (wrapped monospace in a dark card) because Fyne's CodeBlockSegment never wraps.
 - Prompt suggestions: sessions run with `--prompt-suggestions true`; after a turn the CLI emits `{"type":"prompt_suggestion","suggestion":...}` (only while stdin stays open, which it does here). `Conversation.Suggestion` holds it until the next user message; the input shows it as the placeholder "... (Tab to use)" and Tab on an empty input fills it in (`sendEntry.AcceptsTab`).
 - Chat column is centered with a max width of 760 px (shorter lines read better). Text 15 px, line spacing 7. Vertical spacing per item kind lives in `spaced` (chatview.go): user turns get the most space above, tool rows the least; user bubbles use `bgPad` for wider side padding. "Center message text" (sidebar, saved in preferences) centers user/assistant text; tool cards and diffs stay left-aligned.

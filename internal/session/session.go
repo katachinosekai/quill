@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -61,19 +62,20 @@ func NewUUID() string {
 }
 
 type Process struct {
-	opts    Options
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	writeMu sync.Mutex
-	onEvent func(*protocol.Event)
-	done    chan struct{}
-	exitErr error
-	stderr  *tailBuffer
-	seq     atomic.Int64
-	mu      sync.Mutex
-	waiters map[string]chan *protocol.Event
-	busy    atomic.Bool
-	closed  atomic.Bool
+	opts     Options
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	writeMu  sync.Mutex
+	onEvent  func(*protocol.Event)
+	done     chan struct{}
+	exitErr  error
+	stderr   *tailBuffer
+	seq      atomic.Int64
+	mu       sync.Mutex
+	waiters  map[string]chan *protocol.Event
+	busy     atomic.Bool
+	closed   atomic.Bool
+	commands atomic.Pointer[[]protocol.Command]
 }
 
 var ErrExited = errors.New("session: process has exited")
@@ -143,6 +145,11 @@ func (p *Process) read(r io.Reader) {
 		}
 		switch ev.Type {
 		case "control_response":
+			if ev.Response != nil && strings.HasPrefix(ev.Response.RequestID, "desk-init-") {
+				if cmds := protocol.ParseCommands(ev.Response.Response); len(cmds) > 0 {
+					p.commands.Store(&cmds)
+				}
+			}
 			if ev.Response != nil {
 				p.mu.Lock()
 				ch := p.waiters[ev.Response.RequestID]
@@ -187,7 +194,14 @@ func (p *Process) PID() int {
 	return p.cmd.Process.Pid
 }
 
-func (p *Process) Options() Options      { return p.opts }
+func (p *Process) Options() Options { return p.opts }
+
+func (p *Process) Commands() []protocol.Command {
+	if c := p.commands.Load(); c != nil {
+		return *c
+	}
+	return nil
+}
 func (p *Process) Done() <-chan struct{} { return p.done }
 func (p *Process) Busy() bool            { return p.busy.Load() }
 
@@ -323,4 +337,49 @@ func (t *tailBuffer) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.buf)
+}
+
+func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, error) {
+	if bin == "" {
+		bin = "claude"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = cwd
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	defer func() {
+		stdin.Close()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		_ = cmd.Wait()
+	}()
+	if _, err := stdin.Write(protocol.Initialize("cmds")); err != nil {
+		return nil, err
+	}
+	sc := bufio.NewScanner(stdout)
+	sc.Buffer(make([]byte, 1<<20), 64<<20)
+	for sc.Scan() {
+		ev, err := protocol.ParseLine(sc.Bytes())
+		if err != nil || ev.Type != "control_response" || ev.Response == nil || ev.Response.RequestID != "cmds" {
+			continue
+		}
+		return protocol.ParseCommands(ev.Response.Response), nil
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, errors.New("no command list from claude")
 }

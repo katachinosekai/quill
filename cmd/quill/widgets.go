@@ -13,7 +13,10 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-type maxWidthLayout struct{ max float32 }
+type maxWidthLayout struct {
+	max   float32
+	shift func() float32
+}
 
 func (l maxWidthLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
 	var s fyne.Size
@@ -35,6 +38,10 @@ func (l maxWidthLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		w = l.max
 	}
 	x := (size.Width - w) / 2
+	if l.shift != nil {
+		x -= l.shift() / 2
+	}
+	x = max(0, min(x, size.Width-w))
 	for _, o := range objs {
 		h := size.Height
 		o.Move(fyne.NewPos(x, 0))
@@ -46,12 +53,18 @@ func centered(max float32, obj fyne.CanvasObject) *fyne.Container {
 	return container.New(maxWidthLayout{max: max}, obj)
 }
 
+func windowCentered(max float32, shift func() float32, obj fyne.CanvasObject) *fyne.Container {
+	return container.New(maxWidthLayout{max: max, shift: shift}, obj)
+}
+
 type sendEntry struct {
 	widget.Entry
 	shift      bool
 	onSend     func(string)
 	suggestion string
 	hint       string
+	onKey      func(*fyne.KeyEvent) bool
+	menuOpen   func() bool
 }
 
 func (e *sendEntry) setSuggestion(s string) {
@@ -67,6 +80,9 @@ func (e *sendEntry) setSuggestion(s string) {
 }
 
 func (e *sendEntry) AcceptsTab() bool {
+	if e.menuOpen != nil && e.menuOpen() {
+		return true
+	}
 	return e.suggestion != "" && e.Text == ""
 }
 
@@ -94,6 +110,9 @@ func (e *sendEntry) KeyUp(k *fyne.KeyEvent) {
 }
 
 func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
+	if e.onKey != nil && e.onKey(k) {
+		return
+	}
 	if k.Name == fyne.KeyTab && e.AcceptsTab() {
 		e.SetText(e.suggestion)
 		e.CursorRow = strings.Count(e.Text, "\n")

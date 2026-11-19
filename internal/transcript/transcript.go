@@ -18,14 +18,15 @@ import (
 )
 
 type Info struct {
-	ID       string
-	Path     string
-	Cwd      string
-	Title    string
-	Last     time.Time
-	Messages int
-	ModTime  time.Time
-	Size     int64
+	ID         string
+	Path       string
+	Cwd        string
+	Title      string
+	Last       time.Time
+	Messages   int
+	Entrypoint string
+	ModTime    time.Time
+	Size       int64
 }
 
 func DefaultRoot() string {
@@ -138,6 +139,7 @@ type scanRec struct {
 	IsSidechain bool            `json:"isSidechain"`
 	Timestamp   string          `json:"timestamp"`
 	Cwd         string          `json:"cwd"`
+	Entrypoint  string          `json:"entrypoint"`
 	AiTitle     string          `json:"aiTitle"`
 	CustomTitle string          `json:"customTitle"`
 	Summary     string          `json:"summary"`
@@ -185,6 +187,9 @@ func ScanFile(path string) (Info, error) {
 						}
 						if rec.Cwd != "" && info.Cwd == "" {
 							info.Cwd = rec.Cwd
+						}
+						if rec.Entrypoint != "" && info.Entrypoint == "" {
+							info.Entrypoint = rec.Entrypoint
 						}
 						if t, e := time.Parse(time.RFC3339Nano, rec.Timestamp); e == nil && t.After(info.Last) {
 							info.Last = t

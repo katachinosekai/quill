@@ -100,8 +100,8 @@ func shot(t *testing.T, w fyne.Window, dir, name string) {
 func TestDeskWithFixtures(t *testing.T) {
 	d, w := fixtureDesk(t)
 	defer w.Close()
-	if len(d.rows) != 4 {
-		t.Fatalf("rows %+v", d.rows)
+	if len(d.rows) != 2 || len(d.autoRows) != 1 {
+		t.Fatalf("rows %+v auto %+v", d.rows, d.autoRows)
 	}
 	s := openLoaded(t, d, "11111111-2222-3333-4444-555555555555")
 	if len(d.chat.views) != len(s.conv.Items) || d.input.Disabled() {
@@ -213,4 +213,19 @@ func TestScreenshots(t *testing.T) {
 	snap("long.png")
 	h.ui(func() { h.d.chat.scrollBottom() })
 	snap("long-bottom.png")
+
+	h.ui(func() {
+		h.d.cmdList = []protocol.Command{
+			{Name: "compact", Description: "Clear conversation history but keep a summary in context", ArgumentHint: "<instructions>"},
+			{Name: "clear", Description: "Clear conversation history and free up context"},
+			{Name: "code-review", Description: "Review the current diff for correctness bugs", ArgumentHint: "[level] [target]"},
+			{Name: "config", Description: "Open the settings panel"},
+			{Name: "context", Description: "Show current context usage"},
+			{Name: "cost", Description: "Show the total cost of this session"},
+		}
+		h.d.open(editsID)
+	})
+	h.eventually("history again", func() bool { return h.d.sessions[editsID].loaded })
+	h.ui(func() { h.d.input.SetText("/c") })
+	snap("commands.png")
 }
