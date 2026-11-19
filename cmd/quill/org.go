@@ -49,6 +49,12 @@ func (d *desk) loadOrg() {
 	if d.org.Names == nil {
 		d.org.Names = map[string]string{}
 	}
+	for id, place := range d.org.Place {
+		var n int
+		if _, err := fmt.Sscanf(d.org.Titles[id], "New session %d", &n); err == nil && place == placeActive {
+			delete(d.org.Place, id)
+		}
+	}
 }
 
 func (d *desk) saveOrg() {

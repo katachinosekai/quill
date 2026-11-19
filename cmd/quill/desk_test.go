@@ -955,8 +955,11 @@ func TestNewSessionInstant(t *testing.T) {
 		if h.d.org.Titles[a.id] != "New session 1" || h.d.org.Titles[b.id] != "New session 2" {
 			t.Fatalf("names: %q %q", h.d.org.Titles[a.id], h.d.org.Titles[b.id])
 		}
-		if h.d.placement(b.id) != placeActive {
-			t.Fatal("new session should be in Active")
+		if h.d.placement(b.id) != "" {
+			t.Fatal("new session must follow the sorting rules, not be pinned")
+		}
+		if h.d.rows[0].key != placeActive || h.d.rows[0].count < 1 {
+			t.Fatalf("new session should sort into Active: %+v", h.d.rows[0])
 		}
 	})
 }

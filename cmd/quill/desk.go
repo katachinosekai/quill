@@ -940,7 +940,6 @@ func (d *desk) newSessionDialog() {
 	prefs := d.app.Preferences()
 	s := d.createSession(cwd, prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback("newMode", "auto"))
 	d.org.Titles[s.id] = d.nextSessionName()
-	d.org.Place[s.id] = placeActive
 	d.saveOrg()
 	d.updateChrome()
 }
