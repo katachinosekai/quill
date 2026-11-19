@@ -23,6 +23,7 @@ type restoreState struct {
 	Width   float32 `json:"width"`
 	Height  float32 `json:"height"`
 	ScrollY float32 `json:"scrollY"`
+	Hidden  bool    `json:"hidden"`
 }
 
 type binWatch struct {
@@ -107,7 +108,7 @@ func (d *desk) trySwap() {
 		}
 	}
 	d.swapping = true
-	st := restoreState{Draft: d.input.Text}
+	st := restoreState{Draft: d.input.Text, Hidden: d.hidden}
 	if d.current != nil && d.current.persisted {
 		st.Session = d.current.id
 	}

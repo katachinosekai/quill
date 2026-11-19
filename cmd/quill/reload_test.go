@@ -45,3 +45,44 @@ func TestTakeRestore(t *testing.T) {
 		t.Fatal("restore file and env should be consumed")
 	}
 }
+
+func TestSingleInstance(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "q.sock")
+	if signalRunning(sock) {
+		t.Fatal("nothing is listening yet")
+	}
+	h := newHarness(t)
+	shown := make(chan bool, 1)
+	h.d.do = func(f func()) {
+		uiMu.Lock()
+		defer uiMu.Unlock()
+		f()
+		shown <- true
+	}
+	h.ui(func() { h.d.hidden = true })
+	h.d.listenInstance(sock)
+	if !signalRunning(sock) {
+		t.Fatal("running instance should answer")
+	}
+	<-shown
+	h.ui(func() {
+		if h.d.hidden {
+			t.Fatal("window should be shown")
+		}
+	})
+}
+
+func TestCloseHidesInBackground(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.background = true
+		h.d.confirmClose()
+		if !h.d.hidden {
+			t.Fatal("closing should hide the window when running in the background")
+		}
+		h.d.showWindow()
+		if h.d.hidden {
+			t.Fatal("show should bring it back")
+		}
+	})
+}

@@ -68,6 +68,10 @@ Title order: custom title, ai-title record, summary, first prompt. Side-chain an
 
 Go can't hot-swap code, so a new build takes over in place: `watchBinary` polls the running executable (symlinks resolved) every second; once it changed, is at least 1 s old, executable and starts with ELF magic, `trySwap` waits until no session is running/waiting or being taken over (re-checked after each `result`), stops idle Claude processes (they resume on the next message), writes $TMPDIR/quill-restore-<pid>.json (session, draft, window size, scroll) and `syscall.Exec`s the new binary with QUILL_RESTORE set. Startup consumes it (`takeRestore` / `applyRestore`). Build with `go build -o dist/quill.tmp ... && mv dist/quill.tmp dist/quill` so the file swaps atomically. Remote Control is off after a swap (process restart).
 
+## Background mode (background.go)
+
+Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray is available (`desktop.App`); sessions keep running. Tray menu: Show Quill, Quit (Quit shows the window and goes through `confirmQuit`, which asks before stopping running sessions, then `app.Quit`). Single instance: $XDG_RUNTIME_DIR/quill.sock; a second launch sends "show" and exits, the running one shows its window and answers "ok". After a live update (exec) the new process skips the check (QUILL_RESTORE set), re-creates the socket, and stays hidden if it was hidden (`restoreState.Hidden`, started with `app.Run()`).
+
 ## UI notes
 
 - Slash commands (commands.go): the list comes from the `initialize` control response (`commands`: name, description, argumentHint). `session.FetchCommands` gets it at startup from a throwaway process in $HOME (no prompt, so no transcript; it does fire SessionStart hooks); a running session's own list (`Process.Commands`, includes project skills) replaces it. Typing `/word` shows up to 8 matches (prefix first, then substring) in a popup above the input; Up/Down, Tab completes, Enter completes or sends when the full command is already typed, Esc closes.

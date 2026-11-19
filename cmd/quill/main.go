@@ -28,6 +28,10 @@ func main() {
 		fmt.Println(version)
 		return
 	}
+	sock := instanceSocket()
+	if os.Getenv(restoreEnv) == "" && signalRunning(sock) {
+		return
+	}
 	a := app.NewWithID("io.github.katachinosekai.quill")
 	a.Settings().SetTheme(deskTheme{})
 	a.SetIcon(appIcon)
@@ -39,16 +43,27 @@ func main() {
 	})
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1280, 860))
+	startHidden := false
 	if st := takeRestore(); st != nil {
 		d.restore = st
+		startHidden = st.Hidden
 		if st.Width > 200 && st.Height > 200 {
 			w.Resize(fyne.NewSize(st.Width, st.Height))
 		}
 	}
 	w.SetCloseIntercept(d.confirmClose)
+	if !d.setupBackground() {
+		startHidden = false
+	}
+	d.listenInstance(sock)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go d.watch(ctx)
-	w.ShowAndRun()
+	if startHidden {
+		d.hidden = true
+		a.Run()
+	} else {
+		w.ShowAndRun()
+	}
 	os.Exit(0)
 }

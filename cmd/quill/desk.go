@@ -131,48 +131,50 @@ type desk struct {
 	current  *deskSession
 	ownPIDs  sync.Map
 
-	rows      []sideRow
-	list      *widget.List
-	search    *widget.Entry
-	chat      *chatView
-	title     *widget.Label
-	subtitle  *canvas.Text
-	note      *widget.Label
-	rcCheck   *widget.Check
-	rcLink    *widget.Hyperlink
-	input     *sendEntry
-	modelSel  *widget.Select
-	modeSel   *widget.Select
-	folder    *canvas.Text
-	stats     *canvas.Text
-	stopBtn   *widget.Button
-	sendBtn   *widget.Button
-	acctBtn   *widget.Button
-	acct      account.Status
-	acctErr   string
-	signingIn context.CancelFunc
-	swapTo    string
-	swapping  bool
-	restore   *restoreState
-	cmdList   []protocol.Command
-	cmds      *cmdMenu
-	sidebar   fyne.CanvasObject
-	split     *container.Split
-	root      *fyne.Container
-	expandBtn *widget.Button
-	sideOff   bool
-	autoList  *widget.List
-	autoRows  []sideRow
-	autoBtn   *widget.Button
-	autoArea  *fyne.Container
-	autoOpen  bool
-	created   map[string]bool
-	suppress  bool
-	refreshMu sync.Mutex
-	headerBox *fyne.Container
-	mainPane  *fyne.Container
-	do        func(func())
-	doWait    func(func())
+	rows       []sideRow
+	list       *widget.List
+	search     *widget.Entry
+	chat       *chatView
+	title      *widget.Label
+	subtitle   *canvas.Text
+	note       *widget.Label
+	rcCheck    *widget.Check
+	rcLink     *widget.Hyperlink
+	input      *sendEntry
+	modelSel   *widget.Select
+	modeSel    *widget.Select
+	folder     *canvas.Text
+	stats      *canvas.Text
+	stopBtn    *widget.Button
+	sendBtn    *widget.Button
+	acctBtn    *widget.Button
+	acct       account.Status
+	acctErr    string
+	signingIn  context.CancelFunc
+	swapTo     string
+	swapping   bool
+	restore    *restoreState
+	cmdList    []protocol.Command
+	cmds       *cmdMenu
+	sidebar    fyne.CanvasObject
+	background bool
+	hidden     bool
+	split      *container.Split
+	root       *fyne.Container
+	expandBtn  *widget.Button
+	sideOff    bool
+	autoList   *widget.List
+	autoRows   []sideRow
+	autoBtn    *widget.Button
+	autoArea   *fyne.Container
+	autoOpen   bool
+	created    map[string]bool
+	suppress   bool
+	refreshMu  sync.Mutex
+	headerBox  *fyne.Container
+	mainPane   *fyne.Container
+	do         func(func())
+	doWait     func(func())
 }
 
 func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
@@ -1275,9 +1277,17 @@ func (d *desk) watch(ctx context.Context) {
 }
 
 func (d *desk) confirmClose() {
+	if d.background {
+		d.hideWindow()
+		return
+	}
+	d.confirmQuit()
+}
+
+func (d *desk) confirmQuit() {
 	running := d.runningSessions()
 	if len(running) == 0 {
-		d.win.Close()
+		d.app.Quit()
 		return
 	}
 	msg := fmt.Sprintf("%d session(s) are still running in this app. Closing stops them (their conversations are saved and can be resumed).", len(running))
@@ -1291,7 +1301,7 @@ func (d *desk) confirmClose() {
 			d.stopAll(running)
 			d.do(func() {
 				prog.Hide()
-				d.win.Close()
+				d.app.Quit()
 			})
 		}()
 	}, d.win)
