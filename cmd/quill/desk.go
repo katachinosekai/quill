@@ -20,6 +20,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/quill/internal/account"
 	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/live"
 	"github.com/katachinosekai/quill/internal/protocol"
@@ -75,6 +76,7 @@ type deskSession struct {
 	failed    string
 	stopping  bool
 	terminal  *live.Process
+	takeover  bool
 	rcURL     string
 	rcOn      bool
 	created   time.Time
@@ -144,6 +146,10 @@ type desk struct {
 	stats     *canvas.Text
 	stopBtn   *widget.Button
 	sendBtn   *widget.Button
+	acctBtn   *widget.Button
+	acct      account.Status
+	acctErr   string
+	signingIn context.CancelFunc
 	suppress  bool
 	refreshMu sync.Mutex
 	headerBox *fyne.Container
@@ -248,7 +254,13 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	legend := container.NewHBox(
 		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
 	)
-	top := container.NewVBox(newBtn, d.search)
+	logo := canvas.NewImageFromResource(appIcon)
+	logo.FillMode = canvas.ImageFillContain
+	brandName := canvas.NewText("Quill", colText)
+	brandName.TextSize = 18
+	brandName.TextStyle.Bold = true
+	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
+	top := container.NewVBox(brand, newBtn, d.search)
 	bottom := container.NewVBox(widget.NewSeparator(), centerChk, legend)
 	r := canvas.NewRectangle(colSidebar)
 	return container.NewStack(r, container.NewPadded(container.NewBorder(top, bottom, nil, nil, d.list)))
@@ -451,7 +463,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.setRemoteControl(d.current, on)
 	})
 	d.rcCheck.Hide()
-	header := container.NewBorder(nil, nil, nil, container.NewHBox(d.rcLink, d.rcCheck),
+	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
+	header := container.NewBorder(nil, nil, nil, container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
 	headerBox := container.NewVBox(container.NewPadded(header), d.note, widget.NewSeparator())
 	d.headerBox = headerBox
@@ -524,14 +537,25 @@ func (d *desk) updateChrome() {
 	}
 	d.subtitle.Text = sub
 	d.subtitle.Refresh()
-	readOnly := s.terminal != nil && !s.running()
-	if readOnly {
-		d.note.SetText(fmt.Sprintf("This session is open in a terminal (pid %d). Showing it read-only; continue it there, or close it there to continue here.", s.terminal.PID))
+	held := s.terminal != nil && !s.running()
+	if s.takeover {
+		d.note.SetText("Taking this session over from the terminal...")
 		d.note.Show()
 		d.input.Disable()
 		d.sendBtn.Disable()
-		d.modelSel.Disable()
-		d.modeSel.Disable()
+		d.rcCheck.Hide()
+		d.rcLink.Hide()
+	} else if held {
+		where := "a terminal"
+		if s.terminal.Background() {
+			where = "a background Claude process"
+		}
+		d.note.SetText(fmt.Sprintf("This session is open in %s (pid %d). Sending a message here takes it over and closes it there.", where, s.terminal.PID))
+		d.note.Show()
+		d.input.Enable()
+		d.sendBtn.Enable()
+		d.modelSel.Enable()
+		d.modeSel.Enable()
 		d.rcCheck.Hide()
 		d.rcLink.Hide()
 	} else {
@@ -685,15 +709,16 @@ func (d *desk) newSessionDialog() {
 		fd.Resize(fyne.NewSize(700, 500))
 		fd.Show()
 	})
+	prefs := d.app.Preferences()
 	model := widget.NewSelect(modelChoices, nil)
-	model.SetSelected("default")
+	model.SetSelected(prefs.StringWithFallback("newModel", "default"))
 	mode := widget.NewSelect(modeChoices, nil)
-	mode.SetSelected("default")
-	form := widget.NewForm(
-		widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, browse, dir)),
+	mode.SetSelected(prefs.StringWithFallback("newMode", "auto"))
+	opts := widget.NewAccordion(widget.NewAccordionItem("Options", widget.NewForm(
 		widget.NewFormItem("Model", model),
 		widget.NewFormItem("Permissions", mode),
-	)
+	)))
+	form := container.NewVBox(container.NewBorder(nil, nil, nil, browse, dir), opts)
 	dlg := dialog.NewCustomConfirm("New session", "Create", "Cancel", form, func(ok bool) {
 		if !ok {
 			return
@@ -706,9 +731,11 @@ func (d *desk) newSessionDialog() {
 			dialog.ShowError(fmt.Errorf("not a folder: %s", path), d.win)
 			return
 		}
+		prefs.SetString("newModel", model.Selected)
+		prefs.SetString("newMode", mode.Selected)
 		d.createSession(path, model.Selected, mode.Selected)
 	}, d.win)
-	dlg.Resize(fyne.NewSize(560, 260))
+	dlg.Resize(fyne.NewSize(560, 180))
 	dlg.Show()
 }
 
@@ -820,8 +847,69 @@ func (d *desk) send(text string) {
 	if s == nil || text == "" {
 		return
 	}
+	if s.takeover {
+		return
+	}
+	if s.terminal != nil && !s.running() {
+		t := *s.terminal
+		if t.Busy() {
+			dialog.ShowConfirm("Take over?", "Claude is in the middle of a turn in the terminal. Stop it there and continue here?", func(ok bool) {
+				if ok {
+					d.takeOver(s, t, text)
+				}
+			}, d.win)
+			return
+		}
+		d.takeOver(s, t, text)
+		return
+	}
+	d.sendTo(s, text)
+}
+
+func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
+	s.takeover = true
+	d.input.SetText("")
+	d.updateChrome()
+	path := ""
+	if info, ok := d.infos[s.id]; ok {
+		path = info.Path
+	}
+	go func() {
+		err := d.finder.Release(t, d.cfg.ClaudeBin, 5*time.Second)
+		var conv *chat.Conversation
+		var mod time.Time
+		if err == nil && path != "" {
+			if st, serr := os.Stat(path); serr == nil {
+				mod = st.ModTime()
+			}
+			conv, _ = transcript.Load(path)
+		}
+		d.do(func() {
+			s.takeover = false
+			if err != nil {
+				d.chatFor(s, []*chat.Item{s.conv.AddError("Could not take the session over: " + err.Error())})
+				d.input.SetText(text)
+				d.updateChrome()
+				return
+			}
+			s.terminal = nil
+			delete(d.terms, s.id)
+			if conv != nil {
+				s.conv = conv
+				s.loaded = true
+				s.loadedMod = mod
+				if d.current == s {
+					d.chat.show(s)
+				}
+			}
+			d.sendTo(s, text)
+		})
+	}()
+}
+
+func (d *desk) sendTo(s *deskSession, text string) {
 	if err := d.ensureProcess(s); err != nil {
-		d.chat.update([]*chat.Item{s.conv.AddError("Could not start claude: " + err.Error())})
+		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start claude: " + err.Error())})
 		d.updateChrome()
 		return
 	}
@@ -830,13 +918,17 @@ func (d *desk) send(text string) {
 		s.title = oneLine(text, 60)
 	}
 	if err := s.proc.Send(text); err != nil {
-		d.chat.update([]*chat.Item{it, s.conv.AddError("Send failed: " + err.Error())})
+		d.chatFor(s, []*chat.Item{it, s.conv.AddError("Send failed: " + err.Error())})
 		return
 	}
 	s.conv.Busy = true
-	d.input.SetText("")
-	d.chat.update([]*chat.Item{it})
-	d.chat.scrollBottom()
+	if d.current == s {
+		d.input.SetText("")
+	}
+	d.chatFor(s, []*chat.Item{it})
+	if d.current == s {
+		d.chat.scrollBottom()
+	}
 	d.updateChrome()
 	d.rebuildRows()
 }
@@ -847,6 +939,12 @@ func oneLine(s string, n int) string {
 		return string(r[:n]) + "..."
 	}
 	return s
+}
+
+func (d *desk) chatFor(s *deskSession, items []*chat.Item) {
+	if d.current == s {
+		d.chat.update(items)
+	}
 }
 
 func (d *desk) interrupt(s *deskSession) {
@@ -1010,14 +1108,19 @@ func (d *desk) refresh() {
 
 func (d *desk) watch(ctx context.Context) {
 	d.refresh()
+	d.refreshAccount()
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
+	n := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			d.refresh()
+			if n++; n%12 == 0 {
+				d.refreshAccount()
+			}
 		}
 	}
 }
@@ -1057,4 +1160,108 @@ func (d *desk) stopAll(list []*deskSession) {
 		}()
 	}
 	wg.Wait()
+}
+
+func (d *desk) refreshAccount() {
+	st, err := account.Get(d.cfg.ClaudeBin)
+	d.do(func() {
+		d.acct = st
+		d.acctErr = ""
+		if err != nil {
+			d.acctErr = err.Error()
+		}
+		d.updateAccount()
+	})
+}
+
+func (d *desk) updateAccount() {
+	if d.acctBtn == nil {
+		return
+	}
+	switch {
+	case d.signingIn != nil:
+		d.acctBtn.SetText("Signing in...")
+		d.acctBtn.Importance = widget.MediumImportance
+	case d.acct.LoggedIn:
+		label := d.acct.Email
+		if label == "" {
+			label = "Signed in"
+		}
+		if d.acct.Subscription != "" {
+			label += "  ·  " + strings.ToUpper(d.acct.Subscription[:1]) + d.acct.Subscription[1:]
+		}
+		d.acctBtn.SetText(label)
+		d.acctBtn.Importance = widget.LowImportance
+	default:
+		d.acctBtn.SetText("Sign in")
+		d.acctBtn.Importance = widget.HighImportance
+	}
+	d.acctBtn.Refresh()
+}
+
+func (d *desk) accountMenu() {
+	if d.signingIn != nil {
+		d.showMenu(fyne.NewMenuItem("Cancel sign-in", func() { d.signingIn() }))
+		return
+	}
+	if !d.acct.LoggedIn {
+		d.signIn()
+		return
+	}
+	info := d.acct.Email
+	if d.acct.OrgName != "" {
+		info += " (" + d.acct.OrgName + ")"
+	}
+	head := fyne.NewMenuItem(info, nil)
+	head.Disabled = true
+	d.showMenu(head,
+		fyne.NewMenuItem("Refresh status", func() { go d.refreshAccount() }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Sign out", func() {
+			dialog.ShowConfirm("Sign out?", "Sign out of Claude Code on this computer? Terminal sessions use the same login.", func(ok bool) {
+				if !ok {
+					return
+				}
+				go func() {
+					err := account.Logout(d.cfg.ClaudeBin)
+					if err != nil {
+						d.do(func() { dialog.ShowError(err, d.win) })
+					}
+					d.refreshAccount()
+				}()
+			}, d.win)
+		}))
+}
+
+func (d *desk) showMenu(items ...*fyne.MenuItem) {
+	c := d.win.Canvas()
+	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(d.acctBtn).Add(fyne.NewPos(0, d.acctBtn.Size().Height))
+	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", items...), c, pos)
+}
+
+func (d *desk) signIn() {
+	ctx, cancel := context.WithCancel(context.Background())
+	d.signingIn = cancel
+	d.updateAccount()
+	go func() {
+		err := account.Login(ctx, d.cfg.ClaudeBin, func(u string) {
+			d.do(func() {
+				pu, perr := url.Parse(u)
+				if perr != nil {
+					return
+				}
+				link := widget.NewHyperlink("Open the sign-in page", pu)
+				dialog.ShowCustom("Sign in", "Close", container.NewVBox(
+					widget.NewLabel("Finish signing in in your browser. If it did not open:"), link), d.win)
+			})
+		})
+		cancel()
+		d.do(func() {
+			d.signingIn = nil
+			if err != nil && ctx.Err() == nil {
+				dialog.ShowError(fmt.Errorf("sign-in failed: %w", err), d.win)
+			}
+		})
+		d.refreshAccount()
+	}()
 }

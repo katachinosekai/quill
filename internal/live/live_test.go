@@ -2,8 +2,12 @@ package live
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunning(t *testing.T) {
@@ -28,5 +32,30 @@ func TestRunning(t *testing.T) {
 	got := f.Running(map[int]bool{13: true})
 	if len(got) != 1 || got["live"].Cwd != "/a" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestRelease(t *testing.T) {
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go cmd.Wait()
+	f := &Finder{ProcDir: "/proc"}
+	b, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(cmd.Process.Pid), "stat"))
+	s := string(b)
+	start := strings.Fields(s[strings.LastIndexByte(s, ')')+1:])[19]
+	p := Process{PID: cmd.Process.Pid, SessionID: "x", Kind: "interactive", ProcStart: start}
+	if !f.alive(p) {
+		t.Fatal("should be alive")
+	}
+	if err := f.Release(p, "", 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if f.alive(p) {
+		t.Fatal("still alive")
+	}
+	if err := f.Release(Process{PID: cmd.Process.Pid, ProcStart: "1"}, "", time.Second); err != nil {
+		t.Fatal(err)
 	}
 }

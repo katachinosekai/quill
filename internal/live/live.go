@@ -2,10 +2,14 @@ package live
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 type Process struct {
@@ -80,4 +84,46 @@ func (f *Finder) alive(p Process) bool {
 		return false
 	}
 	return true
+}
+
+func (p Process) Background() bool {
+	return p.Kind == "bg"
+}
+
+func (p Process) Busy() bool {
+	return p.Status == "busy"
+}
+
+func (f *Finder) Release(p Process, claudeBin string, timeout time.Duration) error {
+	if !f.alive(p) {
+		return nil
+	}
+	if p.Background() && claudeBin != "" {
+		_ = exec.Command(claudeBin, "stop", p.SessionID).Run()
+		if f.waitGone(p, timeout) {
+			return nil
+		}
+	}
+	_ = syscall.Kill(p.PID, syscall.SIGTERM)
+	if f.waitGone(p, timeout) {
+		return nil
+	}
+	_ = syscall.Kill(p.PID, syscall.SIGKILL)
+	if f.waitGone(p, 2*time.Second) {
+		return nil
+	}
+	return fmt.Errorf("pid %d did not exit", p.PID)
+}
+
+func (f *Finder) waitGone(p Process, timeout time.Duration) bool {
+	end := time.Now().Add(timeout)
+	for {
+		if !f.alive(p) {
+			return true
+		}
+		if time.Now().After(end) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }

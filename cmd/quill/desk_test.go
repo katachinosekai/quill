@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -40,10 +41,11 @@ type harness struct {
 	w       fyne.Window
 	proj    string
 	argsOut string
+	termPID int
 }
 
-func procStart(t *testing.T) string {
-	b, err := os.ReadFile("/proc/self/stat")
+func procStart(t *testing.T, pid int) string {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		t.Skip("no /proc")
 	}
@@ -77,14 +79,20 @@ func newHarness(t *testing.T) *harness {
 	copyFixture("real-smoke.jsonl", "/tmp/ws", ws, smokeID)
 	sessions := filepath.Join(root, "sessions")
 	os.MkdirAll(sessions, 0o755)
-	live := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":%q,"procStart":%q,"kind":"interactive","entrypoint":"cli"}`, os.Getpid(), smokeID, ws, procStart(t))
+	term := exec.Command("sleep", "120")
+	if err := term.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go term.Wait()
+	t.Cleanup(func() { term.Process.Kill() })
+	live := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":%q,"procStart":%q,"kind":"interactive","entrypoint":"cli"}`, term.Process.Pid, smokeID, ws, procStart(t, term.Process.Pid))
 	os.WriteFile(filepath.Join(sessions, "1.json"), []byte(live), 0o600)
 
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, proj: proj, argsOut: filepath.Join(root, "args")}
+	h := &harness{t: t, proj: proj, argsOut: filepath.Join(root, "args"), termPID: term.Process.Pid}
 	t.Setenv("CLAUDE_DESK_FAKE", "1")
 	t.Setenv("FAKE_ARGS_OUT", h.argsOut)
 	a := test.NewTempApp(t)
@@ -197,12 +205,26 @@ func TestSidebarAndTerminalSession(t *testing.T) {
 	})
 	h.eventually("terminal transcript", func() bool { return h.d.sessions[smokeID].loaded })
 	h.ui(func() {
-		if !h.d.input.Disabled() || !h.d.note.Visible() || !strings.Contains(h.d.note.Text, "terminal") {
-			t.Fatal("terminal session should be read-only")
+		if h.d.input.Disabled() || !h.d.note.Visible() || !strings.Contains(h.d.note.Text, "takes it over") {
+			t.Fatalf("terminal session should offer takeover: %q", h.d.note.Text)
 		}
 		h.d.send("hello")
-		if h.d.sessions[smokeID].proc != nil {
-			t.Fatal("must not start claude for a session open in a terminal")
+	})
+	h.eventually("took over", func() bool { return h.d.sessions[smokeID].running() })
+	if _, err := os.Stat(fmt.Sprintf("/proc/%d", h.termPID)); err == nil {
+		b, _ := os.ReadFile(fmt.Sprintf("/proc/%d/stat", h.termPID))
+		if !strings.Contains(string(b), ") Z ") {
+			t.Fatal("terminal process still running")
+		}
+	}
+	h.eventually("echo", func() bool {
+		it := lastItem(h.d.sessions[smokeID])
+		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "hello")
+	})
+	h.ui(func() {
+		s := h.d.sessions[smokeID]
+		if s.terminal != nil || h.d.note.Visible() || !strings.Contains(h.args(), "--resume "+smokeID) {
+			t.Fatalf("after takeover: note %v args %q", h.d.note.Visible(), h.args())
 		}
 	})
 }

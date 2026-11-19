@@ -15,7 +15,8 @@ Go code in this repo carries no comments; notes live here.
 - `internal/chat`: conversation model shared by live streams and saved transcripts (`Conversation.Apply(event)` returns the items that changed). Item kinds: user, assistant (streams via text deltas), tool (one-liner with summary, input, result, diff for Edit/Write/MultiEdit), permission, notice, error, thinking.
 - `internal/transcript`: scans `~/.claude/projects/*/*.jsonl` (read-only, cached by mtime+size) and loads one transcript into a `chat.Conversation`.
 - `internal/session`: one headless `claude` process per app session.
-- `internal/live`: finds sessions open in a terminal.
+- `internal/live`: finds sessions open in a terminal and releases them for takeover.
+- `internal/account`: auth status / login / logout through the CLI.
 - `internal/fakeclaude`: a scripted stand-in for the CLI. Test binaries re-exec themselves with `CLAUDE_DESK_FAKE=1` to become it. Prompts: `write` (Write + permission prompt), `demo` (thinking, text, Bash with result, Edit + permission prompt), `slow` (streams until interrupted), anything else echoes. `FAKE_ARGS_OUT` records argv, `FAKE_IGNORE_EOF` simulates a hung process.
 - `cmd/quill`: Fyne UI (`desk.go` sidebar, header, bottom bar, process wiring; `chatview.go` conversation rendering; `widgets.go` max-width layout, Enter/Shift+Enter entry; `theme.go` dark theme).
 
@@ -45,9 +46,19 @@ Go code in this repo carries no comments; notes live here.
 
 `--remote-control` is for interactive sessions only, but a headless session accepts control_request `{subtype:"remote_control", enabled:true|false}`; enabling returns `session_url` and `connect_url` (verified for real). The header has a per-session "Remote Control" checkbox, off by default; turning it on starts the process if needed and shows an "Open remotely" link. It resets to off whenever the process restarts.
 
-## Sessions open in a terminal
+## Sessions open in a terminal (takeover)
 
-`~/.claude/sessions/<pid>.json` (pid, sessionId, cwd, procStart). A session counts as open elsewhere when that pid is alive, not a zombie, and its `/proc/<pid>/stat` start time equals procStart; the app's own children are excluded. Such sessions are shown read-only with a note (input, pickers and Remote Control disabled, send refuses to start a second process). Their transcript reloads when the file changes (5 s poll).
+`~/.claude/sessions/<pid>.json` (pid, sessionId, cwd, procStart, kind, status). A session counts as open elsewhere when that pid is alive, not a zombie, and its `/proc/<pid>/stat` start time equals procStart; the app's own children are excluded. Exiting an interactive CLI session can leave it held by a background process (`kind:"bg"`, `claude bg-spare`), which is why "exited in Konsole, still blocked in Quill" happened.
+
+Input stays enabled with a note. Sending takes over (`desk.takeOver`): `live.Finder.Release` runs `claude stop <sessionId>` for bg sessions, otherwise SIGTERM, waits up to 5 s, then SIGKILL; then the transcript is reloaded and the session is resumed with the message. If the file says `status:"busy"` a confirm dialog comes first. The Remote Control checkbox stays hidden until the takeover. Transcripts of held sessions reload when the file changes (5 s poll).
+
+## Account
+
+`internal/account`: `claude auth status --json` (refreshed at start and every minute), `claude auth login` (prints any URL it outputs into a dialog link; cancellable), `claude auth logout` (confirmed). Header top-right button shows "email · Plan" or a highlighted "Sign in"; clicking it when signed in opens a menu (org, Refresh, Sign out).
+
+## New session defaults
+
+The dialog shows the folder plus a collapsed "Options" (model, permissions). The defaults are model "default" and mode "auto" (matching how the user runs the CLI), and the last choices are saved in preferences (`newModel`, `newMode`).
 
 ## Transcripts and titles
 

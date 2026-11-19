@@ -5,6 +5,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,8 +112,8 @@ func TestDeskWithFixtures(t *testing.T) {
 	d.search.SetText("")
 	d.terms["514ff30e-119d-4e8f-a1e8-660618817758"] = live.Process{PID: 4242, SessionID: "514ff30e-119d-4e8f-a1e8-660618817758"}
 	ts := openLoaded(t, d, "514ff30e-119d-4e8f-a1e8-660618817758")
-	if ts.status() != stTerminal || !d.input.Disabled() || !d.note.Visible() {
-		t.Fatal("terminal session should be read-only")
+	if ts.status() != stTerminal || d.input.Disabled() || !strings.Contains(d.note.Text, "takes it over") {
+		t.Fatal("terminal session should offer takeover")
 	}
 }
 
