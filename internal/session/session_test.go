@@ -82,7 +82,7 @@ func start(t *testing.T, o Options, r *recorder, env ...string) *Process {
 
 func TestArgs(t *testing.T) {
 	args := strings.Join(Options{Resume: "abc", Model: "haiku", Mode: "acceptEdits"}.Args(), " ")
-	for _, want := range []string{"-p", "--input-format stream-json", "--output-format stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool stdio", "--resume abc", "--model haiku", "--permission-mode acceptEdits"} {
+	for _, want := range []string{"-p", "--input-format stream-json", "--output-format stream-json", "--verbose", "--include-partial-messages", "--prompt-suggestions true", "--permission-prompt-tool stdio", "--resume abc", "--model haiku", "--permission-mode acceptEdits"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("missing %q in %s", want, args)
 		}

@@ -138,6 +138,7 @@ type Event struct {
 	State           string                `json:"state,omitempty"`
 	IsError         bool                  `json:"is_error,omitempty"`
 	Result          string                `json:"result,omitempty"`
+	Suggestion      string                `json:"suggestion,omitempty"`
 	TerminalReason  string                `json:"terminal_reason,omitempty"`
 	TotalCostUSD    float64               `json:"total_cost_usd,omitempty"`
 	NumTurns        int                   `json:"num_turns,omitempty"`

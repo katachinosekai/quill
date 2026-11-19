@@ -358,3 +358,26 @@ func TestSendWaitsForHistoryLoad(t *testing.T) {
 		}
 	})
 }
+
+func TestPromptSuggestion(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("hello")
+	})
+	h.eventually("suggestion", func() bool { return s.conv.Suggestion == "next after hello" })
+	h.ui(func() {
+		if !strings.Contains(h.d.input.PlaceHolder, "next after hello") || !h.d.input.AcceptsTab() {
+			t.Fatalf("placeholder %q", h.d.input.PlaceHolder)
+		}
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyTab})
+		if h.d.input.Text != "next after hello" {
+			t.Fatalf("tab gave %q", h.d.input.Text)
+		}
+		h.d.send(h.d.input.Text)
+		if s.conv.Suggestion != "" || strings.Contains(h.d.input.PlaceHolder, "next after hello") {
+			t.Fatal("suggestion should clear when a message is sent")
+		}
+	})
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"image/color"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -47,8 +48,26 @@ func centered(max float32, obj fyne.CanvasObject) *fyne.Container {
 
 type sendEntry struct {
 	widget.Entry
-	shift  bool
-	onSend func(string)
+	shift      bool
+	onSend     func(string)
+	suggestion string
+	hint       string
+}
+
+func (e *sendEntry) setSuggestion(s string) {
+	if s == e.suggestion {
+		return
+	}
+	e.suggestion = s
+	if s != "" {
+		e.SetPlaceHolder(s + "   (Tab to use)")
+	} else {
+		e.SetPlaceHolder(e.hint)
+	}
+}
+
+func (e *sendEntry) AcceptsTab() bool {
+	return e.suggestion != "" && e.Text == ""
 }
 
 func newSendEntry(onSend func(string)) *sendEntry {
@@ -75,6 +94,13 @@ func (e *sendEntry) KeyUp(k *fyne.KeyEvent) {
 }
 
 func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
+	if k.Name == fyne.KeyTab && e.AcceptsTab() {
+		e.SetText(e.suggestion)
+		e.CursorRow = strings.Count(e.Text, "\n")
+		e.CursorColumn = len([]rune(e.Text[strings.LastIndex(e.Text, "\n")+1:]))
+		e.Refresh()
+		return
+	}
 	if (k.Name == fyne.KeyReturn || k.Name == fyne.KeyEnter) && !e.shift {
 		if e.Disabled() {
 			return

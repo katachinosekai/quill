@@ -70,6 +70,7 @@ type Conversation struct {
 	Stats      Stats
 	Busy       bool
 	Thinking   bool
+	Suggestion string
 	streamKeys map[string]*Item
 	thinkKeys  map[string]string
 	byTool     map[string]*Item
@@ -94,6 +95,7 @@ func (c *Conversation) add(it *Item) *Item {
 }
 
 func (c *Conversation) AddUser(text string) *Item {
+	c.Suggestion = ""
 	return c.add(&Item{Kind: User, Text: text})
 }
 
@@ -141,6 +143,9 @@ func (c *Conversation) Apply(ev *protocol.Event) []*Item {
 		return c.applyStream(ev)
 	case "control_request":
 		return c.applyControl(ev)
+	case "prompt_suggestion":
+		c.Suggestion = strings.TrimSpace(ev.Suggestion)
+		return nil
 	case "control_cancel_request":
 		if it := c.byRequest[ev.RequestID]; it != nil && it.PermState == PermPending {
 			it.PermState = PermCancelled

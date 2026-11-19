@@ -70,7 +70,8 @@ Go can't hot-swap code, so a new build takes over in place: `watchBinary` polls 
 
 ## UI notes
 
-- Long user messages show the first 14 lines / 1400 chars with "Show all (N more lines)" (`clipLines`, `itemView.full`). Markdown code blocks are replaced by `wrapCode` segments (wrapped monospace in a dark card) because Fyne's CodeBlockSegment never wraps.
+- User messages always show in full (collapsing was removed at the user's request). Markdown code blocks are replaced by `wrapCode` segments (wrapped monospace in a dark card) because Fyne's CodeBlockSegment never wraps.
+- Prompt suggestions: sessions run with `--prompt-suggestions true`; after a turn the CLI emits `{"type":"prompt_suggestion","suggestion":...}` (only while stdin stays open, which it does here). `Conversation.Suggestion` holds it until the next user message; the input shows it as the placeholder "... (Tab to use)" and Tab on an empty input fills it in (`sendEntry.AcceptsTab`).
 - Chat column is centered with a max width of 760 px (shorter lines read better). Text 15 px, line spacing 7. Vertical spacing per item kind lives in `spaced` (chatview.go): user turns get the most space above, tool rows the least; user bubbles use `bgPad` for wider side padding. "Center message text" (sidebar, saved in preferences) centers user/assistant text; tool cards and diffs stay left-aligned.
 - Single newlines in assistant text become paragraph breaks outside code blocks and lists (`hardBreaks`), since Fyne's markdown would join them.
 - Thinking blocks render as a collapsed "Thought" row (expand to read). Current models often send thinking with empty text; those add no row, only "thinking..." in the stats line.

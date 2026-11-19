@@ -474,7 +474,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
-	d.input.SetPlaceHolder("Message Claude (Enter to send, Shift+Enter for a new line)")
+	d.input.hint = "Message Claude (Enter to send, Shift+Enter for a new line)"
+	d.input.SetPlaceHolder(d.input.hint)
 	d.modelSel = widget.NewSelect(modelChoices, func(v string) {
 		if d.suppress || d.current == nil {
 			return
@@ -522,6 +523,7 @@ func (d *desk) updateChrome() {
 		d.note.Hide()
 		d.rcCheck.Hide()
 		d.rcLink.Hide()
+		d.input.setSuggestion("")
 		d.input.Disable()
 		d.sendBtn.Disable()
 		d.stopBtn.Disable()
@@ -582,6 +584,11 @@ func (d *desk) updateChrome() {
 	}
 	if s.loading {
 		d.sendBtn.Disable()
+	}
+	if held || s.takeover {
+		d.input.setSuggestion("")
+	} else {
+		d.input.setSuggestion(s.conv.Suggestion)
 	}
 	d.modelSel.SetSelected(s.model)
 	d.modeSel.SetSelected(s.mode)

@@ -35,6 +35,7 @@ func (o Options) Args() []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
+		"--prompt-suggestions", "true",
 		"--permission-prompt-tool", "stdio",
 	}
 	if o.Resume != "" {

@@ -131,6 +131,7 @@ func Run() {
 			default:
 				text("m9", "echo: "+prompt)
 				result("success", "completed")
+				emit(map[string]any{"type": "prompt_suggestion", "suggestion": "next after " + prompt, "session_id": sid})
 			}
 		}
 	}
