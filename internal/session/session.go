@@ -443,6 +443,10 @@ func (p *Process) Respond(requestID string, d protocol.Decision, req *protocol.C
 	return p.write(protocol.PermissionResponse(requestID, d, req, ""))
 }
 
+func (p *Process) Answer(requestID string, req *protocol.ControlRequest, answers map[string]string) error {
+	return p.write(protocol.AnswerQuestions(requestID, req, answers))
+}
+
 func (p *Process) DenyWith(requestID string, req *protocol.ControlRequest, message string) error {
 	return p.write(protocol.PermissionResponse(requestID, protocol.Deny, req, message))
 }

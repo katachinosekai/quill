@@ -1297,6 +1297,33 @@ func (d *desk) answer(s *deskSession, it *chat.Item, dec protocol.Decision) {
 	d.refreshSidebar()
 }
 
+func isQuestion(it *chat.Item) bool {
+	return it.ToolName == "AskUserQuestion"
+}
+
+func (d *desk) answerQuestions(s *deskSession, it *chat.Item, answers map[string]string) {
+	if it.PermState != chat.PermPending || !s.running() {
+		return
+	}
+	if err := s.proc.Answer(it.RequestID, it.Request, answers); err != nil {
+		d.chat.update([]*chat.Item{s.conv.AddError("Could not answer: " + err.Error())})
+		return
+	}
+	var lines []string
+	for _, q := range protocol.ParseQuestions(it.Input) {
+		if a, ok := answers[q.Question]; ok {
+			lines = append(lines, q.Question+" → "+a)
+		}
+	}
+	it.Text = strings.Join(lines, "\n")
+	it.PermState = chat.PermAllowed
+	if d.current == s {
+		d.chat.update([]*chat.Item{it})
+		d.updateChrome()
+	}
+	d.refreshSidebar()
+}
+
 func (d *desk) setModel(s *deskSession, model string) {
 	s.model = model
 	if !s.running() {
@@ -1718,7 +1745,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 				it = x
 			}
 		}
-		if it == nil || it.PermState != chat.PermPending || s.proc == nil {
+		if it == nil || it.PermState != chat.PermPending || s.proc == nil || isQuestion(it) {
 			return nil
 		}
 		if s.runAll {

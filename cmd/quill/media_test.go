@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"image/color"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,9 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
 	"time"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -178,6 +181,35 @@ func TestLightboxAndVideoPlayer(t *testing.T) {
 		h.d.lightboxClose()
 		if len(h.w.Canvas().Overlays().List()) != 0 || !vp.closed {
 			t.Fatal("closing the lightbox should stop the player")
+		}
+	})
+}
+
+func TestQuestionCardAndScrollPassThrough(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		h.d.chat.show(s)
+		it := &chat.Item{Kind: chat.Permission, ToolName: "AskUserQuestion", PermState: chat.PermPending,
+			Input: []byte(`{"questions":[{"question":"Which?","options":[{"label":"A"},{"label":"B"}]}]}`)}
+		found := false
+		walk(h.d.chat.renderPermission(it), func(o fyne.CanvasObject) {
+			if r, ok := o.(*widget.RadioGroup); ok && len(r.Options) == 2 {
+				found = true
+			}
+		})
+		if !found || !isQuestion(it) {
+			t.Fatal("questions should show their options")
+		}
+		tall := canvas.NewRectangle(color.Black)
+		tall.SetMinSize(fyne.NewSize(100, 5000))
+		outer := container.NewVScroll(tall)
+		outer.Resize(fyne.NewSize(100, 300))
+		ps := h.d.chat.sideScroll(widget.NewLabel("x")).(*passScroll)
+		ps.parent = func() *container.Scroll { return outer }
+		ps.Scrolled(&fyne.ScrollEvent{Scrolled: fyne.Delta{DY: -200}})
+		if outer.Offset.Y == 0 {
+			t.Fatal("vertical wheel over a diff should scroll the chat")
 		}
 	})
 }

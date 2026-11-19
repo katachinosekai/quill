@@ -641,7 +641,7 @@ func (v *chatView) diffView(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	if it.DiffPath != "" {
 		parts = append(parts, mutedText(it.DiffPath, 12))
 	}
-	parts = append(parts, container.NewHScroll(grid))
+	parts = append(parts, v.sideScroll(grid))
 	if cut > 0 {
 		more := widget.NewButton(fmt.Sprintf("Show %d more lines", cut), func() {
 			iv.full = true
@@ -653,7 +653,107 @@ func (v *chatView) diffView(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	return container.NewVBox(parts...)
 }
 
+func (v *chatView) renderQuestions(it *chat.Item) fyne.CanvasObject {
+	qs := protocol.ParseQuestions(it.Input)
+	var parts []fyne.CanvasObject
+	head := widget.NewLabel("Claude is asking")
+	head.TextStyle = fyne.TextStyle{Bold: true}
+	parts = append(parts, head)
+	if it.PermState != chat.PermPending {
+		text := it.Text
+		if text == "" {
+			text = permStateText(it.PermState)
+		}
+		l := widget.NewLabel(text)
+		l.Wrapping = fyne.TextWrapWord
+		parts = append(parts, l)
+		return questionCard(parts, false)
+	}
+	type pick struct {
+		q      protocol.Question
+		radio  *widget.RadioGroup
+		checks *widget.CheckGroup
+		other  *widget.Entry
+	}
+	var picks []pick
+	for _, q := range qs {
+		ql := widget.NewLabel(q.Question)
+		ql.Wrapping = fyne.TextWrapWord
+		ql.TextStyle = fyne.TextStyle{Bold: true}
+		parts = append(parts, ql)
+		var labels []string
+		for _, o := range q.Options {
+			labels = append(labels, o.Label)
+		}
+		pk := pick{q: q, other: widget.NewEntry()}
+		pk.other.SetPlaceHolder("Other (type your own answer)")
+		if q.MultiSelect {
+			pk.checks = widget.NewCheckGroup(labels, nil)
+			parts = append(parts, pk.checks)
+		} else {
+			pk.radio = widget.NewRadioGroup(labels, nil)
+			parts = append(parts, pk.radio)
+		}
+		for _, o := range q.Options {
+			if o.Description != "" {
+				d := widget.NewLabel(o.Label + ": " + o.Description)
+				d.Wrapping = fyne.TextWrapWord
+				d.SizeName = theme.SizeNameCaptionText
+				d.Importance = widget.LowImportance
+				parts = append(parts, d)
+			}
+		}
+		parts = append(parts, pk.other, padTop(4))
+		picks = append(picks, pk)
+	}
+	send := widget.NewButtonWithIcon("Send answers", theme.ConfirmIcon(), func() {
+		answers := map[string]string{}
+		for _, pk := range picks {
+			var chosen []string
+			if pk.radio != nil && pk.radio.Selected != "" {
+				chosen = append(chosen, pk.radio.Selected)
+			}
+			if pk.checks != nil {
+				chosen = append(chosen, pk.checks.Selected...)
+			}
+			if t := strings.TrimSpace(pk.other.Text); t != "" {
+				chosen = append(chosen, t)
+			}
+			if len(chosen) > 0 {
+				answers[pk.q.Question] = strings.Join(chosen, ", ")
+			}
+		}
+		if len(answers) == 0 {
+			return
+		}
+		v.d.answerQuestions(v.s, it, answers)
+	})
+	send.Importance = widget.HighImportance
+	skip := widget.NewButtonWithIcon("Skip", theme.CancelIcon(), func() { v.d.answer(v.s, it, protocol.Deny) })
+	if !v.d.canAnswer(v.s) {
+		send.Disable()
+		skip.Disable()
+	}
+	parts = append(parts, container.NewHBox(send, skip))
+	return questionCard(parts, true)
+}
+
+func questionCard(parts []fyne.CanvasObject, pending bool) fyne.CanvasObject {
+	border := colAccent
+	if !pending {
+		border = color.NRGBA{0x44, 0x44, 0x40, 0xff}
+	}
+	r := canvas.NewRectangle(colCard)
+	r.CornerRadius = 10
+	r.StrokeColor = border
+	r.StrokeWidth = 1.5
+	return container.NewVBox(padTop(4), container.NewStack(r, container.NewPadded(container.NewVBox(parts...))), padTop(4))
+}
+
 func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
+	if it.ToolName == "AskUserQuestion" {
+		return v.renderQuestions(it)
+	}
 	title := widget.NewLabel("Allow " + it.ToolName + "?")
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	parts := []fyne.CanvasObject{title}
@@ -1137,4 +1237,28 @@ func toolNaturalWidth(it *chat.Item) float32 {
 	size := smallTheme{}.Size(theme.SizeNameCaptionText)
 	w := fyne.MeasureText(longest, size, fyne.TextStyle{Monospace: true}).Width
 	return w + 40
+}
+
+type passScroll struct {
+	container.Scroll
+	parent func() *container.Scroll
+}
+
+func (v *chatView) sideScroll(content fyne.CanvasObject) fyne.CanvasObject {
+	p := &passScroll{parent: func() *container.Scroll { return v.scroll }}
+	p.Direction = container.ScrollHorizontalOnly
+	p.Content = content
+	p.ExtendBaseWidget(p)
+	return p
+}
+
+func (p *passScroll) Scrolled(ev *fyne.ScrollEvent) {
+	dx, dy := ev.Scrolled.DX, ev.Scrolled.DY
+	if dy*dy > dx*dx {
+		if parent := p.parent(); parent != nil {
+			parent.Scrolled(ev)
+		}
+		return
+	}
+	p.Scroll.Scrolled(ev)
 }

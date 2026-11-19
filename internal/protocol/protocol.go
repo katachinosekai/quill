@@ -280,6 +280,33 @@ func PermissionResponse(requestID string, d Decision, req *ControlRequest, denyM
 	return ControlResponseLine(requestID, body)
 }
 
+type Question struct {
+	Question    string `json:"question"`
+	Header      string `json:"header"`
+	MultiSelect bool   `json:"multiSelect"`
+	Options     []struct {
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	} `json:"options"`
+}
+
+func ParseQuestions(input json.RawMessage) []Question {
+	var in struct {
+		Questions []Question `json:"questions"`
+	}
+	_ = json.Unmarshal(input, &in)
+	return in.Questions
+}
+
+func AnswerQuestions(requestID string, req *ControlRequest, answers map[string]string) []byte {
+	input := map[string]any{}
+	if req != nil {
+		_ = json.Unmarshal(req.Input, &input)
+	}
+	input["answers"] = answers
+	return ControlResponseLine(requestID, map[string]any{"behavior": "allow", "updatedInput": input})
+}
+
 func alwaysRules(req *ControlRequest) []any {
 	var out []any
 	for _, s := range req.PermissionSuggestions {
