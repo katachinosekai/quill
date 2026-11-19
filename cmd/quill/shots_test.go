@@ -100,15 +100,15 @@ func shot(t *testing.T, w fyne.Window, dir, name string) {
 func TestDeskWithFixtures(t *testing.T) {
 	d, w := fixtureDesk(t)
 	defer w.Close()
-	if len(d.rows) != 2 || len(d.autoSec.rows) != 1 {
-		t.Fatalf("rows %+v auto %+v", d.rows, d.autoSec.rows)
+	if !hasRow(d.rows, "11111111-2222-3333-4444-555555555555") || folderRow(d.rows, "auto") == nil {
+		t.Fatalf("rows %+v", d.rows)
 	}
 	s := openLoaded(t, d, "11111111-2222-3333-4444-555555555555")
 	if len(d.chat.views) != len(s.conv.Items) || d.input.Disabled() {
 		t.Fatalf("views %d items %d", len(d.chat.views), len(s.conv.Items))
 	}
 	d.search.SetText("rename")
-	if len(d.rows) != 2 {
+	if !hasRow(d.rows, "11111111-2222-3333-4444-555555555555") {
 		t.Fatalf("search rows %+v", d.rows)
 	}
 	d.search.SetText("")

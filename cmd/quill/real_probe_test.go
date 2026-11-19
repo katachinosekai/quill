@@ -59,8 +59,7 @@ func TestRealSidebarProbe(t *testing.T) {
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1280, 860))
 	d.refresh()
-	d.oldSec.open = true
-	d.rebuildRows()
+	d.toggleFolder("archive")
 	time.Sleep(300 * time.Millisecond)
 	shot(t, w, out, "real-sidebar.png")
 }

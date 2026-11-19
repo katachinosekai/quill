@@ -186,26 +186,19 @@ func TestSidebarAndTerminalSession(t *testing.T) {
 		if len(h.d.order) != 2 {
 			t.Fatalf("order %+v", h.d.order)
 		}
-		headers := 0
-		for _, r := range h.d.rows {
-			if r.header != "" {
-				headers++
-			}
+		auto := folderRow(h.d.rows, "auto")
+		if auto == nil || auto.count != 1 || auto.open || hasRow(h.d.rows, smokeID) || !hasRow(h.d.rows, editsID) {
+			t.Fatalf("rows %+v", h.d.rows)
 		}
-		if headers != 1 || len(h.d.rows) != 2 || len(h.d.autoSec.rows) != 1 || h.d.autoSec.rows[0].id != smokeID {
-			t.Fatalf("rows %+v auto %+v", h.d.rows, h.d.autoSec.rows)
+		h.d.toggleFolder("auto")
+		if !hasRow(h.d.rows, smokeID) {
+			t.Fatal("folder should open")
 		}
-		if h.d.autoSec.area.Visible() || !strings.Contains(h.d.autoSec.btn.Text, "Created by Claude (1)") {
-			t.Fatal("headless sessions should sit in a collapsed section")
-		}
-		test.Tap(h.d.autoSec.btn)
-		if !h.d.autoSec.area.Visible() {
-			t.Fatal("section should open")
-		}
+		h.d.toggleFolder("auto")
 		h.d.created[smokeID] = true
 		h.d.rebuildRows()
-		if len(h.d.rows) != 4 || len(h.d.autoSec.rows) != 0 {
-			t.Fatal("sessions made in Quill stay in the main list")
+		if folderRow(h.d.rows, "auto") != nil || !hasRow(h.d.rows, smokeID) {
+			t.Fatal("sessions made in Quill stay in the main tree")
 		}
 		delete(h.d.created, smokeID)
 		h.d.rebuildRows()
@@ -213,7 +206,7 @@ func TestSidebarAndTerminalSession(t *testing.T) {
 			t.Fatalf("terminal row %q %v", meta, st)
 		}
 		h.d.search.SetText("proj")
-		if len(h.d.rows) != 2 || h.d.rows[1].id != editsID {
+		if !hasRow(h.d.rows, editsID) || hasRow(h.d.rows, smokeID) {
 			t.Fatalf("search rows %+v", h.d.rows)
 		}
 		h.d.search.SetText("")
@@ -446,11 +439,11 @@ func TestSidebarCollapse(t *testing.T) {
 	h.ui(func() {
 		h.d.setSidebar(false)
 		free := h.d.root.Size().Width
-		if h.d.sidebar.Visible() || !h.d.expandBtn.Visible() || h.d.sidebarWidth() != 0 || h.d.chatWidth() != max(chatMinWidth, free*chatShare) {
+		if h.d.sidebar.Visible() || !h.d.sideOff || h.d.sidebarWidth() != 0 || h.d.chatWidth() != max(chatMinWidth, free*chatShare) {
 			t.Fatal("sidebar should be hidden")
 		}
-		test.Tap(h.d.expandBtn)
-		if !h.d.sidebar.Visible() || h.d.expandBtn.Visible() || h.d.chatWidth() != max(chatMinWidth, (h.d.root.Size().Width-sideW)*chatShare) {
+		test.Tap(h.d.sideToggle)
+		if !h.d.sidebar.Visible() || h.d.sideOff || h.d.chatWidth() != max(chatMinWidth, (h.d.root.Size().Width-sideW)*chatShare) {
 			t.Fatal("sidebar should be back")
 		}
 	})
@@ -510,9 +503,12 @@ func TestAutoRemoteControl(t *testing.T) {
 	})
 }
 
-func TestInactiveSection(t *testing.T) {
+func TestInactiveAndArchiveFolders(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
+		if f := folderRow(h.d.rows, "inactive"); f == nil || !f.open || !hasRow(h.d.rows, editsID) {
+			t.Fatalf("recent idle sessions sit in an open Inactive folder: %+v", h.d.rows)
+		}
 		for i, info := range h.d.order {
 			if info.ID == editsID {
 				info.Last = time.Now().Add(-30 * 24 * time.Hour)
@@ -521,22 +517,40 @@ func TestInactiveSection(t *testing.T) {
 			}
 		}
 		h.d.rebuildRows()
-		if len(h.d.oldSec.rows) != 1 || h.d.oldSec.rows[0].id != editsID || !h.d.oldSec.box.Visible() || h.d.oldSec.area.Visible() {
-			t.Fatalf("old %+v", h.d.oldSec.rows)
+		if f := folderRow(h.d.rows, "archive"); f == nil || f.open || hasRow(h.d.rows, editsID) {
+			t.Fatalf("old sessions go to a closed Archive folder: %+v", h.d.rows)
 		}
-		for _, r := range h.d.rows {
-			if r.id == editsID {
-				t.Fatal("inactive session should leave the main list")
-			}
+		h.d.toggleFolder("archive")
+		if !hasRow(h.d.rows, editsID) {
+			t.Fatal("archive should open")
 		}
+		h.d.toggleFolder("archive")
 		h.d.search.SetText("proj")
-		if len(h.d.oldSec.rows) != 0 {
-			t.Fatal("search should find inactive sessions in the main list")
+		if !hasRow(h.d.rows, editsID) {
+			t.Fatal("search shows archived sessions")
 		}
 		h.d.search.SetText("")
 		h.d.open(editsID)
-		if len(h.d.oldSec.rows) != 0 {
-			t.Fatal("the open session is never hidden")
+		if !hasRow(h.d.rows, editsID) || folderRow(h.d.rows, "archive") != nil {
+			t.Fatal("the open session is active")
 		}
 	})
+}
+
+func folderRow(rows []sideRow, key string) *sideRow {
+	for i := range rows {
+		if rows[i].header != "" && rows[i].key == key {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func hasRow(rows []sideRow, id string) bool {
+	for _, r := range rows {
+		if r.id == id {
+			return true
+		}
+	}
+	return false
 }

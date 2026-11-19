@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -114,6 +113,10 @@ type config struct {
 type sideRow struct {
 	header string
 	id     string
+	key    string
+	depth  int
+	count  int
+	open   bool
 }
 
 type desk struct {
@@ -170,11 +173,12 @@ type desk struct {
 	sideAnim      *fyne.Animation
 	animate       bool
 	root          *fyne.Container
-	expandBtn     *tapRow
+	sideToggle    *tapRow
+	headPad       *canvas.Rectangle
+	chatFreeze    float32
 	sideOff       bool
-	autoSec       *foldSection
 	sideBody      *fyne.Container
-	oldSec        *foldSection
+	folderOpen    map[string]bool
 	created       map[string]bool
 	suppress      bool
 	refreshMu     sync.Mutex
@@ -218,9 +222,6 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.search.SetPlaceHolder("Search sessions")
 	d.search.OnChanged = func(string) { d.rebuildRows() }
 	d.list = d.newSessionList(&d.rows)
-	d.oldSec = d.newFold("Inactive")
-	d.autoSec = d.newFold("Created by Claude")
-	autoBox := container.NewVBox(padTop(10), d.oldSec.box, padTop(4), d.autoSec.box, padTop(10))
 	centerChk := widget.NewCheck("Center message text", func(on bool) {
 		d.center = on
 		d.app.Preferences().SetBool("centerText", on)
@@ -249,10 +250,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName := canvas.NewText("Quill", colText)
 	brandName.TextSize = 18
 	brandName.TextStyle.Bold = true
-	collapse := smallArrow(theme.NavigateBackIcon(), func() { d.setSidebar(false) })
-	brand := container.NewBorder(nil, nil, container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName)), container.NewCenter(collapse))
+	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(autoBox, widget.NewSeparator(), centerChk, rcChk, legend)
+	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), centerChk, rcChk, legend)
 	r := canvas.NewRectangle(colSidebar)
 	d.sideBody = container.NewBorder(top, bottom, nil, nil, d.list)
 	return container.NewStack(r, container.NewPadded(d.sideBody))
@@ -260,59 +260,88 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 
 func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 	list := widget.NewList(
-		func() int { return len((*rows)) },
+		func() int { return len(*rows) },
 		func() fyne.CanvasObject {
-			head := canvas.NewText("", colMuted)
-			head.TextSize = 12
-			head.TextStyle.Bold = true
+			indent := canvas.NewRectangle(color.Transparent)
+			icon := widget.NewIcon(theme.FolderIcon())
+			name := canvas.NewText("", colMuted)
+			name.TextStyle.Bold = true
+			count := canvas.NewText("", colMuted)
+			count.TextSize = 11
+			folder := container.NewHBox(indent, container.NewCenter(sized(18, 18, icon)), container.NewCenter(name), container.NewCenter(count))
+			sindent := canvas.NewRectangle(color.Transparent)
 			title := widget.NewLabel("")
 			title.Truncation = fyne.TextTruncateEllipsis
 			meta := canvas.NewText("", colMuted)
 			meta.TextSize = 11
 			dt := dot(color.Transparent)
-			row := container.NewBorder(nil, nil, sized(10, 10, dt), nil,
+			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(10, 10, dt))), nil,
 				container.New(&tightVBox{}, title, container.NewPadded(meta)))
-			return container.NewStack(container.NewPadded(head), row)
+			return container.NewStack(folder, row)
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
-			if id >= len((*rows)) {
+			if id >= len(*rows) {
 				return
 			}
 			st := o.(*fyne.Container)
-			headBox := st.Objects[0].(*fyne.Container)
-			head := headBox.Objects[0].(*canvas.Text)
+			folder := st.Objects[0].(*fyne.Container)
 			row := st.Objects[1].(*fyne.Container)
 			r := (*rows)[id]
 			if r.header != "" {
-				head.Text = r.header
-				headBox.Show()
+				indent := folder.Objects[0].(*canvas.Rectangle)
+				icon := folder.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*widget.Icon)
+				name := folder.Objects[2].(*fyne.Container).Objects[0].(*canvas.Text)
+				count := folder.Objects[3].(*fyne.Container).Objects[0].(*canvas.Text)
+				indent.SetMinSize(fyne.NewSize(float32(r.depth)*16, 1))
+				res := theme.FolderIcon()
+				if r.open {
+					res = theme.FolderOpenIcon()
+				}
+				top := r.depth == 0 && !strings.HasPrefix(r.key, "a:")
+				if top {
+					icon.SetResource(theme.NewPrimaryThemedResource(res))
+					name.Color, name.TextSize = colText, 14
+				} else {
+					icon.SetResource(res)
+					name.Color, name.TextSize = colMuted, 12
+				}
+				name.Text = r.header
+				count.Text = fmt.Sprintf("%d", r.count)
+				name.Refresh()
+				count.Refresh()
+				folder.Show()
 				row.Hide()
-				head.Refresh()
+				folder.Refresh()
 				return
 			}
-			headBox.Hide()
+			folder.Hide()
 			row.Show()
+			left := row.Objects[1].(*fyne.Container)
+			left.Objects[0].(*canvas.Rectangle).SetMinSize(fyne.NewSize(float32(r.depth-1)*16, 1))
 			col := row.Objects[0].(*fyne.Container)
 			title := col.Objects[0].(*widget.Label)
 			meta := col.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
-			dt := row.Objects[1].(*fyne.Container).Objects[0].(*canvas.Circle)
+			dt := left.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Circle)
 			t, m, st2 := d.rowText(r.id)
 			title.SetText(t)
 			meta.Text = m
 			meta.Refresh()
 			dt.FillColor = st2.color()
 			dt.Refresh()
+			row.Refresh()
 		},
 	)
 	list.OnSelected = func(id widget.ListItemID) {
-		if id >= len((*rows)) || d.suppress {
+		if id >= len(*rows) || d.suppress {
 			return
 		}
-		if (*rows)[id].header != "" {
+		r := (*rows)[id]
+		if r.header != "" {
 			list.Unselect(id)
+			d.toggleFolder(r.key)
 			return
 		}
-		d.open((*rows)[id].id)
+		d.open(r.id)
 	}
 	return list
 }
@@ -420,103 +449,102 @@ func tildePath(p string) string {
 
 func (d *desk) rebuildRows() {
 	q := strings.ToLower(strings.TrimSpace(d.search.Text))
-	type entry struct {
-		id   string
-		cwd  string
-		last time.Time
-	}
-	var entries []entry
-	seen := map[string]bool{}
+	var entries []sideEntry
 	for _, s := range d.sessions {
 		if _, ok := d.infos[s.id]; !ok {
-			entries = append(entries, entry{s.id, s.cwd, s.created})
-			seen[s.id] = true
+			entries = append(entries, sideEntry{s.id, s.cwd, s.created})
 		}
 	}
 	for _, info := range d.order {
-		entries = append(entries, entry{info.ID, info.Cwd, info.Last})
+		entries = append(entries, sideEntry{info.ID, info.Cwd, info.Last})
 	}
-	var filtered, auto, old []entry
+	var active, idle, old, auto []sideEntry
 	for _, e := range entries {
-		if d.isAuto(e.id) {
-			if q == "" || d.matches(e.id, e.cwd, q) {
-				auto = append(auto, e)
-			}
+		if q != "" && !d.matches(e.id, e.cwd, q) {
 			continue
 		}
-		if q == "" && d.isInactive(e.id, e.last) {
+		switch {
+		case d.isAuto(e.id):
+			auto = append(auto, e)
+		case q != "" || d.isActive(e.id, e.last):
+			active = append(active, e)
+		case d.isInactive(e.id, e.last):
 			old = append(old, e)
+		default:
+			idle = append(idle, e)
+		}
+	}
+	rows := d.projectRows(active, 0, "a:", q != "")
+	for _, g := range []struct {
+		key, title string
+		es         []sideEntry
+	}{{"inactive", "Inactive", idle}, {"archive", "Archive", old}, {"auto", "Created by Claude", auto}} {
+		if len(g.es) == 0 {
 			continue
 		}
-		if q != "" {
-			t, _, _ := d.rowText(e.id)
-			if !strings.Contains(strings.ToLower(t), q) && !strings.Contains(strings.ToLower(e.cwd), q) {
-				continue
-			}
+		open := q != "" || d.isOpen(g.key)
+		rows = append(rows, sideRow{header: g.title, key: g.key, count: len(g.es), open: open})
+		if open {
+			rows = append(rows, d.projectRows(g.es, 1, g.key+":", q != "")...)
 		}
-		filtered = append(filtered, e)
-	}
-	groupLast := map[string]time.Time{}
-	for _, e := range filtered {
-		if e.last.After(groupLast[e.cwd]) {
-			groupLast[e.cwd] = e.last
-		}
-		if _, ok := groupLast[e.cwd]; !ok {
-			groupLast[e.cwd] = e.last
-		}
-	}
-	sort.SliceStable(filtered, func(i, j int) bool {
-		a, b := filtered[i], filtered[j]
-		if a.cwd != b.cwd {
-			ga, gb := groupLast[a.cwd], groupLast[b.cwd]
-			if !ga.Equal(gb) {
-				return ga.After(gb)
-			}
-			return a.cwd < b.cwd
-		}
-		return a.last.After(b.last)
-	})
-	rows := make([]sideRow, 0, len(filtered)+8)
-	cur := "\x00"
-	for _, e := range filtered {
-		if e.cwd != cur {
-			cur = e.cwd
-			rows = append(rows, sideRow{header: tildePath(e.cwd)})
-		}
-		rows = append(rows, sideRow{id: e.id})
 	}
 	d.rows = rows
-	for _, g := range []struct {
-		sec     *foldSection
-		entries []entry
-	}{{d.autoSec, auto}, {d.oldSec, old}} {
-		es := g.entries
-		sort.SliceStable(es, func(i, j int) bool { return es[i].last.After(es[j].last) })
-		g.sec.rows = g.sec.rows[:0]
-		for _, e := range es {
-			g.sec.rows = append(g.sec.rows, sideRow{id: e.id})
-		}
-		g.sec.refresh()
-	}
 	d.suppress = true
-	for _, l := range []struct {
-		list *widget.List
-		rows []sideRow
-	}{{d.list, d.rows}, {d.autoSec.list, d.autoSec.rows}, {d.oldSec.list, d.oldSec.rows}} {
-		l.list.UnselectAll()
-		for i, r := range l.rows {
-			if r.header != "" {
-				l.list.SetItemHeight(i, 30)
-			} else {
-				l.list.SetItemHeight(i, 54)
-			}
-			if d.current != nil && r.id == d.current.id {
-				l.list.Select(i)
+	d.list.UnselectAll()
+	for i, r := range rows {
+		switch {
+		case r.header != "" && r.depth == 0 && !strings.HasPrefix(r.key, "a:"):
+			d.list.SetItemHeight(i, 44)
+		case r.header != "":
+			d.list.SetItemHeight(i, 32)
+		default:
+			d.list.SetItemHeight(i, 54)
+		}
+		if d.current != nil && r.id == d.current.id {
+			d.list.Select(i)
+		}
+	}
+	d.list.Refresh()
+	d.suppress = false
+}
+
+func (d *desk) projectRows(es []sideEntry, depth int, prefix string, forceOpen bool) []sideRow {
+	var rows []sideRow
+	for _, g := range groupByFolder(es) {
+		key := prefix + g.cwd
+		open := forceOpen || d.isOpen(key)
+		rows = append(rows, sideRow{header: tildePath(g.cwd), key: key, depth: depth, count: len(g.items), open: open})
+		if open {
+			for _, e := range g.items {
+				rows = append(rows, sideRow{id: e.id, depth: depth + 1})
 			}
 		}
-		l.list.Refresh()
 	}
-	d.suppress = false
+	return rows
+}
+
+func (d *desk) isOpen(key string) bool {
+	if v, ok := d.folderOpen[key]; ok {
+		return v
+	}
+	return key != "archive" && key != "auto"
+}
+
+func (d *desk) toggleFolder(key string) {
+	if d.folderOpen == nil {
+		d.folderOpen = map[string]bool{}
+	}
+	d.folderOpen[key] = !d.isOpen(key)
+	d.rebuildRows()
+}
+
+func (d *desk) rowShown(id string) bool {
+	for _, r := range d.rows {
+		if r.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *desk) matches(id, cwd, q string) bool {
@@ -547,9 +575,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	})
 	d.rcCheck.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
-	d.expandBtn = smallArrow(theme.NavigateNextIcon(), func() { d.setSidebar(true) })
-	d.expandBtn.Hide()
-	header := container.NewBorder(nil, nil, container.New(layout.NewCustomPaddedLayout(0, 0, 4, 8), container.NewCenter(d.expandBtn)), container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
+	d.headPad = canvas.NewRectangle(color.Transparent)
+	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
 	headerBox := container.NewVBox(container.NewPadded(header), d.note, widget.NewSeparator())
 	d.headerBox = headerBox
@@ -748,11 +775,8 @@ func (d *desk) open(id string) {
 		return
 	}
 	d.current = s
-	for _, r := range d.oldSec.rows {
-		if r.id == id {
-			d.rebuildRows()
-			break
-		}
+	if !d.rowShown(id) {
+		d.rebuildRows()
 	}
 	info, has := d.infos[id]
 	needLoad := has && !s.running() && (!s.loaded || !info.ModTime.Equal(s.loadedMod))
