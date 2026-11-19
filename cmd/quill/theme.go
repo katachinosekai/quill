@@ -49,6 +49,8 @@ func (deskTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
 		return color.NRGBA{0x44, 0x44, 0x40, 0xff}
 	case theme.ColorNameSeparator:
 		return color.NRGBA{0x3a, 0x3a, 0x37, 0xff}
+	case theme.ColorNameShadow:
+		return color.Transparent
 	case theme.ColorNameHover:
 		return color.NRGBA{0xff, 0xff, 0xff, 0x12}
 	}

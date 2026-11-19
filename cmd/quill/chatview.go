@@ -44,7 +44,6 @@ type chatView struct {
 	placeholder bool
 	root        fyne.CanvasObject
 	col         *fyne.Container
-	frame       *fyne.Container
 	inner       *fyne.Container
 	steps       bool
 	cache       map[*deskSession]*sessView
@@ -70,17 +69,11 @@ func newChatView(d *desk) *chatView {
 	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
 	v.col = windowCentered(d.chatWidth, d.sidebarWidth, v.inner)
 	v.scroll = container.NewVScroll(container.NewPadded(v.col))
-	bubble := canvas.NewRectangle(color.NRGBA{0xff, 0xff, 0xff, 0x05})
-	bubble.StrokeColor = color.NRGBA{0xff, 0xff, 0xff, 0x16}
-	bubble.StrokeWidth = 1
-	bubble.CornerRadius = 16
-	v.frame = windowCentered(d.chatWidth, d.sidebarWidth, bubble)
-	v.root = container.NewStack(container.New(layout.NewCustomPaddedLayout(8, 8, 4, 4), container.NewPadded(v.frame)), v.scroll)
+	v.root = v.scroll
 	return v
 }
 
 func (v *chatView) relayout() {
-	v.frame.Refresh()
 	v.col.Refresh()
 	v.scroll.Refresh()
 }
