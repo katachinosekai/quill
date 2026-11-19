@@ -1495,6 +1495,7 @@ func (d *desk) watch(ctx context.Context) {
 	}
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
+	go d.chat.followLoop(ctx)
 	go d.fetchCommands()
 	d.refreshAccount()
 	t := time.NewTicker(5 * time.Second)

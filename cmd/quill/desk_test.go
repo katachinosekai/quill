@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
@@ -809,6 +811,20 @@ func TestChatFollowsAndJumpButton(t *testing.T) {
 		h.d.chat.update([]*chat.Item{s.conv.AddUser("one more")})
 		if !h.d.chat.atBottom() {
 			t.Fatal("following view should stay at the bottom")
+		}
+		grow := widget.NewLabel("late growth")
+		h.d.chat.box.Add(grow)
+		h.d.chat.box.Refresh()
+		grow2 := canvas.NewRectangle(color.Transparent)
+		grow2.SetMinSize(fyne.NewSize(10, 900))
+		h.d.chat.box.Add(grow2)
+		h.d.chat.scroll.OnScrolled(h.d.chat.scroll.Offset)
+		if !h.d.chat.follow {
+			t.Fatal("content growing below must not count as scrolling up")
+		}
+		h.d.chat.stick()
+		if !h.d.chat.pinned() {
+			t.Fatal("follow loop should catch up when content grows after layout")
 		}
 	})
 }

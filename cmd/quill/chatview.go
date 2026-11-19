@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"image/color"
@@ -47,6 +48,8 @@ type chatView struct {
 	col           *fyne.Container
 	follow        bool
 	autoScrolling bool
+	gliding       bool
+	lastY         float32
 	newBelow      bool
 	jump          *fyne.Container
 	glow          *canvas.Rectangle
@@ -95,7 +98,15 @@ func newChatView(d *desk) *chatView {
 		if v.autoScrolling {
 			return
 		}
-		v.follow = v.atBottom()
+		y := v.scroll.Offset.Y
+		switch {
+		case v.atBottom():
+			v.follow = true
+			v.newBelow = false
+		case y < v.lastY-2:
+			v.follow = false
+		}
+		v.lastY = y
 		v.syncJump()
 	}
 	v.jump = v.newJump()
@@ -166,6 +177,9 @@ func (v *chatView) show(s *deskSession) {
 			v.setBox(sv.box)
 			v.scroll.Offset = fyne.NewPos(0, sv.scrollY)
 			v.scroll.Refresh()
+			v.lastY = v.scroll.Offset.Y
+			v.follow = v.atBottom()
+			v.syncJump()
 			return
 		}
 		delete(v.cache, s)
@@ -230,6 +244,7 @@ func (v *chatView) scrollBottom() {
 	v.autoScrolling = true
 	v.scroll.Refresh()
 	v.scroll.ScrollToBottom()
+	v.lastY = v.scroll.Offset.Y
 	v.autoScrolling = false
 	v.follow = true
 	v.newBelow = false
@@ -248,18 +263,45 @@ func (v *chatView) glideBottom() {
 	if v.glide != nil {
 		v.glide.Stop()
 	}
+	v.gliding = true
 	v.glide = fyne.NewAnimation(320*time.Millisecond, func(p float32) {
 		target := v.scroll.Content.MinSize().Height - v.scroll.Size().Height
 		v.autoScrolling = true
 		v.scroll.Offset = fyne.NewPos(0, from+(target-from)*p)
 		v.scroll.Refresh()
+		v.lastY = v.scroll.Offset.Y
 		v.autoScrolling = false
 		if p >= 1 {
+			v.gliding = false
 			v.scrollBottom()
 		}
 	})
 	v.glide.Curve = fyne.AnimationEaseInOut
 	v.glide.Start()
+}
+
+func (v *chatView) pinned() bool {
+	content := v.scroll.Content.MinSize().Height
+	return v.scroll.Offset.Y+v.scroll.Size().Height >= content-2
+}
+
+func (v *chatView) stick() {
+	if v.follow && !v.gliding && v.s != nil && !v.steps && !v.pinned() {
+		v.scrollBottom()
+	}
+}
+
+func (v *chatView) followLoop(ctx context.Context) {
+	t := time.NewTicker(120 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			v.d.do(v.stick)
+		}
+	}
 }
 
 func (v *chatView) keepUp() {
