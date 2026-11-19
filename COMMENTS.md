@@ -45,7 +45,7 @@ Go code in this repo carries no comments; notes live here.
 
 ## Remote Control
 
-The header shows status only ("● Remote Control on" + "Open remotely" link / "Remote Control off" / connecting); there is no per-session checkbox any more (user 2026-11-19). `setRemoteControl` stays for tests and future use.
+The header shows status only ("● Remote Control on" / "Remote Control off" / "Remote Control..." while connecting; no link, user 2026-11-19); there is no per-session checkbox any more (user 2026-11-19). `setRemoteControl` stays for tests and future use.
 
 `--remote-control` is for interactive sessions only, but a headless session accepts control_request `{subtype:"remote_control", enabled:true|false}`; enabling returns `session_url` and `connect_url` (verified for real). The header has a per-session "Remote Control" checkbox, off by default; turning it on starts the process if needed and shows an "Open remotely" link. It resets to off whenever the process restarts. "Remote Control for every session" (sidebar, preference `autoRemoteControl`, default ON, user 2026-11-19) turns it on quietly (no chat notice) every time Quill starts a Claude process (`autoRemote` from `ensureProcess`), so it survives restarts and live updates.
 

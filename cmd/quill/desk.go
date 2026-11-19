@@ -145,7 +145,6 @@ type desk struct {
 	usage         *usagePanel
 	rate          *protocol.RateLimit
 	rateAt        time.Time
-	rcLink        *widget.Hyperlink
 	input         *sendEntry
 	modelSel      *widget.Select
 	modeSel       *widget.Select
@@ -604,13 +603,11 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.note.Importance = widget.WarningImportance
 	d.note.Wrapping = fyne.TextWrapWord
 	d.note.Hide()
-	d.rcLink = widget.NewHyperlink("", nil)
-	d.rcLink.Hide()
 	d.rcStatus = mutedText("", 12)
 	d.rcStatus.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(container.NewCenter(d.rcStatus), d.rcLink, container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
 	headerBox := container.NewVBox(container.NewPadded(header), d.note, widget.NewSeparator())
 	d.headerBox = headerBox
@@ -667,7 +664,6 @@ func (d *desk) updateChrome() {
 		setText(d.subtitle, "")
 		d.note.Hide()
 		d.rcStatus.Hide()
-		d.rcLink.Hide()
 		d.input.setSuggestion("")
 		d.input.Disable()
 		d.sendBtn.Disable()
@@ -691,7 +687,6 @@ func (d *desk) updateChrome() {
 		d.input.Disable()
 		d.sendBtn.Disable()
 		d.rcStatus.Hide()
-		d.rcLink.Hide()
 	} else if held {
 		where := "a terminal"
 		if s.terminal.Background() {
@@ -704,7 +699,6 @@ func (d *desk) updateChrome() {
 		d.modelSel.Enable()
 		d.modeSel.Enable()
 		d.rcStatus.Hide()
-		d.rcLink.Hide()
 	} else {
 		d.note.Hide()
 		d.input.Enable()
@@ -722,15 +716,6 @@ func (d *desk) updateChrome() {
 			d.rcStatus.Refresh()
 		}
 		d.rcStatus.Show()
-		if s.rcOn && s.rcURL != "" {
-			if u, err := url.Parse(s.rcURL); err == nil {
-				d.rcLink.SetText("Open remotely")
-				d.rcLink.SetURL(u)
-				d.rcLink.Show()
-			}
-		} else {
-			d.rcLink.Hide()
-		}
 	}
 	if s.loading {
 		d.sendBtn.Disable()
