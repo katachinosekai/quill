@@ -889,6 +889,9 @@ func TestPlanFirstApproval(t *testing.T) {
 		if !held || !strings.Contains(h.args(), "") {
 			t.Fatal("the first permission request should be held and Claude asked for a plan")
 		}
+		if s.conv.PlanText(plan) == "" {
+			t.Fatal("Claude's plan should be shown inside the approval box")
+		}
 		h.d.answerPlan(s, plan, true)
 		if !s.runAll || plan.PermState != chat.PermAllowed {
 			t.Fatal("approving the plan should pre-approve the request")

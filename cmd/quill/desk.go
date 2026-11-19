@@ -1738,7 +1738,8 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		s.runAll = false
 		if s.planWait {
 			s.planWait = false
-			return []*chat.Item{s.conv.AddPlan()}
+			marked := s.conv.MarkPlanText()
+			return append(marked, s.conv.AddPlan())
 		}
 	}
 	return nil

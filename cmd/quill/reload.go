@@ -225,6 +225,7 @@ func (hs handedSession) restorePending(s *deskSession) {
 		s.conv.Apply(&protocol.Event{Type: "control_request", RequestID: a.RequestID, Request: a.Request})
 	}
 	if hs.Plan {
+		s.conv.MarkPlanText()
 		s.conv.AddPlan()
 	}
 }

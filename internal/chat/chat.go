@@ -40,6 +40,7 @@ type Item struct {
 	Kind        Kind
 	Text        string
 	Streaming   bool
+	InPlan      bool
 	MsgID       string
 	ToolName    string
 	ToolID      string
@@ -104,6 +105,41 @@ func (c *Conversation) AddUser(text string) *Item {
 
 func (c *Conversation) AddPlan() *Item {
 	return c.add(&Item{Kind: Plan, PermState: PermPending})
+}
+
+func (c *Conversation) MarkPlanText() []*Item {
+	var out []*Item
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		it := c.Items[i]
+		if it.Kind == User || it.Kind == Plan || it.Kind == Permission && it.PermState == PermPlanAsked {
+			break
+		}
+		if it.Kind == Assistant && strings.TrimSpace(it.Text) != "" {
+			it.InPlan = true
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func (c *Conversation) PlanText(plan *Item) string {
+	var parts []string
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		if c.Items[i] != plan {
+			continue
+		}
+		for j := i - 1; j >= 0; j-- {
+			it := c.Items[j]
+			if it.Kind == User || it.Kind == Plan {
+				break
+			}
+			if it.Kind == Assistant && it.InPlan {
+				parts = append([]string{it.Text}, parts...)
+			}
+		}
+		break
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func (c *Conversation) AddNotice(text string) *Item {

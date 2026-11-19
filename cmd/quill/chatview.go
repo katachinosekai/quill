@@ -398,6 +398,9 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		l.Alignment = v.align()
 		return bgPad(colBubble, 14, 4, 10, msgText(l))
 	case chat.Assistant:
+		if it.InPlan {
+			return container.NewWithoutLayout()
+		}
 		md := msgText(v.markdown(it.Text))
 		if it.Streaming {
 			return md
@@ -1065,9 +1068,16 @@ func centerLists(segs []widget.RichTextSegment, indent string) []widget.RichText
 func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	title := widget.NewLabel("Approve this plan?")
 	title.TextStyle = fyne.TextStyle{Bold: true}
-	msg := widget.NewLabel("Claude listed everything it will do above. Approving runs all of it: every command and change for this request is approved automatically until Claude finishes.")
+	msg := widget.NewLabel("Approving runs all of it: every command and change for this request is approved automatically until Claude finishes.")
 	msg.Wrapping = fyne.TextWrapWord
-	parts := []fyne.CanvasObject{title, msg}
+	msg.SizeName = theme.SizeNameCaptionText
+	parts := []fyne.CanvasObject{title}
+	if plan := v.s.conv.PlanText(it); plan != "" {
+		parts = append(parts, msgText(v.markdown(plan)), widget.NewSeparator())
+	} else {
+		msg.SetText("Claude listed everything it will do above. " + msg.Text)
+	}
+	parts = append(parts, msg)
 	border := colAccent
 	if it.PermState == chat.PermPending {
 		run := widget.NewButtonWithIcon("Approve plan & run all", theme.ConfirmIcon(), func() { v.d.answerPlan(v.s, it, true) })
