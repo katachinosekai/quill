@@ -2,11 +2,11 @@ package session
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -63,13 +63,19 @@ func NewUUID() string {
 
 type Process struct {
 	opts     Options
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
+	pid      int
+	osProc   *os.Process
+	stdin    *os.File
+	stdout   *os.File
+	errPath  string
+	readDone chan struct{}
+	handing  atomic.Bool
+	leftover []byte
 	writeMu  sync.Mutex
 	onEvent  func(*protocol.Event)
 	done     chan struct{}
 	exitErr  error
-	stderr   *tailBuffer
+	stderr   string
 	seq      atomic.Int64
 	mu       sync.Mutex
 	waiters  map[string]chan *protocol.Event
@@ -89,35 +95,124 @@ func Start(opts Options, onEvent func(*protocol.Event)) (*Process, error) {
 	cmd.Dir = opts.Cwd
 	cmd.Env = append(os.Environ(), opts.Env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	stdin, err := cmd.StdinPipe()
+	inR, inW, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	outR, outW, err := os.Pipe()
 	if err != nil {
+		inR.Close()
+		inW.Close()
 		return nil, err
+	}
+	errFile, err := os.CreateTemp("", "quill-claude-*.log")
+	if err != nil {
+		inR.Close()
+		inW.Close()
+		outR.Close()
+		outW.Close()
+		return nil, err
+	}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = inR, outW, errFile
+	startErr := cmd.Start()
+	inR.Close()
+	outW.Close()
+	errFile.Close()
+	if startErr != nil {
+		inW.Close()
+		outR.Close()
+		os.Remove(errFile.Name())
+		return nil, startErr
 	}
 	p := &Process{
 		opts:    opts,
-		cmd:     cmd,
-		stdin:   stdin,
+		pid:     cmd.Process.Pid,
+		osProc:  cmd.Process,
+		stdin:   inW,
+		stdout:  outR,
+		errPath: errFile.Name(),
 		onEvent: onEvent,
 		done:    make(chan struct{}),
-		stderr:  &tailBuffer{max: 8192},
 		waiters: map[string]chan *protocol.Event{},
 	}
-	cmd.Stderr = p.stderr
-	if err := cmd.Start(); err != nil {
+	p.run(nil)
+	if err := p.write(protocol.Initialize(p.nextID("init"))); err != nil {
+		return p, err
+	}
+	return p, nil
+}
+
+type Handoff struct {
+	PID      int     `json:"pid"`
+	In       uintptr `json:"in"`
+	Out      uintptr `json:"out"`
+	ErrPath  string  `json:"errPath"`
+	Leftover []byte  `json:"leftover"`
+	Busy     bool    `json:"busy"`
+	Seq      int64   `json:"seq"`
+	Opts     Options `json:"opts"`
+}
+
+func (p *Process) Handoff() (Handoff, error) {
+	if p.Exited() {
+		return Handoff{}, ErrExited
+	}
+	p.handing.Store(true)
+	_ = p.stdout.SetReadDeadline(time.Now())
+	<-p.readDone
+	h := Handoff{PID: p.pid, ErrPath: p.errPath, Leftover: p.leftover, Busy: p.busy.Load(), Seq: p.seq.Load(), Opts: p.opts}
+	for _, f := range []*os.File{p.stdin, p.stdout} {
+		fd := f.Fd()
+		if _, _, e := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFD, 0); e != 0 {
+			return Handoff{}, e
+		}
+	}
+	h.In, h.Out = p.stdin.Fd(), p.stdout.Fd()
+	return h, nil
+}
+
+func Attach(h Handoff, onEvent func(*protocol.Event)) (*Process, error) {
+	proc, err := os.FindProcess(h.PID)
+	if err != nil {
 		return nil, err
 	}
-	readDone := make(chan struct{})
+	if proc.Signal(syscall.Signal(0)) != nil {
+		return nil, ErrExited
+	}
+	p := &Process{
+		opts:    h.Opts,
+		pid:     h.PID,
+		osProc:  proc,
+		stdin:   os.NewFile(h.In, "claude-stdin"),
+		stdout:  os.NewFile(h.Out, "claude-stdout"),
+		errPath: h.ErrPath,
+		onEvent: onEvent,
+		done:    make(chan struct{}),
+		waiters: map[string]chan *protocol.Event{},
+	}
+	p.seq.Store(h.Seq)
+	p.busy.Store(h.Busy)
+	p.run(h.Leftover)
+	return p, nil
+}
+
+func (p *Process) run(leftover []byte) {
+	p.readDone = make(chan struct{})
 	go func() {
-		defer close(readDone)
-		p.read(stdout)
+		defer close(p.readDone)
+		p.read(leftover)
 	}()
 	go func() {
-		<-readDone
-		err := cmd.Wait()
+		<-p.readDone
+		if p.handing.Load() {
+			return
+		}
+		state, err := p.osProc.Wait()
+		if err == nil && !state.Success() {
+			err = errors.New(state.String())
+		}
+		p.stderr = tailFile(p.errPath, 8192)
+		os.Remove(p.errPath)
 		p.closed.Store(true)
 		p.busy.Store(false)
 		p.exitErr = err
@@ -129,47 +224,97 @@ func Start(opts Options, onEvent func(*protocol.Event)) (*Process, error) {
 		p.mu.Unlock()
 		close(p.done)
 	}()
-	if err := p.write(protocol.Initialize(p.nextID("init"))); err != nil {
-		return p, err
-	}
-	return p, nil
 }
 
-func (p *Process) read(r io.Reader) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 1<<20), 256<<20)
-	for sc.Scan() {
-		ev, err := protocol.ParseLine(sc.Bytes())
+func tailFile(path string, max int64) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	off := max64(0, st.Size()-max)
+	b := make([]byte, st.Size()-off)
+	n, _ := f.ReadAt(b, off)
+	return string(b[:n])
+}
+
+func max64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func (p *Process) read(leftover []byte) {
+	buf := append([]byte(nil), leftover...)
+	chunk := make([]byte, 64<<10)
+	for {
+		for {
+			i := bytes.IndexByte(buf, '\n')
+			if i < 0 {
+				break
+			}
+			p.handleLine(buf[:i])
+			buf = buf[i+1:]
+		}
+		n, err := p.stdout.Read(chunk)
+		buf = append(buf, chunk[:n]...)
 		if err != nil {
-			continue
-		}
-		switch ev.Type {
-		case "control_response":
-			if ev.Response != nil && strings.HasPrefix(ev.Response.RequestID, "desk-init-") {
-				if cmds := protocol.ParseCommands(ev.Response.Response); len(cmds) > 0 {
-					p.commands.Store(&cmds)
+			if p.handing.Load() {
+				for {
+					i := bytes.IndexByte(buf, '\n')
+					if i < 0 {
+						break
+					}
+					p.handleLine(buf[:i])
+					buf = buf[i+1:]
 				}
+				p.leftover = append([]byte(nil), buf...)
+				return
 			}
-			if ev.Response != nil {
-				p.mu.Lock()
-				ch := p.waiters[ev.Response.RequestID]
-				delete(p.waiters, ev.Response.RequestID)
-				p.mu.Unlock()
-				if ch != nil {
-					ch <- ev
-					close(ch)
-				}
+			if len(bytes.TrimSpace(buf)) > 0 {
+				p.handleLine(buf)
 			}
-		case "control_request":
-			if ev.Request != nil && ev.Request.Subtype != "can_use_tool" {
-				_ = p.write(protocol.ControlErrorLine(ev.RequestID, "unsupported by Quill: "+ev.Request.Subtype))
-			}
-		case "result":
-			p.busy.Store(false)
+			return
 		}
-		if p.onEvent != nil {
-			p.onEvent(ev)
+	}
+}
+
+func (p *Process) handleLine(line []byte) {
+	ev, err := protocol.ParseLine(line)
+	if err != nil {
+		return
+	}
+	switch ev.Type {
+	case "control_response":
+		if ev.Response != nil && strings.HasPrefix(ev.Response.RequestID, "desk-init-") {
+			if cmds := protocol.ParseCommands(ev.Response.Response); len(cmds) > 0 {
+				p.commands.Store(&cmds)
+			}
 		}
+		if ev.Response != nil {
+			p.mu.Lock()
+			ch := p.waiters[ev.Response.RequestID]
+			delete(p.waiters, ev.Response.RequestID)
+			p.mu.Unlock()
+			if ch != nil {
+				ch <- ev
+				close(ch)
+			}
+		}
+	case "control_request":
+		if ev.Request != nil && ev.Request.Subtype != "can_use_tool" {
+			_ = p.write(protocol.ControlErrorLine(ev.RequestID, "unsupported by Quill: "+ev.Request.Subtype))
+		}
+	case "result":
+		p.busy.Store(false)
+	}
+	if p.onEvent != nil {
+		p.onEvent(ev)
 	}
 }
 
@@ -181,6 +326,9 @@ func (p *Process) write(b []byte) error {
 	if p.closed.Load() {
 		return ErrExited
 	}
+	if p.handing.Load() {
+		return ErrHandedOff
+	}
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	_, err := p.stdin.Write(b)
@@ -188,10 +336,7 @@ func (p *Process) write(b []byte) error {
 }
 
 func (p *Process) PID() int {
-	if p.cmd.Process == nil {
-		return 0
-	}
-	return p.cmd.Process.Pid
+	return p.pid
 }
 
 func (p *Process) Options() Options { return p.opts }
@@ -219,7 +364,12 @@ func (p *Process) ExitError() error {
 	return p.exitErr
 }
 
-func (p *Process) Stderr() string { return p.stderr.String() }
+func (p *Process) Stderr() string {
+	if p.Exited() {
+		return p.stderr
+	}
+	return tailFile(p.errPath, 8192)
+}
 
 func (p *Process) Send(text string) error {
 	if err := p.write(protocol.UserMessage(text)); err != nil {
@@ -260,8 +410,8 @@ func (p *Process) Request(ctx context.Context, build func(id string) []byte) (*p
 
 func (p *Process) Interrupt(ctx context.Context) error {
 	_, err := p.Request(ctx, protocol.Interrupt)
-	if err != nil && !errors.Is(err, ErrExited) && p.cmd.Process != nil {
-		_ = p.cmd.Process.Signal(syscall.SIGINT)
+	if err != nil && !errors.Is(err, ErrExited) && p.osProc != nil {
+		_ = p.osProc.Signal(syscall.SIGINT)
 	}
 	return err
 }
@@ -289,7 +439,12 @@ func (p *Process) Respond(requestID string, d protocol.Decision, req *protocol.C
 	return p.write(protocol.PermissionResponse(requestID, d, req, ""))
 }
 
+var ErrHandedOff = errors.New("session: process was handed to another Quill")
+
 func (p *Process) Stop(grace time.Duration) error {
+	if p.handing.Load() {
+		return ErrHandedOff
+	}
 	if p.Exited() {
 		return p.exitErr
 	}
@@ -315,28 +470,6 @@ func (p *Process) Stop(grace time.Duration) error {
 	_ = syscall.Kill(-p.PID(), syscall.SIGKILL)
 	<-p.done
 	return p.exitErr
-}
-
-type tailBuffer struct {
-	mu  sync.Mutex
-	buf []byte
-	max int
-}
-
-func (t *tailBuffer) Write(b []byte) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buf = append(t.buf, b...)
-	if len(t.buf) > t.max {
-		t.buf = t.buf[len(t.buf)-t.max:]
-	}
-	return len(b), nil
-}
-
-func (t *tailBuffer) String() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return string(t.buf)
 }
 
 func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, error) {

@@ -13,6 +13,9 @@ import (
 	"fyne.io/fyne/v2"
 
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
+	"github.com/katachinosekai/quill/internal/session"
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 const (
@@ -21,13 +24,14 @@ const (
 )
 
 type restoreState struct {
-	Session string   `json:"session"`
-	Draft   string   `json:"draft"`
-	Width   float32  `json:"width"`
-	Height  float32  `json:"height"`
-	ScrollY float32  `json:"scrollY"`
-	Hidden  bool     `json:"hidden"`
-	Running []string `json:"running"`
+	Session string          `json:"session"`
+	Draft   string          `json:"draft"`
+	Width   float32         `json:"width"`
+	Height  float32         `json:"height"`
+	ScrollY float32         `json:"scrollY"`
+	Hidden  bool            `json:"hidden"`
+	Running []string        `json:"running"`
+	Handed  []handedSession `json:"handed"`
 }
 
 type binWatch struct {
@@ -97,6 +101,17 @@ func (d *desk) watchBinary(ctx context.Context) {
 	}
 }
 
+type handedSession struct {
+	ID     string          `json:"id"`
+	Cwd    string          `json:"cwd"`
+	Model  string          `json:"model"`
+	Mode   string          `json:"mode"`
+	Title  string          `json:"title"`
+	RCOn   bool            `json:"rcOn"`
+	RCURL  string          `json:"rcUrl"`
+	Handle session.Handoff `json:"handle"`
+}
+
 func (d *desk) trySwap() {
 	if d.swapTo == "" || d.swapping || d.signingIn != nil {
 		return
@@ -104,17 +119,13 @@ func (d *desk) trySwap() {
 	if !d.forceSwap && time.Since(d.lastTyped) < typingQuiet {
 		return
 	}
-	for _, s := range d.runningSessions() {
-		if st := s.status(); st == stRunning || st == stWaiting {
-			return
-		}
-	}
 	for _, s := range d.sessions {
-		if s.takeover {
+		if s.takeover || s.running() && s.status() == stWaiting {
 			return
 		}
 	}
 	d.swapping = true
+	d.flushUI()
 	st := restoreState{Draft: d.input.Text, Hidden: d.hidden}
 	if d.current != nil && d.current.persisted {
 		st.Session = d.current.id
@@ -122,39 +133,47 @@ func (d *desk) trySwap() {
 	size := d.win.Canvas().Size()
 	st.Width, st.Height = size.Width, size.Height
 	st.ScrollY = d.chat.scroll.Offset.Y
+	var handed []*deskSession
+	for _, s := range d.runningSessions() {
+		h, err := s.proc.Handoff()
+		if err != nil {
+			if s.persisted {
+				st.Running = append(st.Running, s.id)
+			}
+			continue
+		}
+		st.Handed = append(st.Handed, handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL, Handle: h})
+		handed = append(handed, s)
+	}
 	b, _ := json.Marshal(st)
 	path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-restore-%d.json", os.Getpid()))
-	if os.WriteFile(path, b, 0o600) != nil {
-		d.swapping = false
-		return
-	}
-	running := d.runningSessions()
-	for _, s := range running {
-		if s.persisted {
-			st.Running = append(st.Running, s.id)
-		}
-	}
-	target := d.swapTo
-	go func() {
-		d.stopAll(running)
-		d.doWait(func() {
-			st.Draft = d.input.Text
-			if d.chat.scroll != nil {
-				st.ScrollY = d.chat.scroll.Offset.Y
-			}
-			b, _ := json.Marshal(st)
-			_ = os.WriteFile(path, b, 0o600)
-		})
+	err := os.WriteFile(path, b, 0o600)
+	if err == nil {
 		env := append(os.Environ(), restoreEnv+"="+path)
-		err := syscall.Exec(target, os.Args, env)
-		d.do(func() {
-			d.swapping = false
-			d.swapTo = ""
-			if err != nil && d.current != nil {
-				d.chat.update([]*chat.Item{d.current.conv.AddError("Could not switch to the new build: " + err.Error())})
-			}
-		})
-	}()
+		err = syscall.Exec(d.swapTo, os.Args, env)
+	}
+	d.swapping = false
+	d.swapTo = ""
+	d.forceSwap = false
+	for i, s := range handed {
+		d.reattach(s, st.Handed[i])
+	}
+	if d.current != nil {
+		d.chat.update([]*chat.Item{d.current.conv.AddError("Could not switch to the new build: " + err.Error())})
+	}
+}
+
+func (d *desk) reattach(s *deskSession, hs handedSession) bool {
+	p, err := session.Attach(hs.Handle, func(ev *protocol.Event) {
+		d.do(func() { d.handleEvent(s, ev) })
+	})
+	if err != nil {
+		return false
+	}
+	d.adopt(s, p)
+	s.rcOn, s.rcURL = hs.RCOn, hs.RCURL
+	s.conv.Busy = hs.Handle.Busy
+	return true
 }
 
 func takeRestore() *restoreState {
@@ -176,6 +195,25 @@ func takeRestore() *restoreState {
 }
 
 func (d *desk) applyRestore(st *restoreState) {
+	for _, hs := range st.Handed {
+		s := d.session(hs.ID)
+		if s == nil {
+			s = &deskSession{id: hs.ID, cwd: hs.Cwd, title: hs.Title, model: hs.Model, mode: hs.Mode, conv: chat.New(), loaded: true, persisted: true, created: time.Now()}
+			d.sessions[hs.ID] = s
+		}
+		s.model, s.mode = hs.Model, hs.Mode
+		if info, ok := d.infos[hs.ID]; ok {
+			if conv, err := transcript.Load(info.Path); err == nil && conv != nil {
+				s.conv, s.loaded, s.loadedMod = conv, true, info.ModTime
+				if conv.Cwd != "" {
+					s.cwd = conv.Cwd
+				}
+			}
+		}
+		if !d.reattach(s, hs) {
+			st.Running = append(st.Running, hs.ID)
+		}
+	}
 	for _, id := range st.Running {
 		if s := d.session(id); s != nil && !s.running() && s.terminal == nil {
 			if err := d.ensureProcess(s); err != nil {
@@ -183,7 +221,7 @@ func (d *desk) applyRestore(st *restoreState) {
 			}
 		}
 	}
-	if len(st.Running) > 0 {
+	if len(st.Running) > 0 || len(st.Handed) > 0 {
 		d.refreshSidebar()
 	}
 	if st.Draft != "" {

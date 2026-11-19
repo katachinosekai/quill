@@ -973,16 +973,20 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		s.failed = err.Error()
 		return err
 	}
+	d.adopt(s, p)
+	d.autoRemote(s)
+	return nil
+}
+
+func (d *desk) adopt(s *deskSession, p *session.Process) {
 	s.proc = p
 	s.persisted = true
 	d.ownPIDs.Store(p.PID(), true)
-	d.autoRemote(s)
 	go func() {
 		<-p.Done()
 		err := p.ExitError()
 		d.do(func() { d.handleExit(s, p, err) })
 	}()
-	return nil
 }
 
 func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {

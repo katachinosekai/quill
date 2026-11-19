@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/session"
 )
 
 func TestBinWatch(t *testing.T) {
@@ -169,5 +172,42 @@ func TestTextAlignSwitch(t *testing.T) {
 		if !h.d.center || h.d.chat.align() != fyne.TextAlignCenter {
 			t.Fatal("center alignment")
 		}
+	})
+}
+
+func TestSwapHandsOffAndReattachesOnFailure(t *testing.T) {
+	h := newHarness(t)
+	h.d.do = func(f func()) {
+		go func() {
+			uiMu.Lock()
+			defer uiMu.Unlock()
+			f()
+		}()
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("slow")
+	})
+	h.eventually("streaming", func() bool { return s.running() && s.proc.Busy() })
+	var before *session.Process
+	h.ui(func() {
+		before = s.proc
+		h.d.swapTo = "/nonexistent/quill"
+		h.d.forceSwap = true
+		h.d.trySwap()
+		if s.proc == before || !s.running() {
+			t.Fatal("session should be re-attached after a failed switch")
+		}
+		if s.proc.PID() != before.PID() {
+			t.Fatal("the same Claude process must keep running")
+		}
+		h.d.interrupt(s)
+	})
+	h.eventually("turn ends on the re-attached process", func() bool { return !s.proc.Busy() && !s.conv.Busy })
+	h.ui(func() { h.d.send("hello") })
+	h.eventually("next reply", func() bool {
+		it := lastItem(s)
+		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "hello")
 	})
 }

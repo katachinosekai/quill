@@ -2,10 +2,13 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,7 +22,70 @@ func TestMain(m *testing.M) {
 		fakeclaude.Run()
 		os.Exit(0)
 	}
+	if h := os.Getenv("QUILL_EXEC_STAGE2"); h != "" {
+		os.Exit(execStage2(h))
+	}
 	os.Exit(m.Run())
+}
+
+func execStage2(raw string) int {
+	var h Handoff
+	if json.Unmarshal([]byte(raw), &h) != nil {
+		return 3
+	}
+	got := make(chan *protocol.Event, 256)
+	p, err := Attach(h, func(ev *protocol.Event) { got <- ev })
+	if err != nil {
+		return 4
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if !p.Busy() || p.Interrupt(ctx) != nil {
+		return 5
+	}
+	_ = p.Send("after exec")
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case ev := <-got:
+			if ev.Type == "assistant" && strings.Contains(string(ev.MessageRaw), "after exec") {
+				_ = p.Stop(3 * time.Second)
+				return 0
+			}
+		case <-deadline:
+			return 6
+		}
+	}
+}
+
+func TestHandoffAcrossExec(t *testing.T) {
+	if os.Getenv("QUILL_EXEC_CHILD") == "" {
+		exe, _ := os.Executable()
+		cmd := exec.Command(exe, "-test.run=^TestHandoffAcrossExec$", "-test.v")
+		cmd.Env = append(os.Environ(), "QUILL_EXEC_CHILD=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("exec handoff failed: %v\n%s", err, out)
+		}
+		return
+	}
+	r := newRecorder()
+	exe, _ := os.Executable()
+	p, err := Start(Options{Binary: exe, Cwd: t.TempDir(), SessionID: "exec-1", Env: []string{"CLAUDE_DESK_FAKE=1"}}, r.on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Send("slow"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitFor(t, isType("stream_event"))
+	h, err := p.Handoff()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(h)
+	env := append(os.Environ(), "QUILL_EXEC_STAGE2="+string(b))
+	t.Fatal(syscall.Exec(exe, []string{exe}, env))
 }
 
 type recorder struct {
@@ -264,5 +330,49 @@ func TestFetchCommands(t *testing.T) {
 	cmds, err := FetchCommands(exe, t.TempDir(), 10*time.Second)
 	if err != nil || len(cmds) != 3 || cmds[0].Name != "compact" || cmds[0].ArgumentHint != "<instructions>" {
 		t.Fatalf("%+v %v", cmds, err)
+	}
+}
+
+func TestHandoffMidTurn(t *testing.T) {
+	r1 := newRecorder()
+	p := start(t, Options{SessionID: "hand-1"}, r1)
+	if err := p.Send("slow"); err != nil {
+		t.Fatal(err)
+	}
+	r1.waitFor(t, isType("stream_event"))
+	h, err := p.Handoff()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Exited() {
+		t.Fatal("the old handle must not report an exit after a handoff")
+	}
+	r2 := newRecorder()
+	q, err := Attach(h, r2.on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { q.Stop(2 * time.Second) })
+	r2.waitFor(t, isType("stream_event"))
+	if !q.Busy() {
+		t.Fatal("busy state should carry over")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := q.Interrupt(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r2.waitFor(t, isType("result"))
+	if err := q.Send("hello"); err != nil {
+		t.Fatal(err)
+	}
+	r2.waitFor(t, func(ev *protocol.Event) bool {
+		return ev.Type == "result"
+	})
+	if err := q.Stop(3 * time.Second); err != nil && !strings.Contains(err.Error(), "signal") {
+		t.Logf("stop: %v", err)
+	}
+	if !q.Exited() {
+		t.Fatal("attached process should report its exit")
 	}
 }
