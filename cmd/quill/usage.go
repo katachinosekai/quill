@@ -31,7 +31,6 @@ type usagePanel struct {
 	asOf    *canvas.Text
 	sess    *widget.Label
 	today   *widget.Label
-	week7   *widget.Label
 }
 
 func newUsagePanel(d *desk) *usagePanel {
@@ -47,7 +46,7 @@ func newUsagePanel(d *desk) *usagePanel {
 		l.SizeName = theme.SizeNameCaptionText
 		return l
 	}
-	u.sess, u.today, u.week7 = label(), label(), label()
+	u.sess, u.today = label(), label()
 	head := func(s string) fyne.CanvasObject {
 		t := canvas.NewText(s, colText)
 		t.TextStyle.Bold = true
@@ -59,7 +58,7 @@ func newUsagePanel(d *desk) *usagePanel {
 		mutedText("5-hour session", 11), u.five, u.fiveTxt,
 		mutedText("Weekly", 11), u.week, u.weekTxt, u.asOf,
 		padTop(8), head("This session"), u.sess,
-		padTop(8), head("All sessions"), u.today, u.week7,
+		padTop(8), head("All sessions"), u.today,
 	)
 	r := canvas.NewRectangle(colCard)
 	r.CornerRadius = 12
@@ -104,10 +103,6 @@ func tok(n int64) string {
 	return kfmt(int(n))
 }
 
-func tokLine(t transcript.Tokens) string {
-	return fmt.Sprintf("%s in · %s out\n%s cache read · %s cache write", tok(t.In), tok(t.Out), tok(t.CacheRead), tok(t.CacheWrite))
-}
-
 func resetText(unix int64) string {
 	if unix <= 0 {
 		return ""
@@ -144,16 +139,13 @@ func (u *usagePanel) update() {
 	sess := "No session open"
 	if s := d.current; s != nil {
 		info := d.infos[s.id]
-		sess = tokLine(info.Usage)
+		sess = tok(info.Usage.Total()) + " tokens"
 		c := s.conv.Stats
 		if c.ContextUsed > 0 {
-			sess += "\ncontext " + kfmt(c.ContextUsed)
+			sess += "  ·  context " + kfmt(c.ContextUsed)
 			if c.ContextMax > 0 {
-				sess += fmt.Sprintf(" / %s (%d%%)", kfmt(c.ContextMax), c.ContextUsed*100/c.ContextMax)
+				sess += fmt.Sprintf(" (%d%%)", c.ContextUsed*100/c.ContextMax)
 			}
-		}
-		if c.CostUSD > 0 {
-			sess += fmt.Sprintf("\n$%.4f this run", c.CostUSD)
 		}
 	}
 	u.sess.SetText(sess)
@@ -175,8 +167,7 @@ func (u *usagePanel) update() {
 			}
 		}
 	}
-	u.today.SetText("Today: " + tok(today.Total()) + " tokens\n" + tokLine(today))
-	u.week7.SetText("Last 7 days: " + tok(week.Total()) + " tokens")
+	u.today.SetText("Today " + tok(today.Total()) + "  ·  7 days " + tok(week.Total()))
 }
 
 type usageLayout struct{ d *desk }
