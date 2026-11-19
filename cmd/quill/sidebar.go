@@ -209,3 +209,29 @@ func groupByFolder(es []sideEntry) []folderGroup {
 	})
 	return groups
 }
+
+func sortRecent(es []sideEntry) []sideEntry {
+	sort.SliceStable(es, func(i, j int) bool { return es[i].last.After(es[j].last) })
+	return es
+}
+
+func (d *desk) sortedFolders(custom map[string][]sideEntry) []orgFolder {
+	latest := func(f orgFolder) time.Time {
+		var t time.Time
+		for _, e := range custom[folderPrefix+f.ID] {
+			if e.last.After(t) {
+				t = e.last
+			}
+		}
+		return t
+	}
+	out := append([]orgFolder(nil), d.org.Folders...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := latest(out[i]), latest(out[j])
+		if !a.Equal(b) {
+			return a.After(b)
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}

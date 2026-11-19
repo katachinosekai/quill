@@ -586,3 +586,101 @@ func TestTypingContinuesWithCommandList(t *testing.T) {
 		}
 	})
 }
+
+func TestSidebarOrganisation(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.org.Titles[editsID] = "My rename"
+		h.d.saveOrg()
+		if title, _, _ := h.d.rowText(editsID); title != "My rename" {
+			t.Fatalf("rename: %q", title)
+		}
+		h.d.setPlacement(editsID, placeArchive)
+		if f := folderRow(h.d.rows, "archive"); f == nil || f.count != 1 {
+			t.Fatalf("set archive: %+v", h.d.rows)
+		}
+		h.d.org.Folders = append(h.d.org.Folders, orgFolder{ID: "x", Name: "Work"})
+		h.d.saveOrg()
+		if f := folderRow(h.d.rows, "f:x"); f == nil || f.count != 0 || f.header != "Work" {
+			t.Fatalf("empty custom folder should show: %+v", h.d.rows)
+		}
+		h.d.dropOn(editsID, *folderRow(h.d.rows, "f:x"))
+		if f := folderRow(h.d.rows, "f:x"); f == nil || f.count != 1 || !hasRow(h.d.rows, editsID) {
+			t.Fatalf("drop into folder: %+v", h.d.rows)
+		}
+		h.d.created[smokeID] = true
+		h.d.rebuildRows()
+		var target sideRow
+		for _, r := range h.d.rows {
+			if r.id == editsID {
+				target = r
+			}
+		}
+		h.d.dropOn(smokeID, target)
+		if f := folderRow(h.d.rows, "f:x"); f == nil || f.count != 2 {
+			t.Fatalf("drop onto a session joins its folder: %+v", h.d.rows)
+		}
+		h.d.org.Names["inactive"] = "Later"
+		h.d.setPlacement(smokeID, placeInactive)
+		if f := folderRow(h.d.rows, "inactive"); f == nil || f.header != "Later" {
+			t.Fatalf("renamed built-in folder: %+v", h.d.rows)
+		}
+		h.d.setPlacement(editsID, "")
+		h.d.loadOrg()
+		if h.d.org.Titles[editsID] != "My rename" || h.d.org.Place[smokeID] != placeInactive {
+			t.Fatal("organisation should persist in preferences")
+		}
+	})
+}
+
+func TestResumeAndEndSession(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() { h.d.open(editsID) })
+	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
+	h.ui(func() { h.d.resumeSession(editsID) })
+	h.eventually("resumed", func() bool { return h.d.sessions[editsID].running() })
+	h.ui(func() { h.d.endSession(editsID) })
+	h.eventually("ended", func() bool { return !h.d.sessions[editsID].running() })
+}
+
+func TestSidebarDragAndMenus(t *testing.T) {
+	h := newHarness(t)
+	var item, folder *sideItem
+	h.ui(func() {
+		h.d.org.Folders = append(h.d.org.Folders, orgFolder{ID: "y", Name: "Drop here"})
+		h.d.saveOrg()
+		h.d.list.Refresh()
+	})
+	h.eventually("rows rendered", func() bool {
+		item, folder = nil, nil
+		for _, it := range h.d.sideItems {
+			r, ok := it.row()
+			if !ok || !it.Visible() {
+				continue
+			}
+			if r.id == editsID {
+				item = it
+			}
+			if r.key == "f:y" {
+				folder = it
+			}
+		}
+		return item != nil && folder != nil
+	})
+	h.ui(func() {
+		test.TapSecondary(item)
+		test.TapSecondary(folder)
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+		at := fyne.CurrentApp().Driver().AbsolutePositionForObject(folder).Add(fyne.NewPos(20, 5))
+		item.Dragged(&fyne.DragEvent{PointEvent: fyne.PointEvent{AbsolutePosition: at}, Dragged: fyne.Delta{DY: 1}})
+		if !folder.hl.Visible() {
+			t.Fatal("drop target should be highlighted")
+		}
+		item.DragEnd()
+		if h.d.org.Place[editsID] != "f:y" || folder.hl.Visible() {
+			t.Fatalf("drag should move the session: %q", h.d.org.Place[editsID])
+		}
+	})
+}

@@ -66,4 +66,9 @@ func TestRealSidebarProbe(t *testing.T) {
 	}
 	time.Sleep(300 * time.Millisecond)
 	shot(t, w, out, "real-sidebar.png")
+	if os.Getenv("QUILL_PROBE_MENU") != "" && d.current != nil {
+		d.sessionMenu(d.current.id, fyne.NewPos(180, 170))
+		time.Sleep(300 * time.Millisecond)
+		shot(t, w, out, "real-menu.png")
+	}
 }

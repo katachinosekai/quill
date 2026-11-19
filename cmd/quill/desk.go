@@ -113,6 +113,7 @@ type config struct {
 type sideRow struct {
 	header string
 	id     string
+	parent string
 	key    string
 	depth  int
 	count  int
@@ -182,6 +183,10 @@ type desk struct {
 	sideOff       bool
 	sideBody      *fyne.Container
 	folderOpen    map[string]bool
+	org           sideOrg
+	sideItems     []*sideItem
+	dragID        string
+	dragAt        fyne.Position
 	created       map[string]bool
 	suppress      bool
 	refreshMu     sync.Mutex
@@ -207,6 +212,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		do:       fyne.Do,
 		doWait:   fyne.DoAndWait,
 	}
+	d.loadOrg()
 	for _, id := range a.Preferences().StringList("createdSessions") {
 		d.created[id] = true
 	}
@@ -280,13 +286,15 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			dt := dot(color.Transparent)
 			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(10, 10, dt))), nil,
 				container.New(&tightVBox{}, title, container.NewPadded(meta)))
-			return container.NewStack(folder, row)
+			return d.newSideItem(rows, container.NewStack(folder, row))
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			if id >= len(*rows) {
 				return
 			}
-			st := o.(*fyne.Container)
+			item := o.(*sideItem)
+			item.idx = id
+			st := item.content.(*fyne.Container)
 			folder := st.Objects[0].(*fyne.Container)
 			row := st.Objects[1].(*fyne.Container)
 			r := (*rows)[id]
@@ -385,6 +393,9 @@ func (d *desk) rowText(id string) (string, string, status) {
 	s := d.sessions[id]
 	info, ok := d.infos[id]
 	title := info.Title
+	if t := d.org.Titles[id]; t != "" {
+		title = t
+	}
 	var last time.Time
 	msgs := info.Messages
 	if ok {
@@ -464,11 +475,23 @@ func (d *desk) rebuildRows() {
 		entries = append(entries, sideEntry{info.ID, info.Cwd, info.Last})
 	}
 	var active, idle, old, auto []sideEntry
+	custom := map[string][]sideEntry{}
 	for _, e := range entries {
 		if q != "" && !d.matches(e.id, e.cwd, q) {
 			continue
 		}
+		p := d.placement(e.id)
 		switch {
+		case strings.HasPrefix(p, folderPrefix):
+			custom[p] = append(custom[p], e)
+		case p == placeActive:
+			active = append(active, e)
+		case p == placeInactive:
+			idle = append(idle, e)
+		case p == placeArchive:
+			old = append(old, e)
+		case p == placeAuto:
+			auto = append(auto, e)
 		case d.isAuto(e.id):
 			auto = append(auto, e)
 		case q != "" || d.isActive(e.id, e.last):
@@ -480,6 +503,17 @@ func (d *desk) rebuildRows() {
 		}
 	}
 	rows := d.projectRows(active, 0, "a:", q != "")
+	for _, f := range d.sortedFolders(custom) {
+		key := folderPrefix + f.ID
+		es := custom[key]
+		open := q != "" || d.isOpen(key)
+		rows = append(rows, sideRow{header: f.Name, key: key, count: len(es), open: open})
+		if open {
+			for _, e := range sortRecent(es) {
+				rows = append(rows, sideRow{id: e.id, depth: 1, parent: key})
+			}
+		}
+	}
 	for _, g := range []struct {
 		key, title string
 		es         []sideEntry
@@ -488,7 +522,7 @@ func (d *desk) rebuildRows() {
 			continue
 		}
 		open := q != "" || d.isOpen(g.key)
-		rows = append(rows, sideRow{header: g.title, key: g.key, count: len(g.es), open: open})
+		rows = append(rows, sideRow{header: d.folderTitle(g.key, g.title), key: g.key, count: len(g.es), open: open})
 		if open {
 			rows = append(rows, d.projectRows(g.es, 1, g.key+":", q != "")...)
 		}
@@ -518,10 +552,11 @@ func (d *desk) projectRows(es []sideEntry, depth int, prefix string, forceOpen b
 	for _, g := range groupByFolder(es) {
 		key := prefix + g.cwd
 		open := forceOpen || d.isOpen(key)
-		rows = append(rows, sideRow{header: tildePath(g.cwd), key: key, depth: depth, count: len(g.items), open: open})
+		rows = append(rows, sideRow{header: d.folderTitle(key, tildePath(g.cwd)), key: key, depth: depth, count: len(g.items), open: open})
 		if open {
+			parent := strings.TrimSuffix(prefix, ":")
 			for _, e := range g.items {
-				rows = append(rows, sideRow{id: e.id, depth: depth + 1})
+				rows = append(rows, sideRow{id: e.id, depth: depth + 1, parent: parent})
 			}
 		}
 	}
