@@ -131,50 +131,58 @@ type desk struct {
 	current  *deskSession
 	ownPIDs  sync.Map
 
-	rows       []sideRow
-	list       *widget.List
-	search     *widget.Entry
-	chat       *chatView
-	title      *widget.Label
-	subtitle   *canvas.Text
-	note       *widget.Label
-	rcCheck    *widget.Check
-	rcLink     *widget.Hyperlink
-	input      *sendEntry
-	modelSel   *widget.Select
-	modeSel    *widget.Select
-	folder     *canvas.Text
-	stats      *canvas.Text
-	stopBtn    *widget.Button
-	sendBtn    *widget.Button
-	acctBtn    *widget.Button
-	acct       account.Status
-	acctErr    string
-	signingIn  context.CancelFunc
-	swapTo     string
-	swapping   bool
-	restore    *restoreState
-	cmdList    []protocol.Command
-	cmds       *cmdMenu
-	sidebar    fyne.CanvasObject
-	background bool
-	hidden     bool
-	split      *container.Split
-	root       *fyne.Container
-	expandBtn  *widget.Button
-	sideOff    bool
-	autoList   *widget.List
-	autoRows   []sideRow
-	autoBtn    *widget.Button
-	autoArea   *fyne.Container
-	autoOpen   bool
-	created    map[string]bool
-	suppress   bool
-	refreshMu  sync.Mutex
-	headerBox  *fyne.Container
-	mainPane   *fyne.Container
-	do         func(func())
-	doWait     func(func())
+	rows          []sideRow
+	list          *widget.List
+	search        *widget.Entry
+	chat          *chatView
+	title         *widget.Label
+	subtitle      *canvas.Text
+	note          *widget.Label
+	rcCheck       *widget.Check
+	rcLink        *widget.Hyperlink
+	input         *sendEntry
+	modelSel      *widget.Select
+	modeSel       *widget.Select
+	folder        *canvas.Text
+	stats         *canvas.Text
+	stopBtn       *widget.Button
+	sendBtn       *widget.Button
+	acctBtn       *widget.Button
+	acct          account.Status
+	acctErr       string
+	signingIn     context.CancelFunc
+	swapTo        string
+	swapping      bool
+	restore       *restoreState
+	cmdList       []protocol.Command
+	pending       []*chat.Item
+	pendingSeen   map[*chat.Item]bool
+	pendingChrome bool
+	pendingFor    *deskSession
+	act           *activity
+	flushTimer    *time.Timer
+	cmds          *cmdMenu
+	sidebar       fyne.CanvasObject
+	background    bool
+	hidden        bool
+	sideFrac      float32
+	sideAnim      *fyne.Animation
+	animate       bool
+	root          *fyne.Container
+	expandBtn     *tapRow
+	sideOff       bool
+	autoList      *widget.List
+	autoRows      []sideRow
+	autoBtn       *widget.Button
+	autoArea      *fyne.Container
+	autoOpen      bool
+	created       map[string]bool
+	suppress      bool
+	refreshMu     sync.Mutex
+	headerBox     *fyne.Container
+	mainPane      *fyne.Container
+	do            func(func())
+	doWait        func(func())
 }
 
 func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
@@ -201,41 +209,6 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 func (d *desk) isAuto(id string) bool {
 	info, ok := d.infos[id]
 	return ok && strings.HasPrefix(info.Entrypoint, "sdk") && !d.created[id]
-}
-
-func (d *desk) sidebarWidth() float32 {
-	if d.sidebar == nil || d.sideOff {
-		return 0
-	}
-	return d.sidebar.Size().Width + theme.Padding()
-}
-
-func (d *desk) build() fyne.CanvasObject {
-	d.chat = newChatView(d)
-	d.sidebar = d.buildSidebar()
-	d.split = container.NewHSplit(d.sidebar, d.buildMain())
-	d.split.Offset = 0.27
-	d.root = container.NewStack(d.split)
-	if d.app.Preferences().Bool("sidebarHidden") {
-		d.setSidebar(false)
-	}
-	return d.root
-}
-
-func (d *desk) setSidebar(show bool) {
-	d.sideOff = !show
-	d.app.Preferences().SetBool("sidebarHidden", !show)
-	if show {
-		d.split.Leading = d.sidebar
-		d.split.Trailing = d.mainPane
-		d.root.Objects = []fyne.CanvasObject{d.split}
-		d.expandBtn.Hide()
-	} else {
-		d.root.Objects = []fyne.CanvasObject{d.mainPane}
-		d.expandBtn.Show()
-	}
-	d.split.Refresh()
-	d.root.Refresh()
 }
 
 func (d *desk) buildSidebar() fyne.CanvasObject {
@@ -271,8 +244,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName := canvas.NewText("Quill", colText)
 	brandName.TextSize = 18
 	brandName.TextStyle.Bold = true
-	collapse := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() { d.setSidebar(false) })
-	collapse.Importance = widget.LowImportance
+	collapse := smallArrow(theme.NavigateBackIcon(), func() { d.setSidebar(false) })
 	brand := container.NewBorder(nil, nil, container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName)), container.NewCenter(collapse))
 	top := container.NewVBox(brand, newBtn, d.search)
 	bottom := container.NewVBox(autoBox, widget.NewSeparator(), centerChk, legend)
@@ -569,8 +541,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	})
 	d.rcCheck.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
-	d.expandBtn = widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() { d.setSidebar(true) })
-	d.expandBtn.Importance = widget.LowImportance
+	d.expandBtn = smallArrow(theme.NavigateNextIcon(), func() { d.setSidebar(true) })
 	d.expandBtn.Hide()
 	header := container.NewBorder(nil, nil, container.NewCenter(d.expandBtn), container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
@@ -582,7 +553,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.onKey = d.cmds.key
 	d.input.menuOpen = d.cmds.visible
 	d.input.OnChanged = d.cmds.update
-	d.input.hint = "Message Claude (Enter to send, Shift+Enter for a new line, / for commands)"
+	d.input.onSendNow = d.sendNow
+	d.input.hint = "Message Claude  ·  Enter send  ·  Ctrl+Enter stop & send  ·  Shift+Enter new line  ·  / commands"
 	d.input.SetPlaceHolder(d.input.hint)
 	d.modelSel = widget.NewSelect(modelChoices, func(v string) {
 		if d.suppress || d.current == nil {
@@ -609,7 +581,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	controls := container.NewHBox(d.modelSel, d.modeSel, container.NewCenter(d.folder), layout.NewSpacer(), d.stopBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(layout.NewSpacer(), d.sendBtn), d.input))
 	statsRow := container.New(&clipLayout{}, d.stats)
-	bottom := container.NewPadded(windowCentered(chatMaxWidth, d.sidebarWidth, container.NewVBox(inputCard, statsRow)))
+	d.act = newActivity(d)
+	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(inputCard, d.act.root, statsRow)))
 	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, d.chat.root)
 	d.updateChrome()
 	return d.mainPane
@@ -764,6 +737,7 @@ func (d *desk) open(id string) {
 	if d.cmds != nil {
 		d.cmds.hide()
 	}
+	d.flushUI()
 	s := d.session(id)
 	if s == nil {
 		return
@@ -932,14 +906,60 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
 	if d.current == s {
-		d.chat.update(items)
-		d.updateChrome()
+		d.queueUI(s, items)
+	} else {
+		d.chat.forget(s)
 	}
-	if ev.Type == "result" || ev.Type == "control_request" || ev.Type == "system" && ev.Subtype == "init" {
+	urgent := ev.Type == "result" || ev.Type == "control_request" || ev.Type == "prompt_suggestion" || ev.Type == "system" && ev.Subtype == "init"
+	if urgent {
+		d.flushUI()
 		d.refreshSidebar()
 	}
 	if ev.Type == "result" {
 		d.trySwap()
+	}
+}
+
+const uiFrame = 50 * time.Millisecond
+
+func (d *desk) queueUI(s *deskSession, items []*chat.Item) {
+	if d.pendingFor != s {
+		d.flushUI()
+		d.pendingFor = s
+	}
+	if d.pendingSeen == nil {
+		d.pendingSeen = map[*chat.Item]bool{}
+	}
+	for _, it := range items {
+		if !d.pendingSeen[it] {
+			d.pendingSeen[it] = true
+			d.pending = append(d.pending, it)
+		}
+	}
+	d.pendingChrome = true
+	if d.flushTimer == nil {
+		d.flushTimer = time.AfterFunc(uiFrame, func() { d.do(d.flushUI) })
+	}
+}
+
+func (d *desk) flushUI() {
+	if d.flushTimer != nil {
+		d.flushTimer.Stop()
+		d.flushTimer = nil
+	}
+	items, owner := d.pending, d.pendingFor
+	d.pending, d.pendingSeen, d.pendingFor = nil, nil, nil
+	if owner != nil && d.chat.s == owner {
+		d.chat.update(items)
+	}
+	if owner != nil && d.act.v.s == owner {
+		d.act.update(items)
+	} else if owner != nil {
+		d.chat.forget(owner)
+	}
+	if d.pendingChrome {
+		d.pendingChrome = false
+		d.updateChrome()
 	}
 }
 
@@ -1089,6 +1109,33 @@ func (d *desk) chatFor(s *deskSession, items []*chat.Item) {
 	if d.current == s {
 		d.chat.update(items)
 	}
+}
+
+func (d *desk) sendNow(text string) {
+	s := d.current
+	if s == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	p := s.proc
+	if p == nil || p.Exited() || !(s.conv.Busy || p.Busy()) {
+		d.send(text)
+		return
+	}
+	d.input.SetText("")
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = p.Interrupt(ctx)
+		d.do(func() {
+			prev := d.current
+			d.current = s
+			d.send(text)
+			if prev != s {
+				d.current = prev
+				d.updateChrome()
+			}
+		})
+	}()
 }
 
 func (d *desk) interrupt(s *deskSession) {

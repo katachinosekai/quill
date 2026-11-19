@@ -20,7 +20,7 @@ import (
 
 const (
 	chatMaxWidth  = 760
-	historyWindow = 200
+	historyWindow = 80
 	maxResultLen  = 12000
 	maxDiffLines  = 2000
 	diffPreview   = 400
@@ -43,20 +43,97 @@ type chatView struct {
 	shownFrom   int
 	placeholder bool
 	root        fyne.CanvasObject
+	col         *fyne.Container
+	frame       *fyne.Container
+	inner       *fyne.Container
+	steps       bool
+	cache       map[*deskSession]*sessView
+	order       []*deskSession
 }
+
+type sessView struct {
+	box         *fyne.Container
+	views       map[int]*itemView
+	shownFrom   int
+	placeholder bool
+	conv        *chat.Conversation
+	scrollY     float32
+	center      bool
+}
+
+const cachedViews = 8
 
 func newChatView(d *desk) *chatView {
 	v := &chatView{d: d, views: map[int]*itemView{}}
 	v.box = container.NewVBox()
-	v.scroll = container.NewVScroll(container.NewPadded(windowCentered(chatMaxWidth, v.d.sidebarWidth, v.box)))
-	v.root = v.scroll
+	v.cache = map[*deskSession]*sessView{}
+	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
+	v.col = windowCentered(d.chatWidth, d.sidebarWidth, v.inner)
+	v.scroll = container.NewVScroll(container.NewPadded(v.col))
+	bubble := canvas.NewRectangle(color.NRGBA{0xff, 0xff, 0xff, 0x05})
+	bubble.StrokeColor = color.NRGBA{0xff, 0xff, 0xff, 0x16}
+	bubble.StrokeWidth = 1
+	bubble.CornerRadius = 16
+	v.frame = windowCentered(d.chatWidth, d.sidebarWidth, bubble)
+	v.root = container.NewStack(container.New(layout.NewCustomPaddedLayout(8, 8, 4, 4), container.NewPadded(v.frame)), v.scroll)
 	return v
 }
 
+func (v *chatView) relayout() {
+	v.frame.Refresh()
+	v.col.Refresh()
+	v.scroll.Refresh()
+}
+
+func (v *chatView) stash() {
+	if v.s == nil {
+		return
+	}
+	sv := &sessView{box: v.box, views: v.views, shownFrom: v.shownFrom, placeholder: v.placeholder, conv: v.s.conv, scrollY: v.scroll.Offset.Y, center: v.d.center}
+	if _, ok := v.cache[v.s]; !ok {
+		v.order = append(v.order, v.s)
+	}
+	v.cache[v.s] = sv
+	for len(v.order) > cachedViews {
+		delete(v.cache, v.order[0])
+		v.order = v.order[1:]
+	}
+}
+
+func (v *chatView) forget(s *deskSession) {
+	if s == v.s {
+		return
+	}
+	delete(v.cache, s)
+}
+
+func (v *chatView) setBox(b *fyne.Container) {
+	v.box = b
+	v.inner.Objects = []fyne.CanvasObject{b}
+	v.inner.Refresh()
+}
+
 func (v *chatView) show(s *deskSession) {
+	if v.d.act != nil {
+		v.d.act.show(s)
+	}
+	if s != v.s {
+		v.stash()
+	}
+	if s != nil {
+		if sv, ok := v.cache[s]; ok && s != v.s && sv.conv == s.conv && sv.center == v.d.center {
+			v.s = s
+			v.views, v.shownFrom, v.placeholder = sv.views, sv.shownFrom, sv.placeholder
+			v.setBox(sv.box)
+			v.scroll.Offset = fyne.NewPos(0, sv.scrollY)
+			v.scroll.Refresh()
+			return
+		}
+		delete(v.cache, s)
+	}
 	v.s = s
 	v.views = map[int]*itemView{}
-	v.box.RemoveAll()
+	v.setBox(container.NewVBox())
 	if s == nil {
 		v.box.Add(v.emptyState())
 		v.box.Refresh()
@@ -183,25 +260,29 @@ func (v *chatView) align() fyne.TextAlign {
 func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
-		l := widget.NewLabel(it.Text)
-		l.Selectable = true
-		l.Wrapping = fyne.TextWrapWord
-		l.Alignment = v.align()
-		return bgPad(colBubble, 14, 4, 10, l)
+		return bgPad(colBubble, 14, 4, 10, v.markdown(it.Text))
 	case chat.Assistant:
 		return v.markdown(it.Text)
 	case chat.Tool:
+		if !v.steps {
+			return v.stepLine(it)
+		}
 		return v.renderTool(it, iv)
 	case chat.Permission:
 		return v.renderPermission(it)
 	case chat.Thinking:
+		if !v.steps {
+			return v.stepLine(it)
+		}
 		return v.renderThinking(it, iv)
 	case chat.Notice:
-		t := canvas.NewText(it.Text, colMuted)
-		t.TextStyle.Italic = true
-		t.TextSize = 12
-		t.Alignment = fyne.TextAlignCenter
-		return t
+		l := widget.NewLabel(it.Text)
+		l.Wrapping = fyne.TextWrapWord
+		l.Alignment = fyne.TextAlignCenter
+		l.TextStyle.Italic = true
+		l.Importance = widget.MediumImportance
+		l.SizeName = theme.SizeNameCaptionText
+		return l
 	case chat.Error:
 		l := widget.NewLabel(it.Text)
 		l.Wrapping = fyne.TextWrapWord
@@ -272,13 +353,10 @@ func (v *chatView) renderTool(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	if iv.expanded {
 		icon = theme.MenuDropDownIcon()
 	}
-	head := widget.NewButtonWithIcon(toolHeader(it), icon, nil)
-	head.Alignment = widget.ButtonAlignLeading
-	head.Importance = widget.LowImportance
-	head.OnTapped = func() {
+	head := foldHead(toolHeader(it), icon, func() {
 		iv.expanded = !iv.expanded
 		v.refreshItem(it, iv)
-	}
+	})
 	parts := []fyne.CanvasObject{head}
 	if iv.expanded {
 		if len(it.Diff) > 0 {
@@ -294,11 +372,13 @@ func (v *chatView) renderTool(it *chat.Item, iv *itemView) fyne.CanvasObject {
 			if strings.TrimSpace(res) == "" {
 				res = "(no output)"
 			}
-			r := mono(res)
 			if it.ResultError {
+				r := mono(res)
 				r.Importance = widget.DangerImportance
+				parts = append(parts, r)
+			} else {
+				parts = append(parts, v.monoFold(res, it, iv))
 			}
-			parts = append(parts, r)
 		}
 	}
 	box := container.NewVBox(parts...)
@@ -327,6 +407,31 @@ func toolInputText(it *chat.Item) string {
 		s = s[:maxResultLen] + "\n... (truncated)"
 	}
 	return s
+}
+
+const toolPreviewLines = 60
+
+func (v *chatView) monoFold(s string, it *chat.Item, iv *itemView) fyne.CanvasObject {
+	lines := strings.Count(s, "\n") + 1
+	if iv.full || lines <= toolPreviewLines {
+		return mono(s)
+	}
+	cut := s
+	for i, n := 0, 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			n++
+			if n == toolPreviewLines {
+				cut = s[:i]
+				break
+			}
+		}
+	}
+	more := widget.NewButton(fmt.Sprintf("Show all %d lines", lines), func() {
+		iv.full = true
+		v.refreshItem(it, iv)
+	})
+	more.Importance = widget.LowImportance
+	return container.NewVBox(mono(cut), container.NewHBox(more))
 }
 
 func mono(s string) *widget.Label {
@@ -487,13 +592,10 @@ func (v *chatView) renderThinking(it *chat.Item, iv *itemView) fyne.CanvasObject
 	if it.Streaming {
 		label = "Thinking..."
 	}
-	head := widget.NewButtonWithIcon(label, icon, nil)
-	head.Alignment = widget.ButtonAlignLeading
-	head.Importance = widget.LowImportance
-	head.OnTapped = func() {
+	head := foldHead(label, icon, func() {
 		iv.expanded = !iv.expanded
 		v.refreshItem(it, iv)
-	}
+	})
 	if !iv.expanded {
 		return head
 	}
@@ -529,7 +631,7 @@ func spaced(k chat.Kind, obj fyne.CanvasObject) fyne.CanvasObject {
 	case chat.Assistant:
 		top, bottom = 4, 10
 	case chat.Tool, chat.Thinking:
-		top, bottom = 2, 2
+		top, bottom = 0, 0
 	case chat.Notice:
 		top, bottom = 8, 8
 	}
@@ -554,3 +656,36 @@ func (c *wrapCode) Update(o fyne.CanvasObject) {
 func (c *wrapCode) Select(_, _ fyne.Position) {}
 func (c *wrapCode) SelectedText() string      { return "" }
 func (c *wrapCode) Unselect()                 {}
+
+func foldHead(text string, icon fyne.Resource, onTap func()) fyne.CanvasObject {
+	l := widget.NewLabel(text)
+	l.Wrapping = fyne.TextWrapWord
+	l.TextStyle.Bold = true
+	return newTapRow(container.NewBorder(nil, nil, container.NewCenter(sized(18, 18, widget.NewIcon(icon))), nil, l), onTap)
+}
+
+func (v *chatView) stepLine(it *chat.Item) fyne.CanvasObject {
+	if it.Kind == chat.Thinking && it.Text == "" && !it.Streaming {
+		return container.NewWithoutLayout()
+	}
+	text := "✻ Thought"
+	if it.Kind == chat.Tool {
+		mark := "…"
+		switch {
+		case it.ResultError:
+			mark = "✗"
+		case it.HasResult:
+			mark = "✓"
+		}
+		text = mark + "  " + toolHeader(it)
+	}
+	l := widget.NewLabel(text)
+	l.Wrapping = fyne.TextWrapWord
+	l.Importance = widget.MediumImportance
+	l.SizeName = theme.SizeNameCaptionText
+	return newTapRow(l, func() {
+		if v.d.act != nil {
+			v.d.act.focus(it)
+		}
+	})
+}

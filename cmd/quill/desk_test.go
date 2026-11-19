@@ -12,6 +12,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
@@ -444,12 +445,48 @@ func TestSidebarCollapse(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
 		h.d.setSidebar(false)
-		if h.d.root.Objects[0] != h.d.mainPane || !h.d.expandBtn.Visible() || h.d.sidebarWidth() != 0 {
+		if h.d.sidebar.Visible() || !h.d.expandBtn.Visible() || h.d.sidebarWidth() != 0 || h.d.chatWidth() != chatWideMax {
 			t.Fatal("sidebar should be hidden")
 		}
 		test.Tap(h.d.expandBtn)
-		if h.d.root.Objects[0] != h.d.split || h.d.expandBtn.Visible() {
+		if !h.d.sidebar.Visible() || h.d.expandBtn.Visible() || h.d.chatWidth() != chatMaxWidth {
 			t.Fatal("sidebar should be back")
 		}
+	})
+}
+
+func TestSwitchingKeepsRenderedViews(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() { h.d.open(editsID) })
+	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
+	var first *fyne.Container
+	h.ui(func() {
+		first = h.d.chat.box
+		h.d.createSession(h.proj, "default", "default")
+		h.d.open(editsID)
+		if h.d.chat.box != first {
+			t.Fatal("switching back should reuse the rendered view")
+		}
+		h.d.chat.forget(h.d.sessions[editsID])
+	})
+}
+
+func TestCtrlEnterStopsAndSends(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("slow")
+	})
+	h.eventually("busy", func() bool { return s.running() && s.proc.Busy() })
+	h.ui(func() {
+		h.d.input.SetText("hello")
+		h.d.input.KeyDown(&fyne.KeyEvent{Name: desktop.KeyControlLeft})
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+		h.d.input.KeyUp(&fyne.KeyEvent{Name: desktop.KeyControlLeft})
+	})
+	h.eventually("echo after interrupt", func() bool {
+		it := lastItem(s)
+		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "hello")
 	})
 }

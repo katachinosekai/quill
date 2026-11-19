@@ -168,7 +168,6 @@ func TestScreenshots(t *testing.T) {
 		h.d.send("demo")
 	})
 	h.eventually("permission", func() bool { return s.status() == stWaiting && h.button("Allow") != nil })
-	h.ui(func() { test.Tap(h.button("Thought")) })
 	snap("permission.png")
 
 	h.ui(func() { test.Tap(h.button("Allow")) })

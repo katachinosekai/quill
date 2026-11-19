@@ -15,7 +15,15 @@ import (
 
 type maxWidthLayout struct {
 	max   float32
+	width func() float32
 	shift func() float32
+}
+
+func (l maxWidthLayout) limit() float32 {
+	if l.width != nil {
+		return l.width()
+	}
+	return l.max
 }
 
 func (l maxWidthLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
@@ -26,17 +34,14 @@ func (l maxWidthLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
 		}
 		s = s.Max(o.MinSize())
 	}
-	if s.Width > l.max {
-		s.Width = l.max
+	if m := l.limit(); s.Width > m {
+		s.Width = m
 	}
 	return s
 }
 
 func (l maxWidthLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
-	w := size.Width
-	if w > l.max {
-		w = l.max
-	}
+	w := min(size.Width, l.limit())
 	x := (size.Width - w) / 2
 	if l.shift != nil {
 		x -= l.shift() / 2
@@ -53,8 +58,8 @@ func centered(max float32, obj fyne.CanvasObject) *fyne.Container {
 	return container.New(maxWidthLayout{max: max}, obj)
 }
 
-func windowCentered(max float32, shift func() float32, obj fyne.CanvasObject) *fyne.Container {
-	return container.New(maxWidthLayout{max: max, shift: shift}, obj)
+func windowCentered(width, shift func() float32, obj fyne.CanvasObject) *fyne.Container {
+	return container.New(maxWidthLayout{width: width, shift: shift}, obj)
 }
 
 type sendEntry struct {
@@ -64,6 +69,8 @@ type sendEntry struct {
 	suggestion string
 	hint       string
 	onKey      func(*fyne.KeyEvent) bool
+	onSendNow  func(string)
+	ctrl       bool
 	menuOpen   func() bool
 }
 
@@ -99,12 +106,18 @@ func (e *sendEntry) KeyDown(k *fyne.KeyEvent) {
 	if k.Name == desktop.KeyShiftLeft || k.Name == desktop.KeyShiftRight {
 		e.shift = true
 	}
+	if k.Name == desktop.KeyControlLeft || k.Name == desktop.KeyControlRight {
+		e.ctrl = true
+	}
 	e.Entry.KeyDown(k)
 }
 
 func (e *sendEntry) KeyUp(k *fyne.KeyEvent) {
 	if k.Name == desktop.KeyShiftLeft || k.Name == desktop.KeyShiftRight {
 		e.shift = false
+	}
+	if k.Name == desktop.KeyControlLeft || k.Name == desktop.KeyControlRight {
+		e.ctrl = false
 	}
 	e.Entry.KeyUp(k)
 }
@@ -122,6 +135,10 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 	}
 	if (k.Name == fyne.KeyReturn || k.Name == fyne.KeyEnter) && !e.shift {
 		if e.Disabled() {
+			return
+		}
+		if e.ctrl && e.onSendNow != nil {
+			e.onSendNow(e.Text)
 			return
 		}
 		if e.onSend != nil {

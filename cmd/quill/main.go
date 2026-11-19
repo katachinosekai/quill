@@ -41,6 +41,7 @@ func main() {
 		SessionsDir:  live.DefaultDir(),
 		ClaudeBin:    *claudeBin,
 	})
+	d.animate = true
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1280, 860))
 	startHidden := false

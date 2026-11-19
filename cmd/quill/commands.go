@@ -31,6 +31,7 @@ type tapRow struct {
 	widget.BaseWidget
 	content fyne.CanvasObject
 	onTap   func()
+	icon    *widget.Icon
 }
 
 func newTapRow(c fyne.CanvasObject, onTap func()) *tapRow {
