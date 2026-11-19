@@ -348,7 +348,12 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			glow := canvas.NewRectangle(color.Transparent)
 			glow.CornerRadius = 8
 			glow.StrokeWidth = 1.5
-			return d.newSideItem(rows, container.NewStack(glow, folder, row))
+			focus := canvas.NewRectangle(color.Transparent)
+			focus.CornerRadius = 8
+			focus.StrokeWidth = 2.5
+			focus.StrokeColor = colText
+			focus.Hide()
+			return d.newSideItem(rows, container.NewStack(glow, folder, row, focus))
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			if id >= len(*rows) {
@@ -361,6 +366,12 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			folder := st.Objects[1].(*fyne.Container)
 			row := st.Objects[2].(*fyne.Container)
 			r := (*rows)[id]
+			focus := st.Objects[3].(*canvas.Rectangle)
+			if r.header == "" && d.current != nil && d.current.id == r.id {
+				focus.Show()
+			} else {
+				focus.Hide()
+			}
 			if r.header != "" {
 				d.setGlow(glow, nil, 0)
 				indent := folder.Objects[0].(*canvas.Rectangle)

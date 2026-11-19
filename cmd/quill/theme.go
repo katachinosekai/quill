@@ -116,3 +116,10 @@ func (deskTheme) Size(n fyne.ThemeSizeName) float32 {
 	}
 	return theme.DefaultTheme().Size(n)
 }
+
+func (t compactTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
+	if n == theme.ColorNameSelection {
+		return color.Transparent
+	}
+	return t.deskTheme.Color(n, v)
+}
