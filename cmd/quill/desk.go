@@ -1593,6 +1593,7 @@ func (d *desk) signIn() {
 	ctx, cancel := context.WithCancel(context.Background())
 	d.signingIn = cancel
 	d.updateAccount()
+	var dlgs []dialog.Dialog
 	go func() {
 		err := account.Login(ctx, d.cfg.ClaudeBin, func(u string) {
 			d.do(func() {
@@ -1601,13 +1602,18 @@ func (d *desk) signIn() {
 					return
 				}
 				link := widget.NewHyperlink("Open the sign-in page", pu)
-				dialog.ShowCustom("Sign in", "Close", container.NewVBox(
+				dlg := dialog.NewCustom("Sign in", "Close", container.NewVBox(
 					widget.NewLabel("Finish signing in in your browser. If it did not open:"), link), d.win)
+				dlgs = append(dlgs, dlg)
+				dlg.Show()
 			})
 		})
 		cancel()
 		d.do(func() {
 			d.signingIn = nil
+			for _, dlg := range dlgs {
+				dlg.Hide()
+			}
 			if err != nil && ctx.Err() == nil {
 				dialog.ShowError(fmt.Errorf("sign-in failed: %w", err), d.win)
 			}
