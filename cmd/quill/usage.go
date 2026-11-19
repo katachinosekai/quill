@@ -18,6 +18,7 @@ import (
 const (
 	usageMinMargin = 230
 	usageMaxWidth  = 280
+	usageGap       = 36
 )
 
 type usagePanel struct {
@@ -197,8 +198,9 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		return
 	}
 	panel.Show()
-	pw := min(usageMaxWidth, margin-36)
+	pw := min(usageMaxWidth, margin-usageGap-18)
 	ph := min(panel.MinSize().Height, size.Height-16)
+	y := max(8, (size.Height-ph)/2)
 	panel.Resize(fyne.NewSize(pw, ph))
-	panel.Move(fyne.NewPos(x+w+18, 8))
+	panel.Move(fyne.NewPos(x+w+usageGap, y))
 }

@@ -257,7 +257,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	top := container.NewVBox(brand, newBtn, d.search)
 	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), centerChk, rcChk, legend)
 	r := canvas.NewRectangle(colSidebar)
-	d.sideBody = container.NewBorder(top, bottom, nil, nil, d.list)
+	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
 	return container.NewStack(r, container.NewPadded(d.sideBody))
 }
 
@@ -276,7 +276,7 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			title := widget.NewLabel("")
 			title.Truncation = fyne.TextTruncateEllipsis
 			meta := canvas.NewText("", colMuted)
-			meta.TextSize = 11
+			meta.TextSize = 10
 			dt := dot(color.Transparent)
 			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(10, 10, dt))), nil,
 				container.New(&tightVBox{}, title, container.NewPadded(meta)))
@@ -303,10 +303,10 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 				top := r.depth == 0 && !strings.HasPrefix(r.key, "a:")
 				if top {
 					icon.SetResource(theme.NewPrimaryThemedResource(res))
-					name.Color, name.TextSize = colText, 14
+					name.Color, name.TextSize = colText, 13
 				} else {
 					icon.SetResource(res)
-					name.Color, name.TextSize = colMuted, 12
+					name.Color, name.TextSize = colMuted, 11
 				}
 				name.Text = r.header
 				count.Text = fmt.Sprintf("%d", r.count)
@@ -354,6 +354,8 @@ func legendDot(s status) fyne.CanvasObject {
 	return container.NewHBox(sized(8, 8, dot(s.color())), mutedText(label, 11))
 }
 
+const tightOverlap = 2
+
 type tightVBox struct{}
 
 func (tightVBox) MinSize(objs []fyne.CanvasObject) fyne.Size {
@@ -363,7 +365,7 @@ func (tightVBox) MinSize(objs []fyne.CanvasObject) fyne.Size {
 		s.Width = max(s.Width, m.Width)
 		s.Height += m.Height
 	}
-	return fyne.NewSize(s.Width, s.Height-14)
+	return fyne.NewSize(s.Width, s.Height-tightOverlap)
 }
 
 func (tightVBox) Layout(objs []fyne.CanvasObject, size fyne.Size) {
@@ -371,7 +373,7 @@ func (tightVBox) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	for i, o := range objs {
 		h := o.MinSize().Height
 		if i > 0 {
-			y -= 14
+			y -= tightOverlap
 		}
 		o.Move(fyne.NewPos(0, y))
 		o.Resize(fyne.NewSize(size.Width, h))
@@ -497,11 +499,11 @@ func (d *desk) rebuildRows() {
 	for i, r := range rows {
 		switch {
 		case r.header != "" && r.depth == 0 && !strings.HasPrefix(r.key, "a:"):
-			d.list.SetItemHeight(i, 44)
+			d.list.SetItemHeight(i, 34)
 		case r.header != "":
-			d.list.SetItemHeight(i, 32)
+			d.list.SetItemHeight(i, 26)
 		default:
-			d.list.SetItemHeight(i, 54)
+			d.list.SetItemHeight(i, 40)
 		}
 		if d.current != nil && r.id == d.current.id {
 			d.list.Select(i)
