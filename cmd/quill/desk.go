@@ -920,42 +920,27 @@ func contains(list []string, v string) bool {
 
 func (d *desk) newSessionDialog() {
 	home, _ := os.UserHomeDir()
-	start := home
+	cwd := home
 	if d.current != nil && d.current.cwd != "" {
-		start = d.current.cwd
+		cwd = d.current.cwd
 	}
-	dir := widget.NewEntry()
-	dir.SetText(start)
-	browse := widget.NewButtonWithIcon("", theme.FolderOpenIcon(), func() {
-		fd := dialog.NewFolderOpen(func(u fyne.ListableURI, err error) {
-			if err == nil && u != nil {
-				dir.SetText(u.Path())
-			}
-		}, d.win)
-		if l, err := listableURI(dir.Text); err == nil {
-			fd.SetLocation(l)
-		}
-		fd.Resize(fyne.NewSize(700, 500))
-		fd.Show()
-	})
 	prefs := d.app.Preferences()
-	form := container.NewBorder(nil, nil, nil, browse, dir)
-	dlg := dialog.NewCustomConfirm("New session", "Create", "Cancel", form, func(ok bool) {
-		if !ok {
-			return
+	s := d.createSession(cwd, prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback("newMode", "auto"))
+	d.org.Titles[s.id] = d.nextSessionName()
+	d.org.Place[s.id] = placeActive
+	d.saveOrg()
+	d.updateChrome()
+}
+
+func (d *desk) nextSessionName() string {
+	n := 0
+	for _, t := range d.org.Titles {
+		var k int
+		if _, err := fmt.Sscanf(t, "New session %d", &k); err == nil && k > n {
+			n = k
 		}
-		path := strings.TrimSpace(dir.Text)
-		if strings.HasPrefix(path, "~") {
-			path = home + path[1:]
-		}
-		if st, err := os.Stat(path); err != nil || !st.IsDir() {
-			dialog.ShowError(fmt.Errorf("not a folder: %s", path), d.win)
-			return
-		}
-		d.createSession(path, prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback("newMode", "auto"))
-	}, d.win)
-	dlg.Resize(fyne.NewSize(560, 140))
-	dlg.Show()
+	}
+	return fmt.Sprintf("New session %d", n+1)
 }
 
 func (d *desk) createSession(cwd, model, mode string) *deskSession {

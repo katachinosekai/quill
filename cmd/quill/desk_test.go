@@ -919,3 +919,22 @@ func TestLocalSlashCommands(t *testing.T) {
 		}
 	})
 }
+
+func TestNewSessionInstant(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.newSessionDialog()
+		a := h.d.current
+		h.d.newSessionDialog()
+		b := h.d.current
+		if len(h.w.Canvas().Overlays().List()) != 0 {
+			t.Fatal("new session must not open a dialog")
+		}
+		if h.d.org.Titles[a.id] != "New session 1" || h.d.org.Titles[b.id] != "New session 2" {
+			t.Fatalf("names: %q %q", h.d.org.Titles[a.id], h.d.org.Titles[b.id])
+		}
+		if h.d.placement(b.id) != placeActive {
+			t.Fatal("new session should be in Active")
+		}
+	})
+}
