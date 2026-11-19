@@ -398,7 +398,14 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		l.Alignment = v.align()
 		return bgPad(colBubble, 14, 4, 10, msgText(l))
 	case chat.Assistant:
-		return msgText(v.markdown(it.Text))
+		md := msgText(v.markdown(it.Text))
+		if it.Streaming {
+			return md
+		}
+		if p := v.mediaPreviews(it.Text); p != nil {
+			return container.NewVBox(md, p)
+		}
+		return md
 	case chat.Tool:
 		if !v.steps {
 			return v.stepRun(it)

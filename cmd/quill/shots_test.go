@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -199,8 +201,30 @@ func TestScreenshots(t *testing.T) {
 	h.eventually("terminal", func() bool { return h.d.sessions[smokeID].loaded })
 	snap("terminal.png")
 
-	h.ui(func() { h.d.newSessionDialog() })
-	snap("new-session.png")
+	media := t.TempDir()
+	mpic := filepath.Join(media, "chart.png")
+	mimg := image.NewRGBA(image.Rect(0, 0, 320, 180))
+	for x := 0; x < 320; x++ {
+		for y := 0; y < 180; y++ {
+			mimg.Set(x, y, color.NRGBA{uint8(x * 255 / 320), uint8(y * 255 / 180), 160, 255})
+		}
+	}
+	if f, err := os.Create(mpic); err == nil {
+		_ = png.Encode(f, mimg)
+		f.Close()
+	}
+	maud := filepath.Join(media, "voice.wav")
+	_ = os.WriteFile(maud, []byte("RIFF"), 0o600)
+	h.ui(func() {
+		ms := h.d.createSession(h.proj, "default", "default")
+		u := ms.conv.AddUser("make a chart and a voice note")
+		a := &chat.Item{Kind: chat.Assistant, Text: "Here is the chart " + mpic + " and the recording " + maud}
+		ms.conv.Items = append(ms.conv.Items, a)
+		h.d.chat.show(ms)
+		h.d.chat.update([]*chat.Item{u, a})
+	})
+	time.Sleep(300 * time.Millisecond)
+	snap("media.png")
 
 	h.ui(func() {
 		for _, o := range h.w.Canvas().Overlays().List() {
