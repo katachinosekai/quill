@@ -150,6 +150,9 @@ type desk struct {
 	acct      account.Status
 	acctErr   string
 	signingIn context.CancelFunc
+	swapTo    string
+	swapping  bool
+	restore   *restoreState
 	suppress  bool
 	refreshMu sync.Mutex
 	headerBox *fyne.Container
@@ -801,6 +804,9 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	if ev.Type == "result" || ev.Type == "control_request" || ev.Type == "system" && ev.Subtype == "init" {
 		d.refreshSidebar()
 	}
+	if ev.Type == "result" {
+		d.trySwap()
+	}
 }
 
 func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
@@ -1108,6 +1114,11 @@ func (d *desk) refresh() {
 
 func (d *desk) watch(ctx context.Context) {
 	d.refresh()
+	if st := d.restore; st != nil {
+		d.restore = nil
+		d.do(func() { d.applyRestore(st) })
+	}
+	go d.watchBinary(ctx)
 	d.refreshAccount()
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()

@@ -183,10 +183,26 @@ func (v *chatView) align() fyne.TextAlign {
 func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
-		l := widget.NewLabel(it.Text)
+		text, hidden := it.Text, 0
+		if !iv.full {
+			text, hidden = clipLines(it.Text, userPreviewLines, userPreviewChars)
+		}
+		l := widget.NewLabel(text)
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = v.align()
-		return bgPad(colBubble, 14, 4, 10, l)
+		if hidden == 0 && !iv.full {
+			return bgPad(colBubble, 14, 4, 10, l)
+		}
+		label := fmt.Sprintf("Show all (%d more lines)", hidden)
+		if iv.full {
+			label = "Show less"
+		}
+		more := widget.NewButton(label, func() {
+			iv.full = !iv.full
+			v.refreshItem(it, iv)
+		})
+		more.Importance = widget.LowImportance
+		return bgPad(colBubble, 14, 4, 10, container.NewVBox(l, container.NewHBox(more)))
 	case chat.Assistant:
 		return v.markdown(it.Text)
 	case chat.Tool:
@@ -214,6 +230,11 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 func (v *chatView) markdown(text string) fyne.CanvasObject {
 	rt := widget.NewRichTextFromMarkdown(hardBreaks(text))
 	rt.Wrapping = fyne.TextWrapWord
+	for i, seg := range rt.Segments {
+		if cb, ok := seg.(*widget.CodeBlockSegment); ok {
+			rt.Segments[i] = &wrapCode{text: cb.Text}
+		}
+	}
 	if v.d.center {
 		alignSegments(rt.Segments, fyne.TextAlignCenter)
 	}
@@ -529,3 +550,46 @@ func spaced(k chat.Kind, obj fyne.CanvasObject) fyne.CanvasObject {
 	}
 	return container.New(layout.NewCustomPaddedLayout(top, bottom, 0, 0), obj)
 }
+
+const (
+	userPreviewLines = 14
+	userPreviewChars = 1400
+)
+
+func clipLines(s string, maxLines, maxChars int) (string, int) {
+	lines := strings.Split(s, "\n")
+	total := len(lines)
+	if total > maxLines {
+		lines = lines[:maxLines]
+	}
+	out := strings.Join(lines, "\n")
+	if r := []rune(out); len(r) > maxChars {
+		out = string(r[:maxChars]) + "..."
+	}
+	if out == s {
+		return s, 0
+	}
+	hidden := total - strings.Count(out, "\n") - 1
+	if hidden < 1 {
+		hidden = 1
+	}
+	return out, hidden
+}
+
+type wrapCode struct{ text string }
+
+func (c *wrapCode) Inline() bool    { return false }
+func (c *wrapCode) Textual() string { return c.text }
+func (c *wrapCode) Visual() fyne.CanvasObject {
+	l := widget.NewLabel(c.text)
+	l.TextStyle = fyne.TextStyle{Monospace: true}
+	l.Wrapping = fyne.TextWrapBreak
+	l.SizeName = theme.SizeNameCaptionText
+	return bgPad(colBubble, 8, 2, 6, l)
+}
+func (c *wrapCode) Update(o fyne.CanvasObject) {
+	o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*widget.Label).SetText(c.text)
+}
+func (c *wrapCode) Select(_, _ fyne.Position) {}
+func (c *wrapCode) SelectedText() string      { return "" }
+func (c *wrapCode) Unselect()                 {}

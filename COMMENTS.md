@@ -64,8 +64,13 @@ The dialog shows the folder plus a collapsed "Options" (model, permissions). The
 
 Title order: custom title, ai-title record, summary, first prompt. Side-chain and meta records, command caveats, system reminders and task notifications are skipped; slash commands show as `/name args`. Message count = user + assistant text items. Groups are by the cwd recorded in the transcript, newest activity first. Long histories show the last 200 items with a "Show N earlier" button.
 
+## Live update (reload.go)
+
+Go can't hot-swap code, so a new build takes over in place: `watchBinary` polls the running executable (symlinks resolved) every second; once it changed, is at least 1 s old, executable and starts with ELF magic, `trySwap` waits until no session is running/waiting or being taken over (re-checked after each `result`), stops idle Claude processes (they resume on the next message), writes $TMPDIR/quill-restore-<pid>.json (session, draft, window size, scroll) and `syscall.Exec`s the new binary with QUILL_RESTORE set. Startup consumes it (`takeRestore` / `applyRestore`). Build with `go build -o dist/quill.tmp ... && mv dist/quill.tmp dist/quill` so the file swaps atomically. Remote Control is off after a swap (process restart).
+
 ## UI notes
 
+- Long user messages show the first 14 lines / 1400 chars with "Show all (N more lines)" (`clipLines`, `itemView.full`). Markdown code blocks are replaced by `wrapCode` segments (wrapped monospace in a dark card) because Fyne's CodeBlockSegment never wraps.
 - Chat column is centered with a max width of 760 px (shorter lines read better). Text 15 px, line spacing 7. Vertical spacing per item kind lives in `spaced` (chatview.go): user turns get the most space above, tool rows the least; user bubbles use `bgPad` for wider side padding. "Center message text" (sidebar, saved in preferences) centers user/assistant text; tool cards and diffs stay left-aligned.
 - Single newlines in assistant text become paragraph breaks outside code blocks and lists (`hardBreaks`), since Fyne's markdown would join them.
 - Thinking blocks render as a collapsed "Thought" row (expand to read). Current models often send thinking with empty text; those add no row, only "thinking..." in the stats line.

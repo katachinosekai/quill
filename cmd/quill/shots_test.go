@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
+	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -184,4 +186,31 @@ func TestScreenshots(t *testing.T) {
 
 	h.ui(func() { h.d.newSessionDialog() })
 	snap("new-session.png")
+
+	h.ui(func() {
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+		h.d.center = false
+		ls := h.d.createSession(h.proj, "default", "default")
+		var paste strings.Builder
+		for i := 0; i < 80; i++ {
+			fmt.Fprintf(&paste, "log line %d: something happened in the loader while reading mods\n", i)
+		}
+		paste.WriteString("/run/media/someone/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/SteamLibrary/steamapps/workshop/content/108600/1234567890/mods/SomeVeryLongModName/media/lua/client/AVeryLongFileNameWithoutAnySpaces.lua")
+		ls.conv.AddUser(paste.String())
+		long := "Here is a long answer. " + strings.Repeat("The quick brown fox jumps over the lazy dog again and again. ", 12) +
+			"\n\n```\n" + strings.Repeat("x", 300) + "\nfunc main() { fmt.Println(\"a very long line of code that keeps going and going past the edge of the window\") }\n```\n\nA path: /run/media/someone/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/SteamLibrary/steamapps/workshop/content/108600/1234567890/mods/x.lua"
+		line, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"id": "m1", "role": "assistant", "content": []any{map[string]any{"type": "text", "text": long}}}})
+		ev, err := protocol.ParseLine(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ls.conv.Apply(ev)
+		h.d.chat.show(ls)
+	})
+	h.ui(func() { h.d.chat.scroll.ScrollToTop() })
+	snap("long.png")
+	h.ui(func() { h.d.chat.scrollBottom() })
+	snap("long-bottom.png")
 }

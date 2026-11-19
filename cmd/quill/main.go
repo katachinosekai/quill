@@ -39,6 +39,12 @@ func main() {
 	})
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1280, 860))
+	if st := takeRestore(); st != nil {
+		d.restore = st
+		if st.Width > 200 && st.Height > 200 {
+			w.Resize(fyne.NewSize(st.Width, st.Height))
+		}
+	}
 	w.SetCloseIntercept(d.confirmClose)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
