@@ -759,6 +759,9 @@ func (d *desk) updateChrome() {
 	if d.usage != nil {
 		d.usage.update()
 	}
+	if d.chat != nil {
+		d.chat.setLive(liveText(d.current))
+	}
 }
 
 func statsLine(s *deskSession) string {
@@ -1577,4 +1580,26 @@ func (d *desk) signIn() {
 		})
 		d.refreshAccount()
 	}()
+}
+
+func liveText(s *deskSession) string {
+	if s == nil || !s.conv.Busy {
+		return ""
+	}
+	if len(s.conv.PendingPermissions()) > 0 {
+		return "Waiting for your answer above"
+	}
+	if s.conv.Thinking {
+		return "✻ Thinking..."
+	}
+	if n := len(s.conv.Items); n > 0 {
+		last := s.conv.Items[n-1]
+		if last.Kind == chat.Assistant && last.Streaming {
+			return ""
+		}
+		if last.Kind == chat.Tool && !last.HasResult {
+			return "● " + oneLine(toolHeader(last), 90)
+		}
+	}
+	return "✻ Working..."
 }

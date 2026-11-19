@@ -44,6 +44,7 @@ type chatView struct {
 	placeholder bool
 	root        fyne.CanvasObject
 	col         *fyne.Container
+	live        *widget.Label
 	frame       *fyne.Container
 	inner       *fyne.Container
 	steps       bool
@@ -68,6 +69,7 @@ func newChatView(d *desk) *chatView {
 	v.box = container.NewVBox()
 	v.cache = map[*deskSession]*sessView{}
 	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
+	v.setBox(v.box)
 	v.col = v.inner
 	v.scroll = container.NewVScroll(v.inner)
 	border := canvas.NewRectangle(color.Transparent)
@@ -110,8 +112,38 @@ func (v *chatView) forget(s *deskSession) {
 
 func (v *chatView) setBox(b *fyne.Container) {
 	v.box = b
-	v.inner.Objects = []fyne.CanvasObject{b}
+	if v.live == nil {
+		v.live = widget.NewLabel("")
+		v.live.TextStyle.Italic = true
+		v.live.Importance = widget.MediumImportance
+		v.live.Hide()
+	}
+	v.inner.Objects = []fyne.CanvasObject{container.NewVBox(b, v.live)}
 	v.inner.Refresh()
+}
+
+func (v *chatView) setLive(text string) {
+	if v.live == nil || v.steps {
+		return
+	}
+	if text == "" {
+		if v.live.Visible() {
+			v.live.Hide()
+		}
+		return
+	}
+	stick := v.atBottom()
+	v.live.SetText(text)
+	if !v.live.Visible() {
+		v.live.Show()
+	}
+	if stick {
+		v.scrollBottom()
+	}
+}
+
+func msgText(o fyne.CanvasObject) fyne.CanvasObject {
+	return container.NewThemeOverride(o, msgTheme{})
 }
 
 func (v *chatView) show(s *deskSession) {
@@ -235,7 +267,7 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 			iv.stream = widget.NewLabel(it.Text)
 			iv.stream.Wrapping = fyne.TextWrapWord
 			iv.stream.Alignment = v.align()
-			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, iv.stream)}
+			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, msgText(iv.stream))}
 			iv.holder.Refresh()
 		} else {
 			iv.stream.SetText(it.Text)
@@ -262,15 +294,15 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
 		if strings.Contains(it.Text, "```") {
-			return bgPad(colBubble, 14, 4, 10, v.markdown(it.Text))
+			return bgPad(colBubble, 14, 4, 10, msgText(v.markdown(it.Text)))
 		}
 		l := widget.NewLabel(it.Text)
 		l.Selectable = true
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = v.align()
-		return bgPad(colBubble, 14, 4, 10, l)
+		return bgPad(colBubble, 14, 4, 10, msgText(l))
 	case chat.Assistant:
-		return v.markdown(it.Text)
+		return msgText(v.markdown(it.Text))
 	case chat.Tool:
 		if !v.steps {
 			return v.stepLine(it)

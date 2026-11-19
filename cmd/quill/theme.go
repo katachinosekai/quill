@@ -92,12 +92,24 @@ func (t smallTheme) Size(n fyne.ThemeSizeName) float32 {
 	return t.deskTheme.Size(n)
 }
 
-func (deskTheme) Size(n fyne.ThemeSizeName) float32 {
+type msgTheme struct{ deskTheme }
+
+func (t msgTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
 	case theme.SizeNameText:
-		return 15
+		return 16
 	case theme.SizeNameLineSpacing:
 		return 7
+	}
+	return t.deskTheme.Size(n)
+}
+
+func (deskTheme) Size(n fyne.ThemeSizeName) float32 {
+	switch n {
+	case theme.SizeNameText, theme.SizeNameCaptionText:
+		return 13
+	case theme.SizeNameLineSpacing:
+		return 5
 	case theme.SizeNameInputRadius, theme.SizeNameSelectionRadius:
 		return 8
 	}
