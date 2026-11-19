@@ -23,6 +23,8 @@ import (
 const (
 	chatMaxWidth  = 760
 	historyWindow = 80
+	historyBatch  = 60
+	loadEarlierAt = 400
 	maxResultLen  = 12000
 	maxDiffLines  = 2000
 	diffPreview   = 400
@@ -49,6 +51,7 @@ type chatView struct {
 	follow        bool
 	autoScrolling bool
 	gliding       bool
+	moreObj       fyne.CanvasObject
 	lastY         float32
 	newBelow      bool
 	jump          *fyne.Container
@@ -74,6 +77,7 @@ type sessView struct {
 	center      bool
 	follow      bool
 	count       int
+	more        fyne.CanvasObject
 }
 
 const cachedViews = 8
@@ -110,6 +114,9 @@ func newChatView(d *desk) *chatView {
 		}
 		v.lastY = y
 		v.syncJump()
+		if y < loadEarlierAt && v.shownFrom > 0 && !v.follow {
+			v.loadEarlier()
+		}
 	}
 	v.jump = v.newJump()
 	overlay := container.NewVBox(layout.NewSpacer(), windowCentered(d.chatWidth, d.sidebarWidth, container.NewCenter(v.jump)), padTop(18))
@@ -128,7 +135,7 @@ func (v *chatView) stash() {
 	if v.s == nil {
 		return
 	}
-	sv := &sessView{box: v.box, views: v.views, shownFrom: v.shownFrom, placeholder: v.placeholder, conv: v.s.conv, scrollY: v.scroll.Offset.Y, center: v.d.center, follow: v.follow, count: len(v.s.conv.Items)}
+	sv := &sessView{more: v.moreObj, box: v.box, views: v.views, shownFrom: v.shownFrom, placeholder: v.placeholder, conv: v.s.conv, scrollY: v.scroll.Offset.Y, center: v.d.center, follow: v.follow, count: len(v.s.conv.Items)}
 	if _, ok := v.cache[v.s]; !ok {
 		v.order = append(v.order, v.s)
 	}
@@ -175,7 +182,7 @@ func (v *chatView) show(s *deskSession) {
 	if s != nil {
 		if sv, ok := v.cache[s]; ok && s != v.s && sv.conv == s.conv && sv.center == v.d.center {
 			v.s = s
-			v.views, v.shownFrom, v.placeholder = sv.views, sv.shownFrom, sv.placeholder
+			v.views, v.shownFrom, v.placeholder, v.moreObj = sv.views, sv.shownFrom, sv.placeholder, sv.more
 			v.setBox(sv.box)
 			v.catchUp(sv.count)
 			if sv.follow {
@@ -225,17 +232,54 @@ func (v *chatView) catchUp(seen int) {
 	v.follow = follow
 }
 
+func (v *chatView) moreRow(n int) fyne.CanvasObject {
+	more := widget.NewButton(fmt.Sprintf("%d earlier messages (scroll up to load)", n), v.loadEarlier)
+	more.Importance = widget.LowImportance
+	return more
+}
+
+func (v *chatView) loadEarlier() {
+	if v.s == nil || v.shownFrom == 0 {
+		return
+	}
+	items := v.s.conv.Items
+	from := max(0, v.shownFrom-historyBatch)
+	var objs []fyne.CanvasObject
+	var more fyne.CanvasObject
+	if from > 0 {
+		more = v.moreRow(from)
+		objs = append(objs, more)
+	}
+	for _, it := range items[from:v.shownFrom] {
+		objs = append(objs, v.viewFor(it).holder)
+	}
+	rest := v.box.Objects
+	if len(rest) > 0 && v.moreObj != nil && rest[0] == v.moreObj {
+		rest = rest[1:]
+	}
+	before := v.scroll.Content.MinSize().Height
+	v.box.Objects = append(objs, rest...)
+	v.moreObj = more
+	v.shownFrom = from
+	v.box.Refresh()
+	v.scroll.Refresh()
+	v.scroll.Refresh()
+	after := v.scroll.Content.MinSize().Height
+	v.autoScrolling = true
+	v.scroll.Offset = fyne.NewPos(0, v.scroll.Offset.Y+after-before)
+	v.scroll.Refresh()
+	v.lastY = v.scroll.Offset.Y
+	v.autoScrolling = false
+}
+
 func (v *chatView) rebuild() {
 	v.box.RemoveAll()
 	v.views = map[int]*itemView{}
 	items := v.s.conv.Items
+	v.moreObj = nil
 	if v.shownFrom > 0 {
-		more := widget.NewButton(fmt.Sprintf("Show %d earlier messages", v.shownFrom), func() {
-			v.shownFrom = 0
-			v.rebuild()
-		})
-		more.Importance = widget.LowImportance
-		v.box.Add(more)
+		v.moreObj = v.moreRow(v.shownFrom)
+		v.box.Add(v.moreObj)
 	}
 	v.placeholder = len(items) == 0
 	if v.placeholder {

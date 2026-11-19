@@ -1061,3 +1061,34 @@ func TestSwitchBackCatchesUp(t *testing.T) {
 		}
 	})
 }
+
+func TestScrollUpLoadsEarlierHistory(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		for i := 0; i < 200; i++ {
+			s.conv.AddUser(fmt.Sprintf("history %d", i))
+		}
+		h.d.chat.show(s)
+		v := h.d.chat
+		if v.shownFrom != 200-historyWindow {
+			t.Fatalf("start window: %d", v.shownFrom)
+		}
+		first := v.views[s.conv.Items[v.shownFrom].Seq].holder
+		v.scroll.Offset = fyne.NewPos(0, 0)
+		v.scroll.OnScrolled(v.scroll.Offset)
+		if v.shownFrom != 200-historyWindow-historyBatch {
+			t.Fatalf("scrolling to the top should load an earlier batch: %d", v.shownFrom)
+		}
+		if v.scroll.Offset.Y <= 0 || first.Position().Y < v.scroll.Offset.Y-5 {
+			t.Fatalf("view should stay on the same message: offset %.0f, message at %.0f", v.scroll.Offset.Y, first.Position().Y)
+		}
+		for v.shownFrom > 0 {
+			v.scroll.Offset = fyne.NewPos(0, 0)
+			v.scroll.OnScrolled(v.scroll.Offset)
+		}
+		if len(v.box.Objects) != 200 || v.moreObj != nil {
+			t.Fatalf("all history should be loaded without a leftover button: %d", len(v.box.Objects))
+		}
+	})
+}
