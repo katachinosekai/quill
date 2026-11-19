@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"time"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -121,4 +122,62 @@ func TestVideoThumbInMemory(t *testing.T) {
 	if entries, _ := os.ReadDir(cache); len(entries) != 0 {
 		t.Fatal("thumbnails must not be written to disk")
 	}
+}
+
+func TestLightboxAndVideoPlayer(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	vid := filepath.Join(t.TempDir(), "clip.mp4")
+	if b, err := exec.Command("ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=30", "-t", "3", "-pix_fmt", "yuv420p", vid).CombinedOutput(); err != nil {
+		t.Skipf("cannot make test video: %s", b)
+	}
+	h := newHarness(t)
+	pic := filepath.Join(t.TempDir(), "p.png")
+	writePNG(t, pic)
+	h.ui(func() {
+		h.d.viewMedia(mediaRef{src: pic, kind: mediaImage}, nil)
+		if len(h.w.Canvas().Overlays().List()) != 1 {
+			t.Fatal("image should open in the lightbox")
+		}
+		h.w.Canvas().OnTypedKey()(&fyne.KeyEvent{Name: fyne.KeyEscape})
+		if len(h.w.Canvas().Overlays().List()) != 0 {
+			t.Fatal("Escape should close the lightbox")
+		}
+	})
+	var vp *videoPlayer
+	h.ui(func() {
+		vp = newVideoPlayer(h.d, vid, nil)
+		closeFn := h.d.showLightbox(container.NewBorder(nil, vp.controls(), nil, nil, vp.view()), vp.close)
+		vp.play()
+		_ = closeFn
+	})
+	h.eventually("frames playing", func() bool {
+		return vp.img.Image != nil && vp.pos > 0.3
+	})
+	h.ui(func() {
+		if vp.info.w != 160 || vp.info.duration < 2.5 {
+			t.Fatalf("probe: %+v", vp.info)
+		}
+		vp.pause()
+	})
+	var at float64
+	h.ui(func() { at = vp.pos })
+	time.Sleep(400 * time.Millisecond)
+	h.ui(func() {
+		if vp.pos != at || vp.playing {
+			t.Fatal("pause should stop playback")
+		}
+		vp.seekTo(2.5)
+		vp.play()
+	})
+	h.eventually("plays to the end", func() bool {
+		return !vp.playing && vp.pos >= 2.9
+	})
+	h.ui(func() {
+		h.d.lightboxClose()
+		if len(h.w.Canvas().Overlays().List()) != 0 || !vp.closed {
+			t.Fatal("closing the lightbox should stop the player")
+		}
+	})
 }

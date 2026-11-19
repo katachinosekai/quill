@@ -225,6 +225,10 @@ func TestScreenshots(t *testing.T) {
 	})
 	time.Sleep(300 * time.Millisecond)
 	snap("media.png")
+	h.ui(func() { h.d.viewMedia(mediaRef{src: mpic, kind: mediaImage}, nil) })
+	time.Sleep(200 * time.Millisecond)
+	snap("lightbox.png")
+	h.ui(func() { h.d.lightboxClose() })
 
 	h.ui(func() {
 		for _, o := range h.w.Canvas().Overlays().List() {

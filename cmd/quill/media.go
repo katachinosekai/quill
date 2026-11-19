@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -33,8 +34,8 @@ const (
 const (
 	maxMediaRefs  = 6
 	maxImageBytes = 25 << 20
-	previewW      = 420
-	previewH      = 280
+	previewW      = 200
+	previewH      = 124
 )
 
 var mediaExt = map[string]mediaKind{
@@ -211,7 +212,7 @@ func videoThumb(src string) (fyne.Resource, error) {
 		if seek {
 			args = append(args, "-ss", "1")
 		}
-		args = append(args, "-i", src, "-frames:v", "1", "-vf", fmt.Sprintf("scale=%d:-2", previewW*2), "-f", "image2pipe", "-vcodec", "png", "-")
+		args = append(args, "-i", src, "-frames:v", "1", "-vf", "scale=640:-2", "-f", "image2pipe", "-vcodec", "png", "-")
 		return exec.CommandContext(ctx, "ffmpeg", args...).Output()
 	}
 	data, err := grab(true)
@@ -258,6 +259,7 @@ func (p *player) toggle(d *desk, src string) {
 		p.mu.Lock()
 	}
 	cmd := exec.Command("mpv", "--no-video", "--really-quiet", "--no-terminal", src)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if err := cmd.Start(); err != nil {
 		p.mu.Unlock()
 		d.app.OpenURL(fileURL(src))
@@ -275,6 +277,22 @@ func (p *player) toggle(d *desk, src string) {
 		p.mu.Unlock()
 		d.do(func() { p.sync(d, src) })
 	}()
+}
+
+func (p *player) stop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cmd != nil {
+		_ = p.cmd.Process.Kill()
+		p.cmd, p.src = nil, ""
+	}
+}
+
+func (d *desk) stopMedia() {
+	if d.lightboxClose != nil {
+		d.lightboxClose()
+	}
+	audioPlayer.stop()
 }
 
 func (p *player) sync(d *desk, src string) {
@@ -320,12 +338,16 @@ func (v *chatView) mediaPreviews(text string) fyne.CanvasObject {
 
 func (v *chatView) mediaCard(m mediaRef) fyne.CanvasObject {
 	d := v.d
-	caption := mutedText(oneLine(m.name(), 48), 11)
+	caption := mutedText(oneLine(m.name(), 30), 11)
 	switch m.kind {
 	case mediaAudio:
 		btn := widget.NewButtonWithIcon("Play", theme.MediaPlayIcon(), nil)
 		btn.OnTapped = func() { audioPlayer.toggle(d, m.src) }
-		audioPlayer.btns[m.src] = append(audioPlayer.btns[m.src], btn)
+		bs := append(audioPlayer.btns[m.src], btn)
+		if len(bs) > 4 {
+			bs = bs[len(bs)-4:]
+		}
+		audioPlayer.btns[m.src] = bs
 		audioPlayer.sync(d, m.src)
 		open := widget.NewButtonWithIcon("", theme.MediaMusicIcon(), func() { d.openMedia(m) })
 		open.Importance = widget.LowImportance
@@ -341,12 +363,14 @@ func (v *chatView) mediaCard(m mediaRef) fyne.CanvasObject {
 		status.Text = "No preview: " + oneLine(err.Error(), 60)
 		status.Refresh()
 	}
+	var loaded fyne.Resource
 	set := func(r fyne.Resource, err error) {
 		d.do(func() {
 			if err != nil {
 				fail(err)
 				return
 			}
+			loaded = r
 			img.Resource = r
 			img.Refresh()
 			status.Text = ""
@@ -360,7 +384,7 @@ func (v *chatView) mediaCard(m mediaRef) fyne.CanvasObject {
 		img.File = m.src
 		status.Text = ""
 	case m.kind == mediaVideo && m.remote():
-		status.Text = "Click to play"
+		status.Text = "Play"
 	default:
 		go func() { set(videoThumb(m.src)) }()
 	}
@@ -368,9 +392,9 @@ func (v *chatView) mediaCard(m mediaRef) fyne.CanvasObject {
 	if m.kind == mediaVideo {
 		play := widget.NewIcon(theme.MediaPlayIcon())
 		ring := canvas.NewCircle(fade(colText, 0.25))
-		stack = append(stack, container.NewCenter(container.NewStack(sized(56, 56, ring), container.NewCenter(sized(36, 36, play)))))
+		stack = append(stack, container.NewCenter(container.NewStack(sized(40, 40, ring), container.NewCenter(sized(26, 26, play)))))
 	}
 	card := container.NewStack(stack...)
 	foot := container.NewHBox(caption, layout.NewSpacer())
-	return newTapRow(container.NewVBox(card, foot), func() { d.openMedia(m) })
+	return newTapRow(container.NewVBox(card, foot), func() { d.viewMedia(m, loaded) })
 }

@@ -134,6 +134,7 @@ func (d *desk) trySwap() {
 		}
 	}
 	d.swapping = true
+	d.stopMedia()
 	d.flushUI()
 	st := restoreState{Draft: d.input.Text, Hidden: d.hidden}
 	if d.current != nil && d.current.persisted {

@@ -158,7 +158,8 @@ type desk struct {
 	acct          account.Status
 	acctErr       string
 	signingIn     context.CancelFunc
-	glowBoxes     map[*canvas.Rectangle]color.Color
+	glowBoxes     map[*canvas.Rectangle]glow
+	lightboxClose func()
 	swapTo        string
 	swapping      bool
 	restore       *restoreState
@@ -334,7 +335,7 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			row := st.Objects[2].(*fyne.Container)
 			r := (*rows)[id]
 			if r.header != "" {
-				d.setGlow(glow, nil)
+				d.setGlow(glow, nil, 0)
 				indent := folder.Objects[0].(*canvas.Rectangle)
 				icon := folder.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*widget.Icon)
 				name := folder.Objects[2].(*fyne.Container).Objects[0].(*canvas.Text)
@@ -375,10 +376,10 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			meta.Refresh()
 			dt.FillColor = st2.color()
 			dt.Refresh()
-			if needsGlow(st2) && (d.current == nil || d.current.id != r.id) {
-				d.setGlow(glow, st2.color())
+			if d.current == nil || d.current.id != r.id {
+				d.setGlow(glow, st2.color(), glowStrength(st2))
 			} else {
-				d.setGlow(glow, nil)
+				d.setGlow(glow, nil, 0)
 			}
 			row.Refresh()
 		},
