@@ -158,7 +158,7 @@ type desk struct {
 	acct          account.Status
 	acctErr       string
 	signingIn     context.CancelFunc
-	flashDots     map[*canvas.Circle]color.Color
+	glowBoxes     map[*canvas.Rectangle]color.Color
 	swapTo        string
 	swapping      bool
 	restore       *restoreState
@@ -308,7 +308,10 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			dt := dot(color.Transparent)
 			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(10, 10, dt))), nil,
 				container.New(&tightVBox{}, title, container.NewPadded(meta)))
-			return d.newSideItem(rows, container.NewStack(folder, row))
+			glow := canvas.NewRectangle(color.Transparent)
+			glow.CornerRadius = 8
+			glow.StrokeWidth = 1.5
+			return d.newSideItem(rows, container.NewStack(glow, folder, row))
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			if id >= len(*rows) {
@@ -317,10 +320,12 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			item := o.(*sideItem)
 			item.idx = id
 			st := item.content.(*fyne.Container)
-			folder := st.Objects[0].(*fyne.Container)
-			row := st.Objects[1].(*fyne.Container)
+			glow := st.Objects[0].(*canvas.Rectangle)
+			folder := st.Objects[1].(*fyne.Container)
+			row := st.Objects[2].(*fyne.Container)
 			r := (*rows)[id]
 			if r.header != "" {
+				d.setGlow(glow, nil)
 				indent := folder.Objects[0].(*canvas.Rectangle)
 				icon := folder.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*widget.Icon)
 				name := folder.Objects[2].(*fyne.Container).Objects[0].(*canvas.Text)
@@ -360,8 +365,12 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			meta.Text = m
 			meta.Refresh()
 			dt.FillColor = st2.color()
-			d.setFlash(dt, st2.color(), needsFlash(st2) && (d.current == nil || d.current.id != r.id))
 			dt.Refresh()
+			if needsGlow(st2) && (d.current == nil || d.current.id != r.id) {
+				d.setGlow(glow, st2.color())
+			} else {
+				d.setGlow(glow, nil)
+			}
 			row.Refresh()
 		},
 	)
@@ -666,12 +675,14 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		if d.suppress || d.current == nil {
 			return
 		}
+		d.app.Preferences().SetString("newModel", v)
 		d.setModel(d.current, v)
 	})
 	d.modeSel = widget.NewSelect(modeChoices, func(v string) {
 		if d.suppress || d.current == nil {
 			return
 		}
+		d.app.Preferences().SetString("newMode", v)
 		d.setMode(d.current, v)
 	})
 	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · / commands", 10)
@@ -928,15 +939,7 @@ func (d *desk) newSessionDialog() {
 		fd.Show()
 	})
 	prefs := d.app.Preferences()
-	model := widget.NewSelect(modelChoices, nil)
-	model.SetSelected(prefs.StringWithFallback("newModel", "default"))
-	mode := widget.NewSelect(modeChoices, nil)
-	mode.SetSelected(prefs.StringWithFallback("newMode", "auto"))
-	opts := widget.NewAccordion(widget.NewAccordionItem("Options", widget.NewForm(
-		widget.NewFormItem("Model", model),
-		widget.NewFormItem("Permissions", mode),
-	)))
-	form := container.NewVBox(container.NewBorder(nil, nil, nil, browse, dir), opts)
+	form := container.NewBorder(nil, nil, nil, browse, dir)
 	dlg := dialog.NewCustomConfirm("New session", "Create", "Cancel", form, func(ok bool) {
 		if !ok {
 			return
@@ -949,11 +952,9 @@ func (d *desk) newSessionDialog() {
 			dialog.ShowError(fmt.Errorf("not a folder: %s", path), d.win)
 			return
 		}
-		prefs.SetString("newModel", model.Selected)
-		prefs.SetString("newMode", mode.Selected)
-		d.createSession(path, model.Selected, mode.Selected)
+		d.createSession(path, prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback("newMode", "auto"))
 	}, d.win)
-	dlg.Resize(fyne.NewSize(560, 180))
+	dlg.Resize(fyne.NewSize(560, 140))
 	dlg.Show()
 }
 
@@ -1451,7 +1452,7 @@ func (d *desk) watch(ctx context.Context) {
 		d.do(func() { d.applyRestore(st) })
 	}
 	go d.watchBinary(ctx)
-	go d.flashLoop(ctx)
+	go d.glowLoop(ctx)
 	go d.fetchCommands()
 	d.refreshAccount()
 	t := time.NewTicker(5 * time.Second)

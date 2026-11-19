@@ -9,21 +9,29 @@ import (
 	"fyne.io/fyne/v2/canvas"
 )
 
-const flashPeriod = 1200 * time.Millisecond
+const glowPeriod = 2400 * time.Millisecond
 
-func needsFlash(st status) bool {
+func needsGlow(st status) bool {
 	return st == stWaiting || st == stError
 }
 
-func (d *desk) setFlash(c *canvas.Circle, base color.Color, on bool) {
-	if d.flashDots == nil {
-		d.flashDots = map[*canvas.Circle]color.Color{}
+func (d *desk) setGlow(r *canvas.Rectangle, base color.Color) {
+	if d.glowBoxes == nil {
+		d.glowBoxes = map[*canvas.Rectangle]color.Color{}
 	}
-	if on {
-		d.flashDots[c] = base
+	if base != nil {
+		if _, ok := d.glowBoxes[r]; !ok {
+			d.glowBoxes[r] = base
+			paintGlow(r, base, 0.5)
+		}
+		d.glowBoxes[r] = base
 		return
 	}
-	delete(d.flashDots, c)
+	if _, ok := d.glowBoxes[r]; ok {
+		delete(d.glowBoxes, r)
+		r.FillColor, r.StrokeColor = color.Transparent, color.Transparent
+		r.Refresh()
+	}
 }
 
 func fade(c color.Color, a float64) color.Color {
@@ -32,7 +40,13 @@ func fade(c color.Color, a float64) color.Color {
 	return n
 }
 
-func (d *desk) flashLoop(ctx context.Context) {
+func paintGlow(r *canvas.Rectangle, base color.Color, a float64) {
+	r.FillColor = fade(base, 0.04+0.14*a)
+	r.StrokeColor = fade(base, 0.15+0.6*a)
+	r.Refresh()
+}
+
+func (d *desk) glowLoop(ctx context.Context) {
 	t := time.NewTicker(80 * time.Millisecond)
 	defer t.Stop()
 	start := time.Now()
@@ -41,12 +55,11 @@ func (d *desk) flashLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
-			phase := float64(now.Sub(start)%flashPeriod) / float64(flashPeriod)
-			a := 0.2 + 0.8*(0.5+0.5*math.Cos(2*math.Pi*phase))
+			phase := float64(now.Sub(start)%glowPeriod) / float64(glowPeriod)
+			a := 0.5 - 0.5*math.Cos(2*math.Pi*phase)
 			d.do(func() {
-				for c, base := range d.flashDots {
-					c.FillColor = fade(base, a)
-					c.Refresh()
+				for r, base := range d.glowBoxes {
+					paintGlow(r, base, a)
 				}
 			})
 		}
