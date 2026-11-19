@@ -129,3 +129,15 @@ func TestStringContent(t *testing.T) {
 		t.Fatal("content text")
 	}
 }
+
+func TestRateLimitEvent(t *testing.T) {
+	ev, err := ParseLine([]byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1795113000,"rateLimitType":"five_hour","utilization":0.99,"unifiedWindows":{"five_hour":{"utilization":0.99,"resetsAt":1795113000,"status":"allowed_warning"},"seven_day":{"utilization":0.08,"resetsAt":1795701600,"status":"allowed"}}},"session_id":"s"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	five, ok := ev.RateLimit.Window("five_hour")
+	week, ok2 := ev.RateLimit.Window("seven_day")
+	if !ok || !ok2 || five.Utilization != 0.99 || week.ResetsAt != 1795701600 {
+		t.Fatalf("%+v", ev.RateLimit)
+	}
+}

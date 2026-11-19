@@ -3,7 +3,9 @@ package transcript
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/katachinosekai/quill/internal/chat"
 )
@@ -111,5 +113,25 @@ func TestScannerGroupsAndCaches(t *testing.T) {
 	}
 	if Sanitize("/run/media/a b.c") != "-run-media-a-b-c" {
 		t.Fatal(Sanitize("/run/media/a b.c"))
+	}
+}
+
+func TestScanUsage(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "u.jsonl")
+	day := time.Now().UTC().Format(time.RFC3339Nano)
+	lines := []string{
+		`{"type":"user","timestamp":"` + day + `","cwd":"/x","message":{"role":"user","content":"hi"}}`,
+		`{"type":"assistant","timestamp":"` + day + `","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}`,
+		`{"type":"assistant","timestamp":"` + day + `","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t","name":"Bash","input":{}}],"usage":{"input_tokens":1,"output_tokens":20,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}`,
+		`{"type":"assistant","timestamp":"` + day + `","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"b"}],"usage":{"input_tokens":5,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`,
+	}
+	os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	info, err := ScanFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Tokens{In: 6, Out: 25, CacheRead: 3, CacheWrite: 4}
+	if info.Usage != want || info.Days[time.Now().Format("2006-01-02")] != want {
+		t.Fatalf("%+v %+v", info.Usage, info.Days)
 	}
 }

@@ -25,6 +25,8 @@ type Info struct {
 	Last       time.Time
 	Messages   int
 	Entrypoint string
+	Usage      Tokens
+	Days       map[string]Tokens
 	ModTime    time.Time
 	Size       int64
 }
@@ -160,6 +162,11 @@ func ScanFile(path string) (Info, error) {
 	info := Info{ID: strings.TrimSuffix(filepath.Base(path), ".jsonl"), Path: path}
 	var firstPrompt, aiTitle, customTitle, summary string
 	seenAssistant := map[string]bool{}
+	type msgUse struct {
+		day string
+		t   Tokens
+	}
+	uses := map[string]msgUse{}
 	r := bufio.NewReaderSize(f, 1<<20)
 	for {
 		line, err := r.ReadBytes('\n')
@@ -198,6 +205,13 @@ func ScanFile(path string) (Info, error) {
 						if json.Unmarshal(rec.Message, &m) != nil {
 							break
 						}
+						if rec.Type == "assistant" && m.Usage != nil && m.ID != "" {
+							day := ""
+							if t, e := time.Parse(time.RFC3339Nano, rec.Timestamp); e == nil {
+								day = t.Local().Format("2006-01-02")
+							}
+							uses[m.ID] = msgUse{day, Tokens{In: int64(m.Usage.InputTokens), Out: int64(m.Usage.OutputTokens), CacheRead: int64(m.Usage.CacheReadInputTokens), CacheWrite: int64(m.Usage.CacheCreationInputTokens)}}
+						}
 						if rec.Type == "user" {
 							for _, b := range m.Blocks() {
 								if b.Type != "text" {
@@ -229,6 +243,15 @@ func ScanFile(path string) (Info, error) {
 		}
 		if err != nil {
 			return info, err
+		}
+	}
+	for _, u := range uses {
+		info.Usage = info.Usage.Add(u.t)
+		if u.day != "" {
+			if info.Days == nil {
+				info.Days = map[string]Tokens{}
+			}
+			info.Days[u.day] = info.Days[u.day].Add(u.t)
 		}
 	}
 	switch {
@@ -292,4 +315,16 @@ func Load(path string) (*chat.Conversation, error) {
 		}
 	}
 	return c, nil
+}
+
+type Tokens struct {
+	In, Out, CacheRead, CacheWrite int64
+}
+
+func (t Tokens) Add(o Tokens) Tokens {
+	return Tokens{t.In + o.In, t.Out + o.Out, t.CacheRead + o.CacheRead, t.CacheWrite + o.CacheWrite}
+}
+
+func (t Tokens) Total() int64 {
+	return t.In + t.Out + t.CacheRead + t.CacheWrite
 }

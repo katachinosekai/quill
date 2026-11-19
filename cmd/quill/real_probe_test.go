@@ -60,6 +60,10 @@ func TestRealSidebarProbe(t *testing.T) {
 	w.Resize(fyne.NewSize(1280, 860))
 	d.refresh()
 	d.toggleFolder("archive")
+	if id := os.Getenv("QUILL_PROBE_SESSION"); id != "" {
+		d.open(id)
+		time.Sleep(time.Second)
+	}
 	time.Sleep(300 * time.Millisecond)
 	shot(t, w, out, "real-sidebar.png")
 }

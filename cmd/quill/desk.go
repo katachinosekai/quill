@@ -140,7 +140,10 @@ type desk struct {
 	title         *widget.Label
 	subtitle      *canvas.Text
 	note          *widget.Label
-	rcCheck       *widget.Check
+	rcStatus      *canvas.Text
+	usage         *usagePanel
+	rate          *protocol.RateLimit
+	rateAt        time.Time
 	rcLink        *widget.Hyperlink
 	input         *sendEntry
 	modelSel      *widget.Select
@@ -567,16 +570,11 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.note.Hide()
 	d.rcLink = widget.NewHyperlink("", nil)
 	d.rcLink.Hide()
-	d.rcCheck = widget.NewCheck("Remote Control", func(on bool) {
-		if d.suppress || d.current == nil {
-			return
-		}
-		d.setRemoteControl(d.current, on)
-	})
-	d.rcCheck.Hide()
+	d.rcStatus = mutedText("", 12)
+	d.rcStatus.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(container.NewCenter(d.rcStatus), d.rcLink, container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
 	headerBox := container.NewVBox(container.NewPadded(header), d.note, widget.NewSeparator())
 	d.headerBox = headerBox
@@ -619,7 +617,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.act = newActivity(d)
 	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(inputCard, d.act.root, statsRow)))
-	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, d.chat.root)
+	d.usage = newUsagePanel(d)
+	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chat.root, d.usage.root))
 	d.updateChrome()
 	return d.mainPane
 }
@@ -638,7 +637,7 @@ func (d *desk) updateChrome() {
 		d.subtitle.Text = ""
 		d.subtitle.Refresh()
 		d.note.Hide()
-		d.rcCheck.Hide()
+		d.rcStatus.Hide()
 		d.rcLink.Hide()
 		d.input.setSuggestion("")
 		d.input.Disable()
@@ -664,7 +663,7 @@ func (d *desk) updateChrome() {
 		d.note.Show()
 		d.input.Disable()
 		d.sendBtn.Disable()
-		d.rcCheck.Hide()
+		d.rcStatus.Hide()
 		d.rcLink.Hide()
 	} else if held {
 		where := "a terminal"
@@ -677,7 +676,7 @@ func (d *desk) updateChrome() {
 		d.sendBtn.Enable()
 		d.modelSel.Enable()
 		d.modeSel.Enable()
-		d.rcCheck.Hide()
+		d.rcStatus.Hide()
 		d.rcLink.Hide()
 	} else {
 		d.note.Hide()
@@ -685,8 +684,14 @@ func (d *desk) updateChrome() {
 		d.sendBtn.Enable()
 		d.modelSel.Enable()
 		d.modeSel.Enable()
-		d.rcCheck.Show()
-		d.rcCheck.SetChecked(s.rcOn)
+		d.rcStatus.Text, d.rcStatus.Color = "Remote Control off", colMuted
+		if s.rcOn {
+			d.rcStatus.Text, d.rcStatus.Color = "● Remote Control on", colIdle
+		} else if s.running() && d.autoRC {
+			d.rcStatus.Text = "Remote Control connecting..."
+		}
+		d.rcStatus.Show()
+		d.rcStatus.Refresh()
 		if s.rcOn && s.rcURL != "" {
 			if u, err := url.Parse(s.rcURL); err == nil {
 				d.rcLink.SetText("Open remotely")
@@ -714,6 +719,9 @@ func (d *desk) updateChrome() {
 	}
 	d.stats.Text = statsLine(s)
 	d.stats.Refresh()
+	if d.usage != nil {
+		d.usage.update()
+	}
 }
 
 func statsLine(s *deskSession) string {
@@ -740,6 +748,8 @@ func statsLine(s *deskSession) string {
 
 func kfmt(n int) string {
 	switch {
+	case n >= 1_000_000_000:
+		return fmt.Sprintf("%.2fB", float64(n)/1e9)
 	case n >= 1_000_000:
 		return fmt.Sprintf("%.3gM", float64(n)/1e6)
 	case n >= 1000:
@@ -945,6 +955,9 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		d.queueUI(s, items)
 	} else {
 		d.chat.forget(s)
+	}
+	if ev.Type == "rate_limit_event" {
+		d.setRateLimit(ev.RateLimit)
 	}
 	urgent := ev.Type == "result" || ev.Type == "control_request" || ev.Type == "prompt_suggestion" || ev.Type == "system" && ev.Subtype == "init"
 	if urgent {

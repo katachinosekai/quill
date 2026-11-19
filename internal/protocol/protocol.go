@@ -139,6 +139,7 @@ type Event struct {
 	IsError         bool                  `json:"is_error,omitempty"`
 	Result          string                `json:"result,omitempty"`
 	Suggestion      string                `json:"suggestion,omitempty"`
+	RateLimit       *RateLimit            `json:"rate_limit_info,omitempty"`
 	TerminalReason  string                `json:"terminal_reason,omitempty"`
 	TotalCostUSD    float64               `json:"total_cost_usd,omitempty"`
 	NumTurns        int                   `json:"num_turns,omitempty"`
@@ -357,4 +358,31 @@ func ParseCommands(raw json.RawMessage) []Command {
 		}
 	}
 	return out
+}
+
+type RateWindow struct {
+	Utilization float64 `json:"utilization"`
+	ResetsAt    int64   `json:"resetsAt"`
+	Status      string  `json:"status"`
+}
+
+type RateLimit struct {
+	Status         string                `json:"status"`
+	Type           string                `json:"rateLimitType"`
+	Utilization    float64               `json:"utilization"`
+	ResetsAt       int64                 `json:"resetsAt"`
+	UnifiedWindows map[string]RateWindow `json:"unifiedWindows"`
+}
+
+func (r *RateLimit) Window(name string) (RateWindow, bool) {
+	if r == nil {
+		return RateWindow{}, false
+	}
+	if w, ok := r.UnifiedWindows[name]; ok {
+		return w, true
+	}
+	if r.Type == name {
+		return RateWindow{Utilization: r.Utilization, ResetsAt: r.ResetsAt, Status: r.Status}, true
+	}
+	return RateWindow{}, false
 }

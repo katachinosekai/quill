@@ -554,3 +554,11 @@ func hasRow(rows []sideRow, id string) bool {
 	}
 	return false
 }
+
+func TestKfmt(t *testing.T) {
+	for n, want := range map[int]string{999: "999", 1500: "1.5k", 75_700_000: "75.7M", 1_090_000_000: "1.09B", 3_530_000_000: "3.53B"} {
+		if got := kfmt(n); got != want {
+			t.Errorf("kfmt(%d) = %q, want %q", n, got, want)
+		}
+	}
+}

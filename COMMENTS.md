@@ -45,6 +45,8 @@ Go code in this repo carries no comments; notes live here.
 
 ## Remote Control
 
+The header shows status only ("● Remote Control on" + "Open remotely" link / "Remote Control off" / connecting); there is no per-session checkbox any more (user 2026-11-19). `setRemoteControl` stays for tests and future use.
+
 `--remote-control` is for interactive sessions only, but a headless session accepts control_request `{subtype:"remote_control", enabled:true|false}`; enabling returns `session_url` and `connect_url` (verified for real). The header has a per-session "Remote Control" checkbox, off by default; turning it on starts the process if needed and shows an "Open remotely" link. It resets to off whenever the process restarts. "Remote Control for every session" (sidebar, preference `autoRemoteControl`, default ON, user 2026-11-19) turns it on quietly (no chat notice) every time Quill starts a Claude process (`autoRemote` from `ensureProcess`), so it survives restarts and live updates.
 
 ## Sessions open in a terminal (takeover)
@@ -74,6 +76,8 @@ Go can't hot-swap code, so a new build takes over in place: `watchBinary` polls 
 Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray is available (`desktop.App`); sessions keep running. Tray menu: Show Quill, Quit (Quit shows the window and goes through `confirmQuit`, which asks before stopping running sessions, then `app.Quit`). Single instance: $XDG_RUNTIME_DIR/quill.sock; a second launch sends "show" and exits, the running one shows its window and answers "ok". After a live update (exec) the new process skips the check (QUILL_RESTORE set), re-creates the socket, and stays hidden if it was hidden (`restoreState.Hidden`, started with `app.Run()`).
 
 ## UI notes
+
+- Usage panel (usage.go) in the blank space right of the chat (shown when the margin is >= 230 px, `usageLayout`): plan usage from the CLI's `rate_limit_event` (`rate_limit_info.unifiedWindows.five_hour / seven_day`: utilization, resetsAt; last value saved in preference `rateLimit` and shown "as of"), this session's tokens from its transcript (`transcript.Info.Usage`, assistant `message.usage` deduplicated per message id) plus context and cost, and today's / last 7 days' totals across all transcripts (`Info.Days`, keyed by local date).
 
 - Key hints (Enter send, Ctrl+Enter stop & send, Shift+Enter new line, / commands) sit in small grey text, right-aligned on the stats line under the input (`fitRight`: hidden when there is no room, so small windows stay usable) (where the folder name used to be; the folder is already in the header). The empty input just says "Message Claude".
 
