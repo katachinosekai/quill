@@ -708,13 +708,24 @@ func TestStepChipsToggleInline(t *testing.T) {
 		if h.d.chat.isOpen(bash) {
 			t.Fatal("chip should close its step")
 		}
-		h.d.setCollapseChips(true)
-		if h.d.chat.isOpen(bash) {
-			t.Fatal("collapse setting should close chips")
-		}
 		h.d.chat.toggleStep(bash)
+		var other0 *chat.Item
+		for _, it := range h.d.sessions[editsID].conv.Items {
+			if it.Kind == chat.Tool && it != bash {
+				other0 = it
+			}
+		}
+		h.d.setCollapseChips(true)
+		if !h.d.chat.isOpen(bash) || other0 != nil && !h.d.chat.isOpen(other0) {
+			t.Fatal("default toggle must not change existing chips")
+		}
+		h.d.setAllChips(false)
+		if h.d.chat.isOpen(bash) {
+			t.Fatal("collapse all should close chips")
+		}
+		h.d.setAllChips(true)
 		if !h.d.chat.isOpen(bash) {
-			t.Fatal("chip should open its step")
+			t.Fatal("open all should open chips")
 		}
 		other := h.d.createSession(h.proj, "default", "default")
 		other.conv.AddUser("x")

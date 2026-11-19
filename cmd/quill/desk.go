@@ -277,7 +277,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		d.app.Preferences().SetBool("planFirst", on)
 	})
 	planChk.Checked = d.planFirst
-	chipChk := widget.NewCheck("Collapse tool chips", d.setCollapseChips)
+	chipChk := widget.NewCheck("New tool chips start collapsed", d.setCollapseChips)
 	chipChk.Checked = d.collapseChips
 	rulesBtn := widget.NewButtonWithIcon("Sorting rules...", theme.SettingsIcon(), d.rulesDialog)
 	rulesBtn.Importance = widget.LowImportance
@@ -705,7 +705,11 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.sendBtn = widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.send(d.input.Text) })
 	d.sendBtn.Importance = widget.HighImportance
 	d.stt = newSpeech(d)
-	controls := container.NewHBox(d.modelSel, d.modeSel)
+	openAll := widget.NewButtonWithIcon("Open chips", theme.MenuDropDownIcon(), func() { d.setAllChips(true) })
+	openAll.Importance = widget.LowImportance
+	closeAll := widget.NewButtonWithIcon("Collapse chips", theme.MenuDropUpIcon(), func() { d.setAllChips(false) })
+	closeAll.Importance = widget.LowImportance
+	controls := container.NewHBox(d.modelSel, d.modeSel, layout.NewSpacer(), openAll, closeAll)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow)))
@@ -1659,14 +1663,34 @@ func (d *desk) setCollapseChips(on bool) {
 	if d.collapseChips == on {
 		return
 	}
+	if d.chat.stepOpen == nil {
+		d.chat.stepOpen = map[*chat.Item]bool{}
+	}
+	for _, s := range d.sessions {
+		for _, it := range s.conv.Items {
+			if _, ok := d.chat.stepOpen[it]; !ok && it.Kind == chat.Tool {
+				d.chat.stepOpen[it] = !d.collapseChips
+			}
+		}
+	}
 	d.collapseChips = on
 	d.app.Preferences().SetBool("collapseChips", on)
-	d.chat.stepOpen = nil
-	d.chat.cache = map[*deskSession]*sessView{}
-	d.chat.order = nil
-	if d.current != nil {
-		d.chat.show(d.current)
+}
+
+func (d *desk) setAllChips(open bool) {
+	s := d.current
+	if s == nil {
+		return
 	}
+	if d.chat.stepOpen == nil {
+		d.chat.stepOpen = map[*chat.Item]bool{}
+	}
+	for _, it := range s.conv.Items {
+		if it.Kind == chat.Tool {
+			d.chat.stepOpen[it] = open
+		}
+	}
+	d.chat.show(s)
 }
 
 func (d *desk) setCenter(on bool) {
