@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -572,7 +571,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.cmds.update(t)
 	}
 	d.input.onSendNow = d.sendNow
-	d.input.hint = "Message Claude  ·  Enter send  ·  Ctrl+Enter stop & send  ·  Shift+Enter new line  ·  / commands"
+	d.input.hint = "Message Claude"
 	d.input.SetPlaceHolder(d.input.hint)
 	d.modelSel = widget.NewSelect(modelChoices, func(v string) {
 		if d.suppress || d.current == nil {
@@ -586,7 +585,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		}
 		d.setMode(d.current, v)
 	})
-	d.folder = mutedText("", 12)
+	d.folder = mutedText("Enter send  ·  Ctrl+Enter stop & send  ·  Shift+Enter new line  ·  / commands", 11)
 	d.stats = mutedText("", 12)
 	d.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), func() {
 		if d.current != nil {
@@ -628,9 +627,7 @@ func (d *desk) updateChrome() {
 		d.stopBtn.Disable()
 		d.modelSel.Disable()
 		d.modeSel.Disable()
-		d.folder.Text = ""
 		d.stats.Text = ""
-		d.folder.Refresh()
 		d.stats.Refresh()
 		return
 	}
@@ -696,8 +693,6 @@ func (d *desk) updateChrome() {
 	} else {
 		d.stopBtn.Disable()
 	}
-	d.folder.Text = filepath.Base(s.cwd)
-	d.folder.Refresh()
 	d.stats.Text = statsLine(s)
 	d.stats.Refresh()
 }

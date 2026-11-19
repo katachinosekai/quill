@@ -75,6 +75,8 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## UI notes
 
+- Key hints (Enter send, Ctrl+Enter stop & send, Shift+Enter new line, / commands) sit in small grey text in the controls row under the input (where the folder name used to be; the folder is already in the header). The empty input just says "Message Claude".
+
 - The chat bounds show as a thin outline only (`chatView.frame`, transparent fill, white stroke ~11% alpha); the scroll container sits INSIDE the outline so messages never draw over or under it (the scrollbar is inside the frame). No shadows: `ColorNameShadow` is transparent in the theme, which removes the dark overlay Fyne's scroll container draws at the top edge when scrolled (popups lose their drop shadow too).
 
 - Slash commands (commands.go): the list comes from the `initialize` control response (`commands`: name, description, argumentHint). `session.FetchCommands` gets it at startup from a throwaway process in $HOME (no prompt, so no transcript; it does fire SessionStart hooks); a running session's own list (`Process.Commands`, includes project skills) replaces it. Typing `/word` shows up to 8 matches (prefix first, then substring) in a popup above the input; Up/Down, Tab completes, Enter completes or sends when the full command is already typed, Esc closes.
