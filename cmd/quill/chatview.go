@@ -895,7 +895,7 @@ func (v *chatView) stepRun(it *chat.Item) fyne.CanvasObject {
 	var chips, open []fyne.CanvasObject
 	for _, t := range v.s.conv.Items[start : end+1] {
 		chips = append(chips, v.stepChip(t))
-		if v.stepOpen[t] {
+		if v.isOpen(t) {
 			iv := v.views[t.Seq]
 			if iv == nil {
 				iv = &itemView{holder: container.NewStack()}
@@ -911,11 +911,18 @@ func (v *chatView) stepRun(it *chat.Item) fyne.CanvasObject {
 	return container.NewVBox(append([]fyne.CanvasObject{row}, open...)...)
 }
 
+func (v *chatView) isOpen(it *chat.Item) bool {
+	if open, ok := v.stepOpen[it]; ok {
+		return open
+	}
+	return !v.d.collapseChips
+}
+
 func (v *chatView) toggleStep(it *chat.Item) {
 	if v.stepOpen == nil {
 		v.stepOpen = map[*chat.Item]bool{}
 	}
-	v.stepOpen[it] = !v.stepOpen[it]
+	v.stepOpen[it] = !v.isOpen(it)
 	h := v.runHead(it)
 	if iv, ok := v.views[h.Seq]; ok {
 		v.refreshItem(h, iv)

@@ -172,6 +172,7 @@ type desk struct {
 	autoRC        bool
 	groupProjects bool
 	planFirst     bool
+	collapseChips bool
 	alignSel      *widget.RadioGroup
 	suppressAlign bool
 	forceSwap     bool
@@ -217,6 +218,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		autoRC:        a.Preferences().BoolWithFallback("autoRemoteControl", true),
 		groupProjects: a.Preferences().Bool("groupByProject"),
 		planFirst:     a.Preferences().BoolWithFallback("planFirst", true),
+		collapseChips: a.Preferences().Bool("collapseChips"),
 		created:       map[string]bool{},
 		do:            fyne.Do,
 		doWait:        fyne.DoAndWait,
@@ -273,6 +275,8 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		d.app.Preferences().SetBool("planFirst", on)
 	})
 	planChk.Checked = d.planFirst
+	chipChk := widget.NewCheck("Collapse tool chips", d.setCollapseChips)
+	chipChk.Checked = d.collapseChips
 	legend := container.NewHBox(
 		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
 	)
@@ -283,7 +287,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, alignRow, legend)
+	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, alignRow, legend)
 	r := canvas.NewRectangle(colSidebar)
 	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
 	return container.NewStack(r, container.NewPadded(d.sideBody))
@@ -1643,6 +1647,20 @@ func setText(t *canvas.Text, text string) {
 	if t.Text != text {
 		t.Text = text
 		t.Refresh()
+	}
+}
+
+func (d *desk) setCollapseChips(on bool) {
+	if d.collapseChips == on {
+		return
+	}
+	d.collapseChips = on
+	d.app.Preferences().SetBool("collapseChips", on)
+	d.chat.stepOpen = nil
+	d.chat.cache = map[*deskSession]*sessView{}
+	d.chat.order = nil
+	if d.current != nil {
+		d.chat.show(d.current)
 	}
 }
 

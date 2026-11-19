@@ -701,8 +701,19 @@ func TestStepChipsToggleInline(t *testing.T) {
 		if bash == nil {
 			t.Fatal("fixture has no Bash step")
 		}
+		if !h.d.chat.isOpen(bash) {
+			t.Fatal("chips should start open by default")
+		}
 		h.d.chat.toggleStep(bash)
-		if !h.d.chat.stepOpen[bash] {
+		if h.d.chat.isOpen(bash) {
+			t.Fatal("chip should close its step")
+		}
+		h.d.setCollapseChips(true)
+		if h.d.chat.isOpen(bash) {
+			t.Fatal("collapse setting should close chips")
+		}
+		h.d.chat.toggleStep(bash)
+		if !h.d.chat.isOpen(bash) {
 			t.Fatal("chip should open its step")
 		}
 		other := h.d.createSession(h.proj, "default", "default")
