@@ -1221,11 +1221,11 @@ func TestCenteringOptions(t *testing.T) {
 		if h.d.chat.live.Alignment != fyne.TextAlignLeading || !h.d.center || h.d.input.Alignment != fyne.TextAlignCenter {
 			t.Fatal("status toggles on its own")
 		}
-		if h.d.centerAll.Checked {
-			t.Fatal("the master toggle shows off when not everything is centered")
+		if h.d.centerAll.Checked || !h.d.centerAll.Partial {
+			t.Fatal("the master toggle shows a partial square when only some are centered")
 		}
 		h.d.centerChecks[2].SetChecked(true)
-		if !h.d.centerAll.Checked {
+		if !h.d.centerAll.Checked || h.d.centerAll.Partial {
 			t.Fatal("the master toggle shows on when everything is centered")
 		}
 		h.d.centerAll.SetChecked(false)

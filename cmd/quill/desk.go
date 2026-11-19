@@ -1759,14 +1759,21 @@ func (d *desk) syncCenterAll() {
 	if d.centerAll == nil {
 		return
 	}
-	all := true
+	on := 0
 	for _, c := range d.centerChecks {
-		all = all && c.Checked
+		if c.Checked {
+			on++
+		}
 	}
+	all, some := on == len(d.centerChecks), on > 0 && on < len(d.centerChecks)
 	if d.centerAll.Checked != all {
 		d.suppressAlign = true
 		d.centerAll.SetChecked(all)
 		d.suppressAlign = false
+	}
+	if d.centerAll.Partial != some {
+		d.centerAll.Partial = some
+		d.centerAll.Refresh()
 	}
 }
 
