@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -16,6 +19,49 @@ type Status struct {
 	Email        string `json:"email"`
 	OrgName      string `json:"orgName"`
 	Subscription string `json:"subscriptionType"`
+	Tier         string `json:"-"`
+}
+
+func (s Status) Plan() string {
+	t := strings.ToLower(s.Tier)
+	switch {
+	case strings.Contains(t, "max_20x"):
+		return "Max 20x"
+	case strings.Contains(t, "max_5x"), strings.Contains(t, "max"):
+		return "Max 5x"
+	}
+	if s.Subscription == "" {
+		return ""
+	}
+	return strings.ToUpper(s.Subscription[:1]) + s.Subscription[1:]
+}
+
+func profileTier(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		OAuth struct {
+			OrgTier  string `json:"organizationRateLimitTier"`
+			UserTier string `json:"userRateLimitTier"`
+		} `json:"oauthAccount"`
+	}
+	if json.Unmarshal(b, &cfg) != nil {
+		return ""
+	}
+	if cfg.OAuth.UserTier != "" {
+		return cfg.OAuth.UserTier
+	}
+	return cfg.OAuth.OrgTier
+}
+
+func configPath() string {
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, ".claude.json")
+	}
+	h, _ := os.UserHomeDir()
+	return filepath.Join(h, ".claude.json")
 }
 
 func Get(bin string) (Status, error) {
@@ -28,6 +74,9 @@ func Get(bin string) (Status, error) {
 			return s, err
 		}
 		return s, jerr
+	}
+	if s.LoggedIn {
+		s.Tier = profileTier(configPath())
 	}
 	return s, nil
 }

@@ -1537,8 +1537,8 @@ func (d *desk) updateAccount() {
 		if label == "" {
 			label = "Signed in"
 		}
-		if d.acct.Subscription != "" {
-			label += "  ·  " + strings.ToUpper(d.acct.Subscription[:1]) + d.acct.Subscription[1:]
+		if plan := d.acct.Plan(); plan != "" {
+			label += "  ·  " + plan
 		}
 		d.acctBtn.SetText(label)
 		d.acctBtn.Importance = widget.LowImportance
