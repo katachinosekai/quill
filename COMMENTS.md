@@ -77,7 +77,9 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## UI notes
 
-- Text sizes: general UI text is one size (13 px, caption = text); user and assistant messages use `msgTheme` (16 px) via a ThemeOverride (`msgText`). A live line at the end of the chat (`chatView.live`, `liveText`) shows "✻ Thinking...", the running tool, or "✻ Working..." while a turn runs (hidden while reply text streams).
+- Message layout: user bubbles on the left, Claude's replies on the right in their own bubble (`colAgent`), each 85% of the centered column (`sideAlign`). Tool step rows, thoughts, notices and permission cards stay full width.
+
+- Text sizes: general UI text is one size (13 px, caption = text); user and assistant messages use `msgTheme` (16 px) via a ThemeOverride (`msgText`). A live status line under the chat frame, bottom left, outside the scroll (`chatView.live`, `liveText`; fixed height so the chat never jumps) shows "✻ Thinking...", the running tool, or "✻ Working..." while a turn runs (hidden while reply text streams).
 
 - Usage panel (usage.go) in the blank space right of the chat, vertically centered, 36 px from the chat column (shown when the margin is >= 230 px and the full panel fits in height, `usageLayout`): plan usage from the CLI's `rate_limit_event` (`rate_limit_info.unifiedWindows.five_hour / seven_day`: utilization, resetsAt; last value saved in preference `rateLimit` and shown "as of"), this session's TRUE total tokens (in + out + cache read + cache write, from its transcript: `transcript.Info.Usage`, assistant `message.usage` deduplicated per message id) plus context, and today's / last 7 days' true totals on one line (compact, user 2026-11-19) across all transcripts (`Info.Days`, keyed by local date).
 

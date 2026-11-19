@@ -69,7 +69,9 @@ func newChatView(d *desk) *chatView {
 	v.box = container.NewVBox()
 	v.cache = map[*deskSession]*sessView{}
 	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
-	v.setBox(v.box)
+	v.live = widget.NewLabel(" ")
+	v.live.TextStyle.Italic = true
+	v.live.Importance = widget.MediumImportance
 	v.col = v.inner
 	v.scroll = container.NewVScroll(v.inner)
 	border := canvas.NewRectangle(color.Transparent)
@@ -78,7 +80,8 @@ func newChatView(d *desk) *chatView {
 	border.CornerRadius = 16
 	inside := container.New(layout.NewCustomPaddedLayout(2, 2, 2, 2), v.scroll)
 	v.frame = windowCentered(d.chatWidth, d.sidebarWidth, container.NewStack(border, inside))
-	v.root = container.New(layout.NewCustomPaddedLayout(8, 8, 4, 4), container.NewPadded(v.frame))
+	liveRow := windowCentered(d.chatWidth, d.sidebarWidth, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), v.live))
+	v.root = container.NewBorder(nil, liveRow, nil, nil, container.New(layout.NewCustomPaddedLayout(8, 2, 4, 4), container.NewPadded(v.frame)))
 	return v
 }
 
@@ -112,13 +115,7 @@ func (v *chatView) forget(s *deskSession) {
 
 func (v *chatView) setBox(b *fyne.Container) {
 	v.box = b
-	if v.live == nil {
-		v.live = widget.NewLabel("")
-		v.live.TextStyle.Italic = true
-		v.live.Importance = widget.MediumImportance
-		v.live.Hide()
-	}
-	v.inner.Objects = []fyne.CanvasObject{container.NewVBox(b, v.live)}
+	v.inner.Objects = []fyne.CanvasObject{b}
 	v.inner.Refresh()
 }
 
@@ -127,18 +124,10 @@ func (v *chatView) setLive(text string) {
 		return
 	}
 	if text == "" {
-		if v.live.Visible() {
-			v.live.Hide()
-		}
-		return
+		text = " "
 	}
-	stick := v.atBottom()
-	v.live.SetText(text)
-	if !v.live.Visible() {
-		v.live.Show()
-	}
-	if stick {
-		v.scrollBottom()
+	if v.live.Text != text {
+		v.live.SetText(text)
 	}
 }
 
@@ -267,7 +256,7 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 			iv.stream = widget.NewLabel(it.Text)
 			iv.stream.Wrapping = fyne.TextWrapWord
 			iv.stream.Alignment = v.align()
-			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, msgText(iv.stream))}
+			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, agentBubble(msgText(iv.stream)))}
 			iv.holder.Refresh()
 		} else {
 			iv.stream.SetText(it.Text)
@@ -294,15 +283,15 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
 		if strings.Contains(it.Text, "```") {
-			return bgPad(colBubble, 14, 4, 10, msgText(v.markdown(it.Text)))
+			return userBubble(bgPad(colBubble, 14, 4, 10, msgText(v.markdown(it.Text))))
 		}
 		l := widget.NewLabel(it.Text)
 		l.Selectable = true
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = v.align()
-		return bgPad(colBubble, 14, 4, 10, msgText(l))
+		return userBubble(bgPad(colBubble, 14, 4, 10, msgText(l)))
 	case chat.Assistant:
-		return msgText(v.markdown(it.Text))
+		return agentBubble(msgText(v.markdown(it.Text)))
 	case chat.Tool:
 		if !v.steps {
 			return v.stepLine(it)
@@ -725,4 +714,37 @@ func (v *chatView) stepLine(it *chat.Item) fyne.CanvasObject {
 			v.d.act.focus(it)
 		}
 	})
+}
+
+const bubbleShare = 0.85
+
+type sideAlign struct{ right bool }
+
+func (l sideAlign) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	var s fyne.Size
+	for _, o := range objs {
+		s = s.Max(o.MinSize())
+	}
+	return s
+}
+
+func (l sideAlign) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	w := size.Width * bubbleShare
+	x := float32(0)
+	if l.right {
+		x = size.Width - w
+	}
+	for _, o := range objs {
+		h := o.MinSize().Height
+		o.Resize(fyne.NewSize(w, max(h, size.Height)))
+		o.Move(fyne.NewPos(x, 0))
+	}
+}
+
+func userBubble(o fyne.CanvasObject) fyne.CanvasObject {
+	return container.New(sideAlign{}, o)
+}
+
+func agentBubble(o fyne.CanvasObject) fyne.CanvasObject {
+	return container.New(sideAlign{right: true}, bgPad(colAgent, 14, 4, 10, o))
 }
