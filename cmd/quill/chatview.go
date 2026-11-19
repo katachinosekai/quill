@@ -72,6 +72,8 @@ type sessView struct {
 	conv        *chat.Conversation
 	scrollY     float32
 	center      bool
+	follow      bool
+	count       int
 }
 
 const cachedViews = 8
@@ -126,7 +128,7 @@ func (v *chatView) stash() {
 	if v.s == nil {
 		return
 	}
-	sv := &sessView{box: v.box, views: v.views, shownFrom: v.shownFrom, placeholder: v.placeholder, conv: v.s.conv, scrollY: v.scroll.Offset.Y, center: v.d.center}
+	sv := &sessView{box: v.box, views: v.views, shownFrom: v.shownFrom, placeholder: v.placeholder, conv: v.s.conv, scrollY: v.scroll.Offset.Y, center: v.d.center, follow: v.follow, count: len(v.s.conv.Items)}
 	if _, ok := v.cache[v.s]; !ok {
 		v.order = append(v.order, v.s)
 	}
@@ -175,10 +177,16 @@ func (v *chatView) show(s *deskSession) {
 			v.s = s
 			v.views, v.shownFrom, v.placeholder = sv.views, sv.shownFrom, sv.placeholder
 			v.setBox(sv.box)
+			v.catchUp(sv.count)
+			if sv.follow {
+				v.scrollBottom()
+				return
+			}
 			v.scroll.Offset = fyne.NewPos(0, sv.scrollY)
 			v.scroll.Refresh()
 			v.lastY = v.scroll.Offset.Y
-			v.follow = v.atBottom()
+			v.follow = false
+			v.newBelow = len(s.conv.Items) > sv.count
 			v.syncJump()
 			return
 		}
@@ -199,6 +207,22 @@ func (v *chatView) show(s *deskSession) {
 	}
 	v.rebuild()
 	v.scrollBottom()
+}
+
+func (v *chatView) catchUp(seen int) {
+	items := v.s.conv.Items
+	from := max(v.shownFrom, min(seen, len(items))-20)
+	var changed []*chat.Item
+	for _, it := range items[from:] {
+		changed = append(changed, it)
+	}
+	if len(changed) == 0 {
+		return
+	}
+	follow := v.follow
+	v.follow = false
+	v.update(changed)
+	v.follow = follow
 }
 
 func (v *chatView) rebuild() {

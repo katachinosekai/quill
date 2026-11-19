@@ -1032,3 +1032,32 @@ func TestCenteredTyping(t *testing.T) {
 		}
 	})
 }
+
+func TestSwitchBackCatchesUp(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		for i := 0; i < 30; i++ {
+			a.conv.AddUser(fmt.Sprintf("a %d with enough words to take some room in the chat", i))
+		}
+		h.d.chat.show(a)
+		b := h.d.createSession(h.proj, "default", "default")
+		h.d.chat.show(b)
+		late := a.conv.AddUser("arrived while away")
+		h.d.chat.show(a)
+		if _, ok := h.d.chat.views[late.Seq]; !ok {
+			t.Fatal("messages that arrived while away should appear")
+		}
+		if !h.d.chat.follow || !h.d.chat.pinned() {
+			t.Fatal("a session left at the bottom should keep following")
+		}
+		h.d.chat.scroll.Offset = fyne.NewPos(0, 0)
+		h.d.chat.scroll.OnScrolled(h.d.chat.scroll.Offset)
+		h.d.chat.show(b)
+		a.conv.AddUser("another while away")
+		h.d.chat.show(a)
+		if h.d.chat.follow || !h.d.chat.jump.Visible() || h.d.chat.scroll.Offset.Y != 0 {
+			t.Fatal("a session left reading history should stay put and offer Latest")
+		}
+	})
+}
