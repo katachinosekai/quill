@@ -80,7 +80,7 @@ func (e *sendEntry) setSuggestion(s string) {
 	}
 	e.suggestion = s
 	if s != "" {
-		e.SetPlaceHolder(e.hint + "   ·   Tab: " + s)
+		e.SetPlaceHolder(s + "   (Tab)")
 	} else {
 		e.SetPlaceHolder(e.hint)
 	}
