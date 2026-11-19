@@ -33,6 +33,9 @@ claude CLI to be installed separately.
 
 %prep
 %autosetup
+cp third_party/fyne/LICENSE LICENSE.fyne
+cp third_party/whisper.cpp/LICENSE LICENSE.whisper.cpp
+cp vendor/github.com/gen2brain/malgo/LICENSE LICENSE.malgo
 
 %build
 export GOFLAGS="-mod=vendor -trimpath"
@@ -53,7 +56,7 @@ install -Dm644 cmd/quill/icon.svg %{buildroot}%{_datadir}/icons/hicolor/scalable
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinosekai.quill.desktop
 
 %files
-%license LICENSE third_party/fyne/LICENSE third_party/whisper.cpp/LICENSE
+%license LICENSE LICENSE.fyne LICENSE.whisper.cpp LICENSE.malgo
 %doc README.md
 %{_bindir}/quill
 %{_libexecdir}/quill/
