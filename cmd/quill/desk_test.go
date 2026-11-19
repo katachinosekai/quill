@@ -1056,6 +1056,7 @@ func TestCenteredTyping(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
 		h.d.createSession(h.proj, "default", "default")
+		h.d.setInputCenter(false)
 		h.d.input.SetText("hi")
 		h.d.input.CursorColumn = 2
 		h.d.input.Refresh()

@@ -87,6 +87,19 @@ func (d *desk) chatWidth() float32 {
 	return d.chatWidthFor(d.sidebarWidth())
 }
 
+const (
+	inputShare    = 0.35
+	inputMinWidth = 640
+)
+
+func (d *desk) inputWidth() float32 {
+	chat := d.chatWidth()
+	if d.root == nil || d.root.Size().Width <= 0 {
+		return chat
+	}
+	return min(chat, max(d.root.Size().Width*inputShare, inputMinWidth))
+}
+
 func (d *desk) chatWidthFor(side float32) float32 {
 	return max(chatMinWidth, (d.root.Size().Width-side)*chatShare)
 }

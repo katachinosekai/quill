@@ -154,6 +154,32 @@ type Handoff struct {
 	Opts     Options `json:"opts"`
 }
 
+func (p *Process) Keep() (in, out *os.File, h Handoff) {
+	return p.stdin, p.stdout, Handoff{PID: p.pid, ErrPath: p.errPath, Seq: p.seq.Load(), Opts: p.opts}
+}
+
+func waitForeign(pid int) {
+	for syscall.Kill(pid, 0) == nil {
+		var ws syscall.WaitStatus
+		if got, _ := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil); got == pid {
+			return
+		}
+		if zombie(pid) {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func zombie(pid int) bool {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return true
+	}
+	i := bytes.LastIndexByte(b, ')')
+	return i > 0 && i+2 < len(b) && b[i+2] == 'Z'
+}
+
 func (p *Process) Handoff() (Handoff, error) {
 	if p.Exited() {
 		return Handoff{}, ErrExited
@@ -214,6 +240,10 @@ func (p *Process) run(leftover []byte) {
 		state, err := p.osProc.Wait()
 		if err == nil && !state.Success() {
 			err = errors.New(state.String())
+		}
+		if errors.Is(err, syscall.ECHILD) {
+			waitForeign(p.pid)
+			err = nil
 		}
 		p.stderr = tailFile(p.errPath, 8192)
 		os.Remove(p.errPath)

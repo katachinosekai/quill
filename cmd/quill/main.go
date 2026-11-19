@@ -40,6 +40,24 @@ func main() {
 	if os.Getenv(restoreEnv) == "" && signalRunning(sock) {
 		return
 	}
+	if os.Getenv(keeperEnv) == "" && os.Getenv("QUILL_NO_KEEPER") == "" {
+		os.Exit(runKeeper(os.Args[1:], takeRestore()))
+	}
+	os.Exit(runWindowWith(*claudeBin, sock))
+}
+
+func runWindow() int {
+	return runWindowWith(claudeFlag(), instanceSocket())
+}
+
+func claudeFlag() string {
+	if f := flag.Lookup("claude"); f != nil {
+		return f.Value.String()
+	}
+	return "claude"
+}
+
+func runWindowWith(claudeBin, sock string) int {
 	a := app.NewWithID("io.github.katachinosekai.quill")
 	a.Settings().SetTheme(deskTheme{})
 	a.SetIcon(appIcon)
@@ -47,9 +65,10 @@ func main() {
 	d := newDesk(a, w, config{
 		ProjectsRoot: transcript.DefaultRoot(),
 		SessionsDir:  live.DefaultDir(),
-		ClaudeBin:    *claudeBin,
+		ClaudeBin:    claudeBin,
 	})
 	d.animate = true
+	d.keeper = newKeeperClient()
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1280, 860))
 	startHidden := false
@@ -74,5 +93,5 @@ func main() {
 	} else {
 		w.ShowAndRun()
 	}
-	os.Exit(0)
+	return 0
 }

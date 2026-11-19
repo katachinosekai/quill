@@ -95,7 +95,7 @@ func newChatView(d *desk) *chatView {
 	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
 	v.live = widget.NewLabel(" ")
 	v.live.TextStyle.Italic = true
-	if d.app.Preferences().Bool("centerStatus") {
+	if d.app.Preferences().BoolWithFallback("centerStatus", d.center) {
 		v.live.Alignment = fyne.TextAlignCenter
 	}
 	v.live.Importance = widget.MediumImportance

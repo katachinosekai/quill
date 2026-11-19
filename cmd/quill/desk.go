@@ -161,6 +161,9 @@ type desk struct {
 	acctErr        string
 	signingIn      context.CancelFunc
 	glowBoxes      map[*canvas.Rectangle]glow
+	keeper         *keeperClient
+	keptView       string
+	keptHidden     bool
 	lightboxClose  func()
 	swapTo         string
 	swapping       bool
@@ -274,7 +277,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		sel := widget.NewRadioGroup([]string{"Left", "Center"}, nil)
 		sel.Horizontal = true
 		sel.Required = true
-		if d.app.Preferences().Bool(pref) {
+		if d.app.Preferences().BoolWithFallback(pref, d.center) {
 			sel.SetSelected("Center")
 		} else {
 			sel.SetSelected("Left")
@@ -728,7 +731,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.onSendNow = d.sendNow
 	d.input.hint = "Message Claude"
 	d.input.SetPlaceHolder(d.input.hint)
-	if d.app.Preferences().Bool("centerInput") {
+	if d.app.Preferences().BoolWithFallback("centerInput", d.center) {
 		d.input.Alignment = fyne.TextAlignCenter
 	}
 	d.modelSel = widget.NewSelect(modelChoices, func(v string) {
@@ -763,7 +766,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	controls := container.NewHBox(d.modelSel, d.modeSel, d.stt.langBtn, layout.NewSpacer(), openAll, closeAll)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
-	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow)))
+	bottom := container.NewPadded(windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow)))
 	d.usage = newUsagePanel(d)
 	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chat.root, d.usage.root))
 	d.updateChrome()
@@ -771,6 +774,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 }
 
 func (d *desk) updateChrome() {
+	d.keepView()
 	s := d.current
 	d.suppress = true
 	defer func() { d.suppress = false }()
@@ -1064,6 +1068,7 @@ func (d *desk) adopt(s *deskSession, p *session.Process) {
 	s.proc = p
 	s.persisted = true
 	d.ownPIDs.Store(p.PID(), true)
+	d.keepSession(s)
 	go func() {
 		<-p.Done()
 		err := p.ExitError()
@@ -1077,6 +1082,10 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
 	items = append(items, d.planGate(s, ev, items)...)
+	switch ev.Type {
+	case "control_request", "control_cancel_request", "result":
+		d.keepSession(s)
+	}
 	if d.current == s {
 		d.queueUI(s, items)
 	}
@@ -1136,6 +1145,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	if s.proc != p {
 		return
 	}
+	d.unkeepSession(s.id)
 	var items []*chat.Item
 	items = append(items, s.conv.CancelPending()...)
 	for _, it := range s.conv.Items {
@@ -1348,6 +1358,7 @@ func (d *desk) answer(s *deskSession, it *chat.Item, dec protocol.Decision) {
 		d.updateChrome()
 	}
 	d.refreshSidebar()
+	d.keepSession(s)
 }
 
 func isQuestion(it *chat.Item) bool {
@@ -1375,6 +1386,7 @@ func (d *desk) answerQuestions(s *deskSession, it *chat.Item, answers map[string
 		d.updateChrome()
 	}
 	d.refreshSidebar()
+	d.keepSession(s)
 }
 
 func (d *desk) setModel(s *deskSession, model string) {
