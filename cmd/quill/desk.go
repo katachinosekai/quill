@@ -167,6 +167,7 @@ type desk struct {
 	lastTyped     time.Time
 	stt           *speech
 	autoRC        bool
+	groupProjects bool
 	alignSel      *widget.RadioGroup
 	suppressAlign bool
 	forceSwap     bool
@@ -200,19 +201,20 @@ type desk struct {
 
 func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 	d := &desk{
-		app:      a,
-		win:      w,
-		cfg:      cfg,
-		scanner:  transcript.NewScanner(cfg.ProjectsRoot),
-		finder:   &live.Finder{Dir: cfg.SessionsDir, ProcDir: "/proc"},
-		sessions: map[string]*deskSession{},
-		infos:    map[string]transcript.Info{},
-		terms:    map[string]live.Process{},
-		center:   a.Preferences().BoolWithFallback("centerText", true),
-		autoRC:   a.Preferences().BoolWithFallback("autoRemoteControl", true),
-		created:  map[string]bool{},
-		do:       fyne.Do,
-		doWait:   fyne.DoAndWait,
+		app:           a,
+		win:           w,
+		cfg:           cfg,
+		scanner:       transcript.NewScanner(cfg.ProjectsRoot),
+		finder:        &live.Finder{Dir: cfg.SessionsDir, ProcDir: "/proc"},
+		sessions:      map[string]*deskSession{},
+		infos:         map[string]transcript.Info{},
+		terms:         map[string]live.Process{},
+		center:        a.Preferences().BoolWithFallback("centerText", true),
+		autoRC:        a.Preferences().BoolWithFallback("autoRemoteControl", true),
+		groupProjects: a.Preferences().Bool("groupByProject"),
+		created:       map[string]bool{},
+		do:            fyne.Do,
+		doWait:        fyne.DoAndWait,
 	}
 	d.loadOrg()
 	for _, id := range a.Preferences().StringList("createdSessions") {
@@ -512,7 +514,14 @@ func (d *desk) rebuildRows() {
 			idle = append(idle, e)
 		}
 	}
-	rows := d.projectRows(active, 0, "a:", q != "")
+	var rows []sideRow
+	if len(active) > 0 {
+		open := q != "" || d.isOpen(placeActive)
+		rows = append(rows, sideRow{header: d.folderTitle(placeActive, "Active"), key: placeActive, count: len(active), open: open})
+		if open {
+			rows = append(rows, d.projectRows(active, 1, "a:", q != "")...)
+		}
+	}
 	for _, f := range d.sortedFolders(custom) {
 		key := folderPrefix + f.ID
 		es := custom[key]
@@ -559,6 +568,13 @@ func (d *desk) rebuildRows() {
 
 func (d *desk) projectRows(es []sideEntry, depth int, prefix string, forceOpen bool) []sideRow {
 	var rows []sideRow
+	if !d.groupProjects {
+		parent := strings.TrimSuffix(prefix, ":")
+		for _, e := range sortRecent(es) {
+			rows = append(rows, sideRow{id: e.id, depth: depth, parent: parent})
+		}
+		return rows
+	}
 	for _, g := range groupByFolder(es) {
 		key := prefix + g.cwd
 		open := forceOpen || d.isOpen(key)

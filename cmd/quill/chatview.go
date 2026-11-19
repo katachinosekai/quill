@@ -435,6 +435,7 @@ func (v *chatView) markdown(text string) fyne.CanvasObject {
 		}
 	}
 	if v.d.center {
+		rt.Segments = centerLists(rt.Segments, "")
 		alignSegments(rt.Segments, fyne.TextAlignCenter)
 	}
 	return rt
@@ -994,4 +995,37 @@ func (l *flowLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	}
 	place()
 	l.width = size.Width
+}
+
+func centerLists(segs []widget.RichTextSegment, indent string) []widget.RichTextSegment {
+	var out []widget.RichTextSegment
+	for _, seg := range segs {
+		l, ok := seg.(*widget.ListSegment)
+		if !ok {
+			out = append(out, seg)
+			continue
+		}
+		for i, item := range l.Items {
+			mark := indent + "• "
+			if l.Ordered {
+				mark = fmt.Sprintf("%s%d. ", indent, i+1)
+			}
+			var texts []widget.RichTextSegment
+			var nested []widget.RichTextSegment
+			switch it := item.(type) {
+			case *widget.ParagraphSegment:
+				texts = it.Texts
+			case *widget.ListSegment:
+				nested = append(nested, it)
+			default:
+				texts = []widget.RichTextSegment{it}
+			}
+			if len(texts) > 0 {
+				p := &widget.ParagraphSegment{Texts: append([]widget.RichTextSegment{&widget.TextSegment{Text: mark, Style: widget.RichTextStyleInline}}, texts...)}
+				out = append(out, p)
+			}
+			out = append(out, centerLists(nested, indent+"   ")...)
+		}
+	}
+	return out
 }

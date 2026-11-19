@@ -789,3 +789,52 @@ func TestChatFollowsAndJumpButton(t *testing.T) {
 		}
 	})
 }
+
+func TestCenteredListsBecomeParagraphs(t *testing.T) {
+	rt := widget.NewRichTextFromMarkdown("intro\n\n- one\n- two\n\n1. first\n2. second")
+	segs := centerLists(rt.Segments, "")
+	var text []string
+	for _, s := range segs {
+		if _, ok := s.(*widget.ListSegment); ok {
+			t.Fatal("lists should be flattened when centered")
+		}
+		if p, ok := s.(*widget.ParagraphSegment); ok {
+			var b strings.Builder
+			for _, x := range p.Texts {
+				b.WriteString(x.Textual())
+			}
+			text = append(text, b.String())
+		}
+	}
+	joined := strings.Join(text, "|")
+	for _, want := range []string{"• one", "• two", "1. first", "2. second"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in %q", want, joined)
+		}
+	}
+}
+
+func TestFlatSessionsUnderMainFolders(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		for _, r := range h.d.rows {
+			if r.header != "" && r.depth > 0 {
+				t.Fatalf("no project subfolders by default: %+v", h.d.rows)
+			}
+		}
+		if !hasRow(h.d.rows, editsID) {
+			t.Fatal("sessions should still be listed")
+		}
+		h.d.groupProjects = true
+		h.d.rebuildRows()
+		sub := false
+		for _, r := range h.d.rows {
+			if r.header != "" && r.depth > 0 {
+				sub = true
+			}
+		}
+		if !sub {
+			t.Fatal("grouping by project should bring the subfolders back")
+		}
+	})
+}

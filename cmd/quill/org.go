@@ -188,6 +188,13 @@ func (d *desk) folderMenu(r sideRow, at fyne.Position) {
 		}),
 		fyne.NewMenuItem("New folder...", func() { d.newFolder(nil) }),
 	}
+	group := fyne.NewMenuItem("Group by project", func() {
+		d.groupProjects = !d.groupProjects
+		d.app.Preferences().SetBool("groupByProject", d.groupProjects)
+		d.rebuildRows()
+	})
+	group.Checked = d.groupProjects
+	items = append(items, group)
 	if _, ok := d.org.Names[r.key]; ok {
 		items = append(items, fyne.NewMenuItem("Restore original name", func() {
 			delete(d.org.Names, r.key)
@@ -278,7 +285,7 @@ func (d *desk) dropOn(id string, target sideRow) {
 		d.setPlacement(id, placeArchive)
 	case target.key == placeAuto || strings.HasPrefix(target.key, placeAuto+":"):
 		d.setPlacement(id, placeAuto)
-	case strings.HasPrefix(target.key, "a:"):
+	case target.key == placeActive || strings.HasPrefix(target.key, "a:"):
 		d.setPlacement(id, placeActive)
 	}
 }
