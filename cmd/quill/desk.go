@@ -173,6 +173,7 @@ type desk struct {
 	groupProjects bool
 	planFirst     bool
 	collapseChips bool
+	rules         sortRules
 	alignSel      *widget.RadioGroup
 	suppressAlign bool
 	forceSwap     bool
@@ -224,6 +225,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		doWait:        fyne.DoAndWait,
 	}
 	d.loadOrg()
+	d.loadRules()
 	for _, id := range a.Preferences().StringList("createdSessions") {
 		d.created[id] = true
 	}
@@ -277,6 +279,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	planChk.Checked = d.planFirst
 	chipChk := widget.NewCheck("Collapse tool chips", d.setCollapseChips)
 	chipChk.Checked = d.collapseChips
+	rulesBtn := widget.NewButtonWithIcon("Sorting rules...", theme.SettingsIcon(), d.rulesDialog)
+	rulesBtn.Importance = widget.LowImportance
+	rulesBtn.Alignment = widget.ButtonAlignLeading
 	legend := container.NewHBox(
 		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
 	)
@@ -287,7 +292,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, alignRow, legend)
+	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, legend)
 	r := canvas.NewRectangle(colSidebar)
 	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
 	return container.NewStack(r, container.NewPadded(d.sideBody))
@@ -528,7 +533,7 @@ func (d *desk) rebuildRows() {
 			old = append(old, e)
 		case p == placeAuto:
 			auto = append(auto, e)
-		case d.isAuto(e.id):
+		case d.rules.ClaudeFolder && d.isAuto(e.id):
 			auto = append(auto, e)
 		case q != "" || d.isActive(e.id, e.last):
 			active = append(active, e)

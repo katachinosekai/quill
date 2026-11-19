@@ -949,3 +949,31 @@ func TestNewSessionInstant(t *testing.T) {
 		}
 	})
 }
+
+func TestSortRules(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		if h.d.rules != defaultRules() {
+			t.Fatalf("defaults: %+v", h.d.rules)
+		}
+		last := time.Now().Add(-3 * 24 * time.Hour)
+		if h.d.isInactive("x", last) {
+			t.Fatal("3 days old should be inactive, not archive")
+		}
+		h.d.setRules(sortRules{ActiveMinutes: 30, ArchiveDays: 2, ClaudeFolder: true})
+		if !h.d.isInactive("x", last) {
+			t.Fatal("archive after 2 days should archive a 3-day-old session")
+		}
+		h.d.loadRules()
+		if h.d.rules.ArchiveDays != 2 {
+			t.Fatal("rules should persist")
+		}
+		if h.d.isActive("x", time.Now().Add(-40*time.Minute)) {
+			t.Fatal("40 min old should not be active")
+		}
+		h.d.setRules(sortRules{ActiveMinutes: 60, ArchiveDays: 7, ClaudeFolder: true})
+		if !h.d.isActive("x", time.Now().Add(-40*time.Minute)) {
+			t.Fatal("active for 60 min should keep it active")
+		}
+	})
+}

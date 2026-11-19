@@ -134,10 +134,8 @@ func smallArrow(res fyne.Resource, onTap func()) *tapRow {
 	return r
 }
 
-const inactiveAfter = 7 * 24 * time.Hour
-
 func (d *desk) isInactive(id string, last time.Time) bool {
-	if last.IsZero() || time.Since(last) < inactiveAfter {
+	if last.IsZero() || time.Since(last) < d.rules.archiveAfter() {
 		return false
 	}
 	if d.current != nil && d.current.id == id {
@@ -150,8 +148,6 @@ func (d *desk) isInactive(id string, last time.Time) bool {
 	return !held
 }
 
-const activeFor = 30 * time.Minute
-
 func (d *desk) isActive(id string, last time.Time) bool {
 	if d.current != nil && d.current.id == id {
 		return true
@@ -162,7 +158,7 @@ func (d *desk) isActive(id string, last time.Time) bool {
 	if _, held := d.terms[id]; held {
 		return true
 	}
-	return !last.IsZero() && time.Since(last) < activeFor
+	return !last.IsZero() && time.Since(last) < d.rules.activeFor()
 }
 
 type sideEntry struct {
