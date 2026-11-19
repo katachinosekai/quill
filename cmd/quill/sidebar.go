@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	sideW        = 330
-	chatShare    = 0.65
-	chatMinWidth = 560
-	sideAnimTime = 220 * time.Millisecond
+	sideW            = 330
+	defaultChatShare = 0.65
+	chatMinWidth     = 560
+	sideAnimTime     = 220 * time.Millisecond
 )
 
 type slideLayout struct{ d *desk }
@@ -88,8 +88,10 @@ func (d *desk) chatWidth() float32 {
 }
 
 const (
-	inputShare    = 0.35
-	inputMinWidth = 640
+	defaultInputShare = 0.45
+	inputMinWidth     = 640
+	minChatShare      = 0.4
+	minInputShare     = 0.25
 )
 
 func (d *desk) inputWidth() float32 {
@@ -97,11 +99,11 @@ func (d *desk) inputWidth() float32 {
 	if d.root == nil || d.root.Size().Width <= 0 {
 		return chat
 	}
-	return min(chat, max(d.root.Size().Width*inputShare, inputMinWidth))
+	return min(chat, max(d.root.Size().Width*d.inputShare(), inputMinWidth))
 }
 
 func (d *desk) chatWidthFor(side float32) float32 {
-	return max(chatMinWidth, (d.root.Size().Width-side)*chatShare)
+	return max(chatMinWidth, (d.root.Size().Width-side)*d.chatShare())
 }
 
 func (d *desk) setSidebar(show bool) {
@@ -243,4 +245,41 @@ func (d *desk) sortedFolders(custom map[string][]sideEntry) []orgFolder {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+func (d *desk) chatShare() float32 {
+	return d.widthShare("chatShare", defaultChatShare, minChatShare)
+}
+
+func (d *desk) inputShare() float32 {
+	return d.widthShare("inputShare", defaultInputShare, minInputShare)
+}
+
+func (d *desk) widthShare(pref string, def, lo float32) float32 {
+	if v, ok := d.shares[pref]; ok {
+		return v
+	}
+	v := float32(d.app.Preferences().FloatWithFallback(pref, float64(def)))
+	v = max(lo, min(1, v))
+	if d.shares == nil {
+		d.shares = map[string]float32{}
+	}
+	d.shares[pref] = v
+	return v
+}
+
+func (d *desk) setShare(pref string, v float32) {
+	if d.shares == nil {
+		d.shares = map[string]float32{}
+	}
+	d.shares[pref] = v
+	if d.chat != nil {
+		d.chat.relayout()
+	}
+	if d.bottomBox != nil {
+		d.bottomBox.Refresh()
+	}
+	if d.mainPane != nil {
+		d.mainPane.Refresh()
+	}
 }

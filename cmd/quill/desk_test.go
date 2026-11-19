@@ -443,11 +443,11 @@ func TestSidebarCollapse(t *testing.T) {
 	h.ui(func() {
 		h.d.setSidebar(false)
 		free := h.d.root.Size().Width
-		if h.d.sidebar.Visible() || !h.d.sideOff || h.d.sidebarWidth() != 0 || h.d.chatWidth() != max(chatMinWidth, free*chatShare) {
+		if h.d.sidebar.Visible() || !h.d.sideOff || h.d.sidebarWidth() != 0 || h.d.chatWidth() != max(chatMinWidth, free*h.d.chatShare()) {
 			t.Fatal("sidebar should be hidden")
 		}
 		test.Tap(h.d.sideToggle)
-		if !h.d.sidebar.Visible() || h.d.sideOff || h.d.chatWidth() != max(chatMinWidth, (h.d.root.Size().Width-sideW)*chatShare) {
+		if !h.d.sidebar.Visible() || h.d.sideOff || h.d.chatWidth() != max(chatMinWidth, (h.d.root.Size().Width-sideW)*h.d.chatShare()) {
 			t.Fatal("sidebar should be back")
 		}
 	})
@@ -1254,6 +1254,28 @@ func TestCatchUpSkipsUnchanged(t *testing.T) {
 			if holders[seq] != nil && iv.holder.Objects[0] != holders[seq] {
 				t.Fatal("switching back must not re-render unchanged messages")
 			}
+		}
+	})
+}
+
+func TestWidthSliders(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		if h.d.inputShare() != defaultInputShare || h.d.chatShare() != defaultChatShare {
+			t.Fatal("defaults: chat 65%, message box 45%")
+		}
+		h.d.setShare("chatShare", 1)
+		h.d.setShare("inputShare", 1)
+		if h.d.inputWidth() > h.d.chatWidth() {
+			t.Fatal("message box never wider than the chat")
+		}
+		h.d.setShare("inputShare", minInputShare)
+		if h.d.inputWidth() < inputMinWidth && h.d.chatWidth() >= inputMinWidth {
+			t.Fatal("message box keeps its usable minimum")
+		}
+		h.d.setShare("chatShare", minChatShare)
+		if h.d.chatWidth() < chatMinWidth {
+			t.Fatal("chat keeps its usable minimum")
 		}
 	})
 }

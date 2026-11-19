@@ -164,6 +164,8 @@ type desk struct {
 	glowBoxes     map[*canvas.Rectangle]glow
 	pulsing       atomic.Int32
 	keeper        *keeperClient
+	shares        map[string]float32
+	bottomBox     *fyne.Container
 	keptView      string
 	keptHidden    bool
 	lightboxClose func()
@@ -758,9 +760,10 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	controls := container.NewHBox(d.modelSel, d.modeSel, d.stt.langBtn, layout.NewSpacer(), openAll, closeAll)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
-	bottom := container.NewPadded(windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow)))
+	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
+	bottom := container.NewPadded(d.bottomBox)
 	d.usage = newUsagePanel(d)
-	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chat.root, d.usage.root))
+	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chat.root, d.usage.root, d.sizePanel()))
 	d.updateChrome()
 	return d.mainPane
 }

@@ -186,23 +186,58 @@ func (l usageLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
 }
 
 func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
-	chat, panel := objs[0], objs[1]
+	chat, panel, sizes := objs[0], objs[1], objs[2]
 	chat.Resize(size)
 	chat.Move(fyne.NewPos(0, 0))
 	w := min(size.Width, l.d.chatWidth())
 	x := (size.Width-w)/2 - l.d.sidebarWidth()/2
 	x = max(0, min(x, size.Width-w))
 	margin := size.Width - (x + w)
-	if margin < usageMinMargin || panel.MinSize().Height > size.Height-16 {
+	sm := sizes.MinSize()
+	sw := max(sm.Width, min(usageMaxWidth, margin-usageGap-18))
+	sx := size.Width - sw - usageEdge
+	if margin >= sw+usageGap {
+		left := x + w + usageGap/2
+		sx = left + (size.Width-usageEdge-left-sw)/2
+	}
+	sy := size.Height - sm.Height - 12
+	sizes.Resize(fyne.NewSize(sw, sm.Height))
+	sizes.Move(fyne.NewPos(sx, sy))
+	room := sy - 12
+	if margin < usageMinMargin || panel.MinSize().Height > room-8 {
 		panel.Hide()
 		return
 	}
 	panel.Show()
 	pw := min(usageMaxWidth, margin-usageGap-18)
 	ph := panel.MinSize().Height
-	y := max(8, (size.Height-ph)/2)
+	y := max(8, (room-ph)/2)
 	panel.Resize(fyne.NewSize(pw, ph))
 	left := x + w + usageGap/2
 	px := left + (size.Width-usageEdge-left-pw)/2
 	panel.Move(fyne.NewPos(max(px, x+w+usageGap/2), y))
+}
+
+func (d *desk) sizePanel() fyne.CanvasObject {
+	row := func(name, pref string, lo float32, get func() float32) fyne.CanvasObject {
+		label := usageText("")
+		show := func(v float32) { setText(label, fmt.Sprintf("%s  %d%%", name, int(v*100+0.5))) }
+		sl := widget.NewSlider(float64(lo), 1)
+		sl.Step = 0.01
+		sl.Value = float64(get())
+		show(float32(sl.Value))
+		sl.OnChanged = func(v float64) {
+			show(float32(v))
+			d.setShare(pref, float32(v))
+		}
+		sl.OnChangeEnded = func(v float64) { d.app.Preferences().SetFloat(pref, v) }
+		return container.NewVBox(label, sl)
+	}
+	body := container.NewVBox(
+		row("Chat width", "chatShare", minChatShare, d.chatShare),
+		row("Message box", "inputShare", minInputShare, d.inputShare),
+	)
+	r := canvas.NewRectangle(colCard)
+	r.CornerRadius = 12
+	return container.NewStack(r, container.NewPadded(body))
 }
