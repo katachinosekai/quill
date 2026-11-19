@@ -21,6 +21,7 @@ import (
 const (
 	restoreEnv  = "QUILL_RESTORE"
 	typingQuiet = 15 * time.Second
+	prefsSettle = 250 * time.Millisecond
 )
 
 type restoreState struct {
@@ -169,6 +170,7 @@ func (d *desk) trySwap() {
 			st.Handed = append(st.Handed, m.hs)
 			handed = append(handed, m)
 		}
+		time.Sleep(prefsSettle)
 		b, _ := json.Marshal(st)
 		path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-restore-%d.json", os.Getpid()))
 		err := os.WriteFile(path, b, 0o600)
