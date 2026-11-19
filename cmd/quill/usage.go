@@ -184,13 +184,13 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	x := (size.Width-w)/2 - l.d.sidebarWidth()/2
 	x = max(0, min(x, size.Width-w))
 	margin := size.Width - (x + w)
-	if margin < usageMinMargin {
+	if margin < usageMinMargin || panel.MinSize().Height > size.Height-16 {
 		panel.Hide()
 		return
 	}
 	panel.Show()
 	pw := min(usageMaxWidth, margin-usageGap-18)
-	ph := min(panel.MinSize().Height, size.Height-16)
+	ph := panel.MinSize().Height
 	y := max(8, (size.Height-ph)/2)
 	panel.Resize(fyne.NewSize(pw, ph))
 	panel.Move(fyne.NewPos(x+w+usageGap, y))
