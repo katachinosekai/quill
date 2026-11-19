@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"fyne.io/fyne/v2"
 	"time"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -44,26 +47,39 @@ func TestFindMedia(t *testing.T) {
 	}
 }
 
-func TestCachedFetch(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+func TestFetchImageInMemory(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
 	dir := t.TempDir()
 	writePNG(t, filepath.Join(dir, "p.png"))
-	srv := httptest.NewServer(http.FileServer(http.Dir(dir)))
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.ServeFile(w, r, filepath.Join(dir, "p.png"))
+	}))
 	defer srv.Close()
-	got := make(chan string, 1)
-	cachedFetch(srv.URL+"/p.png", func(p string, err error) {
-		if err != nil {
-			t.Error(err)
+	for i := 0; i < 2; i++ {
+		got := make(chan fyne.Resource, 1)
+		fetchImage(srv.URL+"/p.png", func(r fyne.Resource, err error) {
+			if err != nil {
+				t.Error(err)
+			}
+			got <- r
+		})
+		select {
+		case r := <-got:
+			if r == nil || len(r.Content()) == 0 {
+				t.Fatal("empty image")
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("fetch timed out")
 		}
-		got <- p
-	})
-	select {
-	case p := <-got:
-		if st, err := os.Stat(p); err != nil || st.Size() == 0 {
-			t.Fatalf("cached file: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("fetch timed out")
+	}
+	if hits != 1 {
+		t.Fatalf("second preview should come from memory, server hits: %d", hits)
+	}
+	if entries, _ := os.ReadDir(cache); len(entries) != 0 {
+		t.Fatal("web images must not be written to disk")
 	}
 }
 
@@ -86,4 +102,23 @@ func TestAssistantMediaPreview(t *testing.T) {
 			t.Fatal("plain text should not get a preview")
 		}
 	})
+}
+
+func TestVideoThumbInMemory(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+	vid := filepath.Join(t.TempDir(), "clip.mp4")
+	if b, err := exec.Command("ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10", "-t", "2", "-pix_fmt", "yuv420p", vid).CombinedOutput(); err != nil {
+		t.Skipf("cannot make test video: %s", b)
+	}
+	r, err := videoThumb(vid)
+	if err != nil || r == nil || len(r.Content()) < 8 || string(r.Content()[1:4]) != "PNG" {
+		t.Fatalf("thumb: %v", err)
+	}
+	if entries, _ := os.ReadDir(cache); len(entries) != 0 {
+		t.Fatal("thumbnails must not be written to disk")
+	}
 }

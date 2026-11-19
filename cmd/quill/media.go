@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -105,105 +103,130 @@ func findMedia(text string) []mediaRef {
 	return out
 }
 
-func mediaCacheDir() string {
-	d, err := os.UserCacheDir()
-	if err != nil {
-		d = os.TempDir()
-	}
-	return filepath.Join(d, "quill", "media")
+const memCacheBytes = 96 << 20
+
+type memEntry struct {
+	src  string
+	data []byte
 }
 
 var (
 	fetchMu   sync.Mutex
-	fetchWait = map[string][]func(string, error){}
+	fetchWait = map[string][]func(fyne.Resource, error){}
+	memCache  []memEntry
+	memSize   int
 )
 
-func cachedFetch(src string, done func(string, error)) {
-	sum := sha256.Sum256([]byte(src))
-	ext := strings.ToLower(filepath.Ext(mediaRef{src: src}.name()))
-	dst := filepath.Join(mediaCacheDir(), hex.EncodeToString(sum[:12])+ext)
-	if _, err := os.Stat(dst); err == nil {
-		done(dst, nil)
+func memGet(src string) fyne.Resource {
+	for i, e := range memCache {
+		if e.src == src {
+			memCache = append(append(memCache[:i:i], memCache[i+1:]...), e)
+			return fyne.NewStaticResource(mediaRef{src: src}.name(), e.data)
+		}
+	}
+	return nil
+}
+
+func memPut(src string, data []byte) {
+	memCache = append(memCache, memEntry{src, data})
+	memSize += len(data)
+	for memSize > memCacheBytes && len(memCache) > 1 {
+		memSize -= len(memCache[0].data)
+		memCache = memCache[1:]
+	}
+}
+
+func fetchImage(src string, done func(fyne.Resource, error)) {
+	fetchMu.Lock()
+	if r := memGet(src); r != nil {
+		fetchMu.Unlock()
+		done(r, nil)
 		return
 	}
-	fetchMu.Lock()
 	if waiters, ok := fetchWait[src]; ok {
 		fetchWait[src] = append(waiters, done)
 		fetchMu.Unlock()
 		return
 	}
-	fetchWait[src] = []func(string, error){done}
+	fetchWait[src] = []func(fyne.Resource, error){done}
 	fetchMu.Unlock()
 	go func() {
-		err := download(src, dst)
+		data, err := download(src)
 		fetchMu.Lock()
+		var r fyne.Resource
+		if err == nil {
+			memPut(src, data)
+			r = fyne.NewStaticResource(mediaRef{src: src}.name(), data)
+		}
 		waiters := fetchWait[src]
 		delete(fetchWait, src)
 		fetchMu.Unlock()
 		for _, w := range waiters {
-			w(dst, err)
+			w(r, err)
 		}
 	}()
 }
 
-func download(src, dst string) error {
+func download(src string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s", resp.Status)
+		return nil, fmt.Errorf("%s", resp.Status)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	tmp := dst + ".part"
-	f, err := os.Create(tmp)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	n, err := io.Copy(f, io.LimitReader(resp.Body, maxImageBytes+1))
-	f.Close()
-	if err == nil && n > maxImageBytes {
-		err = fmt.Errorf("larger than %d MB", maxImageBytes>>20)
+	if len(data) > maxImageBytes {
+		return nil, fmt.Errorf("larger than %d MB", maxImageBytes>>20)
 	}
-	if err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, dst)
+	return data, nil
 }
 
-func videoThumb(src string) (string, error) {
+func videoThumb(src string) (fyne.Resource, error) {
 	st, err := os.Stat(src)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d", src, st.Size(), st.ModTime().UnixNano())))
-	dst := filepath.Join(mediaCacheDir(), "thumb-"+hex.EncodeToString(sum[:12])+".png")
-	if _, err := os.Stat(dst); err == nil {
-		return dst, nil
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return "", err
+	key := fmt.Sprintf("thumb|%s|%d|%d", src, st.Size(), st.ModTime().UnixNano())
+	fetchMu.Lock()
+	r := memGet(key)
+	fetchMu.Unlock()
+	if r != nil {
+		return r, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-loglevel", "error", "-y", "-ss", "1", "-i", src, "-frames:v", "1", "-vf", fmt.Sprintf("scale=%d:-2", previewW*2), dst)
-	if b, err := cmd.CombinedOutput(); err != nil {
-		cmd = exec.CommandContext(ctx, "ffmpeg", "-loglevel", "error", "-y", "-i", src, "-frames:v", "1", "-vf", fmt.Sprintf("scale=%d:-2", previewW*2), dst)
-		if b2, err2 := cmd.CombinedOutput(); err2 != nil {
-			return "", fmt.Errorf("%s %s", strings.TrimSpace(string(b)), strings.TrimSpace(string(b2)))
+	grab := func(seek bool) ([]byte, error) {
+		args := []string{"-loglevel", "error"}
+		if seek {
+			args = append(args, "-ss", "1")
+		}
+		args = append(args, "-i", src, "-frames:v", "1", "-vf", fmt.Sprintf("scale=%d:-2", previewW*2), "-f", "image2pipe", "-vcodec", "png", "-")
+		return exec.CommandContext(ctx, "ffmpeg", args...).Output()
+	}
+	data, err := grab(true)
+	if err != nil || len(data) == 0 {
+		if data, err = grab(false); err != nil {
+			return nil, err
 		}
 	}
-	return dst, nil
+	if len(data) == 0 {
+		return nil, fmt.Errorf("no video frame")
+	}
+	fetchMu.Lock()
+	memPut(key, data)
+	fetchMu.Unlock()
+	return fyne.NewStaticResource(filepath.Base(src)+".png", data), nil
 }
 
 type player struct {
@@ -314,14 +337,17 @@ func (v *chatView) mediaCard(m mediaRef) fyne.CanvasObject {
 	img.ScaleMode = canvas.ImageScaleSmooth
 	img.SetMinSize(fyne.NewSize(previewW, previewH))
 	status := mutedText("Loading preview...", 11)
-	set := func(path string, err error) {
+	fail := func(err error) {
+		status.Text = "No preview: " + oneLine(err.Error(), 60)
+		status.Refresh()
+	}
+	set := func(r fyne.Resource, err error) {
 		d.do(func() {
 			if err != nil {
-				status.Text = "No preview: " + oneLine(err.Error(), 60)
-				status.Refresh()
+				fail(err)
 				return
 			}
-			img.File = path
+			img.Resource = r
 			img.Refresh()
 			status.Text = ""
 			status.Refresh()
@@ -329,7 +355,7 @@ func (v *chatView) mediaCard(m mediaRef) fyne.CanvasObject {
 	}
 	switch {
 	case m.kind == mediaImage && m.remote():
-		cachedFetch(m.src, set)
+		fetchImage(m.src, set)
 	case m.kind == mediaImage:
 		img.File = m.src
 		status.Text = ""
