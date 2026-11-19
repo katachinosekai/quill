@@ -562,3 +562,27 @@ func TestKfmt(t *testing.T) {
 		}
 	}
 }
+
+func TestTypingContinuesWithCommandList(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.createSession(h.proj, "default", "default")
+		h.d.cmdList = []protocol.Command{{Name: "compact"}, {Name: "code-review"}, {Name: "clear"}}
+		h.w.Canvas().Focus(h.d.input)
+		typeFocused := func(text string) {
+			f := h.w.Canvas().Focused()
+			if f == nil {
+				t.Fatal("the input lost keyboard focus")
+			}
+			test.Type(f, text)
+		}
+		typeFocused("/c")
+		if !h.d.cmds.visible() {
+			t.Fatal("list should be open")
+		}
+		typeFocused("om")
+		if h.d.input.Text != "/com" || len(h.d.cmds.matches) != 1 || h.d.cmds.matches[0].Name != "compact" {
+			t.Fatalf("typing stopped reaching the input: %q %+v", h.d.input.Text, h.d.cmds.matches)
+		}
+	})
+}

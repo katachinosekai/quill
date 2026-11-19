@@ -21,7 +21,7 @@ const maxCmdRows = 8
 
 type cmdMenu struct {
 	d       *desk
-	pop     *widget.PopUp
+	panel   *fyne.Container
 	box     *fyne.Container
 	matches []protocol.Command
 	sel     int
@@ -89,13 +89,14 @@ func matchCommands(all []protocol.Command, text string) []protocol.Command {
 }
 
 func (m *cmdMenu) visible() bool {
-	return m.pop != nil && m.pop.Visible() && len(m.matches) > 0
+	return m.panel != nil && m.panel.Visible() && len(m.matches) > 0
 }
 
 func (m *cmdMenu) hide() {
 	m.matches = nil
-	if m.pop != nil {
-		m.pop.Hide()
+	if m.panel != nil && m.panel.Visible() {
+		m.panel.Hide()
+		m.d.mainPane.Refresh()
 	}
 }
 
@@ -119,14 +120,6 @@ func (m *cmdMenu) update(text string) {
 
 func (m *cmdMenu) render() {
 	d := m.d
-	if m.box == nil {
-		m.box = container.NewVBox()
-		bgRect := canvas.NewRectangle(colCard)
-		bgRect.CornerRadius = 10
-		bgRect.StrokeColor = color.NRGBA{0x44, 0x44, 0x40, 0xff}
-		bgRect.StrokeWidth = 1
-		m.pop = widget.NewPopUp(container.NewStack(bgRect, container.NewPadded(m.box)), d.win.Canvas())
-	}
 	m.box.RemoveAll()
 	for i, c := range m.matches {
 		name := canvas.NewText("/"+c.Name, colText)
@@ -151,11 +144,22 @@ func (m *cmdMenu) render() {
 			m.accept()
 		}))
 	}
-	w := d.input.Size().Width + d.sendBtn.Size().Width
-	size := fyne.NewSize(w, m.pop.MinSize().Height)
-	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(d.input)
-	m.pop.Resize(size)
-	m.pop.ShowAtPosition(fyne.NewPos(pos.X, pos.Y-size.Height-6))
+	m.box.Refresh()
+	if !m.panel.Visible() {
+		m.panel.Show()
+		d.mainPane.Refresh()
+	}
+}
+
+func newCmdMenu(d *desk) *cmdMenu {
+	m := &cmdMenu{d: d, box: container.NewVBox()}
+	bgRect := canvas.NewRectangle(colCard)
+	bgRect.CornerRadius = 10
+	bgRect.StrokeColor = color.NRGBA{0x44, 0x44, 0x40, 0xff}
+	bgRect.StrokeWidth = 1
+	m.panel = container.NewStack(bgRect, container.NewPadded(m.box))
+	m.panel.Hide()
+	return m
 }
 
 func (m *cmdMenu) accept() {

@@ -582,7 +582,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
-	d.cmds = &cmdMenu{d: d}
+	d.cmds = newCmdMenu(d)
 	d.input.onKey = d.cmds.key
 	d.input.menuOpen = d.cmds.visible
 	d.input.OnChanged = func(t string) {
@@ -618,7 +618,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(layout.NewSpacer(), d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.act = newActivity(d)
-	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(inputCard, d.act.root, statsRow)))
+	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, d.act.root, statsRow)))
 	d.usage = newUsagePanel(d)
 	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chat.root, d.usage.root))
 	d.updateChrome()
