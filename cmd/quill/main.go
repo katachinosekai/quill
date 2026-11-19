@@ -30,6 +30,7 @@ func main() {
 	}
 	a := app.NewWithID("io.github.katachinosekai.quill")
 	a.Settings().SetTheme(deskTheme{})
+	a.SetIcon(appIcon)
 	w := a.NewWindow("Quill")
 	d := newDesk(a, w, config{
 		ProjectsRoot: transcript.DefaultRoot(),
