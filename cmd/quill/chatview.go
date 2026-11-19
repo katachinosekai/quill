@@ -22,7 +22,7 @@ import (
 
 const (
 	chatMaxWidth  = 760
-	historyWindow = 80
+	historyWindow = 40
 	historyBatch  = 60
 	loadEarlierAt = 400
 	maxResultLen  = 12000
@@ -36,6 +36,11 @@ type itemView struct {
 	expanded bool
 	full     bool
 	height   float32
+	sig      string
+}
+
+func itemSig(it *chat.Item) string {
+	return fmt.Sprintf("%d|%d|%t|%t|%t|%d|%d|%d|%t|%d", it.Kind, len(it.Text), it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, it.InPlan, len(it.Diff))
 }
 
 type chatView struct {
@@ -81,7 +86,7 @@ type sessView struct {
 	more        fyne.CanvasObject
 }
 
-const cachedViews = 8
+const cachedViews = 12
 
 func newChatView(d *desk) *chatView {
 	v := &chatView{d: d, views: map[int]*itemView{}}
@@ -90,6 +95,9 @@ func newChatView(d *desk) *chatView {
 	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
 	v.live = widget.NewLabel(" ")
 	v.live.TextStyle.Italic = true
+	if d.app.Preferences().Bool("centerStatus") {
+		v.live.Alignment = fyne.TextAlignCenter
+	}
 	v.live.Importance = widget.MediumImportance
 	v.col = v.inner
 	v.scroll = container.NewVScroll(v.inner)
@@ -222,7 +230,9 @@ func (v *chatView) catchUp(seen int) {
 	from := max(v.shownFrom, min(seen, len(items))-20)
 	var changed []*chat.Item
 	for _, it := range items[from:] {
-		changed = append(changed, it)
+		if iv, ok := v.views[it.Seq]; !ok || iv.sig != itemSig(it) {
+			changed = append(changed, it)
+		}
 	}
 	if len(changed) == 0 {
 		return
@@ -473,6 +483,7 @@ func (v *chatView) viewFor(it *chat.Item) *itemView {
 }
 
 func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
+	iv.sig = itemSig(it)
 	if it.Kind == chat.Assistant && it.Streaming {
 		if iv.stream == nil {
 			iv.stream = widget.NewLabel(it.Text)

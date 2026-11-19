@@ -1207,3 +1207,41 @@ func TestTypedApproval(t *testing.T) {
 		s.conv.Busy = false
 	})
 }
+
+func TestCenteringOptions(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.alignSel.SetSelected("Left")
+		h.d.alignSel.SetSelected("Center")
+		if !h.d.center || h.d.input.Alignment != fyne.TextAlignCenter || h.d.chat.live.Alignment != fyne.TextAlignCenter {
+			t.Fatal("the global Center switch should center chat, typing and status")
+		}
+		h.d.alignFollowers[1].SetSelected("Left")
+		if h.d.chat.live.Alignment != fyne.TextAlignLeading || !h.d.center {
+			t.Fatal("status can be set on its own")
+		}
+	})
+}
+
+func TestCatchUpSkipsUnchanged(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		for i := 0; i < 30; i++ {
+			a.conv.AddUser(fmt.Sprintf("a %d", i))
+		}
+		h.d.chat.show(a)
+		holders := map[int]fyne.CanvasObject{}
+		for seq, iv := range h.d.chat.views {
+			holders[seq] = iv.holder.Objects[0]
+		}
+		b := h.d.createSession(h.proj, "default", "default")
+		h.d.chat.show(b)
+		h.d.chat.show(a)
+		for seq, iv := range h.d.chat.views {
+			if holders[seq] != nil && iv.holder.Objects[0] != holders[seq] {
+				t.Fatal("switching back must not re-render unchanged messages")
+			}
+		}
+	})
+}
