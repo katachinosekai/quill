@@ -388,7 +388,7 @@ func (v *chatView) renderTool(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	if iv.expanded {
 		icon = theme.MenuDropDownIcon()
 	}
-	head := foldHead(toolHeader(it), icon, func() {
+	head := foldHead(toolHeader(it), icon, v.d.center, func() {
 		iv.expanded = !iv.expanded
 		v.refreshItem(it, iv)
 	})
@@ -635,7 +635,7 @@ func (v *chatView) renderThinking(it *chat.Item, iv *itemView) fyne.CanvasObject
 	if it.Streaming {
 		label = "Thinking..."
 	}
-	head := foldHead(label, icon, func() {
+	head := foldHead(label, icon, v.d.center, func() {
 		iv.expanded = !iv.expanded
 		v.refreshItem(it, iv)
 	})
@@ -700,11 +700,15 @@ func (c *wrapCode) Select(_, _ fyne.Position) {}
 func (c *wrapCode) SelectedText() string      { return "" }
 func (c *wrapCode) Unselect()                 {}
 
-func foldHead(text string, icon fyne.Resource, onTap func()) fyne.CanvasObject {
+func foldHead(text string, icon fyne.Resource, center bool, onTap func()) fyne.CanvasObject {
 	l := widget.NewLabel(text)
-	l.Wrapping = fyne.TextWrapWord
 	l.TextStyle.Bold = true
-	return newTapRow(container.NewBorder(nil, nil, container.NewCenter(sized(18, 18, widget.NewIcon(icon))), nil, l), onTap)
+	ic := container.NewCenter(sized(18, 18, widget.NewIcon(icon)))
+	if center {
+		return newTapRow(container.New(&flowLayout{gap: 2, center: true}, ic, l), onTap)
+	}
+	l.Wrapping = fyne.TextWrapWord
+	return newTapRow(container.NewBorder(nil, nil, ic, nil, l), onTap)
 }
 
 func (v *chatView) stepLine(it *chat.Item) fyne.CanvasObject {
@@ -787,7 +791,7 @@ func (v *chatView) stepRun(it *chat.Item) fyne.CanvasObject {
 			open = append(open, container.NewThemeOverride(bg(colCard, 8, container.NewVBox(body...)), smallTheme{}))
 		}
 	}
-	row := container.New(&flowLayout{gap: 6}, chips...)
+	row := container.New(&flowLayout{gap: 6, center: v.d.center}, chips...)
 	if len(open) == 0 {
 		return row
 	}
@@ -830,8 +834,9 @@ func (v *chatView) stepChip(it *chat.Item) fyne.CanvasObject {
 }
 
 type flowLayout struct {
-	gap   float32
-	width float32
+	gap    float32
+	width  float32
+	center bool
 }
 
 func (l *flowLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
@@ -862,18 +867,33 @@ func (l *flowLayout) rows(objs []fyne.CanvasObject, width float32) int {
 }
 
 func (l *flowLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	var row []fyne.CanvasObject
 	x, y, rowH := float32(0), float32(0), float32(0)
+	place := func() {
+		off := float32(0)
+		if l.center && x > 0 {
+			off = max(0, (size.Width-(x-l.gap))/2)
+		}
+		cx := off
+		for _, o := range row {
+			m := o.MinSize()
+			o.Resize(m)
+			o.Move(fyne.NewPos(cx, y+(rowH-m.Height)/2))
+			cx += m.Width + l.gap
+		}
+	}
 	for _, o := range objs {
 		m := o.MinSize()
 		if x > 0 && x+m.Width > size.Width {
-			x = 0
+			place()
+			row, x = nil, 0
 			y += rowH + l.gap
 			rowH = 0
 		}
-		o.Resize(m)
-		o.Move(fyne.NewPos(x, y))
+		row = append(row, o)
 		x += m.Width + l.gap
 		rowH = max(rowH, m.Height)
 	}
+	place()
 	l.width = size.Width
 }
