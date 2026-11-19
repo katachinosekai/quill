@@ -86,3 +86,29 @@ func TestCloseHidesInBackground(t *testing.T) {
 		}
 	})
 }
+
+func TestSwapWaitsWhileTyping(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.swapTo = "/nonexistent/quill"
+		h.d.input.SetText("half a thought")
+		h.d.trySwap()
+		if h.d.swapping {
+			t.Fatal("must not swap while the user is typing")
+		}
+		h.d.swapTo = ""
+	})
+}
+
+func TestLateSendKeepsNewTyping(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.input.SetText("typed meanwhile")
+		h.d.sendTo(s, "earlier message")
+		if h.d.input.Text != "typed meanwhile" {
+			t.Fatalf("input wiped: %q", h.d.input.Text)
+		}
+	})
+}

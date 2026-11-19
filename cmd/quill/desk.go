@@ -160,6 +160,8 @@ type desk struct {
 	pendingChrome bool
 	pendingFor    *deskSession
 	act           *activity
+	lastTyped     time.Time
+	autoRC        bool
 	flushTimer    *time.Timer
 	cmds          *cmdMenu
 	sidebar       fyne.CanvasObject
@@ -196,6 +198,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		infos:    map[string]transcript.Info{},
 		terms:    map[string]live.Process{},
 		center:   a.Preferences().Bool("centerText"),
+		autoRC:   a.Preferences().BoolWithFallback("autoRemoteControl", true),
 		created:  map[string]bool{},
 		do:       fyne.Do,
 		doWait:   fyne.DoAndWait,
@@ -236,6 +239,18 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		}
 	})
 	centerChk.Checked = d.center
+	rcChk := widget.NewCheck("Remote Control for every session", func(on bool) {
+		d.autoRC = on
+		d.app.Preferences().SetBool("autoRemoteControl", on)
+		if on {
+			for _, s := range d.runningSessions() {
+				if !s.rcOn {
+					d.autoRemote(s)
+				}
+			}
+		}
+	})
+	rcChk.Checked = d.autoRC
 	legend := container.NewHBox(
 		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
 	)
@@ -247,7 +262,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	collapse := smallArrow(theme.NavigateBackIcon(), func() { d.setSidebar(false) })
 	brand := container.NewBorder(nil, nil, container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName)), container.NewCenter(collapse))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(autoBox, widget.NewSeparator(), centerChk, legend)
+	bottom := container.NewVBox(autoBox, widget.NewSeparator(), centerChk, rcChk, legend)
 	r := canvas.NewRectangle(colSidebar)
 	return container.NewStack(r, container.NewPadded(container.NewBorder(top, bottom, nil, nil, d.list)))
 }
@@ -552,7 +567,10 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.cmds = &cmdMenu{d: d}
 	d.input.onKey = d.cmds.key
 	d.input.menuOpen = d.cmds.visible
-	d.input.OnChanged = d.cmds.update
+	d.input.OnChanged = func(t string) {
+		d.lastTyped = time.Now()
+		d.cmds.update(t)
+	}
 	d.input.onSendNow = d.sendNow
 	d.input.hint = "Message Claude  ·  Enter send  ·  Ctrl+Enter stop & send  ·  Shift+Enter new line  ·  / commands"
 	d.input.SetPlaceHolder(d.input.hint)
@@ -892,6 +910,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 	s.proc = p
 	s.persisted = true
 	d.ownPIDs.Store(p.PID(), true)
+	d.autoRemote(s)
 	go func() {
 		<-p.Done()
 		err := p.ExitError()
@@ -1086,7 +1105,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		return
 	}
 	s.conv.Busy = true
-	if d.current == s {
+	if d.current == s && strings.TrimSpace(d.input.Text) == text {
 		d.input.SetText("")
 	}
 	d.chatFor(s, []*chat.Item{it})
@@ -1208,6 +1227,27 @@ func (d *desk) notify(s *deskSession, msg string) {
 	if d.current == s {
 		d.chat.update([]*chat.Item{it})
 	}
+}
+
+func (d *desk) autoRemote(s *deskSession) {
+	if !d.autoRC || s.proc == nil {
+		return
+	}
+	p := s.proc
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		info, err := p.RemoteControl(ctx, true)
+		d.do(func() {
+			if err != nil || s.proc != p {
+				return
+			}
+			s.rcOn, s.rcURL = true, info.SessionURL
+			if d.current == s {
+				d.updateChrome()
+			}
+		})
+	}()
 }
 
 func (d *desk) setRemoteControl(s *deskSession, on bool) {

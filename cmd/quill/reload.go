@@ -15,7 +15,10 @@ import (
 	"github.com/katachinosekai/quill/internal/chat"
 )
 
-const restoreEnv = "QUILL_RESTORE"
+const (
+	restoreEnv  = "QUILL_RESTORE"
+	typingQuiet = 15 * time.Second
+)
 
 type restoreState struct {
 	Session string  `json:"session"`
@@ -97,6 +100,9 @@ func (d *desk) trySwap() {
 	if d.swapTo == "" || d.swapping || d.signingIn != nil {
 		return
 	}
+	if time.Since(d.lastTyped) < typingQuiet {
+		return
+	}
 	for _, s := range d.runningSessions() {
 		if st := s.status(); st == stRunning || st == stWaiting {
 			return
@@ -125,6 +131,14 @@ func (d *desk) trySwap() {
 	target := d.swapTo
 	go func() {
 		d.stopAll(running)
+		d.doWait(func() {
+			st.Draft = d.input.Text
+			if d.chat.scroll != nil {
+				st.ScrollY = d.chat.scroll.Offset.Y
+			}
+			b, _ := json.Marshal(st)
+			_ = os.WriteFile(path, b, 0o600)
+		})
 		env := append(os.Environ(), restoreEnv+"="+path)
 		err := syscall.Exec(target, os.Args, env)
 		d.do(func() {

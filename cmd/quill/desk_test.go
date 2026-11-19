@@ -490,3 +490,21 @@ func TestCtrlEnterStopsAndSends(t *testing.T) {
 		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "hello")
 	})
 }
+
+func TestAutoRemoteControl(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		h.d.autoRC = true
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("hello")
+	})
+	h.eventually("remote control on", func() bool { return s.rcOn && s.rcURL != "" })
+	h.ui(func() {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.Notice && strings.Contains(it.Text, "Remote Control") {
+				t.Fatal("auto Remote Control should not add chat notices")
+			}
+		}
+	})
+}

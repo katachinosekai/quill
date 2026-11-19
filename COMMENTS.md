@@ -45,7 +45,7 @@ Go code in this repo carries no comments; notes live here.
 
 ## Remote Control
 
-`--remote-control` is for interactive sessions only, but a headless session accepts control_request `{subtype:"remote_control", enabled:true|false}`; enabling returns `session_url` and `connect_url` (verified for real). The header has a per-session "Remote Control" checkbox, off by default; turning it on starts the process if needed and shows an "Open remotely" link. It resets to off whenever the process restarts.
+`--remote-control` is for interactive sessions only, but a headless session accepts control_request `{subtype:"remote_control", enabled:true|false}`; enabling returns `session_url` and `connect_url` (verified for real). The header has a per-session "Remote Control" checkbox, off by default; turning it on starts the process if needed and shows an "Open remotely" link. It resets to off whenever the process restarts. "Remote Control for every session" (sidebar, preference `autoRemoteControl`, default ON, user 2026-11-19) turns it on quietly (no chat notice) every time Quill starts a Claude process (`autoRemote` from `ensureProcess`), so it survives restarts and live updates.
 
 ## Sessions open in a terminal (takeover)
 
@@ -67,7 +67,7 @@ Title order: custom title, ai-title record, summary, first prompt. Side-chain an
 
 ## Live update (reload.go)
 
-Go can't hot-swap code, so a new build takes over in place: `watchBinary` polls the running executable (symlinks resolved) every second; once it changed, is at least 1 s old, executable and starts with ELF magic, `trySwap` waits until no session is running/waiting or being taken over (re-checked after each `result`), stops idle Claude processes (they resume on the next message), writes $TMPDIR/quill-restore-<pid>.json (session, draft, window size, scroll) and `syscall.Exec`s the new binary with QUILL_RESTORE set. Startup consumes it (`takeRestore` / `applyRestore`). Build with `go build -o dist/quill.tmp ... && mv dist/quill.tmp dist/quill` so the file swaps atomically. Remote Control is off after a swap (process restart).
+Go can't hot-swap code, so a new build takes over in place: `watchBinary` polls the running executable (symlinks resolved) every second; once it changed, is at least 1 s old, executable and starts with ELF magic, `trySwap` waits until no session is running/waiting or being taken over and nothing was typed for 15 s (`lastTyped`; retried on every 5 s refresh) (re-checked after each `result`), stops idle Claude processes (they resume on the next message), writes $TMPDIR/quill-restore-<pid>.json (session, draft, window size, scroll; the draft and scroll are captured again right before exec) and `syscall.Exec`s the new binary with QUILL_RESTORE set. Startup consumes it (`takeRestore` / `applyRestore`). Build with `go build -o dist/quill.tmp ... && mv dist/quill.tmp dist/quill` so the file swaps atomically. Remote Control is off after a swap (process restart).
 
 ## Background mode (background.go)
 
