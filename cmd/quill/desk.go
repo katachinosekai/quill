@@ -1123,7 +1123,13 @@ func (d *desk) send(text string) {
 	d.cmds.hide()
 	s := d.current
 	text = strings.TrimSpace(text)
-	if s == nil || text == "" {
+	if text == "" {
+		return
+	}
+	if d.runLocalCommand(text) {
+		return
+	}
+	if s == nil {
 		return
 	}
 	if s.takeover || s.loading {

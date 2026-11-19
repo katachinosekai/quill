@@ -400,7 +400,7 @@ func TestSlashCommandMenu(t *testing.T) {
 		s = h.d.createSession(h.proj, "default", "default")
 		h.d.cmdList = []protocol.Command{{Name: "help"}, {Name: "model"}}
 		h.d.input.SetText("/")
-		if !h.d.cmds.visible() || len(h.d.cmds.matches) != 2 {
+		if !h.d.cmds.visible() || len(h.d.cmds.matches) != len(localCommands)+1 {
 			t.Fatalf("startup list should show: %+v", h.d.cmds.matches)
 		}
 		h.d.send("hi")
@@ -886,6 +886,36 @@ func TestPlanFirstApproval(t *testing.T) {
 			if it.Kind == chat.Permission && it.PermState == chat.PermPending {
 				t.Fatal("no prompt should wait for the user during an approved plan")
 			}
+		}
+	})
+}
+
+func TestLocalSlashCommands(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("/model sonnet")
+		if s.model != "sonnet" || s.proc != nil {
+			t.Fatalf("/model should switch locally without starting claude: %q", s.model)
+		}
+		h.d.send("/upgrade")
+		if s.proc != nil || h.d.input.Text != "" {
+			t.Fatal("/upgrade must be handled by Quill, not sent to the CLI")
+		}
+		before := len(h.d.sessions)
+		h.d.send("/clear")
+		if len(h.d.sessions) != before+1 || h.d.current == s {
+			t.Fatal("/clear should start a fresh session")
+		}
+		var hasUpgrade bool
+		for _, c := range h.d.commandsFor(h.d.current) {
+			if c.Name == "upgrade" {
+				hasUpgrade = true
+			}
+		}
+		if !hasUpgrade {
+			t.Fatal("local commands should be suggested")
 		}
 	})
 }

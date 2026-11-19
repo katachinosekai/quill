@@ -81,6 +81,8 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## UI notes
 
+- Local slash commands (localcmds.go): the headless CLI rejects interactive-only commands ("/upgrade isn't available in this environment"), so Quill handles /upgrade (opens claude.ai/upgrade), /login, /logout, /clear (new session in the same folder), /model <name>, /exit|/quit itself before anything is sent; they are listed first in the / suggestions and replace the CLI's entries of the same name.
+
 - Auto-scroll: the chat follows new messages/thoughts/steps while the view is at the bottom (`follow`); scrolling up (OnScrolled, not caused by Quill itself) stops following, and a glowing "Latest" button (pulsing accent behind it) appears at the bottom of the chat; clicking it glides down to the newest content (320 ms ease, `glideBottom`) and resumes following.
 
 - Speech to text (stt.go): mic button above Send. Fully local: `pw-record` (16 kHz mono) -> `ffmpeg` clean-up -> whisper.cpp `whisper-cli -nt -np` with `~/.local/share/quill/models/ggml-base.en.bin` (overrides: QUILL_WHISPER, QUILL_WHISPER_MODEL); the temp audio folder is deleted after transcription, the text is appended to the input (never sent automatically). First click shows a privacy notice (nothing collected or sent to Anthropic; preference `sttNoticeShown`). If the engine is missing, a dialog shows the one-time setup command (`sttSetupCommand`: clone whisper.cpp v1.7.6, CPU build, download the model). Status shows on the live line ("● Listening...", "Turning speech into text...").

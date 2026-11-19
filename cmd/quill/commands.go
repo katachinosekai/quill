@@ -53,12 +53,24 @@ func (d *desk) fetchCommands() {
 }
 
 func (d *desk) commandsFor(s *deskSession) []protocol.Command {
+	list := d.cmdList
 	if s != nil && s.proc != nil {
 		if c := s.proc.Commands(); len(c) > 0 {
-			return c
+			list = c
 		}
 	}
-	return d.cmdList
+	seen := map[string]bool{}
+	out := make([]protocol.Command, 0, len(list)+len(localCommands))
+	for _, c := range localCommands {
+		seen[c.Name] = true
+		out = append(out, c)
+	}
+	for _, c := range list {
+		if !seen[c.Name] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func matchCommands(all []protocol.Command, text string) []protocol.Command {
