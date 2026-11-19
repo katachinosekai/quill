@@ -137,3 +137,9 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 - No attachments, slash-command palette, session rename/delete, or per-tool "always" rules beyond what the CLI suggests.
 - Transcript reloads are full reloads (fine for normal sizes; very large transcripts load in the background).
 - Terminal detection relies on `~/.claude/sessions/*.json`; if the CLI changes that format the "open in a terminal" state disappears (sessions then look idle, and sending would start a second process on the same id).
+
+## Bundled Fyne (third_party/fyne)
+
+Quill builds against a patched copy of Fyne v2.8.2 in `third_party/fyne` (go.mod `replace`). The only change is in `widget/entry.go`: an `Alignment` field on `Entry`, applied to the text and placeholder segments, and `CursorPosition` adds `rowAlignOffset` so the cursor lines up with centered text (clicks and selection already handle alignment upstream). The diff is `third_party/fyne-entry-align.patch`.
+
+To upgrade Fyne: copy the new version from the module cache into `third_party/fyne` (without `_test.go`/`testdata`), re-apply the patch (`patch -p1 -d third_party/fyne < third_party/fyne-entry-align.patch`), fix any rejected hunks by hand, run the tests (`TestCenteredTyping`).

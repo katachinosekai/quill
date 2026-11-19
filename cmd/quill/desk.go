@@ -261,6 +261,20 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	}
 	d.suppressAlign = false
 	alignRow := container.NewHBox(container.NewCenter(mutedText("Text", 12)), d.alignSel)
+	typeSel := widget.NewRadioGroup([]string{"Left", "Center"}, nil)
+	typeSel.Horizontal = true
+	typeSel.Required = true
+	if d.app.Preferences().Bool("centerInput") {
+		typeSel.SetSelected("Center")
+	} else {
+		typeSel.SetSelected("Left")
+	}
+	typeSel.OnChanged = func(v string) {
+		if v != "" {
+			d.setInputCenter(v == "Center")
+		}
+	}
+	typeRow := container.NewHBox(container.NewCenter(mutedText("Typing", 12)), typeSel)
 	rcChk := widget.NewCheck("Remote Control for every session", func(on bool) {
 		d.autoRC = on
 		d.app.Preferences().SetBool("autoRemoteControl", on)
@@ -293,7 +307,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, legend)
+	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, typeRow, legend)
 	r := canvas.NewRectangle(colSidebar)
 	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
 	return container.NewStack(r, container.NewPadded(d.sideBody))
@@ -681,6 +695,9 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.onSendNow = d.sendNow
 	d.input.hint = "Message Claude"
 	d.input.SetPlaceHolder(d.input.hint)
+	if d.app.Preferences().Bool("centerInput") {
+		d.input.Alignment = fyne.TextAlignCenter
+	}
 	d.modelSel = widget.NewSelect(modelChoices, func(v string) {
 		if d.suppress || d.current == nil {
 			return
@@ -1684,6 +1701,18 @@ func setText(t *canvas.Text, text string) {
 		t.Text = text
 		t.Refresh()
 	}
+}
+
+func (d *desk) setInputCenter(on bool) {
+	d.app.Preferences().SetBool("centerInput", on)
+	if d.input == nil {
+		return
+	}
+	d.input.Alignment = fyne.TextAlignLeading
+	if on {
+		d.input.Alignment = fyne.TextAlignCenter
+	}
+	d.input.Refresh()
 }
 
 func (d *desk) setCollapseChips(on bool) {

@@ -1,0 +1,35 @@
+--- a/widget/entry.go	2026-11-19 13:31:09.107551907 -0800
++++ b/widget/entry.go	2026-11-19 13:31:09.114095645 -0800
+@@ -44,6 +44,7 @@
+ 	Text     string
+ 	// Since: 2.0
+ 	TextStyle   fyne.TextStyle
++	Alignment   fyne.TextAlign
+ 	PlaceHolder string
+ 	OnChanged   func(string) `json:"-"`
+ 
+@@ -232,7 +233,7 @@
+ 	textSize := th.Size(theme.SizeNameText)
+ 
+ 	size := provider.lineSizeToColumn(e.CursorColumn, e.CursorRow, textSize, innerPad)
+-	xPos := size.Width
++	xPos := size.Width + provider.rowAlignOffset(e.CursorRow, textSize, innerPad)
+ 	yPos := size.Height * float32(e.CursorRow)
+ 
+ 	return fyne.NewPos(xPos-(inputBorder/2), yPos+innerPad-inputBorder)
+@@ -1279,6 +1280,7 @@
+ 	textSegment.Style.ColorName = colName
+ 	textSegment.Style.concealed = e.Password
+ 	textSegment.Style.TextStyle = e.TextStyle
++	textSegment.Style.Alignment = e.Alignment
+ 
+ 	colName = theme.ColorNamePlaceHolder
+ 	if disabled {
+@@ -1291,6 +1293,7 @@
+ 	textSegment = placeholder.Segments[0].(*TextSegment)
+ 	textSegment.Style.ColorName = colName
+ 	textSegment.Style.TextStyle = e.TextStyle
++	textSegment.Style.Alignment = e.Alignment
+ 	textSegment.Text = e.PlaceHolder
+ }
+ 

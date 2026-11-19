@@ -994,3 +994,25 @@ func TestSortRules(t *testing.T) {
 		}
 	})
 }
+
+func TestCenteredTyping(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.createSession(h.proj, "default", "default")
+		h.d.input.SetText("hi")
+		h.d.input.CursorColumn = 2
+		h.d.input.Refresh()
+		left := h.d.input.CursorPosition().X
+		h.d.setInputCenter(true)
+		h.d.input.Refresh()
+		mid := h.d.input.CursorPosition().X
+		w := h.d.input.Size().Width
+		if !(mid > left+w/4) {
+			t.Fatalf("centered cursor should move toward the middle: left %.0f center %.0f width %.0f", left, mid, w)
+		}
+		h.d.setInputCenter(false)
+		if h.d.input.Alignment != fyne.TextAlignLeading {
+			t.Fatal("left typing")
+		}
+	})
+}

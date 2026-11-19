@@ -228,7 +228,18 @@ func TestScreenshots(t *testing.T) {
 	h.ui(func() { h.d.viewMedia(mediaRef{src: mpic, kind: mediaImage}, nil) })
 	time.Sleep(200 * time.Millisecond)
 	snap("lightbox.png")
-	h.ui(func() { h.d.lightboxClose() })
+	h.ui(func() {
+		h.d.lightboxClose()
+		h.d.setInputCenter(true)
+		h.d.input.SetText("centered typing\nsecond line is a bit longer than the first")
+		h.w.Canvas().Focus(h.d.input)
+	})
+	time.Sleep(200 * time.Millisecond)
+	snap("typing-center.png")
+	h.ui(func() {
+		h.d.setInputCenter(false)
+		h.d.input.SetText("")
+	})
 
 	h.ui(func() {
 		for _, o := range h.w.Canvas().Overlays().List() {
