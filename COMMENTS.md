@@ -74,7 +74,7 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## UI notes
 
-- No chat frame and no shadows: `ColorNameShadow` is transparent in the theme, which removes the dark overlay Fyne's scroll container draws at the top edge when scrolled (popups lose their drop shadow too).
+- The chat bounds show as a thin outline only (`chatView.frame`, transparent fill, white stroke ~11% alpha). No shadows: `ColorNameShadow` is transparent in the theme, which removes the dark overlay Fyne's scroll container draws at the top edge when scrolled (popups lose their drop shadow too).
 
 - Slash commands (commands.go): the list comes from the `initialize` control response (`commands`: name, description, argumentHint). `session.FetchCommands` gets it at startup from a throwaway process in $HOME (no prompt, so no transcript; it does fire SessionStart hooks); a running session's own list (`Process.Commands`, includes project skills) replaces it. Typing `/word` shows up to 8 matches (prefix first, then substring) in a popup above the input; Up/Down, Tab completes, Enter completes or sends when the full command is already typed, Esc closes.
 - Activity panel (activity.go), below the input like Claude Code: thinking and tool steps of the latest turn render there in full (second `chatView` with `steps=true`), max 260 px scroll, auto-scrolls to the newest, status line "✻ Thinking... / ● <tool> / N steps", collapsible (preference `activityClosed`). In the chat each step is a one-line row (✓/✗/…  header); tapping it loads that turn's steps into the panel and scrolls to it. Diffs show up to 400 lines; long tool output shows 60 lines + "Show all N lines".
