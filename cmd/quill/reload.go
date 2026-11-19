@@ -110,6 +110,15 @@ type handedSession struct {
 	RCOn   bool            `json:"rcOn"`
 	RCURL  string          `json:"rcUrl"`
 	Handle session.Handoff `json:"handle"`
+	Asks   []pendingAsk    `json:"asks"`
+	Plan   bool            `json:"plan"`
+	Wait   bool            `json:"planWait"`
+	RunAll bool            `json:"runAll"`
+}
+
+type pendingAsk struct {
+	RequestID string                   `json:"requestId"`
+	Request   *protocol.ControlRequest `json:"request"`
 }
 
 func (d *desk) trySwap() {
@@ -120,7 +129,7 @@ func (d *desk) trySwap() {
 		return
 	}
 	for _, s := range d.sessions {
-		if s.takeover || s.running() && s.status() == stWaiting {
+		if s.takeover {
 			return
 		}
 	}
@@ -140,7 +149,9 @@ func (d *desk) trySwap() {
 	}
 	var metas []meta
 	for _, s := range running {
-		metas = append(metas, meta{s, handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL}})
+		hs := handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL}
+		hs.savePending(s)
+		metas = append(metas, meta{s, hs})
 	}
 	target := d.swapTo
 	go func() {
@@ -189,7 +200,32 @@ func (d *desk) reattach(s *deskSession, hs handedSession) bool {
 	d.adopt(s, p)
 	s.rcOn, s.rcURL = hs.RCOn, hs.RCURL
 	s.conv.Busy = hs.Handle.Busy
+	hs.restorePending(s)
 	return true
+}
+
+func (hs *handedSession) savePending(s *deskSession) {
+	hs.Wait, hs.RunAll = s.planWait, s.runAll
+	for _, it := range s.conv.PendingPermissions() {
+		if it.Kind == chat.Plan {
+			hs.Plan = true
+		} else if it.Request != nil {
+			hs.Asks = append(hs.Asks, pendingAsk{RequestID: it.RequestID, Request: it.Request})
+		}
+	}
+}
+
+func (hs handedSession) restorePending(s *deskSession) {
+	s.planWait, s.runAll = hs.Wait, hs.RunAll
+	if len(s.conv.PendingPermissions()) > 0 {
+		return
+	}
+	for _, a := range hs.Asks {
+		s.conv.Apply(&protocol.Event{Type: "control_request", RequestID: a.RequestID, Request: a.Request})
+	}
+	if hs.Plan {
+		s.conv.AddPlan()
+	}
 }
 
 func takeRestore() *restoreState {

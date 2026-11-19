@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"fyne.io/fyne/v2"
 
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 	"github.com/katachinosekai/quill/internal/session"
 )
 
@@ -210,4 +212,26 @@ func TestSwapHandsOffAndReattachesOnFailure(t *testing.T) {
 		it := lastItem(s)
 		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "hello")
 	})
+}
+
+func TestReattachRestoresPendingApproval(t *testing.T) {
+	s := &deskSession{conv: chat.New(), runAll: true}
+	s.conv.Apply(&protocol.Event{Type: "control_request", RequestID: "r1", Request: &protocol.ControlRequest{Subtype: "can_use_tool", ToolName: "Bash"}})
+	s.conv.AddPlan()
+	var hs handedSession
+	hs.savePending(s)
+	b, _ := json.Marshal(hs)
+	var back handedSession
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	fresh := &deskSession{conv: chat.New()}
+	back.restorePending(fresh)
+	if n := len(fresh.conv.PendingPermissions()); n != 2 || fresh.conv.Permission("r1") == nil || !fresh.runAll {
+		t.Fatalf("pending approvals not restored: %d", n)
+	}
+	back.restorePending(s)
+	if n := len(s.conv.PendingPermissions()); n != 2 {
+		t.Fatalf("restoring into the same session must not duplicate: %d", n)
+	}
 }
