@@ -901,7 +901,11 @@ func (v *chatView) stepRun(it *chat.Item) fyne.CanvasObject {
 				iv = &itemView{holder: container.NewStack()}
 			}
 			body := append([]fyne.CanvasObject{mutedText(toolHeader(t), 12)}, v.toolBody(t, iv)...)
-			open = append(open, container.NewThemeOverride(bg(colCard, 8, container.NewVBox(body...)), smallTheme{}))
+			var card fyne.CanvasObject = container.NewThemeOverride(bg(colCard, 8, container.NewVBox(body...)), smallTheme{})
+			if v.d.center {
+				card = container.New(fitCenter{natural: toolNaturalWidth(t)}, card)
+			}
+			open = append(open, card)
 		}
 	}
 	row := container.New(&flowLayout{gap: 6, center: v.d.center}, chips...)
@@ -1083,4 +1087,37 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	r.StrokeColor = border
 	r.StrokeWidth = 1.5
 	return container.NewVBox(padTop(4), container.NewStack(r, container.NewPadded(container.NewVBox(parts...))), padTop(4))
+}
+
+type fitCenter struct{ natural float32 }
+
+func (l fitCenter) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	return objs[0].MinSize()
+}
+
+func (l fitCenter) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	w := max(min(l.natural, size.Width), min(objs[0].MinSize().Width, size.Width))
+	objs[0].Resize(fyne.NewSize(w, size.Height))
+	objs[0].Move(fyne.NewPos((size.Width-w)/2, 0))
+}
+
+func toolNaturalWidth(it *chat.Item) float32 {
+	text := toolInputText(it) + "\n" + toolHeader(it)
+	if it.HasResult {
+		res := it.Result
+		if len(res) > maxResultLen {
+			res = res[:maxResultLen]
+		}
+		text += "\n" + res
+	}
+	longest := ""
+	n := 0
+	for _, line := range strings.Split(text, "\n") {
+		if c := len([]rune(line)); c > n {
+			n, longest = c, line
+		}
+	}
+	size := smallTheme{}.Size(theme.SizeNameCaptionText)
+	w := fyne.MeasureText(longest, size, fyne.TextStyle{Monospace: true}).Width
+	return w + 40
 }
