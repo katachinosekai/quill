@@ -637,7 +637,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	})
 	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · / commands", 10)
 	d.stats = mutedText("", 12)
-	d.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), func() {
+	d.stopBtn = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
 		if d.current != nil {
 			d.interrupt(d.current)
 		}
@@ -645,8 +645,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.stopBtn.Importance = widget.DangerImportance
 	d.sendBtn = widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.send(d.input.Text) })
 	d.sendBtn.Importance = widget.HighImportance
-	controls := container.NewHBox(d.modelSel, d.modeSel, layout.NewSpacer(), d.stopBtn)
-	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(layout.NewSpacer(), d.sendBtn), d.input))
+	controls := container.NewHBox(d.modelSel, d.modeSel)
+	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow)))
 	d.usage = newUsagePanel(d)
