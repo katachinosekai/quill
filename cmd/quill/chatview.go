@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -18,7 +19,7 @@ import (
 )
 
 const (
-	chatMaxWidth  = 820
+	chatMaxWidth  = 760
 	historyWindow = 200
 	maxResultLen  = 12000
 	maxDiffLines  = 2000
@@ -156,14 +157,14 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 			iv.stream = widget.NewLabel(it.Text)
 			iv.stream.Wrapping = fyne.TextWrapWord
 			iv.stream.Alignment = v.align()
-			iv.holder.Objects = []fyne.CanvasObject{iv.stream}
+			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, iv.stream)}
 			iv.holder.Refresh()
 		} else {
 			iv.stream.SetText(it.Text)
 		}
 	} else {
 		iv.stream = nil
-		iv.holder.Objects = []fyne.CanvasObject{v.render(it, iv)}
+		iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, v.render(it, iv))}
 		iv.holder.Refresh()
 	}
 	if h := iv.holder.MinSize().Height; h != iv.height {
@@ -185,7 +186,7 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		l := widget.NewLabel(it.Text)
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = v.align()
-		return container.NewVBox(padTop(6), bg(colBubble, 12, l), padTop(2))
+		return bgPad(colBubble, 14, 4, 10, l)
 	case chat.Assistant:
 		return v.markdown(it.Text)
 	case chat.Tool:
@@ -199,7 +200,7 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		t.TextStyle.Italic = true
 		t.TextSize = 12
 		t.Alignment = fyne.TextAlignCenter
-		return container.NewVBox(padTop(2), t, padTop(2))
+		return t
 	case chat.Error:
 		l := widget.NewLabel(it.Text)
 		l.Wrapping = fyne.TextWrapWord
@@ -512,4 +513,19 @@ func permDetail(v *chatView, it *chat.Item) []fyne.CanvasObject {
 		in = in[:1500] + "\n..."
 	}
 	return []fyne.CanvasObject{mono(in)}
+}
+
+func spaced(k chat.Kind, obj fyne.CanvasObject) fyne.CanvasObject {
+	top, bottom := float32(6), float32(6)
+	switch k {
+	case chat.User:
+		top, bottom = 22, 10
+	case chat.Assistant:
+		top, bottom = 4, 10
+	case chat.Tool, chat.Thinking:
+		top, bottom = 2, 2
+	case chat.Notice:
+		top, bottom = 8, 8
+	}
+	return container.New(layout.NewCustomPaddedLayout(top, bottom, 0, 0), obj)
 }

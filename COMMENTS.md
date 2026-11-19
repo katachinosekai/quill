@@ -66,7 +66,7 @@ Title order: custom title, ai-title record, summary, first prompt. Side-chain an
 
 ## UI notes
 
-- Chat column is centered with a max width of 820 px. "Center message text" (sidebar, saved in preferences) centers user/assistant text; tool cards and diffs stay left-aligned.
+- Chat column is centered with a max width of 760 px (shorter lines read better). Text 15 px, line spacing 7. Vertical spacing per item kind lives in `spaced` (chatview.go): user turns get the most space above, tool rows the least; user bubbles use `bgPad` for wider side padding. "Center message text" (sidebar, saved in preferences) centers user/assistant text; tool cards and diffs stay left-aligned.
 - Single newlines in assistant text become paragraph breaks outside code blocks and lists (`hardBreaks`), since Fyne's markdown would join them.
 - Thinking blocks render as a collapsed "Thought" row (expand to read). Current models often send thinking with empty text; those add no row, only "thinking..." in the stats line.
 - Edit/Write/MultiEdit show as line diffs (first 40 lines, "Show N more"). Answered permission cards collapse to their outcome.

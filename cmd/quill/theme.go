@@ -61,7 +61,9 @@ func (deskTheme) Icon(n fyne.ThemeIconName) fyne.Resource { return theme.Default
 func (deskTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
 	case theme.SizeNameText:
-		return 14
+		return 15
+	case theme.SizeNameLineSpacing:
+		return 7
 	case theme.SizeNameInputRadius, theme.SizeNameSelectionRadius:
 		return 8
 	}

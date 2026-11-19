@@ -7,6 +7,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -140,4 +141,10 @@ func (clipLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		o.Move(fyne.NewPos(theme.Padding(), 0))
 		o.Resize(fyne.NewSize(size.Width-2*theme.Padding(), size.Height))
 	}
+}
+
+func bgPad(c color.Color, radius, vpad, hpad float32, obj fyne.CanvasObject) *fyne.Container {
+	r := canvas.NewRectangle(c)
+	r.CornerRadius = radius
+	return container.NewStack(r, container.New(layout.NewCustomPaddedLayout(vpad, vpad, hpad, hpad), obj))
 }
