@@ -15,3 +15,11 @@ srpm: dist
 
 rpm: dist
 	rpmbuild -bb packaging/quill.spec --define "_sourcedir $(CURDIR)/$(DIST)" --define "_rpmdir $(CURDIR)/$(DIST)" --define "_builddir $(CURDIR)/$(DIST)/build"
+
+appimage:
+	rm -rf $(DIST)/AppDir && mkdir -p $(DIST)/AppDir
+	cd $(DIST)/AppDir && rpm2cpio ../quill-$(VERSION)-*.x86_64.rpm | cpio -idm --quiet
+	cp packaging/AppRun $(DIST)/AppDir/AppRun
+	cp packaging/io.github.katachinosekai.quill.desktop $(DIST)/AppDir/
+	cp cmd/quill/Icon.png $(DIST)/AppDir/io.github.katachinosekai.quill.png
+	ARCH=x86_64 appimagetool --appimage-extract-and-run $(DIST)/AppDir $(DIST)/Quill-$(VERSION)-x86_64.AppImage

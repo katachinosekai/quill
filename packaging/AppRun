@@ -1,0 +1,4 @@
+#!/bin/sh
+here="$(dirname "$(readlink -f "$0")")"
+export QUILL_LIBEXEC="$here/usr/libexec/quill"
+exec "$here/usr/bin/quill" "$@"
