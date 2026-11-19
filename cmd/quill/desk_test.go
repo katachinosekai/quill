@@ -445,11 +445,12 @@ func TestSidebarCollapse(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
 		h.d.setSidebar(false)
-		if h.d.sidebar.Visible() || !h.d.expandBtn.Visible() || h.d.sidebarWidth() != 0 || h.d.chatWidth() != chatWideMax {
+		free := h.d.root.Size().Width
+		if h.d.sidebar.Visible() || !h.d.expandBtn.Visible() || h.d.sidebarWidth() != 0 || h.d.chatWidth() != max(chatMinWidth, free*chatShare) {
 			t.Fatal("sidebar should be hidden")
 		}
 		test.Tap(h.d.expandBtn)
-		if !h.d.sidebar.Visible() || h.d.expandBtn.Visible() || h.d.chatWidth() != chatMaxWidth {
+		if !h.d.sidebar.Visible() || h.d.expandBtn.Visible() || h.d.chatWidth() != max(chatMinWidth, (h.d.root.Size().Width-sideW)*chatShare) {
 			t.Fatal("sidebar should be back")
 		}
 	})

@@ -557,7 +557,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.expandBtn = smallArrow(theme.NavigateNextIcon(), func() { d.setSidebar(true) })
 	d.expandBtn.Hide()
-	header := container.NewBorder(nil, nil, container.NewCenter(d.expandBtn), container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, container.New(layout.NewCustomPaddedLayout(0, 0, 4, 8), container.NewCenter(d.expandBtn)), container.NewHBox(d.rcLink, d.rcCheck, container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
 	headerBox := container.NewVBox(container.NewPadded(header), d.note, widget.NewSeparator())
 	d.headerBox = headerBox
@@ -585,7 +585,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		}
 		d.setMode(d.current, v)
 	})
-	d.folder = mutedText("Enter send  ·  Ctrl+Enter stop & send  ·  Shift+Enter new line  ·  / commands", 11)
+	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · / commands", 10)
 	d.stats = mutedText("", 12)
 	d.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), func() {
 		if d.current != nil {
@@ -595,9 +595,9 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.stopBtn.Importance = widget.DangerImportance
 	d.sendBtn = widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.send(d.input.Text) })
 	d.sendBtn.Importance = widget.HighImportance
-	controls := container.NewHBox(d.modelSel, d.modeSel, container.NewCenter(d.folder), layout.NewSpacer(), d.stopBtn)
+	controls := container.NewHBox(d.modelSel, d.modeSel, layout.NewSpacer(), d.stopBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(layout.NewSpacer(), d.sendBtn), d.input))
-	statsRow := container.New(&clipLayout{}, d.stats)
+	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.act = newActivity(d)
 	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(inputCard, d.act.root, statsRow)))
 	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, d.chat.root)

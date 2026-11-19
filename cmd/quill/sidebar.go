@@ -13,7 +13,8 @@ import (
 
 const (
 	sideW        = 330
-	chatWideMax  = 1120
+	chatShare    = 0.65
+	chatMinWidth = 560
 	sideAnimTime = 220 * time.Millisecond
 )
 
@@ -61,7 +62,11 @@ func (d *desk) sidebarWidth() float32 {
 }
 
 func (d *desk) chatWidth() float32 {
-	return chatMaxWidth + (chatWideMax-chatMaxWidth)*(1-d.sideFrac)
+	if d.root == nil || d.root.Size().Width <= 0 {
+		return chatMaxWidth
+	}
+	free := d.root.Size().Width - d.sidebarWidth()
+	return max(chatMinWidth, free*chatShare)
 }
 
 func (d *desk) setSidebar(show bool) {

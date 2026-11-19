@@ -210,3 +210,45 @@ func bgPad(c color.Color, radius, vpad, hpad float32, obj fyne.CanvasObject) *fy
 	r.CornerRadius = radius
 	return container.NewStack(r, container.New(layout.NewCustomPaddedLayout(vpad, vpad, hpad, hpad), obj))
 }
+
+type fitOrHide struct{}
+
+func (fitOrHide) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	var h float32
+	for _, o := range objs {
+		h = max(h, o.MinSize().Height)
+	}
+	return fyne.NewSize(0, h)
+}
+
+func (fitOrHide) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	for _, o := range objs {
+		m := o.MinSize()
+		if m.Width+2*theme.Padding() > size.Width {
+			o.Hide()
+			continue
+		}
+		o.Show()
+		o.Move(fyne.NewPos(theme.Padding(), (size.Height-m.Height)/2))
+		o.Resize(m)
+	}
+}
+
+type fitRight struct{}
+
+func (fitRight) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	return fitOrHide{}.MinSize(objs)
+}
+
+func (fitRight) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	for _, o := range objs {
+		m := o.MinSize()
+		if m.Width+2*theme.Padding() > size.Width {
+			o.Hide()
+			continue
+		}
+		o.Show()
+		o.Move(fyne.NewPos(size.Width-m.Width-theme.Padding(), (size.Height-m.Height)/2))
+		o.Resize(m)
+	}
+}
