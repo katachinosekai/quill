@@ -260,7 +260,14 @@ func (v *chatView) align() fyne.TextAlign {
 func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
-		return bgPad(colBubble, 14, 4, 10, v.markdown(it.Text))
+		if strings.Contains(it.Text, "```") {
+			return bgPad(colBubble, 14, 4, 10, v.markdown(it.Text))
+		}
+		l := widget.NewLabel(it.Text)
+		l.Selectable = true
+		l.Wrapping = fyne.TextWrapWord
+		l.Alignment = v.align()
+		return bgPad(colBubble, 14, 4, 10, l)
 	case chat.Assistant:
 		return v.markdown(it.Text)
 	case chat.Tool:
@@ -627,7 +634,7 @@ func spaced(k chat.Kind, obj fyne.CanvasObject) fyne.CanvasObject {
 	top, bottom := float32(6), float32(6)
 	switch k {
 	case chat.User:
-		top, bottom = 22, 10
+		top, bottom = 8, 4
 	case chat.Assistant:
 		top, bottom = 4, 10
 	case chat.Tool, chat.Thinking:
