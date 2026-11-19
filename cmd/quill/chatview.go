@@ -220,17 +220,28 @@ func (v *chatView) update(items []*chat.Item) {
 	}
 	stick := v.atBottom()
 	added := false
+	heads := map[*chat.Item]bool{}
 	for _, it := range items {
 		if iv, ok := v.views[it.Seq]; ok {
 			v.refreshItem(it, iv)
-			continue
+		} else {
+			if v.placeholder {
+				v.box.RemoveAll()
+				v.placeholder = false
+			}
+			v.box.Add(v.viewFor(it).holder)
+			added = true
 		}
-		if v.placeholder {
-			v.box.RemoveAll()
-			v.placeholder = false
+		if it.Kind == chat.Tool && !v.steps {
+			if h := v.runHead(it); h != it {
+				heads[h] = true
+			}
 		}
-		v.box.Add(v.viewFor(it).holder)
-		added = true
+	}
+	for h := range heads {
+		if iv, ok := v.views[h.Seq]; ok {
+			v.refreshItem(h, iv)
+		}
 	}
 	if added {
 		v.box.Refresh()
@@ -294,7 +305,7 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		return agentBubble(msgText(v.markdown(it.Text)))
 	case chat.Tool:
 		if !v.steps {
-			return v.stepLine(it)
+			return v.stepRun(it)
 		}
 		return v.renderTool(it, iv)
 	case chat.Permission:
@@ -747,4 +758,130 @@ func userBubble(o fyne.CanvasObject) fyne.CanvasObject {
 
 func agentBubble(o fyne.CanvasObject) fyne.CanvasObject {
 	return container.New(sideAlign{right: true}, bgPad(colAgent, 14, 4, 10, o))
+}
+
+func (v *chatView) runBounds(it *chat.Item) (int, int) {
+	items := v.s.conv.Items
+	i := -1
+	for k := len(items) - 1; k >= 0; k-- {
+		if items[k] == it {
+			i = k
+			break
+		}
+	}
+	if i < 0 {
+		return -1, -1
+	}
+	start, end := i, i
+	for start > 0 && items[start-1].Kind == chat.Tool {
+		start--
+	}
+	for end+1 < len(items) && items[end+1].Kind == chat.Tool {
+		end++
+	}
+	return start, end
+}
+
+func (v *chatView) runHead(it *chat.Item) *chat.Item {
+	if v.s == nil {
+		return it
+	}
+	start, _ := v.runBounds(it)
+	if start < 0 {
+		return it
+	}
+	return v.s.conv.Items[start]
+}
+
+func (v *chatView) stepRun(it *chat.Item) fyne.CanvasObject {
+	if v.s == nil {
+		return v.stepLine(it)
+	}
+	start, end := v.runBounds(it)
+	if start < 0 {
+		return v.stepLine(it)
+	}
+	if v.s.conv.Items[start] != it {
+		return container.NewWithoutLayout()
+	}
+	var chips []fyne.CanvasObject
+	for _, t := range v.s.conv.Items[start : end+1] {
+		chips = append(chips, v.stepChip(t))
+	}
+	return container.New(&flowLayout{gap: 6}, chips...)
+}
+
+func (v *chatView) stepChip(it *chat.Item) fyne.CanvasObject {
+	mark, col := "…", colMuted
+	switch {
+	case it.ResultError:
+		mark, col = "✗", colError
+	case it.HasResult:
+		mark, col = "✓", colIdle
+	}
+	m := canvas.NewText(mark, col)
+	m.TextStyle.Bold = true
+	m.TextSize = 13
+	name := it.ToolName
+	if name == "" {
+		name = "Tool"
+	}
+	n := mutedText(name, 12)
+	bgr := canvas.NewRectangle(colCard)
+	bgr.CornerRadius = 8
+	chip := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(2, 2, 7, 7), container.NewHBox(m, n)))
+	return newTapRow(chip, func() {
+		if v.d.act != nil {
+			v.d.act.focus(it)
+		}
+	})
+}
+
+type flowLayout struct {
+	gap   float32
+	width float32
+}
+
+func (l *flowLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	var w, h float32
+	for _, o := range objs {
+		m := o.MinSize()
+		w = max(w, m.Width)
+		h = max(h, m.Height)
+	}
+	n := float32(l.rows(objs, l.width))
+	return fyne.NewSize(w, h*n+l.gap*(n-1))
+}
+
+func (l *flowLayout) rows(objs []fyne.CanvasObject, width float32) int {
+	if width <= 0 {
+		return 1
+	}
+	rows, x := 1, float32(0)
+	for _, o := range objs {
+		w := o.MinSize().Width
+		if x > 0 && x+w > width {
+			rows++
+			x = 0
+		}
+		x += w + l.gap
+	}
+	return rows
+}
+
+func (l *flowLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	x, y, rowH := float32(0), float32(0), float32(0)
+	for _, o := range objs {
+		m := o.MinSize()
+		if x > 0 && x+m.Width > size.Width {
+			x = 0
+			y += rowH + l.gap
+			rowH = 0
+		}
+		o.Resize(m)
+		o.Move(fyne.NewPos(x, y))
+		x += m.Width + l.gap
+		rowH = max(rowH, m.Height)
+	}
+	l.width = size.Width
 }
