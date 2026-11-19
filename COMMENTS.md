@@ -73,13 +73,15 @@ Go can't hot-swap code, so a new build takes over in place: `watchBinary` polls 
 
 ## Background mode (background.go)
 
+`quill --reload` sends "reload" over the instance socket: the running Quill swaps to the new build as soon as no turn is running, skipping the 15 s typing wait (`forceSwap`). Use it after every build.
+
 Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray is available (`desktop.App`); sessions keep running. Tray menu: Show Quill, Quit (Quit shows the window and goes through `confirmQuit`, which asks before stopping running sessions, then `app.Quit`). Single instance: $XDG_RUNTIME_DIR/quill.sock; a second launch sends "show" and exits, the running one shows its window and answers "ok". After a live update (exec) the new process skips the check (QUILL_RESTORE set), re-creates the socket, and stays hidden if it was hidden (`restoreState.Hidden`, started with `app.Run()`).
 
 ## UI notes
 
-- Flicker: never refresh the whole main pane on chrome updates; `setLabel`/`setText` and the select/usage guards only touch widgets whose content changed (Fyne re-lays out containers when a child's min size changes).
+- Flicker: never refresh the whole main pane on chrome updates; `setLabel`/`setText` and the select/usage guards only touch widgets whose content changed (Fyne re-lays out containers when a WIDGET's min size changes, but not for canvas.Text, so the header is refreshed explicitly when its subtitle or Remote Control text changes).
 
-- Message layout: all message text is centered (preference `centerText`, default on); user messages in a dark full-width bubble, Claude's replies plain (the left/right split was removed).
+- Message layout: message text alignment is switchable in the sidebar ("Text: Left / Center" radio next to the Remote Control option; preference `centerText`, default Center); user messages in a dark full-width bubble, Claude's replies plain (the left/right split was removed).
 
 - Text sizes: general UI text is one size (13 px, caption = text); user and assistant messages use `msgTheme` (16 px) via a ThemeOverride (`msgText`). A live status line under the chat frame, bottom left, outside the scroll (`chatView.live`, `liveText`; fixed height so the chat never jumps) shows "✻ Thinking...", the running tool, or "✻ Working..." while a turn runs (hidden while reply text streams).
 

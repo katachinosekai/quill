@@ -101,7 +101,7 @@ func (d *desk) trySwap() {
 	if d.swapTo == "" || d.swapping || d.signingIn != nil {
 		return
 	}
-	if time.Since(d.lastTyped) < typingQuiet {
+	if !d.forceSwap && time.Since(d.lastTyped) < typingQuiet {
 		return
 	}
 	for _, s := range d.runningSessions() {

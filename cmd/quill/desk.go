@@ -166,6 +166,9 @@ type desk struct {
 	pendingFor    *deskSession
 	lastTyped     time.Time
 	autoRC        bool
+	alignSel      *widget.RadioGroup
+	suppressAlign bool
+	forceSwap     bool
 	flushTimer    *time.Timer
 	cmds          *cmdMenu
 	sidebar       fyne.CanvasObject
@@ -229,14 +232,22 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.search.SetPlaceHolder("Search sessions")
 	d.search.OnChanged = func(string) { d.rebuildRows() }
 	d.list = d.newSessionList(&d.rows)
-	centerChk := widget.NewCheck("Center message text", func(on bool) {
-		d.center = on
-		d.app.Preferences().SetBool("centerText", on)
-		if d.current != nil {
-			d.chat.show(d.current)
+	d.alignSel = widget.NewRadioGroup([]string{"Left", "Center"}, func(v string) {
+		if v == "" || d.suppressAlign {
+			return
 		}
+		d.setCenter(v == "Center")
 	})
-	centerChk.Checked = d.center
+	d.alignSel.Horizontal = true
+	d.alignSel.Required = true
+	d.suppressAlign = true
+	if d.center {
+		d.alignSel.SetSelected("Center")
+	} else {
+		d.alignSel.SetSelected("Left")
+	}
+	d.suppressAlign = false
+	alignRow := container.NewHBox(container.NewCenter(mutedText("Text", 12)), d.alignSel)
 	rcChk := widget.NewCheck("Remote Control for every session", func(on bool) {
 		d.autoRC = on
 		d.app.Preferences().SetBool("autoRemoteControl", on)
@@ -259,7 +270,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), centerChk, rcChk, legend)
+	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, alignRow, legend)
 	r := canvas.NewRectangle(colSidebar)
 	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
 	return container.NewStack(r, container.NewPadded(d.sideBody))
@@ -679,7 +690,10 @@ func (d *desk) updateChrome() {
 	if st != stNone {
 		sub += "  ·  " + st.String()
 	}
-	setText(d.subtitle, sub)
+	if d.subtitle.Text != sub {
+		setText(d.subtitle, sub)
+		d.headerBox.Refresh()
+	}
 	held := s.terminal != nil && !s.running()
 	if s.takeover {
 		setLabel(d.note, "Taking this session over from the terminal...")
@@ -714,8 +728,12 @@ func (d *desk) updateChrome() {
 		if d.rcStatus.Text != rcText || d.rcStatus.Color != rcCol {
 			d.rcStatus.Text, d.rcStatus.Color = rcText, rcCol
 			d.rcStatus.Refresh()
+			d.headerBox.Refresh()
 		}
-		d.rcStatus.Show()
+		if !d.rcStatus.Visible() {
+			d.rcStatus.Show()
+			d.headerBox.Refresh()
+		}
 	}
 	if s.loading {
 		d.sendBtn.Disable()
@@ -1592,5 +1610,16 @@ func setText(t *canvas.Text, text string) {
 	if t.Text != text {
 		t.Text = text
 		t.Refresh()
+	}
+}
+
+func (d *desk) setCenter(on bool) {
+	if d.center == on {
+		return
+	}
+	d.center = on
+	d.app.Preferences().SetBool("centerText", on)
+	if d.current != nil {
+		d.chat.show(d.current)
 	}
 }

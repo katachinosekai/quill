@@ -21,13 +21,17 @@ func instanceSocket() string {
 }
 
 func signalRunning(path string) bool {
+	return sendCommand(path, "show")
+}
+
+func sendCommand(path, cmd string) bool {
 	c, err := net.DialTimeout("unix", path, time.Second)
 	if err != nil {
 		return false
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
-	if _, err := c.Write([]byte("show\n")); err != nil {
+	if _, err := c.Write([]byte(cmd + "\n")); err != nil {
 		return false
 	}
 	line, err := bufio.NewReader(c).ReadString('\n')
@@ -51,10 +55,20 @@ func (d *desk) listenInstance(path string) {
 				defer c.Close()
 				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
 				line, err := bufio.NewReader(c).ReadString('\n')
-				if err != nil || strings.TrimSpace(line) != "show" {
+				if err != nil {
 					return
 				}
-				d.do(d.showWindow)
+				switch strings.TrimSpace(line) {
+				case "show":
+					d.do(d.showWindow)
+				case "reload":
+					d.do(func() {
+						d.forceSwap = true
+						d.trySwap()
+					})
+				default:
+					return
+				}
 				_, _ = c.Write([]byte("ok\n"))
 			}()
 		}

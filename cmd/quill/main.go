@@ -23,12 +23,20 @@ func listableURI(path string) (fyne.ListableURI, error) {
 func main() {
 	showVersion := flag.Bool("version", false, "print the version")
 	claudeBin := flag.String("claude", "claude", "claude CLI to run")
+	reload := flag.Bool("reload", false, "ask the running Quill to switch to this build now")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
 		return
 	}
 	sock := instanceSocket()
+	if *reload {
+		if !sendCommand(sock, "reload") {
+			fmt.Fprintln(os.Stderr, "no running Quill answered")
+			os.Exit(1)
+		}
+		return
+	}
 	if os.Getenv(restoreEnv) == "" && signalRunning(sock) {
 		return
 	}

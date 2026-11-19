@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"fyne.io/fyne/v2"
 )
 
 func TestBinWatch(t *testing.T) {
@@ -131,4 +133,41 @@ func TestLiveIndicatorUnderChat(t *testing.T) {
 	h.eventually("indicator", func() bool { return strings.TrimSpace(h.d.chat.live.Text) != "" && h.d.chat.live.Visible() })
 	h.ui(func() { h.d.interrupt(s) })
 	h.eventually("indicator clears", func() bool { return strings.TrimSpace(h.d.chat.live.Text) == "" })
+}
+
+func TestReloadCommandForcesSwap(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "q.sock")
+	h := newHarness(t)
+	done := make(chan bool, 4)
+	h.d.do = func(f func()) {
+		uiMu.Lock()
+		defer uiMu.Unlock()
+		f()
+		done <- true
+	}
+	h.d.listenInstance(sock)
+	h.ui(func() { h.d.lastTyped = time.Now() })
+	if !sendCommand(sock, "reload") {
+		t.Fatal("reload not acknowledged")
+	}
+	<-done
+	h.ui(func() {
+		if !h.d.forceSwap {
+			t.Fatal("reload should skip the typing wait")
+		}
+	})
+}
+
+func TestTextAlignSwitch(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.alignSel.SetSelected("Left")
+		if h.d.center || h.d.chat.align() != fyne.TextAlignLeading {
+			t.Fatal("left alignment")
+		}
+		h.d.alignSel.SetSelected("Center")
+		if !h.d.center || h.d.chat.align() != fyne.TextAlignCenter {
+			t.Fatal("center alignment")
+		}
+	})
 }
