@@ -165,6 +165,7 @@ type desk struct {
 	pendingChrome bool
 	pendingFor    *deskSession
 	lastTyped     time.Time
+	stt           *speech
 	autoRC        bool
 	alignSel      *widget.RadioGroup
 	suppressAlign bool
@@ -656,8 +657,9 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.stopBtn.Importance = widget.DangerImportance
 	d.sendBtn = widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.send(d.input.Text) })
 	d.sendBtn.Importance = widget.HighImportance
+	d.stt = newSpeech(d)
 	controls := container.NewHBox(d.modelSel, d.modeSel)
-	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.sendBtn), d.input))
+	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	bottom := container.NewPadded(windowCentered(d.chatWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow)))
 	d.usage = newUsagePanel(d)
@@ -758,7 +760,7 @@ func (d *desk) updateChrome() {
 	if d.usage != nil {
 		d.usage.update()
 	}
-	if d.chat != nil {
+	if d.chat != nil && (d.stt == nil || d.stt.state == sttIdle) {
 		d.chat.setLive(liveText(d.current))
 	}
 }

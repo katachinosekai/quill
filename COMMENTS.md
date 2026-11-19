@@ -79,6 +79,8 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## UI notes
 
+- Speech to text (stt.go): mic button above Send. Fully local: `pw-record` (16 kHz mono) -> `ffmpeg` clean-up -> whisper.cpp `whisper-cli -nt -np` with `~/.local/share/quill/models/ggml-base.en.bin` (overrides: QUILL_WHISPER, QUILL_WHISPER_MODEL); the temp audio folder is deleted after transcription, the text is appended to the input (never sent automatically). First click shows a privacy notice (nothing collected or sent to Anthropic; preference `sttNoticeShown`). If the engine is missing, a dialog shows the one-time setup command (`sttSetupCommand`: clone whisper.cpp v1.7.6, CPU build, download the model). Status shows on the live line ("● Listening...", "Turning speech into text...").
+
 - Flicker: never refresh the whole main pane on chrome updates; `setLabel`/`setText` and the select/usage guards only touch widgets whose content changed (Fyne re-lays out containers when a WIDGET's min size changes, but not for canvas.Text, so the header is refreshed explicitly when its subtitle or Remote Control text changes).
 
 - Message layout: message text alignment is switchable in the sidebar ("Text: Left / Center" radio next to the Remote Control option; preference `centerText`, default Center); user messages in a dark full-width bubble, Claude's replies plain (the left/right split was removed).

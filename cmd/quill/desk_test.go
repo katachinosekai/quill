@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -711,4 +712,48 @@ func TestStepChipsToggleInline(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestSpeechToText(t *testing.T) {
+	h := newHarness(t)
+	h.d.do = func(f func()) {
+		go func() {
+			uiMu.Lock()
+			defer uiMu.Unlock()
+			f()
+		}()
+	}
+	sp := h.d.stt
+	recorded := false
+	sp.ready = func() error { return nil }
+	sp.record = func() (func() (string, error), error) {
+		recorded = true
+		return func() (string, error) { return "/tmp/fake.wav", nil }, nil
+	}
+	sp.recognize = func(ctx context.Context, wav string) (string, error) { return "hello from my voice", nil }
+	h.ui(func() {
+		h.d.createSession(h.proj, "default", "default")
+		h.d.app.Preferences().SetBool("sttNoticeShown", false)
+		sp.click()
+		if recorded || len(h.w.Canvas().Overlays().List()) == 0 {
+			t.Fatal("first use must show the privacy notice before recording")
+		}
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+		h.d.app.Preferences().SetBool("sttNoticeShown", true)
+		h.d.input.SetText("note:")
+		sp.click()
+		if !recorded || sp.state != sttRecording {
+			t.Fatal("second click should record")
+		}
+		sp.click()
+	})
+	h.eventually("transcribed", func() bool { return sp.state == sttIdle && h.d.input.Text == "note: hello from my voice" })
+}
+
+func TestCleanTranscript(t *testing.T) {
+	if got := cleanTranscript("\n [BLANK_AUDIO]\n Hello there.\n  How are you?\n"); got != "Hello there. How are you?" {
+		t.Fatalf("%q", got)
+	}
 }
