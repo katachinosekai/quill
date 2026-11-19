@@ -51,6 +51,7 @@ type chatView struct {
 	follow        bool
 	autoScrolling bool
 	gliding       bool
+	qcards        map[*chat.Item]fyne.CanvasObject
 	moreObj       fyne.CanvasObject
 	lastY         float32
 	newBelow      bool
@@ -426,7 +427,14 @@ func (v *chatView) update(items []*chat.Item) {
 	}
 	added := false
 	heads := map[*chat.Item]bool{}
+	firstSeq := 0
+	if v.shownFrom > 0 && v.shownFrom < len(v.s.conv.Items) {
+		firstSeq = v.s.conv.Items[v.shownFrom].Seq
+	}
 	for _, it := range items {
+		if it.Seq < firstSeq {
+			continue
+		}
 		if iv, ok := v.views[it.Seq]; ok {
 			v.refreshItem(it, iv)
 		} else {
@@ -764,6 +772,22 @@ func (v *chatView) diffView(it *chat.Item, iv *itemView) fyne.CanvasObject {
 }
 
 func (v *chatView) renderQuestions(it *chat.Item) fyne.CanvasObject {
+	if it.PermState == chat.PermPending {
+		if c, ok := v.qcards[it]; ok {
+			return c
+		}
+		if v.qcards == nil {
+			v.qcards = map[*chat.Item]fyne.CanvasObject{}
+		}
+		c := v.buildQuestions(it)
+		v.qcards[it] = c
+		return c
+	}
+	delete(v.qcards, it)
+	return v.buildQuestions(it)
+}
+
+func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 	qs := protocol.ParseQuestions(it.Input)
 	var parts []fyne.CanvasObject
 	head := widget.NewLabel("Claude is asking")

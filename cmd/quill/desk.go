@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image/color"
 	"net/url"
@@ -193,6 +194,8 @@ type desk struct {
 	sideOff       bool
 	sideBody      *fyne.Container
 	folderOpen    map[string]bool
+	sorted        sortState
+	sortDirty     bool
 	org           sideOrg
 	sideItems     []*sideItem
 	dragID        string
@@ -227,6 +230,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 	}
 	d.loadOrg()
 	d.loadRules()
+	d.loadSortState()
 	for _, id := range a.Preferences().StringList("createdSessions") {
 		d.created[id] = true
 	}
@@ -532,6 +536,7 @@ func (d *desk) rebuildRows() {
 	}
 	var active, idle, old, auto []sideEntry
 	custom := map[string][]sideEntry{}
+	demote := d.demoteDue()
 	for _, e := range entries {
 		if q != "" && !d.matches(e.id, e.cwd, q) {
 			continue
@@ -550,13 +555,26 @@ func (d *desk) rebuildRows() {
 			auto = append(auto, e)
 		case d.rules.ClaudeFolder && d.isAuto(e.id):
 			auto = append(auto, e)
-		case q != "" || d.isActive(e.id, e.last):
+		case q != "":
 			active = append(active, e)
-		case d.isInactive(e.id, e.last):
-			old = append(old, e)
 		default:
-			idle = append(idle, e)
+			switch d.stickyPlace(e, demote) {
+			case placeActive:
+				active = append(active, e)
+			case placeArchive:
+				old = append(old, e)
+			default:
+				idle = append(idle, e)
+			}
 		}
+	}
+	if demote && q == "" {
+		d.sorted.At = time.Now().Unix()
+		d.sortDirty = true
+	}
+	if d.sortDirty {
+		d.sortDirty = false
+		d.saveSortState()
 	}
 	var rows []sideRow
 	if len(active) > 0 {
@@ -645,6 +663,9 @@ func (d *desk) toggleFolder(key string) {
 		d.folderOpen = map[string]bool{}
 	}
 	d.folderOpen[key] = !d.isOpen(key)
+	if b, err := json.Marshal(d.folderOpen); err == nil {
+		d.app.Preferences().SetString("folderOpen", string(b))
+	}
 	d.rebuildRows()
 }
 
@@ -1042,8 +1063,6 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	items = append(items, d.planGate(s, ev, items)...)
 	if d.current == s {
 		d.queueUI(s, items)
-	} else {
-		d.chat.forget(s)
 	}
 	if ev.Type == "rate_limit_event" {
 		d.setRateLimit(ev.RateLimit)
@@ -1089,8 +1108,6 @@ func (d *desk) flushUI() {
 	d.pending, d.pendingSeen, d.pendingFor = nil, nil, nil
 	if owner != nil && d.chat.s == owner {
 		d.chat.update(items)
-	} else if owner != nil {
-		d.chat.forget(owner)
 	}
 	if d.pendingChrome {
 		d.pendingChrome = false

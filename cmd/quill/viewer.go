@@ -91,6 +91,9 @@ func (d *desk) showLightbox(content fyne.CanvasObject, onClose func()) func() {
 		closed = true
 		c.Overlays().Remove(lb)
 		c.SetOnTypedKey(prev)
+		if d.input != nil && !d.hidden {
+			c.Focus(d.input)
+		}
 		if d.lightboxClose != nil {
 			d.lightboxClose = nil
 		}
@@ -449,6 +452,14 @@ func (vp *videoPlayer) stream(ctx context.Context, gen int, start float64, info 
 	vp.mu.Lock()
 	ended := vp.gen == gen && ctx.Err() == nil
 	vp.mu.Unlock()
+	if ended && n == 0 {
+		vp.stopStreams()
+		vp.d.do(func() {
+			setText(vp.status, "Cannot play this video")
+			vp.syncUI()
+		})
+		return
+	}
 	if ended {
 		vp.stopStreams()
 		vp.mu.Lock()

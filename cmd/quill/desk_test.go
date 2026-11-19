@@ -521,10 +521,23 @@ func TestInactiveAndArchiveFolders(t *testing.T) {
 			}
 		}
 		h.d.rebuildRows()
+		if folderRow(h.d.rows, "archive") != nil {
+			t.Fatal("sessions must not drop to Archive on every refresh")
+		}
+		h.d.resortNow()
 		if f := folderRow(h.d.rows, "archive"); f == nil || f.open || hasRow(h.d.rows, editsID) {
 			t.Fatalf("old sessions go to a closed Archive folder: %+v", h.d.rows)
 		}
 		h.d.toggleFolder("archive")
+		saved := h.d.folderOpen
+		h.d.folderOpen = nil
+		h.d.loadSortState()
+		if !h.d.folderOpen["archive"] || len(saved) == 0 {
+			t.Fatal("folder open state should survive a restart")
+		}
+		if h.d.sorted.Place[editsID] != placeArchive {
+			t.Fatal("sorting should be remembered across restarts")
+		}
 		if !hasRow(h.d.rows, editsID) {
 			t.Fatal("archive should open")
 		}
@@ -1089,6 +1102,36 @@ func TestScrollUpLoadsEarlierHistory(t *testing.T) {
 		}
 		if len(v.box.Objects) != 200 || v.moreObj != nil {
 			t.Fatalf("all history should be loaded without a leftover button: %d", len(v.box.Objects))
+		}
+	})
+}
+
+func TestReviewFixes(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		for i := 0; i < 150; i++ {
+			s.conv.AddUser(fmt.Sprintf("m %d", i))
+		}
+		h.d.chat.show(s)
+		v := h.d.chat
+		n := len(v.box.Objects)
+		v.update([]*chat.Item{s.conv.Items[3]})
+		if len(v.box.Objects) != n {
+			t.Fatal("updates to messages above the loaded window must not be appended at the bottom")
+		}
+		q := &chat.Item{Kind: chat.Permission, ToolName: "AskUserQuestion", PermState: chat.PermPending,
+			Input: []byte(`{"questions":[{"question":"Which?","options":[{"label":"A"},{"label":"B"}]}]}`)}
+		first := v.renderPermission(q)
+		var radio *widget.RadioGroup
+		walk(first, func(o fyne.CanvasObject) {
+			if r, ok := o.(*widget.RadioGroup); ok {
+				radio = r
+			}
+		})
+		radio.SetSelected("B")
+		if v.renderPermission(q) != first || radio.Selected != "B" {
+			t.Fatal("re-rendering a pending question must keep the user's picks")
 		}
 	})
 }
