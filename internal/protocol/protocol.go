@@ -403,6 +403,9 @@ type RateLimit struct {
 	Utilization    float64               `json:"utilization"`
 	ResetsAt       int64                 `json:"resetsAt"`
 	UnifiedWindows map[string]RateWindow `json:"unifiedWindows"`
+	OverageStatus  string                `json:"overageStatus,omitempty"`
+	OverageReason  string                `json:"overageDisabledReason,omitempty"`
+	UsingOverage   bool                  `json:"isUsingOverage,omitempty"`
 }
 
 func (r *RateLimit) Window(name string) (RateWindow, bool) {

@@ -94,6 +94,9 @@ func (d *desk) setRateLimit(r *protocol.RateLimit) {
 	if d.rate != nil && r.UnifiedWindows == nil {
 		merged := *d.rate
 		merged.Status, merged.Type, merged.Utilization, merged.ResetsAt = r.Status, r.Type, r.Utilization, r.ResetsAt
+		if r.OverageStatus != "" {
+			merged.OverageStatus, merged.OverageReason, merged.UsingOverage = r.OverageStatus, r.OverageReason, r.UsingOverage
+		}
 		if merged.UnifiedWindows != nil {
 			w := map[string]protocol.RateWindow{}
 			for k, v := range merged.UnifiedWindows {
@@ -110,6 +113,28 @@ func (d *desk) setRateLimit(r *protocol.RateLimit) {
 	}
 	d.usage.update()
 	d.clearLimitIfAllowed()
+}
+
+func creditsText(r *protocol.RateLimit) string {
+	if r == nil || r.OverageStatus == "" {
+		return "not reported yet"
+	}
+	if r.UsingOverage {
+		return "in use"
+	}
+	switch r.OverageReason {
+	case "out_of_credits":
+		return "out of credits"
+	case "org_level_disabled":
+		return "turned off"
+	}
+	switch r.OverageStatus {
+	case "allowed", "allowed_warning":
+		return "available"
+	case "rejected":
+		return "not available"
+	}
+	return r.OverageStatus
 }
 
 func tok(n int64) string {
@@ -210,17 +235,18 @@ func (u *usagePanel) buildStrip() fyne.CanvasObject {
 	five, fiveIt := item("5-hour session", true)
 	sess, sessIt := item("This session", false)
 	all, allIt := item("All sessions", false)
+	credits, creditsIt := item("Usage credits", false)
 	week, weekIt := item("Weekly", true)
-	u.strip = []*stripItem{fiveIt, sessIt, allIt, weekIt}
+	u.strip = []*stripItem{fiveIt, sessIt, allIt, creditsIt, weekIt}
 	sep := func() fyne.CanvasObject { return container.NewCenter(mutedText("│", fontMeta)) }
 	gap := func() fyne.CanvasObject { return padLeft(10) }
-	row := container.NewHBox(five, gap(), sep(), gap(), sess, gap(), sep(), gap(), all, gap(), sep(), gap(), week)
+	row := container.NewHBox(five, gap(), sep(), gap(), sess, gap(), sep(), gap(), all, gap(), sep(), gap(), credits, gap(), sep(), gap(), week)
 	u.stripRow = container.New(layout.NewCustomPaddedLayout(2, 4, 0, 0), container.New(&clipLayout{}, container.NewCenter(row)))
 	return u.stripRow
 }
 
 func (u *usagePanel) syncStrip(sess, all string) {
-	if len(u.strip) != 4 {
+	if len(u.strip) != 5 {
 		return
 	}
 	win := func(it *stripItem, name string) {
@@ -241,7 +267,8 @@ func (u *usagePanel) syncStrip(sess, all string) {
 	win(u.strip[0], "five_hour")
 	setText(u.strip[1].value, sess)
 	setText(u.strip[2].value, all)
-	win(u.strip[3], "seven_day")
+	setText(u.strip[3].value, creditsText(u.d.rate))
+	win(u.strip[4], "seven_day")
 	if u.stripRow != nil && u.stripRow.Visible() {
 		u.stripRow.Refresh()
 	}
