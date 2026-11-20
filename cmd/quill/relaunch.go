@@ -99,11 +99,23 @@ func (d *desk) relaunchSession(id string) {
 		d.org.Place[ns.id] = place
 	}
 	d.org.Place[id] = placeArchive
-	for i, t := range d.tabs {
-		if t == id {
-			d.tabs[i] = ns.id
+	var tabs []string
+	replaced := false
+	for _, t := range d.tabs {
+		switch t {
+		case ns.id:
+			continue
+		case id:
+			tabs = append(tabs, ns.id)
+			replaced = true
+		default:
+			tabs = append(tabs, t)
 		}
 	}
+	if !replaced {
+		tabs = append(tabs, ns.id)
+	}
+	d.tabs = tabs
 	d.saveTabs()
 	d.saveOrg()
 	d.open(ns.id)

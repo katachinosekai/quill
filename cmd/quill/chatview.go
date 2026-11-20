@@ -651,10 +651,67 @@ func (v *chatView) markdown(text string) fyne.CanvasObject {
 		}
 	}
 	if v.d.center {
-		rt.Segments = centerLists(rt.Segments, "")
-		alignSegments(rt.Segments, fyne.TextAlignCenter)
+		return centeredBlocks(rt.Segments)
 	}
 	return rt
+}
+
+func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
+	var parts []fyne.CanvasObject
+	var run []widget.RichTextSegment
+	flush := func() {
+		if len(run) == 0 {
+			return
+		}
+		alignSegments(run, fyne.TextAlignCenter)
+		t := widget.NewRichText(run...)
+		t.Wrapping = fyne.TextWrapWord
+		parts = append(parts, t)
+		run = nil
+	}
+	for _, seg := range segs {
+		l, ok := seg.(*widget.ListSegment)
+		if !ok {
+			run = append(run, seg)
+			continue
+		}
+		flush()
+		t := widget.NewRichText(l)
+		t.Wrapping = fyne.TextWrapWord
+		parts = append(parts, container.New(fitCenter{natural: listNaturalWidth(l, 0)}, t))
+	}
+	flush()
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return container.NewVBox(parts...)
+}
+
+func listNaturalWidth(l *widget.ListSegment, depth int) float32 {
+	size := msgTheme{}.Size(theme.SizeNameText)
+	indent := float32(depth+1) * 28
+	var w float32
+	for _, item := range l.Items {
+		switch it := item.(type) {
+		case *widget.ListSegment:
+			w = max(w, listNaturalWidth(it, depth+1))
+		default:
+			var b strings.Builder
+			if p, ok := item.(*widget.ParagraphSegment); ok {
+				for _, t := range p.Texts {
+					if nl, ok := t.(*widget.ListSegment); ok {
+						w = max(w, listNaturalWidth(nl, depth+1))
+						continue
+					}
+					b.WriteString(t.Textual())
+				}
+			} else {
+				b.WriteString(item.Textual())
+			}
+			w = max(w, indent+fyne.MeasureText(b.String(), size, fyne.TextStyle{}).Width)
+		}
+	}
+	return w + 24
 }
 
 func alignSegments(segs []widget.RichTextSegment, a fyne.TextAlign) {

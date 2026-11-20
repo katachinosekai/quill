@@ -1151,6 +1151,7 @@ func (d *desk) createSession(cwd, model, mode string) *deskSession {
 	s := &deskSession{id: id, cwd: cwd, model: model, mode: mode, conv: chat.New(), loaded: true, created: time.Now()}
 	d.sessions[id] = s
 	d.current = s
+	d.addTab(id)
 	d.rebuildRows()
 	d.chat.show(s)
 	d.updateChrome()

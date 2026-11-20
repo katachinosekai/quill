@@ -226,6 +226,17 @@ func TestScreenshots(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	snap("media.png")
 	h.ui(func() {
+		ls := h.d.createSession(h.proj, "default", "default")
+		u := ls.conv.AddUser("give me the steps")
+		a := &chat.Item{Kind: chat.Assistant, Text: "Here is the plan:\n\n1. Build the RPM in a clean Fedora container\n2. Make the AppImage from the RPM contents\n3. Upload both to the release\n   - check the license files\n   - check the file names\n\nThen publish it.\n\n- short item\n- a much longer bullet item that goes on for a while to show wrapping behaviour"}
+		ls.conv.Items = append(ls.conv.Items, a)
+		h.d.center = true
+		h.d.chat.show(ls)
+		h.d.chat.update([]*chat.Item{u, a})
+	})
+	time.Sleep(200 * time.Millisecond)
+	snap("lists.png")
+	h.ui(func() {
 		ids := []string{}
 		for id := range h.d.sessions {
 			ids = append(ids, id)
