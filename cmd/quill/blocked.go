@@ -68,7 +68,8 @@ func (d *desk) retryBlocked(s *deskSession, it *chat.Item) {
 		s.restoreMode = "auto"
 		d.setMode(s, "default")
 	}
-	msg := "I approve the action that Claude Code's auto-mode check blocked: " + oneLine(blockedCommand(it), 300) +
+	s.retryCmd = blockedCommand(it)
+	msg := retryPrefix + oneLine(blockedCommand(it), 300) +
 		". Please retry it now; Quill will ask me to confirm it."
 	if d.current != s {
 		if p := d.paneFor(s); p != nil {
