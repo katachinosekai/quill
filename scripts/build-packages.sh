@@ -17,4 +17,10 @@ chmod +x /usr/local/bin/appimagetool
 git config --global --add safe.directory /src
 make -C /src appimage
 '
-ls -la dist/pkg/
+version=$(sed -n 's/^Version: *//p' packaging/quill.spec)
+rel="dist/release-$version"
+rm -rf "$rel" && mkdir -p "$rel"
+cp dist/pkg/*"$version"* "$rel"/
+for apk in ../quill-android/dist/*.apk; do [ -f "$apk" ] && cp "$apk" "$rel"/; done
+go run ./cmd/quill-sign -sign "$rel"
+ls -la "$rel"

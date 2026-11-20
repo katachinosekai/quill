@@ -173,3 +173,14 @@ Live transcription (`live.go`): audio stays in memory; every 400 ms the audio si
 Starting `quill` runs a small keeper process that launches the window as a child (env `QUILL_KEEPER` = keeper socket). The window sends each Claude session's stdin/stdout pipes to the keeper over the socket (SCM_RIGHTS) when a session starts, when an approval request arrives or is answered, and drops them when the session ends; it also reports the open session. Because the keeper holds copies of the pipes, Claude never sees EOF when the window dies. If the window exits abnormally (signal other than TERM/INT/HUP, or a non-zero code) the keeper starts a new window with the pipes as extra files (fd 3, 4, ...) and a restore file, and the window re-attaches exactly like after a live update. Restarts back off from 0.5 s to 30 s but never stop, so sessions only end when Quill itself ends them. A normal quit (exit 0) closes the keeper's copies. A live update from a window started before the keeper existed execs into the keeper with the handed-off pipes (`keeper.adopt`), so protection starts without a restart; if the keeper cannot start, the update falls back to the plain window path. `QUILL_NO_KEEPER=1` disables it.
 
 Sessions re-attached after a crash are no longer children of the window, so `session.Attach` falls back to polling the PID (`waitForeign`) when `Wait` returns ECHILD.
+
+## Updater and release signing (internal/updater, cmd/quill/update.go, cmd/quill-sign)
+
+Installed builds (RPM under /usr/libexec/quill, or an AppImage via $APPIMAGE) check https://api.github.com/repos/katachinosekai/quill/releases/latest after 15 s and every 6 h ("Check for updates" in Alignment settings). Dev builds (version "dev") never update. An update is only installed when:
+1. the release has `SHA256SUMS` and `SHA256SUMS.sig`, and the signature verifies with the ed25519 public key built into `updater.PublicKey`;
+2. the package name matches the release version exactly (`quill-X.Y.Z-N.fcNN.x86_64.rpm` / `Quill-X.Y.Z-x86_64.AppImage`), and the version is strictly newer;
+3. GitHub's asset digest equals the signed checksum, and the downloaded bytes hash to it too;
+4. every request is HTTPS to github.com / api.github.com / *.githubusercontent.com (redirects too), with size limits.
+AppImage installs swap the file in place (keeping `.old`) and Quill execs into it with the usual session hand-off. RPM installs run `pkexec dnf install -y -- <file>` (no shell), and the binary watcher then live-updates.
+
+The private signing key lives only at `~/.config/quill-release/release.key` (mode 600, never committed). `go run ./cmd/quill-sign -genkey` created it once. `scripts/build-packages.sh` copies this version's packages (plus the Android APK) into `dist/release-<version>/` and signs them. Upload `SHA256SUMS` and `SHA256SUMS.sig` with the release, or the updater refuses it. If the key is lost, ship a build with a new public key; older installs then can't auto-update to it.

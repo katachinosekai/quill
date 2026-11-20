@@ -27,6 +27,7 @@ import (
 	"github.com/katachinosekai/quill/internal/protocol"
 	"github.com/katachinosekai/quill/internal/session"
 	"github.com/katachinosekai/quill/internal/transcript"
+	"github.com/katachinosekai/quill/internal/updater"
 )
 
 var modelChoices = []string{"default", "fable", "opus", "sonnet", "haiku"}
@@ -224,6 +225,8 @@ type desk struct {
 	planFirst      bool
 	collapseChips  bool
 	hideChips      bool
+	updBtn         *widget.Button
+	updRelease     *updater.Release
 	rules          sortRules
 	centerAll      *widget.Check
 	centerChecks   []*widget.Check
@@ -359,7 +362,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
 	)
 	top := container.NewVBox(padTop(40), newBtn, d.search)
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, d.buildPhoneRow(), legend)
+	updChk := widget.NewCheck("Check for updates (signed releases only)", func(on bool) { d.app.Preferences().SetBool("checkUpdates", on) })
+	updChk.Checked = d.app.Preferences().BoolWithFallback("checkUpdates", true)
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, updChk, rulesBtn, alignRow, d.buildPhoneRow(), legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -832,7 +837,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.rcStatus.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.autoSplitCheck()), container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.updateButton()), container.NewCenter(d.autoSplitCheck()), container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
 		layout.NewSpacer())
 	d.bookRow = d.buildBookmarks()
 	d.tabRow = d.buildTabs()
@@ -1705,6 +1710,7 @@ func (d *desk) watch(ctx context.Context) {
 	d.do(d.reopenLastTab)
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
+	go d.watchUpdates(ctx)
 	go d.chat.followGuard(ctx)
 	go d.fetchCommands()
 	d.refreshAccount()
