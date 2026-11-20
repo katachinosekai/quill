@@ -99,7 +99,7 @@ func newChatView(d *desk) *chatView {
 
 func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 	v := &chatView{d: d, views: map[int]*itemView{}}
-	v.box = container.NewVBox()
+	v.box = chatBox()
 	v.cache = map[*deskSession]*sessView{}
 	v.inner = container.New(shownPad{10, 10, 14, 14}, v.box)
 	v.live = widget.NewLabel(" ")
@@ -274,7 +274,7 @@ func (v *chatView) show(s *deskSession) {
 	}
 	v.s = s
 	v.views = map[int]*itemView{}
-	v.setBox(container.NewVBox())
+	v.setBox(chatBox())
 	if s == nil {
 		v.box.Add(v.emptyState())
 		relayout(v.box)
@@ -1174,16 +1174,16 @@ func permDetail(v *chatView, it *chat.Item) []fyne.CanvasObject {
 }
 
 func spaced(k chat.Kind, obj fyne.CanvasObject) fyne.CanvasObject {
-	top, bottom := float32(6), float32(6)
+	top, bottom := float32(2), float32(2)
 	switch k {
 	case chat.User:
-		top, bottom = 8, 4
-	case chat.Assistant:
-		top, bottom = 4, 10
-	case chat.Tool, chat.Thinking:
+		top, bottom = 10, 2
+	case chat.Assistant, chat.Thinking:
+		top, bottom = 0, 0
+	case chat.Tool:
 		top, bottom = 0, 0
 	case chat.Notice:
-		top, bottom = 8, 8
+		top, bottom = 4, 4
 	}
 	return container.New(layout.NewCustomPaddedLayout(top, bottom, 0, 0), obj)
 }
@@ -1358,7 +1358,7 @@ func (v *chatView) stepChip(it *chat.Item) fyne.CanvasObject {
 	if name == "" {
 		name = "Tool"
 	}
-	n := mutedText(name, fontMeta)
+	n := mutedText(name, fontBody)
 	bgr := canvas.NewRectangle(colCard)
 	bgr.CornerRadius = 8
 	chip := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(2, 2, 7, 7), container.NewHBox(m, n)))
@@ -1620,4 +1620,10 @@ func glowWrap(b *widget.Button, tint color.Color, enabled bool) fyne.CanvasObjec
 	face.StrokeColor = fade(tint, 0.75*a)
 	face.StrokeWidth = 1.5
 	return container.NewStack(halo, container.New(layout.NewCustomPaddedLayout(2, 2, 2, 2), container.NewStack(face, b)))
+}
+
+const chatItemGap = 2
+
+func chatBox() *fyne.Container {
+	return container.New(layout.NewCustomPaddedVBoxLayout(chatItemGap))
 }
