@@ -665,3 +665,28 @@ func TestKmemLinkFromFirstPrompt(t *testing.T) {
 		}
 	})
 }
+
+func TestPlanApprovedPromptsAreHidden(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		h.d.chat.show(s)
+		texts := func(it *chat.Item) []string {
+			var out []string
+			walk(h.d.chat.render(it, &itemView{}), func(o fyne.CanvasObject) {
+				if l, ok := o.(*widget.Label); ok && l.Text != "" {
+					out = append(out, l.Text)
+				}
+			})
+			return out
+		}
+		auto := &chat.Item{Kind: chat.Permission, ToolName: "Bash", PermState: chat.PermAutoAllowed}
+		if got := texts(auto); len(got) != 0 {
+			t.Fatalf("prompts approved with the plan show nothing in the chat: %v", got)
+		}
+		held := &chat.Item{Kind: chat.Permission, ToolName: "Bash", PermState: chat.PermPlanAsked}
+		if got := texts(held); len(got) != 1 || !strings.Contains(got[0], "Held") {
+			t.Fatalf("held requests still show their line: %v", got)
+		}
+	})
+}
