@@ -63,7 +63,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 
 %changelog
 * Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.6-1
-- Approvals always reach the session that asked (fixes plan approval sent to the wrong session); Claude's limit message in every chat; usage credits status; split-view drag and drop; name field for new tabs; sharper pairing QR
+- Approvals always reach the session that asked (fixes plan approval sent to the wrong session); a typed "approve"/"yes" works mid-turn; Claude's limit message in every chat; usage credits status; split-view drag and drop; name field for new tabs; sharper pairing QR
 
 * Thu Nov 19 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.5-1
 - Desktop and phone notifications for approvals, questions, plans, finished and failed sessions; tray shows Quill
