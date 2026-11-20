@@ -1275,12 +1275,12 @@ func TestTypedApproval(t *testing.T) {
 		s.runAll = false
 		s.conv.Busy = true
 		h.d.approveByText(s)
-		if s.runAll || !s.runAllNext {
-			t.Fatal("approval typed during a turn should apply to the next request")
+		if !s.runAll {
+			t.Fatal("approval typed during a turn applies at once: Claude Code delivers it into the running turn")
 		}
 		h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
 		if !s.runAll || s.runAllNext {
-			t.Fatal("next request should run pre-approved")
+			t.Fatal("and it still holds for the next request")
 		}
 		s.conv.Busy = false
 	})
