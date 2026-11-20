@@ -1369,6 +1369,19 @@ func TestReadOnlyRequests(t *testing.T) {
 		"rm -rf x":                                   false,
 		"git push":                                   false,
 		"ls; rm x":                                   false,
+		"sed 's/a/b/w out' f":                        false,
+		"sed -n '/x/w out' f":                        false,
+		"sed -n '5p' f":                              true,
+		"git branch -D old":                          false,
+		"git branch newname":                         false,
+		"git branch -a":                              true,
+		"git remote add x url":                       false,
+		"git remote -v":                              true,
+		"git diff --output=f":                        false,
+		"sort -o out in":                             false,
+		"tree -o out":                                false,
+		"uniq in out":                                false,
+		"sort in | uniq -c":                          true,
 	} {
 		if readOnlyRequest(bash(c)) != want {
 			t.Errorf("readOnlyRequest(%q) = %v", c, !want)

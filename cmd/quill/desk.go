@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1955,6 +1956,52 @@ var readOnlyCommands = map[string]bool{
 
 var readOnlyGit = map[string]bool{"status": true, "log": true, "diff": true, "show": true, "branch": true, "remote": true, "rev-parse": true, "ls-files": true, "blame": true, "describe": true}
 
+func readOnlySed(args []string) bool {
+	quiet := false
+	script := 0
+	for _, a := range args {
+		switch {
+		case a == "-n" || a == "--quiet" || a == "--silent":
+			quiet = true
+		case strings.HasPrefix(a, "-"):
+			return false
+		case script == 0:
+			script++
+			if !sedPrintRange.MatchString(strings.Trim(a, `'"`)) {
+				return false
+			}
+		}
+	}
+	return quiet && script == 1
+}
+
+var sedPrintRange = regexp.MustCompile(`^(\d+|\$)?(,(\d+|\$))?p$`)
+
+func readOnlyGitArgs(sub string, args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "--output") || strings.HasPrefix(a, "--ext-diff") {
+			return false
+		}
+	}
+	switch sub {
+	case "branch":
+		for _, a := range args {
+			switch a {
+			case "-a", "-r", "-v", "-vv", "--list", "--show-current", "--all", "--remotes":
+			default:
+				return false
+			}
+		}
+	case "remote":
+		for _, a := range args {
+			if a != "-v" && a != "--verbose" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func readOnlyRequest(r *protocol.ControlRequest) bool {
 	if r == nil {
 		return false
@@ -1994,10 +2041,8 @@ func readOnlyCommand(cmd string) bool {
 		name := f[0]
 		switch {
 		case name == "sed":
-			for _, a := range f[1:] {
-				if strings.HasPrefix(a, "-i") || a == "--in-place" || strings.Contains(a, "w ") {
-					return false
-				}
+			if !readOnlySed(f[1:]) {
+				return false
 			}
 		case name == "find":
 			for _, a := range f[1:] {
@@ -2006,7 +2051,23 @@ func readOnlyCommand(cmd string) bool {
 				}
 			}
 		case name == "git":
-			if len(f) < 2 || !readOnlyGit[f[1]] {
+			if len(f) < 2 || !readOnlyGit[f[1]] || !readOnlyGitArgs(f[1], f[2:]) {
+				return false
+			}
+		case name == "sort" || name == "tree":
+			for _, a := range f[1:] {
+				if strings.HasPrefix(a, "-o") || strings.HasPrefix(a, "--output") {
+					return false
+				}
+			}
+		case name == "uniq":
+			files := 0
+			for _, a := range f[1:] {
+				if !strings.HasPrefix(a, "-") {
+					files++
+				}
+			}
+			if files > 1 {
 				return false
 			}
 		case name == "awk":
