@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -86,8 +87,7 @@ func fallbackWindow(k *keeper, initial *restoreState) int {
 	defer runtime.KeepAlive(k)
 	if initial != nil {
 		if b, err := json.Marshal(initial); err == nil {
-			path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-restore-%d.json", os.Getpid()))
-			if os.WriteFile(path, b, 0o600) == nil {
+			if path, err := writePrivate("quill-restore-*.json", b); err == nil {
 				os.Setenv(restoreEnv, path)
 			}
 		}
@@ -125,9 +125,11 @@ func runKeeper(args []string, initial *restoreState) int {
 	if fresh {
 		restore = k.writeRestore(true)
 	}
+	tail := &tailBuffer{max: crashTailBytes}
 	for {
 		cmd := exec.Command(exe, args...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		cmd.Stdin, cmd.Stdout = os.Stdin, os.Stdout
+		cmd.Stderr = io.MultiWriter(os.Stderr, tail)
 		cmd.Env = append(os.Environ(), keeperEnv+"="+sock)
 		if restore != "" {
 			cmd.Env = append(cmd.Env, restoreEnv+"="+restore)
@@ -162,10 +164,12 @@ func runKeeper(args []string, initial *restoreState) int {
 			os.Remove(restore)
 			restore = ""
 		}
+		output := tail.take()
 		if !crashed(cmd.ProcessState) {
 			k.closeAll()
 			return 0
 		}
+		saveCrash(cmd.ProcessState.String(), output)
 		if time.Since(started) > keeperStable {
 			delay = 500 * time.Millisecond
 		}
@@ -328,8 +332,8 @@ func (k *keeper) writeRestore(handover bool) string {
 	}
 	k.mu.Unlock()
 	b, _ := json.Marshal(st)
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-crash-restore-%d.json", os.Getpid()))
-	if os.WriteFile(path, b, 0o600) != nil {
+	path, err := writePrivate("quill-crash-restore-*.json", b)
+	if err != nil {
 		return ""
 	}
 	return path

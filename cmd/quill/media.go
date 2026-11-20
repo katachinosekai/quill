@@ -175,7 +175,7 @@ func download(src string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := previewClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

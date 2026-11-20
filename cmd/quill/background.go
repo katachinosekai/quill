@@ -112,8 +112,9 @@ func (d *desk) hideWindow() {
 }
 
 func writeProfile() {
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-cpu-%d.pprof", os.Getpid()))
-	f, err := os.Create(path)
+	path := filepath.Join(privateDir(), fmt.Sprintf("quill-cpu-%d.pprof", os.Getpid()))
+	_ = os.Remove(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return
 	}

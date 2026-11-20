@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -178,8 +177,7 @@ func (d *desk) trySwap() {
 		}
 		time.Sleep(prefsSettle)
 		b, _ := json.Marshal(st)
-		path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-restore-%d.json", os.Getpid()))
-		err := os.WriteFile(path, b, 0o600)
+		path, err := writePrivate("quill-restore-*.json", b)
 		if err == nil {
 			env := append(os.Environ(), restoreEnv+"="+path)
 			err = syscall.Exec(target, os.Args, env)

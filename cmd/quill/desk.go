@@ -2179,7 +2179,19 @@ func readOnlyCommand(cmd string) bool {
 			}
 		case name == "sort" || name == "tree":
 			for _, a := range f[1:] {
-				if strings.HasPrefix(a, "-o") || strings.HasPrefix(a, "--output") {
+				if strings.HasPrefix(a, "-o") || strings.HasPrefix(a, "--output") || strings.HasPrefix(a, "--compress-program") {
+					return false
+				}
+			}
+		case name == "rg":
+			for _, a := range f[1:] {
+				if strings.HasPrefix(a, "--pre") || strings.HasPrefix(a, "--search-zip") || a == "-z" {
+					return false
+				}
+			}
+		case name == "file":
+			for _, a := range f[1:] {
+				if a == "-C" || a == "--compile" {
 					return false
 				}
 			}

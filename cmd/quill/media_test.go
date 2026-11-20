@@ -52,6 +52,8 @@ func TestFindMedia(t *testing.T) {
 }
 
 func TestFetchImageInMemory(t *testing.T) {
+	allowPrivatePreviews = true
+	t.Cleanup(func() { allowPrivatePreviews = false })
 	cache := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cache)
 	dir := t.TempDir()

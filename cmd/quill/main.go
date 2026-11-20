@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -24,7 +25,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version")
 	claudeBin := flag.String("claude", "claude", "claude CLI to run")
 	reload := flag.Bool("reload", false, "ask the running Quill to switch to this build now")
-	profile := flag.Bool("profile", false, "record 10 s of the running Quill's CPU use into $TMPDIR/quill-cpu-<pid>.pprof")
+	profile := flag.Bool("profile", false, "record 10 s of the running Quill's CPU use into $XDG_RUNTIME_DIR/quill-cpu-<pid>.pprof")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
@@ -93,6 +94,10 @@ func runWindowWith(claudeBin, sock string) int {
 		startHidden = false
 	}
 	d.setupShortcuts()
+	go func() {
+		time.Sleep(2 * time.Second)
+		d.do(d.checkCrashReports)
+	}()
 	d.listenInstance(sock)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
