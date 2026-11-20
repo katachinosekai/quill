@@ -1336,6 +1336,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 		}
 		s.failed = msg
 		items = append(items, s.conv.AddError(msg))
+		d.alert(s, "error", msg)
 	}
 	if d.current == s {
 		d.chat.update(items)

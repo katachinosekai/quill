@@ -6,6 +6,7 @@ import (
 	"github.com/godbus/dbus/v5"
 
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/folders"
 	"github.com/katachinosekai/quill/internal/protocol"
 )
 
@@ -43,38 +44,77 @@ func (d *desk) seen(s *deskSession) bool {
 }
 
 func (d *desk) attention(s *deskSession, ev *protocol.Event, items []*chat.Item) {
-	if !d.notifyOn() || d.seen(s) {
+	kind, body := attentionKind(s, ev, items)
+	if kind == "" {
 		return
 	}
-	title, _, _ := d.rowText(s.id)
+	d.alert(s, kind, body)
+}
+
+func attentionKind(s *deskSession, ev *protocol.Event, items []*chat.Item) (string, string) {
 	for _, it := range items {
 		if it.PermState != chat.PermPending {
 			continue
 		}
 		switch {
 		case it.Kind == chat.Plan:
-			d.desktopNotify(s.id, title+" has a plan to approve", clip(lastReply(s.conv), 200))
-			return
+			return "plan", lastReply(s.conv)
 		case it.Kind == chat.Permission && isQuestion(it):
-			d.desktopNotify(s.id, title+" has a question", clip(it.Summary, 200))
-			return
+			return "question", it.Summary
 		case it.Kind == chat.Permission:
 			body := it.ToolName
 			if it.Summary != "" {
 				body += ": " + it.Summary
 			}
-			d.desktopNotify(s.id, title+" needs approval", clip(body, 200))
-			return
+			return "approval", body
 		}
 	}
 	if ev.Type != "result" || s.compacting || len(s.conv.PendingPermissions()) > 0 {
-		return
+		return "", ""
 	}
 	if ev.IsError {
-		d.desktopNotify(s.id, title+" stopped with an error", clip(ev.Result, 200))
+		return "error", ev.Result
+	}
+	return "finished", lastReply(s.conv)
+}
+
+var alertTitles = map[string]string{
+	"approval": " needs approval",
+	"question": " has a question",
+	"plan":     " has a plan to approve",
+	"finished": " finished",
+	"error":    " stopped with an error",
+}
+
+func (d *desk) alert(s *deskSession, kind, body string) {
+	title, _, _ := d.rowText(s.id)
+	d.phoneEvent(s.id, kind, title)
+	if !d.notifyOn() || d.seen(s) {
 		return
 	}
-	d.desktopNotify(s.id, title+" finished", clip(lastReply(s.conv), 200))
+	d.desktopNotify(s.id, title+alertTitles[kind], clip(body, 200))
+}
+
+func (d *desk) phoneEvent(sid, kind, title string) {
+	p := d.phoneSync
+	if p == nil || p.server == nil {
+		return
+	}
+	rc := ""
+	for k, v := range p.rc {
+		if v == sid && k > rc {
+			rc = k
+		}
+	}
+	folder := ""
+	for _, g := range d.groups {
+		for _, id := range g.ids {
+			if id == sid {
+				folder = g.title
+			}
+		}
+	}
+	p.server.Emit(folders.Event{Type: kind, RC: rc, Quill: sid, Title: title, Folder: folder})
 }
 
 func lastReply(c *chat.Conversation) string {
