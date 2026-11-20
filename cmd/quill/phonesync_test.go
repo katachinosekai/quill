@@ -41,17 +41,30 @@ func TestPhoneSyncFileServerAndGist(t *testing.T) {
 		h.d.rememberRC(editsID, "https://claude.ai/code/session_01EditsAAA")
 		h.d.rememberRC(editsID, "https://claude.ai/code?environment=")
 	})
-	h.eventually("edits session in a folder", func() bool {
-		h.d.rebuildRows()
-		for _, g := range h.d.groups {
-			for _, id := range g.ids {
-				if id == editsID {
-					want = g.title
+	found := func() bool {
+		ok := false
+		h.ui(func() {
+			h.d.rebuildRows()
+			for _, g := range h.d.groups {
+				for _, id := range g.ids {
+					if id == editsID {
+						want, ok = g.title, true
+					}
 				}
 			}
+		})
+		return ok
+	}
+	for deadline := time.Now().Add(30 * time.Second); !found(); {
+		if time.Now().After(deadline) {
+			h.ui(func() {
+				_, inInfos := h.d.infos[editsID]
+				t.Fatalf("edits session is in no folder: inInfos=%v order=%d place=%q", inInfos, len(h.d.order), h.d.placement(editsID))
+			})
 		}
-		return want != ""
-	})
+		h.d.refresh()
+		time.Sleep(50 * time.Millisecond)
+	}
 	h.eventually("folders file", func() bool { return readFile().Sessions["session_01EditsAAA"] == want })
 	f := readFile()
 	if f.Version != 1 || len(f.Order) == 0 || len(f.Sessions) != 1 || f.UpdatedMs == 0 {
