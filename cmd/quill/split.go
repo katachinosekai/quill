@@ -147,7 +147,7 @@ func (d *desk) newPane() *pane {
 	controls := container.NewHBox(p.model, p.mode, layout.NewSpacer(), openAll, closeAll)
 	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
 	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
-	p.stats = mutedText("", 11)
+	p.stats = mutedText("", fontMeta)
 	inputRow := container.NewVBox(card, container.New(&clipLayout{}, p.stats))
 	p.choices = container.NewVBox()
 	hint := widget.NewLabelWithStyle(emptyPaneText, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
@@ -444,7 +444,7 @@ func (d *desk) splitButtons() fyne.CanvasObject {
 	}
 	d.splitBtns = btns
 	d.syncSplitButtons()
-	objs := []fyne.CanvasObject{container.NewCenter(mutedText("View", 11))}
+	objs := []fyne.CanvasObject{container.NewCenter(mutedText("View", fontMeta))}
 	for _, b := range btns {
 		objs = append(objs, b)
 	}

@@ -226,7 +226,7 @@ func newVideoPlayer(d *desk, src string, preview fyne.Resource) *videoPlayer {
 	vp.img.FillMode = canvas.ImageFillContain
 	vp.img.ScaleMode = canvas.ImageScaleFastest
 	vp.img.SetMinSize(fyne.NewSize(320, 180))
-	vp.status = mutedText("", 12)
+	vp.status = mutedText("", fontMeta)
 	vp.btn = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), vp.toggle)
 	vp.seek = widget.NewSlider(0, 1)
 	vp.seek.Step = 0.01
@@ -235,7 +235,7 @@ func newVideoPlayer(d *desk, src string, preview fyne.Resource) *videoPlayer {
 		vp.seeking = false
 		vp.seekTo(v)
 	}
-	vp.timeLbl = mutedText("0:00", 12)
+	vp.timeLbl = mutedText("0:00", fontMeta)
 	return vp
 }
 

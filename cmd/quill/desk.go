@@ -358,7 +358,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	logo := canvas.NewImageFromResource(appIcon)
 	logo.FillMode = canvas.ImageFillContain
 	brandName := canvas.NewText("Quill", colText)
-	brandName.TextSize = 18
+	brandName.TextSize = fontBrand
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
@@ -380,13 +380,13 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			name := canvas.NewText("", colMuted)
 			name.TextStyle.Bold = true
 			count := canvas.NewText("", colMuted)
-			count.TextSize = 11
+			count.TextSize = fontDense
 			folder := container.NewHBox(indent, container.NewCenter(sized(18, 18, icon)), container.NewCenter(name), container.NewCenter(count))
 			sindent := canvas.NewRectangle(color.Transparent)
 			title := widget.NewLabel("")
 			title.Truncation = fyne.TextTruncateEllipsis
 			meta := canvas.NewText("", colMuted)
-			meta.TextSize = 10
+			meta.TextSize = fontDense
 			dt := dot(color.Transparent)
 			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(10, 10, dt))), nil,
 				container.New(&tightVBox{}, title, container.NewPadded(meta)))
@@ -484,7 +484,7 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 
 func legendDot(s status) fyne.CanvasObject {
 	label := map[status]string{stRunning: "run", stWaiting: "wait", stIdle: "idle", stError: "err", stTerminal: "term"}[s]
-	return container.NewHBox(sized(8, 8, dot(s.color())), mutedText(label, 11))
+	return container.NewHBox(sized(8, 8, dot(s.color())), mutedText(label, fontMeta))
 }
 
 const tightOverlap = 2
@@ -826,12 +826,12 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.title = widget.NewLabel("Quill")
 	d.title.TextStyle = fyne.TextStyle{Bold: true}
 	d.title.Truncation = fyne.TextTruncateEllipsis
-	d.subtitle = mutedText("", 12)
+	d.subtitle = mutedText("", fontMeta)
 	d.note = widget.NewLabel("")
 	d.note.Importance = widget.WarningImportance
 	d.note.Truncation = fyne.TextTruncateEllipsis
 	d.note.Hide()
-	d.rcStatus = mutedText("", 12)
+	d.rcStatus = mutedText("", fontMeta)
 	d.rcStatus.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
@@ -870,8 +870,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.app.Preferences().SetString("newMode", v)
 		d.setMode(d.current, v)
 	})
-	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands", 10)
-	d.stats = mutedText("", 12)
+	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands", fontMeta)
+	d.stats = mutedText("", fontMeta)
 	d.stopBtn = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
 		if d.current != nil {
 			d.interrupt(d.current)

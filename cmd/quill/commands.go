@@ -136,10 +136,10 @@ func (m *cmdMenu) render() {
 	for i, c := range m.matches {
 		name := canvas.NewText("/"+c.Name, colText)
 		name.TextStyle.Bold = true
-		name.TextSize = 14
+		name.TextSize = fontHeading
 		left := container.NewHBox(name)
 		if c.ArgumentHint != "" {
-			left.Add(mutedText(c.ArgumentHint, 12))
+			left.Add(mutedText(c.ArgumentHint, fontMeta))
 		}
 		desc := widget.NewLabel(oneLine(c.Description, 160))
 		desc.Truncation = fyne.TextTruncateEllipsis

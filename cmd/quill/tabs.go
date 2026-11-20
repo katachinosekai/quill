@@ -259,7 +259,7 @@ func (d *desk) syncTabs() {
 		title, _, st := d.rowText(id)
 		active := d.current != nil && d.current.id == id
 		label := canvas.NewText(oneLine(title, tabTitleRunes), colText)
-		label.TextSize = 13
+		label.TextSize = fontBody
 		label.TextStyle.Bold = active
 		if !active {
 			label.Color = colMuted
@@ -349,7 +349,7 @@ func (d *desk) syncBookmarks() {
 		g := g
 		icon := widget.NewIcon(theme.FolderIcon())
 		label := canvas.NewText(fmt.Sprintf("%s (%d)", g.title, len(g.ids)), colText)
-		label.TextSize = 13
+		label.TextSize = fontBody
 		label.TextStyle.Bold = true
 		row := container.NewHBox(padLeft(6), container.NewCenter(sized(18, 18, icon)), container.NewCenter(label), padLeft(6))
 		var chip *tabChip

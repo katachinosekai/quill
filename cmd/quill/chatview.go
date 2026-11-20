@@ -892,7 +892,7 @@ func (v *chatView) diffView(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	grid.Rows = rows
 	parts := []fyne.CanvasObject{}
 	if it.DiffPath != "" {
-		parts = append(parts, mutedText(it.DiffPath, 12))
+		parts = append(parts, mutedText(it.DiffPath, fontMeta))
 	}
 	parts = append(parts, v.sideScroll(grid))
 	if cut > 0 {
@@ -1050,7 +1050,7 @@ func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
 		}
 		parts = append(parts, container.NewHBox(allow, always, deny))
 	} else {
-		parts = append(parts, mutedText(permStateText(it.PermState), 13))
+		parts = append(parts, mutedText(permStateText(it.PermState), fontBody))
 	}
 	border := colAccent
 	if it.PermState != chat.PermPending {
@@ -1279,7 +1279,7 @@ func (v *chatView) stepRun(it *chat.Item) fyne.CanvasObject {
 			if iv == nil {
 				iv = &itemView{holder: container.NewStack()}
 			}
-			body := append([]fyne.CanvasObject{mutedText(toolHeader(t), 12)}, v.toolBody(t, iv)...)
+			body := append([]fyne.CanvasObject{mutedText(toolHeader(t), fontMeta)}, v.toolBody(t, iv)...)
 			var card fyne.CanvasObject = container.NewThemeOverride(bg(colCard, 8, container.NewVBox(body...)), smallTheme{})
 			if v.d.center {
 				card = container.New(fitCenter{natural: toolNaturalWidth(t)}, card)
@@ -1322,12 +1322,12 @@ func (v *chatView) stepChip(it *chat.Item) fyne.CanvasObject {
 	}
 	m := canvas.NewText(mark, col)
 	m.TextStyle.Bold = true
-	m.TextSize = 13
+	m.TextSize = fontBody
 	name := it.ToolName
 	if name == "" {
 		name = "Tool"
 	}
-	n := mutedText(name, 12)
+	n := mutedText(name, fontMeta)
 	bgr := canvas.NewRectangle(colCard)
 	bgr.CornerRadius = 8
 	chip := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(2, 2, 7, 7), container.NewHBox(m, n)))
@@ -1465,7 +1465,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		case chat.PermCancelled:
 			text = "No longer needed"
 		}
-		parts = append(parts, mutedText(text, 13))
+		parts = append(parts, mutedText(text, fontBody))
 		border = color.NRGBA{0x44, 0x44, 0x40, 0xff}
 	}
 	r := canvas.NewRectangle(colCard)

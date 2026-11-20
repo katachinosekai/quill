@@ -430,7 +430,7 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	}
 	d.updatePhoneRow()
 	d.phoneGistChk.OnChanged = d.toggleGist
-	head := mutedText("Phone", 11)
+	head := mutedText("Phone", fontMeta)
 	return container.NewVBox(head, pairBtn, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), d.phoneGistChk, p.status)
 }
 

@@ -66,9 +66,9 @@ type compactTheme struct{ deskTheme }
 func (t compactTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
 	case theme.SizeNameText:
-		return 13
+		return fontBody
 	case theme.SizeNameCaptionText:
-		return 10
+		return fontDense
 	case theme.SizeNamePadding, theme.SizeNameInnerPadding:
 		return 2
 	case theme.SizeNameLineSpacing:
@@ -82,9 +82,9 @@ type smallTheme struct{ deskTheme }
 func (t smallTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
 	case theme.SizeNameText:
-		return 12
+		return fontMeta
 	case theme.SizeNameCaptionText:
-		return 11
+		return fontMeta
 	case theme.SizeNameLineSpacing:
 		return 3
 	case theme.SizeNamePadding:
@@ -98,17 +98,28 @@ type msgTheme struct{ deskTheme }
 func (t msgTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
 	case theme.SizeNameText:
-		return 16
+		return fontMessage
 	case theme.SizeNameLineSpacing:
 		return 7
 	}
 	return t.deskTheme.Size(n)
 }
 
+const (
+	fontBrand   = 18
+	fontHeading = 14
+	fontBody    = 13
+	fontMessage = 16
+	fontMeta    = 12
+	fontDense   = 11
+)
+
 func (deskTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
-	case theme.SizeNameText, theme.SizeNameCaptionText:
-		return 13
+	case theme.SizeNameText:
+		return fontBody
+	case theme.SizeNameCaptionText:
+		return fontMeta
 	case theme.SizeNameLineSpacing:
 		return 5
 	case theme.SizeNameInputRadius, theme.SizeNameSelectionRadius:

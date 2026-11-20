@@ -358,7 +358,7 @@ func (v *chatView) mediaCard(m mediaRef) fyne.CanvasObject {
 	img.FillMode = canvas.ImageFillContain
 	img.ScaleMode = canvas.ImageScaleSmooth
 	img.SetMinSize(fyne.NewSize(previewW, previewH))
-	status := mutedText("Loading preview...", 11)
+	status := mutedText("Loading preview...", fontMeta)
 	fail := func(err error) {
 		status.Text = "No preview: " + oneLine(err.Error(), 60)
 		status.Refresh()

@@ -37,7 +37,7 @@ type usagePanel struct {
 
 func usageText(s string) *canvas.Text {
 	t := canvas.NewText(s, colText)
-	t.TextSize = 12
+	t.TextSize = fontMeta
 	return t
 }
 
@@ -58,7 +58,7 @@ func newUsagePanel(d *desk) *usagePanel {
 	head := func(s string) fyne.CanvasObject {
 		t := canvas.NewText(s, colText)
 		t.TextStyle.Bold = true
-		t.TextSize = 13
+		t.TextSize = fontBody
 		return t
 	}
 	body := container.NewVBox(
