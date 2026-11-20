@@ -627,9 +627,27 @@ func (d *desk) autoSplitCheck() fyne.CanvasObject {
 	d.autoChk = widget.NewCheck("Auto split", func(on bool) {
 		d.app.Preferences().SetBool("autoSplit", on)
 		if on {
+			d.preAuto = ""
+			if !d.split() && d.current != nil {
+				d.preAuto = d.current.id
+			}
 			d.autoSplitSync()
+			return
 		}
+		d.leaveAutoSplit()
 	})
 	d.autoChk.Checked = d.app.Preferences().Bool("autoSplit")
 	return d.autoChk
+}
+
+func (d *desk) leaveAutoSplit() {
+	back := d.preAuto
+	d.preAuto = ""
+	if !d.split() {
+		return
+	}
+	d.setSplit(1)
+	if back != "" && d.session(back) != nil {
+		d.open(back)
+	}
 }

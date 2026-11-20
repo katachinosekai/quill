@@ -185,6 +185,7 @@ type desk struct {
 	strip          *tabStrip
 	autoChk        *widget.Check
 	autoSyncing    bool
+	preAuto        string
 	listTheme      *container.ThemeOverride
 	usageBox       *fyne.Container
 	resizeFreeze   float32
