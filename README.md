@@ -18,7 +18,7 @@ Quill needs the Claude Code CLI (`claude`) installed and signed in. Installed co
 **Sessions**
 - Browser-style tabs (drag to reorder, middle-click to close, Ctrl+T new, Ctrl+1–9 to switch) with folder drop-downs, or a vertical sidebar
 - Folders: Active, Inactive, Archive, Created by Claude and your own, with Format Rules for sorting; Active keeps a fixed order
-- Split view (2 or 3 panes), each with its own full message box; Auto split shows your Active sessions side by side
+- Split view (2 or 3 panes), each with its own full message box; drag a tab or session onto a pane (or onto the chat to split); Auto split shows your Active sessions side by side
 - Rename, restart as a fresh session that takes over the job from a compacted brief, delete, open in split, drag between folders
 - Takes over a session that is open in a terminal when you send a message
 
@@ -36,7 +36,8 @@ Quill needs the Claude Code CLI (`claude`) installed and signed in. Installed co
 
 **Reliability**
 - Live self-update with session hand-off; a crash keeper keeps Claude sessions running if the window crashes and reconnects them
-- Usage panel with plan limits and a banner when a limit is reached
+- Usage panel and strip with plan limits and usage-credit status; when Claude reports a limit, its message appears in every session's chat
+- Desktop and phone notifications for approvals, questions, plans, finished and failed sessions
 - Optional crash reports: you choose what to redact (optionally with a tool-less Claude agent) and review the exact text before it's sent
 
 ## Quill for Android
