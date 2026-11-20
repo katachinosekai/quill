@@ -176,6 +176,10 @@ type Server struct {
 	ring     []Event
 	wake     chan struct{}
 	waiters  int
+
+	usageSrc  func() []byte
+	usageData []byte
+	usageAt   time.Time
 }
 
 func Listen(cert tls.Certificate, port int, key string) (*Server, error) {
@@ -209,7 +213,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet || r.URL.Path != "/folders.json" && r.URL.Path != "/events" {
+	if r.Method != http.MethodGet || r.URL.Path != "/folders.json" && r.URL.Path != "/events" && r.URL.Path != "/usage.json" {
 		http.NotFound(w, r)
 		return
 	}
@@ -223,6 +227,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/events" {
 		s.serveEvents(w, r)
+		return
+	}
+	if r.URL.Path == "/usage.json" {
+		s.serveUsage(w)
 		return
 	}
 	if data == nil {

@@ -281,6 +281,7 @@ func (d *desk) startPhoneServer() error {
 	prefs.SetInt("phonePort", s.Port)
 	prefs.SetBool("phoneServe", true)
 	s.SetEvents(prefs.BoolWithFallback("phoneNotify", true))
+	s.SetUsageSource(d.phoneUsageJSON)
 	p.server, p.fp = s, fp
 	d.publishPhone(true)
 	return nil
