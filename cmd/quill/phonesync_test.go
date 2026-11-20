@@ -40,6 +40,8 @@ func TestPhoneSyncFileServerAndGist(t *testing.T) {
 		h.d.app.Preferences().SetString("phoneDir", out)
 		h.d.rememberRC(editsID, "https://claude.ai/code/session_01EditsAAA")
 		h.d.rememberRC(editsID, "https://claude.ai/code?environment=")
+	})
+	h.eventually("edits session in a folder", func() bool {
 		h.d.rebuildRows()
 		for _, g := range h.d.groups {
 			for _, id := range g.ids {
@@ -48,9 +50,7 @@ func TestPhoneSyncFileServerAndGist(t *testing.T) {
 				}
 			}
 		}
-		if want == "" {
-			t.Fatal("edits session is in no folder")
-		}
+		return want != ""
 	})
 	h.eventually("folders file", func() bool { return readFile().Sessions["session_01EditsAAA"] == want })
 	f := readFile()

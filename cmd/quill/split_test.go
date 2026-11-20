@@ -78,6 +78,21 @@ func TestTabsAndBookmarks(t *testing.T) {
 		if len(h.w.Canvas().Overlays().List()) == 0 {
 			t.Fatal("a folder opens as a drop-down overlay")
 		}
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+		test.TapSecondary(h.d.bookBar.Objects[0].(*tabChip))
+		if len(h.w.Canvas().Overlays().List()) == 0 {
+			t.Fatal("right-clicking a folder opens its menu")
+		}
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+		h.d.openAllInSplit(h.d.groups[0].key)
+		if !h.d.split() && len(h.d.groups[0].ids) > 1 {
+			t.Fatal("Open in split view splits the folder's sessions")
+		}
+		h.d.setSplit(1)
 	})
 }
 
