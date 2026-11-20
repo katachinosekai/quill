@@ -7,7 +7,6 @@ import (
 	"image/color"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -374,6 +373,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	rulesBtn := widget.NewButtonWithIcon("Format Rules...", theme.SettingsIcon(), d.rulesDialog)
 	rulesBtn.Importance = widget.LowImportance
 	rulesBtn.Alignment = widget.ButtonAlignLeading
+	roBtn := widget.NewButtonWithIcon("Read-only commands...", theme.SettingsIcon(), d.readOnlyDialog)
+	roBtn.Importance = widget.LowImportance
+	roBtn.Alignment = widget.ButtonAlignLeading
 	legend := container.NewHBox(
 		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
 	)
@@ -382,7 +384,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	updChk.Checked = d.app.Preferences().BoolWithFallback("checkUpdates", true)
 	notifyChk := widget.NewCheck("Notify me about approvals and finished sessions", func(on bool) { d.app.Preferences().SetBool("desktopNotify", on) })
 	notifyChk.Checked = d.notifyOn()
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, updChk, notifyChk, rulesBtn, alignRow, d.buildPhoneRow(), legend)
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, updChk, notifyChk, rulesBtn, roBtn, alignRow, d.buildPhoneRow(), legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -2137,7 +2139,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		if !d.planFirst {
 			return nil
 		}
-		if readOnlyRequest(it.Request) {
+		if readOnlyRequest(it.Request, d.readOnlyExtra()) {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}
@@ -2194,157 +2196,6 @@ func (d *desk) approveNow(s *deskSession) {
 		}
 	}
 	s.runAll, s.runAllNext = true, false
-}
-
-var readOnlyTools = map[string]bool{"Read": true, "Grep": true, "Glob": true, "LS": true, "ToolSearch": true, "ListAgents": true, "NotebookRead": true}
-
-var readOnlyCommands = map[string]bool{
-	"ls": true, "cat": true, "head": true, "tail": true, "grep": true, "rg": true, "wc": true, "file": true, "stat": true,
-	"sort": true, "uniq": true, "cut": true, "tr": true, "diff": true, "cmp": true, "sha256sum": true, "md5sum": true,
-	"du": true, "df": true, "pwd": true, "which": true, "date": true, "echo": true, "printf": true, "true": true,
-	"pgrep": true, "ps": true, "uptime": true, "free": true, "id": true, "whoami": true, "basename": true, "dirname": true,
-	"realpath": true, "readlink": true, "tree": true, "jq": true, "column": true, "nl": true, "strings": true,
-}
-
-var readOnlyGit = map[string]bool{"status": true, "log": true, "diff": true, "show": true, "branch": true, "remote": true, "rev-parse": true, "ls-files": true, "blame": true, "describe": true}
-
-func readOnlySed(args []string) bool {
-	quiet := false
-	script := 0
-	for _, a := range args {
-		switch {
-		case a == "-n" || a == "--quiet" || a == "--silent":
-			quiet = true
-		case strings.HasPrefix(a, "-"):
-			return false
-		case script == 0:
-			script++
-			if !sedPrintRange.MatchString(strings.Trim(a, `'"`)) {
-				return false
-			}
-		}
-	}
-	return quiet && script == 1
-}
-
-var sedPrintRange = regexp.MustCompile(`^(\d+|\$)?(,(\d+|\$))?p$`)
-
-func readOnlyGitArgs(sub string, args []string) bool {
-	for _, a := range args {
-		if strings.HasPrefix(a, "--output") || strings.HasPrefix(a, "--ext-diff") {
-			return false
-		}
-	}
-	switch sub {
-	case "branch":
-		for _, a := range args {
-			switch a {
-			case "-a", "-r", "-v", "-vv", "--list", "--show-current", "--all", "--remotes":
-			default:
-				return false
-			}
-		}
-	case "remote":
-		for _, a := range args {
-			if a != "-v" && a != "--verbose" {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func readOnlyRequest(r *protocol.ControlRequest) bool {
-	if r == nil {
-		return false
-	}
-	if readOnlyTools[r.ToolName] {
-		return true
-	}
-	if r.ToolName != "Bash" {
-		return false
-	}
-	var in struct {
-		Command string `json:"command"`
-	}
-	if json.Unmarshal(r.Input, &in) != nil {
-		return false
-	}
-	return readOnlyCommand(in.Command)
-}
-
-func readOnlyCommand(cmd string) bool {
-	c := strings.TrimSpace(cmd)
-	if c == "" || strings.ContainsAny(c, "`\n") || strings.Contains(c, "$(") || strings.Contains(c, "<(") {
-		return false
-	}
-	for _, ok := range []string{"2>/dev/null", ">/dev/null", "2>&1"} {
-		c = strings.ReplaceAll(c, ok, "")
-	}
-	if strings.ContainsAny(c, "><") {
-		return false
-	}
-	c = strings.NewReplacer("&&", ";", "||", ";", "|", ";").Replace(c)
-	for _, part := range strings.Split(c, ";") {
-		f := strings.Fields(part)
-		if len(f) == 0 {
-			continue
-		}
-		name := f[0]
-		switch {
-		case name == "sed":
-			if !readOnlySed(f[1:]) {
-				return false
-			}
-		case name == "find":
-			for _, a := range f[1:] {
-				if a == "-delete" || strings.HasPrefix(a, "-exec") || strings.HasPrefix(a, "-ok") || strings.HasPrefix(a, "-fprint") || a == "-fls" {
-					return false
-				}
-			}
-		case name == "git":
-			if len(f) < 2 || !readOnlyGit[f[1]] || !readOnlyGitArgs(f[1], f[2:]) {
-				return false
-			}
-		case name == "sort" || name == "tree":
-			for _, a := range f[1:] {
-				if strings.HasPrefix(a, "-o") || strings.HasPrefix(a, "--output") || strings.HasPrefix(a, "--compress-program") {
-					return false
-				}
-			}
-		case name == "rg":
-			for _, a := range f[1:] {
-				if strings.HasPrefix(a, "--pre") || strings.HasPrefix(a, "--search-zip") || a == "-z" {
-					return false
-				}
-			}
-		case name == "file":
-			for _, a := range f[1:] {
-				if a == "-C" || a == "--compile" {
-					return false
-				}
-			}
-		case name == "uniq":
-			files := 0
-			for _, a := range f[1:] {
-				if !strings.HasPrefix(a, "-") {
-					files++
-				}
-			}
-			if files > 1 {
-				return false
-			}
-		case name == "awk":
-			if strings.Contains(part, "system(") || strings.Contains(part, "print >") {
-				return false
-			}
-		default:
-			if !readOnlyCommands[name] {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 var approvalWords = map[string]bool{

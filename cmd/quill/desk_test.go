@@ -1365,7 +1365,7 @@ func TestReadOnlyRequests(t *testing.T) {
 	for c, want := range map[string]bool{
 		"ls -la ~/.ssh":                              true,
 		"grep -rn foo src | head -5":                 true,
-		"git -C repo status --short":                 false,
+		"git -C repo status --short":                 true,
 		"git status --short && git log --oneline -3": true,
 		"sed -n 1,40p file.go":                       true,
 		"cat a 2>/dev/null; wc -l b":                 true,
@@ -1390,12 +1390,62 @@ func TestReadOnlyRequests(t *testing.T) {
 		"uniq in out":                                false,
 		"sort in | uniq -c":                          true,
 	} {
-		if readOnlyRequest(bash(c)) != want {
+		if readOnlyRequest(bash(c), nil) != want {
 			t.Errorf("readOnlyRequest(%q) = %v", c, !want)
 		}
 	}
-	if !readOnlyRequest(&protocol.ControlRequest{ToolName: "Read"}) || readOnlyRequest(&protocol.ControlRequest{ToolName: "Write"}) {
+	if !readOnlyRequest(&protocol.ControlRequest{ToolName: "Read"}, nil) || readOnlyRequest(&protocol.ControlRequest{ToolName: "Write"}, nil) {
 		t.Fatal("Read is read-only, Write is not")
+	}
+}
+
+func TestReadOnlyShellParsing(t *testing.T) {
+	extra := parseReadOnlyExtra("pzlock status\nssh srv powershell -File 'D:\\s\\status.ps1'\n\nrm -rf (")
+	for c, want := range map[string]bool{
+		"cd /x && git log --oneline -3":                                   true,
+		"Q=/r/quill; git -C $Q log --oneline -3; git -C $Q status | head": true,
+		`grep -E "amdgpu|gpu reset" f | tail -8`:                          true,
+		`journalctl -k --since "-40 min" --no-pager 2>/dev/null | grep x`: true,
+		"journalctl --vacuum-size=1M":                                     false,
+		"X=-i; sed $X s/a/b/ f":                                           false,
+		"sed -n 1,5p $UNSET":                                              false,
+		"PATH=/tmp/evil:$PATH; ls":                                        false,
+		"GIT_PAGER=x git log":                                             false,
+		"git --no-pager log -1":                                           true,
+		"git -c core.pager=x log":                                         false,
+		"ls | tee out":                                                    false,
+		`echo "a > b | c"`:                                                true,
+		`echo "$(rm x)"`:                                                  false,
+		`echo '$(rm x)' "${HOME}"`:                                        true,
+		"ls # ; rm x":                                                     true,
+		"ls #x\nrm x":                                                     false,
+		"cat <<EOF\nx\nEOF":                                               false,
+		"wc -l < file":                                                    true,
+		"ls >| out":                                                       false,
+		"ls &> /dev/null; ls 2>&1 >/dev/null":                             true,
+		"/usr/bin/ls -la":                                                 true,
+		"./ls":                                                            false,
+		"$CMD x":                                                          false,
+		"date +%s":                                                        true,
+		"date -s 2020-01-01":                                              false,
+		"awk '{print $1}' f":                                              true,
+		`awk '{print > "x"}' f`:                                           false,
+		`awk '{system("rm x")}' f`:                                        false,
+		"awk -f prog f":                                                   false,
+		"(rm x)":                                                          false,
+		"ls 'unterminated":                                                false,
+		"~/.local/bin/pzlock status 2>&1 | head -3":                       true,
+		"pzlock acquire me":                                               false,
+		`ssh srv powershell -File 'D:\s\status.ps1' 2>&1 | sed -n 2,3p`: true,
+		`ssh srv powershell -File D:\\s\\status.ps1`:                    true,
+		"ssh srv powershell -Command rm":                                false,
+	} {
+		if readOnlyCommand(c, extra) != want {
+			t.Errorf("readOnlyCommand(%q) = %v", c, !want)
+		}
+	}
+	if readOnlyCommand("pzlock status", nil) {
+		t.Fatal("pzlock is only read-only when the user lists it")
 	}
 }
 
