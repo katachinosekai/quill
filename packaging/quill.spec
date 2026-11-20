@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.8
+Version:        0.1.9
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -62,6 +62,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
 
 %changelog
+* Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.9-1
+- Approve and retry: the command you confirm goes straight to the normal Allow prompt (no longer gets stuck behind plan-first), and retrying never cancels a plan you already approved
+
 * Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.8-1
 - Usage for paired phones (5-hour and weekly limits, credits, token totals, per-session status) for Quill for Android's usage strip
 
