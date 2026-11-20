@@ -1765,6 +1765,7 @@ func (d *desk) refresh() {
 				infos[k].Title = d.unRCTitle(infos[k].ID, infos[k].Title)
 				d.infos[infos[k].ID] = infos[k]
 			}
+			d.linkKmem(infos)
 		}
 		d.terms = terms
 		for id, s := range d.sessions {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -26,6 +27,7 @@ type Info struct {
 	Last       time.Time
 	Messages   int
 	Entrypoint string
+	Kmem       string
 	Usage      Tokens
 	Days       map[string]Tokens
 	ModTime    time.Time
@@ -299,6 +301,7 @@ func (fs *fileScan) result() Info {
 			info.Days[u.day] = info.Days[u.day].Add(u.t)
 		}
 	}
+	info.Kmem = KmemName(fs.firstPrompt)
 	info.Named = true
 	switch {
 	case fs.customTitle != "":
@@ -315,6 +318,15 @@ func (fs *fileScan) result() Info {
 		info.Title = "(untitled)"
 	}
 	return info
+}
+
+var kmemPrompt = regexp.MustCompile(`(?:kmem handoff get |\bkmem-resume-)([A-Za-z0-9._-]+)`)
+
+func KmemName(firstPrompt string) string {
+	if m := kmemPrompt.FindStringSubmatch(firstPrompt); m != nil {
+		return strings.TrimRight(m[1], ".")
+	}
+	return ""
 }
 
 func oneLine(s string, n int) string {

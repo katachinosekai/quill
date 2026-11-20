@@ -16,6 +16,7 @@ import (
 
 	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 func TestSplitView(t *testing.T) {
@@ -628,6 +629,27 @@ func TestKmemRestartSavesThenDeletes(t *testing.T) {
 		}
 		if !found {
 			t.Fatal("without kmem-resume for the name, the built-in resume prompt is sent")
+		}
+	})
+}
+
+func TestKmemLinkFromFirstPrompt(t *testing.T) {
+	for prompt, want := range map[string]string{
+		"You are the Quill for Android session; use kmem name \"Quill Android\" (kmem --as ...). Start by running `kmem brief` and `kmem handoff get quill-android`, read": "quill-android",
+		"kmem-resume-quill": "quill",
+		"fix the tabs":      "",
+	} {
+		if got := transcript.KmemName(prompt); got != want {
+			t.Errorf("KmemName(%q) = %q, want %q", prompt, got, want)
+		}
+	}
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.org.Kmem["c"] = ""
+		h.d.org.Kmem["d"] = "viewpoint"
+		h.d.linkKmem([]transcript.Info{{ID: "a", Kmem: "quill"}, {ID: "b"}, {ID: "c", Kmem: "fps-ab"}, {ID: "e", Kmem: "viewpoint"}})
+		if h.d.org.Kmem["a"] != "quill" || h.d.org.Kmem["b"] != "" || h.d.org.Kmem["c"] != "" || h.d.org.Kmem["e"] != "" {
+			t.Fatalf("auto-link fills only unset sessions and never takes a name in use: %v", h.d.org.Kmem)
 		}
 	})
 }
