@@ -141,9 +141,8 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 }
 
 func (v *chatView) relayout() {
-	v.frame.Refresh()
-	v.col.Refresh()
-	v.scroll.Refresh()
+	relayout(v.frame)
+	v.reflow()
 }
 
 func (v *chatView) stash() {
@@ -193,7 +192,7 @@ func (v *chatView) setBox(b *fyne.Container) {
 		b.Show()
 	}
 	v.inner.Objects = objs
-	v.inner.Refresh()
+	v.relayoutInner()
 }
 
 type shownPad struct{ top, bottom, left, right float32 }
@@ -250,7 +249,7 @@ func (v *chatView) show(s *deskSession) {
 				return
 			}
 			v.scroll.Offset = fyne.NewPos(0, sv.scrollY)
-			v.scroll.Refresh()
+			v.reflow()
 			v.lastY = v.scroll.Offset.Y
 			v.follow = false
 			v.newBelow = len(s.conv.Items) > sv.count
@@ -264,7 +263,7 @@ func (v *chatView) show(s *deskSession) {
 	v.setBox(container.NewVBox())
 	if s == nil {
 		v.box.Add(v.emptyState())
-		v.box.Refresh()
+		relayout(v.box)
 		return
 	}
 	items := s.conv.Items
@@ -323,13 +322,13 @@ func (v *chatView) loadEarlier() {
 	v.box.Objects = append(objs, rest...)
 	v.moreObj = more
 	v.shownFrom = from
-	v.box.Refresh()
-	v.scroll.Refresh()
-	v.scroll.Refresh()
+	relayout(v.box)
+	v.reflow()
+	v.reflow()
 	after := v.scroll.Content.MinSize().Height
 	v.autoScrolling = true
 	v.scroll.Offset = fyne.NewPos(0, v.scroll.Offset.Y+after-before)
-	v.scroll.Refresh()
+	v.reflow()
 	v.lastY = v.scroll.Offset.Y
 	v.autoScrolling = false
 }
@@ -350,7 +349,7 @@ func (v *chatView) rebuild() {
 	for _, it := range items[v.shownFrom:] {
 		v.box.Add(v.viewFor(it).holder)
 	}
-	v.box.Refresh()
+	relayout(v.box)
 }
 
 func (v *chatView) emptyState() fyne.CanvasObject {
@@ -372,7 +371,7 @@ func (v *chatView) atBottom() bool {
 
 func (v *chatView) scrollBottom() {
 	v.autoScrolling = true
-	v.scroll.Refresh()
+	v.reflow()
 	v.scroll.ScrollToBottom()
 	v.lastY = v.scroll.Offset.Y
 	v.autoScrolling = false
@@ -398,7 +397,7 @@ func (v *chatView) glideBottom() {
 		target := v.scroll.Content.MinSize().Height - v.scroll.Size().Height
 		v.autoScrolling = true
 		v.scroll.Offset = fyne.NewPos(0, from+(target-from)*p)
-		v.scroll.Refresh()
+		v.reflow()
 		v.lastY = v.scroll.Offset.Y
 		v.autoScrolling = false
 		if p >= 1 {
@@ -534,7 +533,7 @@ func (v *chatView) update(items []*chat.Item) {
 		}
 	}
 	if added {
-		v.box.Refresh()
+		relayout(v.box)
 	}
 	v.keepUp()
 	v.stickSoon()
@@ -569,7 +568,7 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 	}
 	if h := iv.holder.MinSize().Height; h != iv.height {
 		iv.height = h
-		v.box.Refresh()
+		relayout(v.box)
 		if v.follow && !v.steps {
 			v.scrollBottom()
 		}
@@ -1474,4 +1473,25 @@ func (p *passScroll) Scrolled(ev *fyne.ScrollEvent) {
 		return
 	}
 	p.Scroll.Scrolled(ev)
+}
+
+func relayout(c *fyne.Container) {
+	if c == nil {
+		return
+	}
+	if c.Layout != nil {
+		c.Layout.Layout(c.Objects, c.Size())
+	}
+	canvas.Refresh(c)
+}
+
+func (v *chatView) relayoutInner() {
+	relayout(v.inner)
+	v.scroll.Base.Refresh()
+}
+
+func (v *chatView) reflow() {
+	relayout(v.box)
+	relayout(v.inner)
+	v.scroll.Base.Refresh()
 }

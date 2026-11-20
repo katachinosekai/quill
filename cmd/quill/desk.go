@@ -178,6 +178,8 @@ type desk struct {
 	tabSig         string
 	tabChips       map[string]*tabChip
 	strip          *tabStrip
+	listTheme      *container.ThemeOverride
+	usageBox       *fyne.Container
 	resizeFreeze   float32
 	resizeTimer    *time.Timer
 	lastRootSize   fyne.Size
@@ -357,7 +359,8 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
-	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
+	d.listTheme = container.NewThemeOverride(d.list, compactTheme{})
+	d.sideBody = container.NewBorder(top, bottom, nil, nil, d.listTheme)
 	return container.NewStack(r, container.NewPadded(d.sideBody))
 }
 
@@ -734,7 +737,7 @@ func (d *desk) rebuildRows() {
 			d.list.Select(i)
 		}
 	}
-	d.list.Refresh()
+	d.listTheme.Refresh()
 	d.suppress = false
 }
 
@@ -794,7 +797,7 @@ func (d *desk) matches(id, cwd, q string) bool {
 }
 
 func (d *desk) refreshSidebar() {
-	d.list.Refresh()
+	d.listTheme.Refresh()
 	d.syncTabs()
 }
 
@@ -881,7 +884,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	bottom := container.NewPadded(d.bottomBox)
 	d.usage = newUsagePanel(d)
 	d.chatHost = container.NewStack(d.chat.root)
-	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chatHost, d.usage.root, d.sizePanel()))
+	d.usageBox = container.New(usageLayout{d}, d.chatHost, d.usage.root, d.sizePanel())
+	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, d.usageBox)
 	d.updateChrome()
 	return d.mainPane
 }

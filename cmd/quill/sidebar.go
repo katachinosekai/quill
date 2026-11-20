@@ -131,14 +131,14 @@ func (d *desk) setSidebar(show bool) {
 	if d.root.Size().Width > 0 {
 		d.chatFreeze = d.chatWidthFor(float32(sideW) * to)
 	}
-	d.mainPane.Refresh()
+	relayout(d.mainPane)
 	d.chat.relayout()
 	step := func(p float32) {
 		d.sideFrac = from + (to-from)*p
-		d.root.Refresh()
+		relayout(d.root)
 		if p >= 1 {
 			d.chatFreeze = 0
-			d.mainPane.Refresh()
+			relayout(d.mainPane)
 			d.chat.relayout()
 		}
 	}
@@ -288,10 +288,11 @@ func (d *desk) setShare(pref string, v float32) {
 		d.chat.relayout()
 	}
 	if d.bottomBox != nil {
-		d.bottomBox.Refresh()
+		relayout(d.bottomBox)
 	}
 	if d.mainPane != nil {
-		d.mainPane.Refresh()
+		relayout(d.mainPane)
+		relayout(d.usageBox)
 	}
 }
 
@@ -317,7 +318,7 @@ func (d *desk) noteResize(size fyne.Size) {
 			d.resizeFreeze = 0
 			d.resizeTimer = nil
 			if d.mainPane != nil {
-				d.mainPane.Refresh()
+				relayout(d.mainPane)
 			}
 			d.chat.relayout()
 		})

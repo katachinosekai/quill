@@ -108,7 +108,7 @@ func (m *cmdMenu) hide() {
 	m.matches = nil
 	if m.panel != nil && m.panel.Visible() {
 		m.panel.Hide()
-		m.d.mainPane.Refresh()
+		relayout(m.d.mainPane)
 	}
 }
 
@@ -159,7 +159,7 @@ func (m *cmdMenu) render() {
 	m.box.Refresh()
 	if !m.panel.Visible() {
 		m.panel.Show()
-		d.mainPane.Refresh()
+		relayout(d.mainPane)
 	}
 }
 

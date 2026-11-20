@@ -170,10 +170,11 @@ func (d *desk) afterSplit() {
 	d.syncPanes()
 	d.syncSplitButtons()
 	if d.bottomBox != nil {
-		d.bottomBox.Refresh()
+		relayout(d.bottomBox)
 	}
 	if d.mainPane != nil {
-		d.mainPane.Refresh()
+		relayout(d.mainPane)
+		relayout(d.usageBox)
 	}
 	d.updateChrome()
 	d.refreshSidebar()
