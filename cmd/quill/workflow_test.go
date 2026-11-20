@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -164,6 +165,58 @@ func TestCtrlNumberAndEmptySessions(t *testing.T) {
 			if p.view.s != nil && p.view.s.id == inPane {
 				t.Fatal("a deleted empty session leaves its split pane")
 			}
+		}
+	})
+}
+
+func TestCtrlEnterSendsNowViaShortcut(t *testing.T) {
+	var sentNow string
+	e := newSendEntry(func(string) { t.Fatal("Ctrl+Enter must use send-now") })
+	e.onSendNow = func(text string) { sentNow = text }
+	e.SetText("stop and do this")
+	e.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierControl})
+	if sentNow != "stop and do this" {
+		t.Fatal("Fyne delivers Ctrl+Enter as a shortcut; it must send right away")
+	}
+	before := e.Text
+	e.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyEnter, Modifier: fyne.KeyModifierControl | fyne.KeyModifierShift})
+	if e.Text != before {
+		t.Fatal("other Enter combinations must not change the text")
+	}
+}
+
+func TestKeyCombinationsLikeTheRealWindow(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.setupShortcuts()
+		var sent, sentNow []string
+		e := newSendEntry(func(s string) { sent = append(sent, s) })
+		e.onSendNow = func(s string) { sentNow = append(sentNow, s) }
+		e.onShortcut = h.d.handleShortcut
+		e.SetText("line one")
+		e.KeyDown(&fyne.KeyEvent{Name: desktop.KeyShiftLeft})
+		e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+		e.KeyUp(&fyne.KeyEvent{Name: desktop.KeyShiftLeft})
+		if len(sent) != 0 || !strings.Contains(e.Text, "\n") {
+			t.Fatalf("Shift+Enter adds a new line, text %q", e.Text)
+		}
+		e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+		if len(sent) != 1 {
+			t.Fatal("Enter sends")
+		}
+		e.SetText("urgent")
+		e.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyEnter, Modifier: fyne.KeyModifierControl})
+		if len(sentNow) != 1 {
+			t.Fatal("Ctrl+Enter (keypad) sends now")
+		}
+		before := len(h.d.sessions)
+		e.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyT, Modifier: fyne.KeyModifierControl})
+		if len(h.d.sessions) != before+1 {
+			t.Fatal("Ctrl+T works from any message box")
+		}
+		e.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierAlt})
+		if len(sent) != 1 || len(sentNow) != 1 {
+			t.Fatal("Alt+Enter does nothing")
 		}
 	})
 }

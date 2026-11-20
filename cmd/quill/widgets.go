@@ -76,6 +76,16 @@ type sendEntry struct {
 }
 
 func (e *sendEntry) TypedShortcut(s fyne.Shortcut) {
+	if c, ok := s.(*desktop.CustomShortcut); ok && (c.KeyName == fyne.KeyReturn || c.KeyName == fyne.KeyEnter) {
+		if c.Modifier == fyne.KeyModifierControl && !e.Disabled() {
+			if e.onSendNow != nil {
+				e.onSendNow(e.Text)
+			} else if e.onSend != nil {
+				e.onSend(e.Text)
+			}
+		}
+		return
+	}
 	if e.onShortcut != nil && e.onShortcut(s) {
 		return
 	}
