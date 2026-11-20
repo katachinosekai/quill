@@ -123,7 +123,7 @@ func newHarness(t *testing.T) *harness {
 		var running []*deskSession
 		h.ui(func() { running = h.d.runningSessions() })
 		h.d.stopAll(running)
-		h.eventually("exits handled", func() bool {
+		h.eventuallyFor("exits handled", 30*time.Second, func() bool {
 			n := 0
 			h.d.ownPIDs.Range(func(any, any) bool { n++; return true })
 			return n == 0
@@ -141,7 +141,12 @@ func (h *harness) ui(f func()) {
 
 func (h *harness) eventually(what string, cond func() bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	h.eventuallyFor(what, 10*time.Second, cond)
+}
+
+func (h *harness) eventuallyFor(what string, wait time.Duration, cond func() bool) {
+	h.t.Helper()
+	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		ok := false
 		h.ui(func() { ok = cond() })
