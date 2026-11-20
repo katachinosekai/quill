@@ -225,24 +225,34 @@ func TestKeyCombinationsLikeTheRealWindow(t *testing.T) {
 	})
 }
 
-func TestLimitBannerAndBlockedCard(t *testing.T) {
+func TestLimitMessageAndBlockedCard(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
 		s := h.d.createSession(h.proj, "default", "auto")
-		h.d.setSplit(2)
-		h.d.setRateLimit(&protocol.RateLimit{Status: "rejected", Type: "five_hour", Utilization: 1, ResetsAt: time.Now().Add(time.Hour).Unix()})
-		for _, p := range h.d.panes {
-			if !p.view.limit.Visible() {
-				t.Fatal("every split pane shows the limit banner")
+		other := h.d.createSession(h.proj, "default", "default")
+		limit := "You've hit your session limit · resets 9am (America/Los_Angeles)"
+		hit := &chat.Item{Seq: 600, Kind: chat.Assistant, Text: limit}
+		s.conv.Items = append(s.conv.Items, hit)
+		h.d.checkLimitMessage(s, []*chat.Item{hit})
+		copies := func(x *deskSession) int {
+			n := 0
+			for _, it := range x.conv.Items {
+				if it.Text == limit {
+					n++
+				}
 			}
+			return n
 		}
-		h.d.setSplit(1)
-		if !h.d.single.limit.Visible() || !strings.Contains(h.d.single.limitText.Text, "Usage limit reached") {
-			t.Fatal("the single view shows the limit banner too")
+		if copies(s) != 1 || copies(other) != 1 {
+			t.Fatalf("Claude's limit message is copied once into every other chat: %d %d", copies(s), copies(other))
+		}
+		h.d.checkLimitMessage(s, []*chat.Item{hit})
+		if copies(other) != 1 {
+			t.Fatal("no duplicates")
 		}
 		h.d.setRateLimit(&protocol.RateLimit{Status: "allowed", Type: "five_hour", Utilization: 0.2, ResetsAt: time.Now().Add(time.Hour).Unix()})
-		if h.d.single.limit.Visible() {
-			t.Fatal("the banner goes away when usage is allowed again")
+		if h.d.limitMsg != "" {
+			t.Fatal("the limit clears when usage is allowed again")
 		}
 
 		blocked := &chat.Item{Seq: 777, Kind: chat.Tool, ToolName: "Bash", HasResult: true, ResultError: true,

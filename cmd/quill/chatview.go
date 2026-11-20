@@ -56,10 +56,8 @@ type chatView struct {
 	follow        bool
 	autoScrolling bool
 	gliding       bool
-	limit         *fyne.Container
 	queueBox      *fyne.Container
 	dismissed     map[*chat.Item]bool
-	limitText     *widget.Label
 	stickTimer    *time.Timer
 	qcards        map[*chat.Item]fyne.CanvasObject
 	moreObj       fyne.CanvasObject
@@ -140,17 +138,9 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 	v.jump = v.newJump()
 	overlay := container.NewVBox(layout.NewSpacer(), windowCentered(width, shift, container.NewCenter(v.jump)), padTop(18))
 	framed := container.New(layout.NewCustomPaddedLayout(8, 2, 4, 4), container.NewPadded(v.frame))
-	v.limitText = widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-	v.limitText.Wrapping = fyne.TextWrapWord
-	limitBg := canvas.NewRectangle(fade(colError, 0.22))
-	limitBg.CornerRadius = 12
-	limitBg.StrokeColor = fade(colError, 0.8)
-	limitBg.StrokeWidth = 1.5
-	v.limit = container.NewCenter(sized(360, 0, container.NewStack(limitBg, container.NewPadded(v.limitText))))
-	v.limit.Hide()
 	v.queueBox = container.NewVBox()
 	queueRow := windowCentered(width, shift, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), v.queueBox))
-	v.root = container.NewBorder(nil, container.NewVBox(queueRow, liveRow), nil, nil, container.NewStack(framed, overlay, v.limit))
+	v.root = container.NewBorder(nil, container.NewVBox(queueRow, liveRow), nil, nil, container.NewStack(framed, overlay))
 	return v
 }
 
