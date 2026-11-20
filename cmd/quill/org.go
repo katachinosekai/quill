@@ -129,7 +129,7 @@ func (d *desk) askName(title, current string, onOK func(string)) {
 	d.win.Canvas().Focus(e)
 }
 
-func (d *desk) sessionMenu(id string, at fyne.Position) {
+func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem) {
 	title, _, _ := d.rowText(id)
 	move := func(place string) func() { return func() { d.setPlacement(id, place) } }
 	var moveItems []*fyne.MenuItem
@@ -154,6 +154,7 @@ func (d *desk) sessionMenu(id string, at fyne.Position) {
 				}
 			})
 		}),
+		fyne.NewMenuItem("Open", func() { d.open(id) }),
 		fyne.NewMenuItem("Resume", func() { d.resumeSession(id) }),
 		fyne.NewMenuItem("Open in split view", func() { d.openInSplit(id) }),
 		fyne.NewMenuItem("End session", func() { d.endSession(id) }),
@@ -197,6 +198,15 @@ func (d *desk) folderMenu(r sideRow, at fyne.Position) {
 			})
 		}),
 		fyne.NewMenuItem("New folder...", func() { d.newFolder(nil) }),
+		fyne.NewMenuItem("Open all in tabs", func() { d.openAllInTabs(r.key) }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Expand all folders", func() { d.setAllFolders(true) }),
+		fyne.NewMenuItem("Collapse all folders", func() { d.setAllFolders(false) }),
+	}
+	if d.layoutMode() == layoutVertical {
+		items = append(items, fyne.NewMenuItem("Switch to horizontal tabs", func() { d.setLayoutMode(layoutHorizontal) }))
+	} else {
+		items = append(items, fyne.NewMenuItem("Switch to vertical sidebar", func() { d.setLayoutMode(layoutVertical) }))
 	}
 	group := fyne.NewMenuItem("Group by project", func() {
 		d.groupProjects = !d.groupProjects
@@ -446,6 +456,37 @@ func (d *desk) clearDropTarget() {
 		if it.hl.Visible() {
 			it.hl.Hide()
 			it.hl.Refresh()
+		}
+	}
+}
+
+func (d *desk) setAllFolders(open bool) {
+	if d.folderOpen == nil {
+		d.folderOpen = map[string]bool{}
+	}
+	for _, g := range d.groups {
+		d.folderOpen[g.key] = open
+	}
+	if b, err := json.Marshal(d.folderOpen); err == nil {
+		d.app.Preferences().SetString("folderOpen", string(b))
+	}
+	d.rebuildRows()
+}
+
+func (d *desk) openAllInTabs(key string) {
+	for _, g := range d.groups {
+		if g.key != key {
+			continue
+		}
+		ids := g.ids
+		if len(ids) > maxTabs {
+			ids = ids[:maxTabs]
+		}
+		for _, id := range ids {
+			d.addTab(id)
+		}
+		if len(ids) > 0 {
+			d.open(ids[0])
 		}
 	}
 }

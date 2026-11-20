@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -59,7 +60,7 @@ func TestTabsAndBookmarks(t *testing.T) {
 		b := h.d.createSession(h.proj, "default", "default")
 		h.d.open(a.id)
 		h.d.open(b.id)
-		if len(h.d.tabs) < 2 || len(h.d.tabBar.Objects) < 2 {
+		if len(h.d.tabs) < 2 || len(h.d.tabChips) < 2 {
 			t.Fatalf("opening sessions adds tabs: %v", h.d.tabs)
 		}
 		h.d.closeTab(b.id)
@@ -67,7 +68,7 @@ func TestTabsAndBookmarks(t *testing.T) {
 			t.Fatal("closing the active tab switches to a neighbour")
 		}
 		h.d.rebuildRows()
-		if len(h.d.groups) == 0 || len(h.d.bookBar.Objects) != len(h.d.groups) {
+		if len(h.d.groups) == 0 || len(h.d.bookBar.Objects) != 2*len(h.d.groups) {
 			t.Fatal("each folder gets a bookmark button")
 		}
 		h.d.folderMenu2(h.d.groups[0], fyne.NewPos(10, 10))
@@ -162,5 +163,45 @@ func TestRelaunchTakesOverNameAndJob(t *testing.T) {
 			}
 		}
 		return false
+	})
+}
+
+func TestTabDragMenusAndCentering(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		var ids []string
+		for i := 0; i < 3; i++ {
+			s := h.d.createSession(h.proj, "default", "default")
+			h.d.open(s.id)
+			ids = append(ids, s.id)
+		}
+		first := ids[0]
+		h.d.tabDrag = first
+		last := h.d.tabChips[h.d.tabs[len(h.d.tabs)-1]]
+		pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(last)
+		h.d.tabDragX = pos.X + last.Size().Width
+		h.d.dropTab()
+		if h.d.tabs[len(h.d.tabs)-1] != first {
+			var dbg []string
+			for _, id := range h.d.tabs {
+				c := h.d.tabChips[id]
+				p := fyne.CurrentApp().Driver().AbsolutePositionForObject(c)
+				dbg = append(dbg, fmt.Sprintf("%s@%.0f+%.0f", id[:4], p.X, c.Size().Width))
+			}
+			t.Fatalf("dragging a tab to the end moves it there: first=%s dragX=%.0f %v", first[:4], h.d.tabDragX, dbg)
+		}
+		h.d.tabMenu(ids[1], fyne.NewPos(5, 5))
+		if len(h.w.Canvas().Overlays().List()) == 0 {
+			t.Fatal("right-clicking a tab opens a menu")
+		}
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+		h.d.setTabCenter(true)
+		if _, ok := h.d.tabCenter.Layout.(interface {
+			Layout([]fyne.CanvasObject, fyne.Size)
+		}); !ok || !h.d.app.Preferences().Bool("centerTabs") {
+			t.Fatal("tab centering toggles")
+		}
 	})
 }

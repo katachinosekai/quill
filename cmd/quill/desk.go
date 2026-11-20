@@ -176,6 +176,11 @@ type desk struct {
 	tabBar         *fyne.Container
 	bookBar        *fyne.Container
 	tabSig         string
+	tabChips       map[string]*tabChip
+	tabDrag        string
+	tabDragX       float32
+	tabCenter      *fyne.Container
+	bookCenter     *fyne.Container
 	bookSig        string
 	bookRow        fyne.CanvasObject
 	tabRow         fyne.CanvasObject
@@ -295,6 +300,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		centerChk("Chat text", d.center, d.setCenter),
 		centerChk("Typing", prefs.Bool("centerInput"), d.setInputCenter),
 		centerChk("Status", prefs.Bool("centerStatus"), d.setStatusCenter),
+		centerChk("Tabs", prefs.Bool("centerTabs"), d.setTabCenter),
 	}
 	d.centerAll = widget.NewCheck("Center everything", func(on bool) {
 		if d.suppressAlign {
@@ -310,7 +316,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		pad.SetMinSize(fyne.NewSize(16, 1))
 		return container.NewHBox(pad, o)
 	}
-	alignRow := container.NewVBox(d.centerAll, container.NewGridWithColumns(3, indent(d.centerChecks[0]), d.centerChecks[1], d.centerChecks[2]))
+	alignRow := container.NewVBox(d.centerAll, container.NewGridWithColumns(2, indent(d.centerChecks[0]), d.centerChecks[1], indent(d.centerChecks[2]), d.centerChecks[3]))
 	rcChk := widget.NewCheck("Remote Control for every session", func(on bool) {
 		d.autoRC = on
 		d.app.Preferences().SetBool("autoRemoteControl", on)

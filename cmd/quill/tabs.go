@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -72,10 +73,12 @@ func (d *desk) closeTab(id string) {
 
 func (d *desk) buildTabs() fyne.CanvasObject {
 	d.loadTabs()
-	d.tabBar = container.NewHBox()
+	d.tabBar = container.New(layout.NewCustomPaddedLayout(4, 4, 8, 8), container.NewHBox())
+	d.tabCenter = container.NewStack(d.tabBar)
+	d.applyTabCentering()
 	newTab := widget.NewButtonWithIcon("", theme.ContentAddIcon(), d.newSessionDialog)
 	newTab.Importance = widget.LowImportance
-	scroll := container.NewHScroll(d.tabBar)
+	scroll := container.NewHScroll(d.tabCenter)
 	return container.NewBorder(nil, nil, nil, newTab, scroll)
 }
 
@@ -83,12 +86,32 @@ type tabChip struct {
 	widget.BaseWidget
 	content fyne.CanvasObject
 	onTap   func()
-	onClose func()
+	onMenu  func(at fyne.Position)
+	onDrag  func(e *fyne.DragEvent)
+	onDrop  func()
+}
+
+func (c *tabChip) Dragged(e *fyne.DragEvent) {
+	if c.onDrag != nil {
+		c.onDrag(e)
+	}
+}
+
+func (c *tabChip) DragEnd() {
+	if c.onDrop != nil {
+		c.onDrop()
+	}
+}
+
+func newChip(content fyne.CanvasObject, onTap func(), onMenu func(fyne.Position)) *tabChip {
+	c := &tabChip{content: content, onTap: onTap, onMenu: onMenu}
+	c.ExtendBaseWidget(c)
+	return c
 }
 
 func (c *tabChip) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimpleRenderer(c.content) }
 func (c *tabChip) Tapped(*fyne.PointEvent)             { c.onTap() }
-func (c *tabChip) TappedSecondary(*fyne.PointEvent)    { c.onClose() }
+func (c *tabChip) TappedSecondary(e *fyne.PointEvent)  { c.onMenu(e.AbsolutePosition) }
 
 func (d *desk) syncTabs() {
 	if d.tabBar == nil {
@@ -106,6 +129,7 @@ func (d *desk) syncTabs() {
 		return
 	}
 	d.tabSig = sig
+	d.tabChips = map[string]*tabChip{}
 	var objs []fyne.CanvasObject
 	var kept []string
 	for _, id := range d.tabs {
@@ -117,32 +141,105 @@ func (d *desk) syncTabs() {
 		title, _, st := d.rowText(id)
 		active := d.current != nil && d.current.id == id
 		label := canvas.NewText(oneLine(title, tabTitleRunes), colText)
-		label.TextSize = 12
+		label.TextSize = 13
 		label.TextStyle.Bold = active
+		if !active {
+			label.Color = colMuted
+		}
 		dt := dot(st.color())
 		closeBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() { d.closeTab(id) })
 		closeBtn.Importance = widget.LowImportance
 		bg := canvas.NewRectangle(colCard)
-		bg.CornerRadius = 8
+		bg.CornerRadius = 10
 		if active {
 			bg.StrokeColor = colText
 			bg.StrokeWidth = 2
 		}
-		row := container.NewHBox(padLeft(4), container.NewCenter(sized(8, 8, dt)), container.NewCenter(label), sized(24, 24, closeBtn))
-		chip := &tabChip{content: container.NewStack(bg, row), onTap: func() { d.open(id) }, onClose: func() { d.closeTab(id) }}
-		chip.ExtendBaseWidget(chip)
-		objs = append(objs, chip)
+		row := container.NewHBox(padLeft(10), container.NewCenter(sized(9, 9, dt)), padLeft(2), container.NewCenter(label), padLeft(2), container.NewCenter(sized(22, 22, closeBtn)), padLeft(4))
+		content := container.NewStack(bg, container.New(layout.NewCustomPaddedLayout(5, 5, 0, 0), row))
+		chip := newChip(content, func() { d.open(id) }, func(at fyne.Position) { d.tabMenu(id, at) })
+		chip.onDrag = func(e *fyne.DragEvent) {
+			d.tabDrag, d.tabDragX = id, e.AbsolutePosition.X
+		}
+		chip.onDrop = func() { d.dropTab() }
+		d.tabChips[id] = chip
+		objs = append(objs, chip, padLeft(6))
 	}
 	if len(kept) != len(d.tabs) {
 		d.tabs = kept
 	}
-	d.tabBar.Objects = objs
-	d.tabBar.Refresh()
+	strip := d.tabBar.Objects[0].(*fyne.Container)
+	strip.Objects = objs
+	strip.Refresh()
 }
 
 func (d *desk) buildBookmarks() fyne.CanvasObject {
 	d.bookBar = container.NewHBox()
-	return container.NewHScroll(d.bookBar)
+	d.bookCenter = container.NewStack(container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), d.bookBar))
+	d.applyTabCentering()
+	return container.NewHScroll(d.bookCenter)
+}
+
+func (d *desk) applyTabCentering() {
+	on := d.app.Preferences().Bool("centerTabs")
+	set := func(c *fyne.Container) {
+		if c == nil || len(c.Objects) == 0 {
+			return
+		}
+		inner := c.Objects[0]
+		if on {
+			c.Layout = layout.NewCenterLayout()
+		} else {
+			c.Layout = layout.NewStackLayout()
+		}
+		c.Objects = []fyne.CanvasObject{inner}
+		c.Refresh()
+	}
+	set(d.tabCenter)
+	set(d.bookCenter)
+}
+
+func (d *desk) setTabCenter(on bool) {
+	d.app.Preferences().SetBool("centerTabs", on)
+	d.applyTabCentering()
+}
+
+func (d *desk) dropTab() {
+	id := d.tabDrag
+	d.tabDrag = ""
+	if id == "" {
+		return
+	}
+	target := len(d.tabs)
+	for i, t := range d.tabs {
+		chip := d.tabChips[t]
+		if chip == nil {
+			continue
+		}
+		pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(chip)
+		if d.tabDragX < pos.X+chip.Size().Width/2 {
+			target = i
+			break
+		}
+	}
+	from := -1
+	for i, t := range d.tabs {
+		if t == id {
+			from = i
+		}
+	}
+	if from < 0 {
+		return
+	}
+	rest := append(append([]string{}, d.tabs[:from]...), d.tabs[from+1:]...)
+	if target > from {
+		target--
+	}
+	target = max(0, min(target, len(rest)))
+	d.tabs = append(rest[:target], append([]string{id}, rest[target:]...)...)
+	d.saveTabs()
+	d.tabSig = ""
+	d.syncTabs()
 }
 
 func (d *desk) syncBookmarks() {
@@ -160,13 +257,19 @@ func (d *desk) syncBookmarks() {
 	var objs []fyne.CanvasObject
 	for _, g := range d.groups {
 		g := g
-		var btn *widget.Button
-		btn = widget.NewButtonWithIcon(fmt.Sprintf("%s (%d)", g.title, len(g.ids)), theme.FolderIcon(), func() {
-			pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(btn)
-			d.folderMenu2(g, pos.Add(fyne.NewPos(0, btn.Size().Height)))
+		icon := widget.NewIcon(theme.FolderIcon())
+		label := canvas.NewText(fmt.Sprintf("%s (%d)", g.title, len(g.ids)), colText)
+		label.TextSize = 13
+		label.TextStyle.Bold = true
+		row := container.NewHBox(padLeft(6), container.NewCenter(sized(18, 18, icon)), container.NewCenter(label), padLeft(6))
+		var chip *tabChip
+		chip = newChip(container.New(layout.NewCustomPaddedLayout(4, 4, 0, 0), row), func() {
+			pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(chip)
+			d.folderMenu2(g, pos.Add(fyne.NewPos(0, chip.Size().Height)))
+		}, func(at fyne.Position) {
+			d.folderMenu(sideRow{header: g.title, key: g.key}, at)
 		})
-		btn.Importance = widget.LowImportance
-		objs = append(objs, btn)
+		objs = append(objs, chip, padLeft(4))
 	}
 	d.bookBar.Objects = objs
 	d.bookBar.Refresh()
@@ -184,27 +287,58 @@ func (d *desk) folderMenu2(g bookGroup, at fyne.Position) {
 		func() fyne.CanvasObject {
 			t := widget.NewLabel("")
 			t.Truncation = fyne.TextTruncateEllipsis
-			return container.NewBorder(nil, nil, container.NewCenter(sized(8, 8, dot(color.Transparent))), nil, t)
+			c := container.NewBorder(nil, nil, container.NewCenter(sized(8, 8, dot(color.Transparent))), nil, t)
+			return newChip(c, func() {}, func(fyne.Position) {})
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			if i >= len(g.ids) {
 				return
 			}
-			title, meta, st := d.rowText(g.ids[i])
-			c := o.(*fyne.Container)
+			id := g.ids[i]
+			chip := o.(*tabChip)
+			chip.onTap = func() {
+				pop.Hide()
+				d.open(id)
+			}
+			chip.onMenu = func(at fyne.Position) {
+				pop.Hide()
+				d.sessionMenu(id, at, fyne.NewMenuItem("Open in new tab", func() { d.addTab(id) }))
+			}
+			title, meta, st := d.rowText(id)
+			c := chip.content.(*fyne.Container)
 			c.Objects[0].(*widget.Label).SetText(title + "   " + meta)
 			dt := c.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Circle)
 			dt.FillColor = st.color()
 			dt.Refresh()
 		},
 	)
-	list.OnSelected = func(i widget.ListItemID) {
-		if i < len(g.ids) {
-			pop.Hide()
-			d.open(g.ids[i])
-		}
-	}
 	h := min(float32(menuMaxHeight), float32(len(g.ids))*38+8)
 	pop = widget.NewPopUp(sized(menuWidth, h, list), d.win.Canvas())
 	pop.ShowAtPosition(at)
+}
+
+func (d *desk) tabMenu(id string, at fyne.Position) {
+	closeOthers := func(keep func(i, at int) bool) {
+		pos := -1
+		for i, t := range d.tabs {
+			if t == id {
+				pos = i
+			}
+		}
+		var kept []string
+		for i, t := range d.tabs {
+			if keep(i, pos) {
+				kept = append(kept, t)
+			}
+		}
+		d.tabs = kept
+		d.saveTabs()
+		d.tabSig = ""
+		d.syncTabs()
+	}
+	d.sessionMenu(id, at,
+		fyne.NewMenuItem("Close tab", func() { d.closeTab(id) }),
+		fyne.NewMenuItem("Close other tabs", func() { closeOthers(func(i, at int) bool { return i == at }) }),
+		fyne.NewMenuItem("Close tabs to the right", func() { closeOthers(func(i, at int) bool { return i <= at }) }),
+	)
 }
