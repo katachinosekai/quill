@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1460,7 +1461,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		return
 	}
 	if d.planFirst {
-		if approves(text) && text != planGoMessage {
+		if approvesPlan(s, text) && text != planGoMessage {
 			d.approveByText(s)
 		} else if text != planGoMessage && !isRetry(text) && !s.inTurn {
 			s.runAll, s.runAllNext = false, false
@@ -2171,7 +2172,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			if it.Kind != chat.User {
 				continue
 			}
-			if approves(it.Text) {
+			if approvesPlan(s, it.Text) {
 				d.approveNow(s)
 			} else if !isRetry(it.Text) && !s.inTurn {
 				s.runAll, s.runAllNext = false, false
@@ -2223,6 +2224,26 @@ const retryPrefix = "I approve the action that Claude Code's auto-mode check blo
 
 func approves(text string) bool {
 	return isApproval(text) || text == planGoMessage
+}
+
+var stepList = regexp.MustCompile(`(?i)^(steps?\s*)?#?\d+(\s*(-|–|—|\bto\b|,|\band\b|&|\s)\s*#?\d+)+$`)
+
+func isStepList(text string) bool {
+	t := strings.TrimRight(strings.TrimSpace(text), ".! ")
+	return len(t) <= 60 && stepList.MatchString(t)
+}
+
+func hasPendingPlan(s *deskSession) bool {
+	for _, it := range s.conv.PendingPermissions() {
+		if it.Kind == chat.Plan {
+			return true
+		}
+	}
+	return false
+}
+
+func approvesPlan(s *deskSession, text string) bool {
+	return approves(text) || isStepList(text) && hasPendingPlan(s)
 }
 
 func isRetry(text string) bool {
