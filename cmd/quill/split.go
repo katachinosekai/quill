@@ -26,6 +26,7 @@ type pane struct {
 	view    *chatView
 	title   *widget.Label
 	outline *canvas.Rectangle
+	dropHL  *canvas.Rectangle
 	root    fyne.CanvasObject
 	input   *sendEntry
 	lastID  string
@@ -154,7 +155,12 @@ func (d *desk) newPane() *pane {
 	hint := widget.NewLabelWithStyle(emptyPaneText, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	p.picker = container.NewCenter(container.NewVBox(hint, p.choices))
 	body := container.NewBorder(head, container.NewPadded(inputRow), nil, nil, container.NewStack(p.view.root, p.picker))
-	box := &paneBox{p: p, content: container.NewStack(p.outline, container.NewPadded(body))}
+	p.dropHL = canvas.NewRectangle(fade(colAccent, 0.14))
+	p.dropHL.CornerRadius = 14
+	p.dropHL.StrokeColor = colAccent
+	p.dropHL.StrokeWidth = 2
+	p.dropHL.Hide()
+	box := &paneBox{p: p, content: container.NewStack(p.outline, container.NewPadded(body), p.dropHL)}
 	box.ExtendBaseWidget(box)
 	p.root = box
 	return p
@@ -175,14 +181,105 @@ func (d *desk) sendFromPane(p *pane, text string) {
 }
 
 func (d *desk) showInPane(p *pane, id string) {
-	if s := d.session(id); s != nil {
-		if other := d.paneFor(s); other != nil && other != p {
-			d.focusPane(other)
-			return
-		}
+	s := d.session(id)
+	if s == nil || p == nil {
+		return
+	}
+	other := d.paneFor(s)
+	if other == p {
+		d.focusPane(p)
+		return
+	}
+	prev := p.view.s
+	if other != nil {
+		other.view.show(nil)
 	}
 	d.focusPane(p)
 	d.open(id)
+	if prev == nil || prev == s {
+		return
+	}
+	dest := other
+	if dest == nil {
+		for _, q := range d.panes {
+			if q != p && q.view.s == nil {
+				dest = q
+				break
+			}
+		}
+	}
+	if dest != nil {
+		d.focusPane(dest)
+		d.open(prev.id)
+		d.focusPane(p)
+	}
+}
+
+func (d *desk) hintDrop(abs fyne.Position, on bool) {
+	var target *pane
+	if on {
+		target = d.paneAt(abs)
+	}
+	for _, p := range d.panes {
+		if p.dropHL == nil {
+			continue
+		}
+		if show := p == target; show != p.dropHL.Visible() {
+			if show {
+				p.dropHL.Show()
+			} else {
+				p.dropHL.Hide()
+			}
+			p.dropHL.Refresh()
+		}
+	}
+	if d.split() || d.chatDropHL == nil {
+		return
+	}
+	show := on && d.overChat(abs)
+	if show != d.chatDropHL.Visible() {
+		if show {
+			d.chatDropHL.Show()
+		} else {
+			d.chatDropHL.Hide()
+		}
+		d.chatDropHL.Refresh()
+	}
+}
+
+func (d *desk) overChat(abs fyne.Position) bool {
+	if d.chatHost == nil {
+		return false
+	}
+	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(d.chatHost)
+	sz := d.chatHost.Size()
+	return abs.X >= pos.X && abs.X < pos.X+sz.Width && abs.Y >= pos.Y && abs.Y < pos.Y+sz.Height
+}
+
+func (d *desk) dropSession(id string, abs fyne.Position) bool {
+	d.hintDrop(abs, false)
+	if d.split() {
+		if p := d.paneAt(abs); p != nil {
+			d.showInPane(p, id)
+			return true
+		}
+		return false
+	}
+	if !d.overChat(abs) || d.current == nil || d.current.id == id {
+		return false
+	}
+	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(d.chatHost)
+	left := abs.X < pos.X+d.chatHost.Size().Width/2
+	d.setSplit(2)
+	if len(d.panes) < 2 {
+		return false
+	}
+	target := d.panes[1]
+	if left {
+		target = d.panes[0]
+	}
+	d.showInPane(target, id)
+	return true
 }
 
 func (d *desk) paneAt(abs fyne.Position) *pane {
@@ -227,7 +324,7 @@ func (d *desk) setSplit(n int) {
 		}
 		d.panes = nil
 		d.chat = d.single
-		d.chatHost.Objects = []fyne.CanvasObject{d.single.root}
+		d.chatHost.Objects = []fyne.CanvasObject{d.single.root, d.chatDropHL}
 		d.chatHost.Refresh()
 		d.focused = nil
 		if cur != nil {
