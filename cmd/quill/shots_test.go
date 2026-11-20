@@ -163,6 +163,13 @@ func TestScreenshots(t *testing.T) {
 	h.ui(func() { h.d.open(editsID) })
 	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
 	snap("history.png")
+	h.ui(func() { h.d.folderMenu2(h.d.groups[0], fyne.NewPos(120, 90)) })
+	snap("folder-menu.png")
+	h.ui(func() {
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+	})
 	h.ui(func() { h.w.Resize(fyne.NewSize(820, 700)) })
 	snap("small.png")
 	h.ui(func() { h.d.setSidebar(false) })

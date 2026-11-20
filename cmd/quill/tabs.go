@@ -373,19 +373,23 @@ func (d *desk) syncBookmarks() {
 }
 
 func (d *desk) folderMenu2(g bookGroup, at fyne.Position) {
-	var pop *widget.PopUp
 	for _, x := range d.groups {
 		if x.key == g.key {
 			g = x
 		}
 	}
+	var closeMenu func()
 	list := widget.NewList(
 		func() int { return len(g.ids) },
 		func() fyne.CanvasObject {
-			t := widget.NewLabel("")
-			t.Truncation = fyne.TextTruncateEllipsis
-			c := container.NewBorder(nil, nil, container.NewCenter(sized(8, 8, dot(color.Transparent))), nil, t)
-			return newChip(c, func() {}, func(fyne.Position) {})
+			title := widget.NewLabel("")
+			title.TextStyle.Bold = true
+			title.Truncation = fyne.TextTruncateEllipsis
+			meta := canvas.NewText("", colMuted)
+			meta.TextSize = fontMeta
+			text := container.New(&tightVBox{}, title, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 0), meta))
+			row := container.NewBorder(nil, nil, container.NewHBox(padLeft(4), container.NewCenter(sized(9, 9, dot(color.Transparent)))), nil, text)
+			return newChip(row, func() {}, func(fyne.Position) {})
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			if i >= len(g.ids) {
@@ -394,24 +398,101 @@ func (d *desk) folderMenu2(g bookGroup, at fyne.Position) {
 			id := g.ids[i]
 			chip := o.(*tabChip)
 			chip.onTap = func() {
-				pop.Hide()
+				closeMenu()
 				d.open(id)
 			}
 			chip.onMenu = func(at fyne.Position) {
-				pop.Hide()
+				closeMenu()
 				d.sessionMenu(id, at, fyne.NewMenuItem("Open in new tab", func() { d.addTab(id) }))
 			}
 			title, meta, st := d.rowText(id)
-			c := chip.content.(*fyne.Container)
-			c.Objects[0].(*widget.Label).SetText(title + "   " + meta)
-			dt := c.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Circle)
+			row := chip.content.(*fyne.Container)
+			text := row.Objects[0].(*fyne.Container)
+			text.Objects[0].(*widget.Label).SetText(title)
+			m := text.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
+			m.Text = meta
+			m.Refresh()
+			dt := row.Objects[1].(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Circle)
 			dt.FillColor = st.color()
 			dt.Refresh()
 		},
 	)
-	h := min(float32(menuMaxHeight), float32(len(g.ids))*38+8)
-	pop = widget.NewPopUp(sized(menuWidth, h, list), d.win.Canvas())
-	pop.ShowAtPosition(at)
+	list.HideSeparators = true
+	for i := range g.ids {
+		list.SetItemHeight(i, 50)
+	}
+	head := canvas.NewText(fmt.Sprintf("%s · %d", g.title, len(g.ids)), colText)
+	head.TextStyle.Bold = true
+	head.TextSize = fontBody
+	bgr := canvas.NewRectangle(colCard)
+	bgr.CornerRadius = 14
+	bgr.StrokeColor = color.NRGBA{0xff, 0xff, 0xff, 0x22}
+	bgr.StrokeWidth = 1
+	top := container.New(layout.NewCustomPaddedLayout(4, 4, 10, 10), head)
+	h := min(float32(menuMaxHeight), top.MinSize().Height+float32(len(g.ids))*50+4)
+	body := container.NewBorder(top, nil, nil, nil, container.NewThemeOverride(list, compactTheme{}))
+	card := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(6, 8, 6, 6), sized(menuWidth, h, body)))
+	closeMenu = d.showDropdown(card, at)
+}
+
+type dropdown struct {
+	widget.BaseWidget
+	card  fyne.CanvasObject
+	at    fyne.Position
+	close func()
+}
+
+func (dd *dropdown) CreateRenderer() fyne.WidgetRenderer {
+	return &dropdownRenderer{dd: dd, card: newAbsorb(dd.card)}
+}
+
+func (dd *dropdown) Tapped(*fyne.PointEvent) { dd.close() }
+
+type dropdownRenderer struct {
+	dd   *dropdown
+	card fyne.CanvasObject
+}
+
+func (r *dropdownRenderer) Layout(size fyne.Size) {
+	m := r.card.MinSize()
+	x := min(r.dd.at.X, size.Width-m.Width-8)
+	y := min(r.dd.at.Y+4, size.Height-m.Height-8)
+	r.card.Resize(m)
+	r.card.Move(fyne.NewPos(max(8, x), max(8, y)))
+}
+
+func (r *dropdownRenderer) MinSize() fyne.Size           { return fyne.NewSize(0, 0) }
+func (r *dropdownRenderer) Refresh()                     { r.card.Refresh() }
+func (r *dropdownRenderer) Destroy()                     {}
+func (r *dropdownRenderer) Objects() []fyne.CanvasObject { return []fyne.CanvasObject{r.card} }
+
+func (d *desk) showDropdown(card fyne.CanvasObject, at fyne.Position) func() {
+	c := d.win.Canvas()
+	dd := &dropdown{card: card, at: at}
+	dd.ExtendBaseWidget(dd)
+	prev := c.OnTypedKey()
+	closed := false
+	dd.close = func() {
+		if closed {
+			return
+		}
+		closed = true
+		c.Overlays().Remove(dd)
+		c.SetOnTypedKey(prev)
+	}
+	c.Unfocus()
+	c.SetOnTypedKey(func(k *fyne.KeyEvent) {
+		if k.Name == fyne.KeyEscape {
+			dd.close()
+			return
+		}
+		if prev != nil {
+			prev(k)
+		}
+	})
+	c.Overlays().Add(dd)
+	dd.Resize(c.Size())
+	return dd.close
 }
 
 func (d *desk) tabMenu(id string, at fyne.Position) {
