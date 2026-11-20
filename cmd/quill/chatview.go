@@ -940,6 +940,7 @@ func (v *chatView) renderQuestions(it *chat.Item) fyne.CanvasObject {
 }
 
 func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
+	owner := v.s
 	qs := protocol.ParseQuestions(it.Input)
 	var parts []fyne.CanvasObject
 	head := widget.NewLabel("Claude is asking")
@@ -1013,14 +1014,14 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 		if len(answers) == 0 {
 			return
 		}
-		v.d.answerQuestions(v.s, it, answers)
+		v.d.answerQuestions(owner, it, answers)
 	})
 	ok := v.d.canAnswer(v.s)
 	if !ok {
 		send.Disable()
 	}
 	sendG := glowWrap(send, colIdle, ok)
-	skip := glowButton("Skip", theme.CancelIcon(), colError, ok, func() { v.d.answer(v.s, it, protocol.Deny) })
+	skip := glowButton("Skip", theme.CancelIcon(), colError, ok, func() { v.d.answer(owner, it, protocol.Deny) })
 	parts = append(parts, v.buttonRow(sendG, skip))
 	return questionCard(parts, true)
 }
@@ -1038,6 +1039,7 @@ func questionCard(parts []fyne.CanvasObject, pending bool) fyne.CanvasObject {
 }
 
 func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
+	owner := v.s
 	if it.ToolName == "AskUserQuestion" {
 		return v.renderQuestions(it)
 	}
@@ -1060,9 +1062,9 @@ func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
 	parts = append(parts, permDetail(v, it)...)
 	if it.PermState == chat.PermPending {
 		ok := v.d.canAnswer(v.s)
-		allow := glowButton("Allow", theme.ConfirmIcon(), colIdle, ok, func() { v.d.answer(v.s, it, protocol.Allow) })
-		always := glowButton("Allow always (this session)", nil, colAccent, ok, func() { v.d.answer(v.s, it, protocol.AllowAlways) })
-		deny := glowButton("Deny", theme.CancelIcon(), colError, ok, func() { v.d.answer(v.s, it, protocol.Deny) })
+		allow := glowButton("Allow", theme.ConfirmIcon(), colIdle, ok, func() { v.d.answer(owner, it, protocol.Allow) })
+		always := glowButton("Allow always (this session)", nil, colAccent, ok, func() { v.d.answer(owner, it, protocol.AllowAlways) })
+		deny := glowButton("Deny", theme.CancelIcon(), colError, ok, func() { v.d.answer(owner, it, protocol.Deny) })
 		parts = append(parts, v.buttonRow(allow, always, deny))
 	} else {
 		parts = append(parts, mutedText(permStateText(it.PermState), fontBody))
@@ -1480,10 +1482,15 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	}
 	parts = append(parts, msg)
 	border := colAccent
+	owner := v.s
 	if it.PermState == chat.PermPending {
-		run := glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, v.d.canAnswer(v.s), func() { v.d.answerPlan(v.s, it, true) })
-		no := glowButton("Don't run", theme.CancelIcon(), colError, true, func() { v.d.answerPlan(v.s, it, false) })
+		run := glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), func() { v.d.answerPlan(owner, it, true) })
+		no := glowButton("Don't run", theme.CancelIcon(), colError, true, func() { v.d.answerPlan(owner, it, false) })
 		parts = append(parts, v.buttonRow(run, no))
+	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !replied(owner, it) {
+		parts = append(parts, mutedText("Approved, but Claude hasn't replied yet", fontBody))
+		resend := glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, func() { v.d.answerPlan(owner, it, true) })
+		parts = append(parts, v.buttonRow(resend))
 	} else {
 		text := "Not run"
 		switch it.PermState {

@@ -61,7 +61,7 @@ func (v *chatView) blockedCard(it *chat.Item) fyne.CanvasObject {
 }
 
 func (d *desk) retryBlocked(s *deskSession, it *chat.Item) {
-	if s == nil {
+	if s = d.cardOwner(s, it); s == nil {
 		return
 	}
 	if s.mode == "auto" {

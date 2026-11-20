@@ -1537,11 +1537,14 @@ func (d *desk) interrupt(s *deskSession) {
 }
 
 func (d *desk) answer(s *deskSession, it *chat.Item, dec protocol.Decision) {
+	if s = d.cardOwner(s, it); s == nil {
+		return
+	}
 	if it.PermState != chat.PermPending || !s.running() {
 		return
 	}
 	if err := s.proc.Respond(it.RequestID, dec, it.Request); err != nil {
-		d.chat.update([]*chat.Item{s.conv.AddError("Could not answer: " + err.Error())})
+		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not answer: " + err.Error())})
 		return
 	}
 	switch dec {
@@ -1565,11 +1568,14 @@ func isQuestion(it *chat.Item) bool {
 }
 
 func (d *desk) answerQuestions(s *deskSession, it *chat.Item, answers map[string]string) {
+	if s = d.cardOwner(s, it); s == nil {
+		return
+	}
 	if it.PermState != chat.PermPending || !s.running() {
 		return
 	}
 	if err := s.proc.Answer(it.RequestID, it.Request, answers); err != nil {
-		d.chat.update([]*chat.Item{s.conv.AddError("Could not answer: " + err.Error())})
+		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not answer: " + err.Error())})
 		return
 	}
 	var lines []string
@@ -2366,6 +2372,14 @@ func (d *desk) approveByText(s *deskSession) {
 }
 
 func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
+	if s = d.cardOwner(s, it); s == nil {
+		return
+	}
+	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {
+		s.runAll = true
+		d.sendTo(s, planGoMessage)
+		return
+	}
 	if it.PermState != chat.PermPending {
 		return
 	}
