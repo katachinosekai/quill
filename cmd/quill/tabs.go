@@ -126,10 +126,29 @@ func (c *tabChip) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimple
 func (c *tabChip) Tapped(*fyne.PointEvent)             { c.onTap() }
 func (c *tabChip) TappedSecondary(e *fyne.PointEvent)  { c.onMenu(e.AbsolutePosition) }
 
+func (d *desk) followDraft() {
+	if d.strip == nil || d.split() {
+		return
+	}
+	cur := ""
+	if d.current != nil {
+		cur = d.current.id
+	}
+	if cur == d.strip.lastCur {
+		return
+	}
+	d.strip.keepDraft(d.strip.lastCur, d.input.Text)
+	d.strip.lastCur = cur
+	if text := d.strip.draft(cur); text != d.input.Text {
+		d.input.SetText(text)
+	}
+}
+
 func (d *desk) syncTabs() {
 	if d.tabBar == nil {
 		return
 	}
+	d.followDraft()
 	sig := ""
 	if d.current != nil {
 		sig = d.current.id

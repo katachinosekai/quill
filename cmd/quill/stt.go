@@ -52,6 +52,8 @@ type speech struct {
 	ready   func(lang string) error
 	start   func(lang string, update func(whisper.Update)) (liveSession, error)
 
+	entry *sendEntry
+
 	modelMu   sync.Mutex
 	model     *whisper.Model
 	modelPath string
@@ -193,6 +195,13 @@ func newSpeech(d *desk) *speech {
 	return sp
 }
 
+func (sp *speech) target() *sendEntry {
+	if sp.entry != nil {
+		return sp.entry
+	}
+	return sp.d.input
+}
+
 func (sp *speech) lang() string {
 	return sp.d.app.Preferences().StringWithFallback("sttLang", "en")
 }
@@ -277,7 +286,7 @@ func (sp *speech) begin() {
 		sp.setup(lang)
 		return
 	}
-	sp.base = strings.TrimRight(d.input.Text, " ")
+	sp.base = strings.TrimRight(sp.target().Text, " ")
 	if sp.base != "" {
 		sp.base += " "
 	}
@@ -316,17 +325,19 @@ func (sp *speech) apply(u whisper.Update) {
 		return
 	}
 	full := sp.base + text
-	if d.input.Text != full {
-		d.input.SetText(full)
-		d.input.CursorRow = strings.Count(full, "\n")
-		d.input.CursorColumn = len([]rune(full[strings.LastIndex(full, "\n")+1:]))
-		d.input.Refresh()
+	in := sp.target()
+	if in.Text != full {
+		in.SetText(full)
+		in.CursorRow = strings.Count(full, "\n")
+		in.CursorColumn = len([]rune(full[strings.LastIndex(full, "\n")+1:]))
+		in.Refresh()
 	}
 	if u.Final {
 		sp.state = sttIdle
 		sp.live = nil
 		sp.sync()
-		d.win.Canvas().Focus(d.input)
+		d.win.Canvas().Focus(in)
+		sp.entry = nil
 		sp.releaseLater()
 	}
 }

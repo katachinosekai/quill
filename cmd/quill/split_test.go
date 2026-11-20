@@ -268,3 +268,62 @@ func TestSplitPanesHaveOwnInputsPickerAndDrop(t *testing.T) {
 		}
 	})
 }
+
+func TestSplitSurvivesUpdate(t *testing.T) {
+	h := newHarness(t)
+	var saved *splitState
+	var a, b *deskSession
+	h.ui(func() {
+		a = h.d.createSession(h.proj, "opus", "default")
+		b = h.d.createSession(h.proj, "default", "default")
+		h.d.open(a.id)
+		h.d.openInSplit(b.id)
+		h.d.panes[0].input.SetText("half typed in pane one")
+		h.d.focusPane(h.d.panes[0])
+		if h.d.panes[0].model.Selected != "opus" {
+			t.Fatal("each pane shows its session's model")
+		}
+		saved = h.d.saveSplit()
+		h.d.setSplit(1)
+		h.d.panes = nil
+		h.d.restoreSplit(saved)
+		if len(h.d.panes) != 2 || h.d.panes[0].view.s != a || h.d.panes[1].view.s != b {
+			t.Fatal("split layout comes back after an update")
+		}
+		if h.d.panes[0].input.Text != "half typed in pane one" || h.d.focused != h.d.panes[0] {
+			t.Fatal("pane drafts and focus come back after an update")
+		}
+	})
+}
+
+func TestDraftsFollowTheirSession(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		b := h.d.createSession(h.proj, "default", "default")
+		h.d.open(a.id)
+		h.d.input.SetText("draft for a")
+		h.d.open(b.id)
+		if h.d.input.Text != "" {
+			t.Fatal("switching sessions should not carry a's draft to b")
+		}
+		h.d.open(a.id)
+		if h.d.input.Text != "draft for a" {
+			t.Fatalf("a's draft should come back, got %q", h.d.input.Text)
+		}
+		h.d.openInSplit(b.id)
+		if h.d.panes[0].input.Text != "draft for a" {
+			t.Fatal("entering split moves a's draft into a's pane")
+		}
+		h.d.panes[1].input.SetText("draft for b")
+		h.d.focusPane(h.d.panes[1])
+		h.d.setSplit(1)
+		if h.d.current != b || h.d.input.Text != "draft for b" {
+			t.Fatalf("back to single shows the focused session's draft, got %q", h.d.input.Text)
+		}
+		h.d.open(a.id)
+		if h.d.input.Text != "draft for a" {
+			t.Fatal("the other pane's draft stayed with its session")
+		}
+	})
+}

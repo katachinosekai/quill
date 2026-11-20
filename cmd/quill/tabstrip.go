@@ -13,19 +13,21 @@ const (
 )
 
 type tabStrip struct {
-	d      *desk
-	box    *fyne.Container
-	chips  []*tabChip
-	ids    map[*tabChip]string
-	cur    map[*tabChip]float32
-	plus   fyne.CanvasObject
-	held   *tabChip
-	heldID string
-	grab   float32
-	ptr    float32
-	abs    fyne.Position
-	ticker *time.Ticker
-	stop   chan struct{}
+	d       *desk
+	box     *fyne.Container
+	chips   []*tabChip
+	ids     map[*tabChip]string
+	cur     map[*tabChip]float32
+	plus    fyne.CanvasObject
+	drafts  map[string]string
+	lastCur string
+	held    *tabChip
+	heldID  string
+	grab    float32
+	ptr     float32
+	abs     fyne.Position
+	ticker  *time.Ticker
+	stop    chan struct{}
 }
 
 func (t *tabStrip) setChips(chips []*tabChip) {
@@ -233,4 +235,22 @@ func (t *tabStrip) step() {
 		t.ticker = nil
 		t.d.syncTabs()
 	}
+}
+
+func (t *tabStrip) keepDraft(id, text string) {
+	if id == "" {
+		return
+	}
+	if t.drafts == nil {
+		t.drafts = map[string]string{}
+	}
+	if text == "" {
+		delete(t.drafts, id)
+		return
+	}
+	t.drafts[id] = text
+}
+
+func (t *tabStrip) draft(id string) string {
+	return t.drafts[id]
 }

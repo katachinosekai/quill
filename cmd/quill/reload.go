@@ -32,6 +32,7 @@ type restoreState struct {
 	ScrollY float32         `json:"scrollY"`
 	Hidden  bool            `json:"hidden"`
 	Max     bool            `json:"maximized"`
+	Split   *splitState     `json:"split,omitempty"`
 	X       int             `json:"x"`
 	Y       int             `json:"y"`
 	Running []string        `json:"running"`
@@ -147,6 +148,7 @@ func (d *desk) trySwap() {
 	size := d.win.Canvas().Size()
 	st.Width, st.Height = size.Width, size.Height
 	st.Max, st.X, st.Y = windowPlacement(d.win)
+	st.Split = d.saveSplit()
 	st.ScrollY = d.chat.scroll.Offset.Y
 	running := d.runningSessions()
 	type meta struct {
@@ -288,6 +290,7 @@ func (d *desk) applyRestore(st *restoreState) {
 	if st.Draft != "" {
 		d.input.SetText(st.Draft)
 	}
+	defer d.restoreSplit(st.Split)
 	if st.Session == "" {
 		return
 	}

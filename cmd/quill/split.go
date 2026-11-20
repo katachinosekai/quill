@@ -28,8 +28,15 @@ type pane struct {
 	outline *canvas.Rectangle
 	root    fyne.CanvasObject
 	input   *sendEntry
+	lastID  string
 	picker  *fyne.Container
 	choices *fyne.Container
+	model   *widget.Select
+	mode    *widget.Select
+	stop    *widget.Button
+	mic     *widget.Button
+	stats   *canvas.Text
+	quiet   bool
 
 	pending []*chat.Item
 	timer   *time.Timer
@@ -96,13 +103,58 @@ func (d *desk) newPane() *pane {
 	p.outline.StrokeWidth = 1
 	p.outline.StrokeColor = color.NRGBA{0xff, 0xff, 0xff, 0x1c}
 	p.input = newSendEntry(func(text string) { d.sendFromPane(p, text) })
-	p.input.onSendNow = func(text string) { d.sendFromPane(p, text) }
+	p.input.onSendNow = func(text string) { d.sendNowFromPane(p, text) }
 	p.input.SetMinRowsVisible(2)
 	p.input.hint = "Message Claude"
 	p.input.SetPlaceHolder(p.input.hint)
+	p.input.onShortcut = func(sc fyne.Shortcut) bool {
+		if isNewTab(sc) {
+			d.newSessionDialog()
+			return true
+		}
+		return false
+	}
 	sendBtn := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.sendFromPane(p, p.input.Text) })
 	sendBtn.Importance = widget.HighImportance
-	inputRow := bg(colInput, 10, container.NewBorder(nil, nil, nil, container.NewVBox(layout.NewSpacer(), sendBtn), p.input))
+	p.stop = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
+		if p.view.s != nil {
+			d.interrupt(p.view.s)
+		}
+	})
+	p.stop.Importance = widget.DangerImportance
+	p.mic = widget.NewButtonWithIcon("", theme.MediaRecordIcon(), func() {
+		d.focusPane(p)
+		d.stt.entry = p.input
+		d.stt.click()
+	})
+	p.mic.Importance = widget.LowImportance
+	p.model = widget.NewSelect(modelChoices, func(v string) {
+		if !p.quiet && p.view.s != nil {
+			d.app.Preferences().SetString("newModel", v)
+			d.setModel(p.view.s, v)
+		}
+	})
+	p.mode = widget.NewSelect(modeChoices, func(v string) {
+		if !p.quiet && p.view.s != nil {
+			d.app.Preferences().SetString("newMode", v)
+			d.setMode(p.view.s, v)
+		}
+	})
+	openAll := widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
+		d.focusPane(p)
+		d.setAllChips(true)
+	})
+	openAll.Importance = widget.LowImportance
+	closeAll := widget.NewButtonWithIcon("", theme.MenuDropUpIcon(), func() {
+		d.focusPane(p)
+		d.setAllChips(false)
+	})
+	closeAll.Importance = widget.LowImportance
+	controls := container.NewHBox(p.model, p.mode, layout.NewSpacer(), openAll, closeAll)
+	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
+	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
+	p.stats = mutedText("", 11)
+	inputRow := container.NewVBox(card, container.New(&clipLayout{}, p.stats))
 	p.choices = container.NewVBox()
 	hint := widget.NewLabelWithStyle(emptyPaneText, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	p.picker = container.NewCenter(container.NewVBox(hint, p.choices))
@@ -124,6 +176,7 @@ func (d *desk) sendFromPane(p *pane, text string) {
 	if p.view.s != nil && strings.TrimSpace(p.input.Text) == strings.TrimSpace(text) {
 		p.input.SetText("")
 	}
+	d.syncPaneControls(p)
 }
 
 func (d *desk) showInPane(p *pane, id string) {
@@ -172,6 +225,11 @@ func (d *desk) setSplit(n int) {
 			return
 		}
 		cur := d.current
+		for _, p := range d.panes {
+			if p.view.s != nil {
+				d.strip.keepDraft(p.view.s.id, p.input.Text)
+			}
+		}
 		d.panes = nil
 		d.chat = d.single
 		d.chatHost.Objects = []fyne.CanvasObject{d.single.root}
@@ -179,6 +237,8 @@ func (d *desk) setSplit(n int) {
 		d.focused = nil
 		if cur != nil {
 			d.chat.show(cur)
+			d.input.SetText(d.strip.draft(cur.id))
+			d.strip.lastCur = cur.id
 		} else {
 			d.chat.show(nil)
 		}
@@ -186,6 +246,10 @@ func (d *desk) setSplit(n int) {
 		return
 	}
 	if !d.split() {
+		if d.current != nil {
+			d.strip.keepDraft(d.current.id, d.input.Text)
+		}
+		d.input.SetText("")
 		first := d.newPane()
 		d.panes = []*pane{first}
 		d.focused = first
@@ -307,6 +371,16 @@ func (d *desk) syncPanes() {
 		}
 	}
 	for _, p := range d.panes {
+		id := ""
+		if p.view.s != nil {
+			id = p.view.s.id
+		}
+		if id != p.lastID {
+			d.strip.keepDraft(p.lastID, p.input.Text)
+			p.input.SetText(d.strip.draft(id))
+			p.lastID = id
+		}
+		d.syncPaneControls(p)
 		if p.view.s == nil {
 			var btns []fyne.CanvasObject
 			for _, id := range d.tabs {
@@ -361,6 +435,7 @@ func (p *pane) queue(items []*chat.Item) {
 			if p.view.s != nil {
 				p.view.update(items)
 				p.view.setLive(liveText(p.view.s))
+				p.d.syncPaneControls(p)
 			}
 		})
 	})
@@ -454,5 +529,102 @@ func (d *desk) autoSplitSync() {
 	}
 	if keep != nil {
 		d.focusPane(keep)
+	}
+}
+
+func (d *desk) sendNowFromPane(p *pane, text string) {
+	if p.view.s == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	d.focusPane(p)
+	d.sendNow(text)
+	p.input.SetText("")
+}
+
+func (d *desk) syncPaneControls(p *pane) {
+	s := p.view.s
+	p.quiet = true
+	defer func() { p.quiet = false }()
+	if s == nil {
+		p.model.Disable()
+		p.mode.Disable()
+		p.stop.Disable()
+		p.mic.Disable()
+		setText(p.stats, "")
+		p.input.setSuggestion("")
+		return
+	}
+	p.model.Enable()
+	p.mode.Enable()
+	p.mic.Enable()
+	if p.model.Selected != s.model {
+		p.model.SetSelected(s.model)
+	}
+	if p.mode.Selected != s.mode {
+		p.mode.SetSelected(s.mode)
+	}
+	if s.running() && (s.conv.Busy || s.proc.Busy()) {
+		p.stop.Enable()
+	} else {
+		p.stop.Disable()
+	}
+	stats := s.model
+	if c := s.conv.Stats; c.ContextUsed > 0 {
+		stats = "context " + kfmt(c.ContextUsed)
+		if c.ContextMax > 0 {
+			stats += " / " + kfmt(c.ContextMax)
+		}
+		stats += " · " + s.model
+	}
+	setText(p.stats, stats)
+	if p.input.Text == "" {
+		p.input.setSuggestion(s.conv.Suggestion)
+	}
+}
+
+type splitState struct {
+	Panes  []string `json:"panes"`
+	Drafts []string `json:"drafts"`
+	Focus  int      `json:"focus"`
+}
+
+func (d *desk) saveSplit() *splitState {
+	if !d.split() {
+		return nil
+	}
+	st := &splitState{}
+	for i, p := range d.panes {
+		id := ""
+		if p.view.s != nil {
+			id = p.view.s.id
+		}
+		st.Panes = append(st.Panes, id)
+		st.Drafts = append(st.Drafts, p.input.Text)
+		if p == d.focused {
+			st.Focus = i
+		}
+	}
+	return st
+}
+
+func (d *desk) restoreSplit(st *splitState) {
+	if st == nil || len(st.Panes) < 2 {
+		return
+	}
+	d.setSplit(len(st.Panes))
+	for i, id := range st.Panes {
+		if i >= len(d.panes) {
+			break
+		}
+		p := d.panes[i]
+		if id != "" && d.session(id) != nil {
+			d.showInPane(p, id)
+		}
+		if i < len(st.Drafts) && st.Drafts[i] != "" {
+			p.input.SetText(st.Drafts[i])
+		}
+	}
+	if st.Focus >= 0 && st.Focus < len(d.panes) {
+		d.focusPane(d.panes[st.Focus])
 	}
 }
