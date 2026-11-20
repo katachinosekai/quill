@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
 	"github.com/katachinosekai/quill/internal/transcript"
 )
@@ -309,6 +310,10 @@ func (d *desk) kmemAfterTurn(s *deskSession) {
 			}
 			if !saved {
 				ks.prompt = ""
+				if hasPendingPlan(s) || s.conv.AsksApproval() {
+					d.notify(s, fmt.Sprintf("Waiting for you: approve the plan so this session can save its kmem handoff “%s”; the restart continues after that.", ks.name))
+					return
+				}
 				if ks.spare > 0 {
 					ks.spare--
 					return
@@ -332,4 +337,13 @@ func (d *desk) finishKmemRelaunch(old *deskSession, name, prompt string) {
 	d.notify(ns, fmt.Sprintf("Resuming from kmem handoff “%s”; the previous session was deleted.", name))
 	d.sendTo(ns, prompt)
 	d.deleteSession(old.id)
+}
+
+func hasPendingPlan(s *deskSession) bool {
+	for _, it := range s.conv.PendingPermissions() {
+		if it.Kind == chat.Plan {
+			return true
+		}
+	}
+	return false
 }
