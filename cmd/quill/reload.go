@@ -208,7 +208,16 @@ func (d *desk) reattach(s *deskSession, hs handedSession) bool {
 	s.rcOn, s.rcURL = hs.RCOn, hs.RCURL
 	s.conv.Busy = hs.Handle.Busy
 	hs.restorePending(s)
+	d.reclaimRC(s)
 	return true
+}
+
+func (d *desk) reclaimRC(s *deskSession) {
+	if s.rcURL != "" {
+		d.rememberRC(s.id, s.rcURL)
+		return
+	}
+	d.autoRemote(s)
 }
 
 func (hs *handedSession) savePending(s *deskSession) {
