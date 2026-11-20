@@ -29,10 +29,11 @@ type orgFolder struct {
 }
 
 type sideOrg struct {
-	Place   map[string]string `json:"place"`
-	Titles  map[string]string `json:"titles"`
-	Names   map[string]string `json:"names"`
-	Folders []orgFolder       `json:"folders"`
+	Place   map[string]string  `json:"place"`
+	Titles  map[string]string  `json:"titles"`
+	Names   map[string]string  `json:"names"`
+	Folders []orgFolder        `json:"folders"`
+	RC      map[string]rcTitle `json:"rc,omitempty"`
 }
 
 func (d *desk) loadOrg() {

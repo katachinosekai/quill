@@ -469,6 +469,11 @@ func (p *Process) RemoteControl(ctx context.Context, enabled bool) (protocol.Rem
 	return info, nil
 }
 
+func (p *Process) RenameSession(ctx context.Context, title string) error {
+	_, err := p.Request(ctx, func(id string) []byte { return protocol.RenameSession(id, title) })
+	return err
+}
+
 func (p *Process) Respond(requestID string, d protocol.Decision, req *protocol.ControlRequest) error {
 	return p.write(protocol.PermissionResponse(requestID, d, req, ""))
 }

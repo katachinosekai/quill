@@ -83,6 +83,7 @@ type deskSession struct {
 	loading    bool
 	rcURL      string
 	rcOn       bool
+	rcName     string
 	created    time.Time
 }
 
@@ -206,6 +207,7 @@ type desk struct {
 	sorted        sortState
 	sortDirty     bool
 	org           sideOrg
+	rowPlace      map[string]string
 	sideItems     []*sideItem
 	dragID        string
 	dragAt        fyne.Position
@@ -557,6 +559,15 @@ func (d *desk) rebuildRows() {
 	var active, idle, old, auto []sideEntry
 	custom := map[string][]sideEntry{}
 	demote := d.demoteDue()
+	if q == "" {
+		d.rowPlace = make(map[string]string, len(entries))
+	}
+	put := func(list *[]sideEntry, key string, e sideEntry) {
+		*list = append(*list, e)
+		if q == "" {
+			d.rowPlace[e.id] = key
+		}
+	}
 	for _, e := range entries {
 		if q != "" && !d.matches(e.id, e.cwd, q) {
 			continue
@@ -564,29 +575,34 @@ func (d *desk) rebuildRows() {
 		p := d.placement(e.id)
 		switch {
 		case strings.HasPrefix(p, folderPrefix):
-			custom[p] = append(custom[p], e)
+			es := custom[p]
+			put(&es, p, e)
+			custom[p] = es
 		case p == placeActive:
-			active = append(active, e)
+			put(&active, placeActive, e)
 		case p == placeInactive:
-			idle = append(idle, e)
+			put(&idle, placeInactive, e)
 		case p == placeArchive:
-			old = append(old, e)
+			put(&old, placeArchive, e)
 		case p == placeAuto:
-			auto = append(auto, e)
+			put(&auto, placeAuto, e)
 		case d.rules.ClaudeFolder && d.isAuto(e.id):
-			auto = append(auto, e)
+			put(&auto, placeAuto, e)
 		case q != "":
 			active = append(active, e)
 		default:
 			switch d.stickyPlace(e, demote) {
 			case placeActive:
-				active = append(active, e)
+				put(&active, placeActive, e)
 			case placeArchive:
-				old = append(old, e)
+				put(&old, placeArchive, e)
 			default:
-				idle = append(idle, e)
+				put(&idle, placeInactive, e)
 			}
 		}
+	}
+	if q == "" {
+		d.syncRCNames()
 	}
 	if demote && q == "" {
 		d.sorted.At = time.Now().Unix()
@@ -1057,7 +1073,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 	}
 	s.failed = ""
 	s.stopping = false
-	s.rcOn, s.rcURL = false, ""
+	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	p, err := session.Start(opts, func(ev *protocol.Event) {
 		d.do(func() { d.handleEvent(s, ev) })
 	})
@@ -1161,7 +1177,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 		}
 	}
 	s.conv.Busy = false
-	s.rcOn, s.rcURL = false, ""
+	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
 		msg := "Claude process exited: " + err.Error()
 		if tail := strings.TrimSpace(p.Stderr()); tail != "" {
@@ -1446,6 +1462,7 @@ func (d *desk) autoRemote(s *deskSession) {
 				return
 			}
 			s.rcOn, s.rcURL = true, info.SessionURL
+			d.syncRCNames()
 			if d.current == s {
 				d.updateChrome()
 			}
@@ -1477,6 +1494,8 @@ func (d *desk) setRemoteControl(s *deskSession, on bool) {
 			} else {
 				s.rcOn = on
 				s.rcURL = info.SessionURL
+				s.rcName = ""
+				d.syncRCNames()
 				if on {
 					d.notify(s, "Remote Control on: "+info.SessionURL)
 				} else {
@@ -1516,8 +1535,9 @@ func (d *desk) refresh() {
 		if err == nil {
 			d.order = infos
 			d.infos = make(map[string]transcript.Info, len(infos))
-			for _, i := range infos {
-				d.infos[i.ID] = i
+			for k := range infos {
+				infos[k].Title = d.unRCTitle(infos[k].ID, infos[k].Title)
+				d.infos[infos[k].ID] = infos[k]
 			}
 		}
 		d.terms = terms

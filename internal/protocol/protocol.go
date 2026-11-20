@@ -251,6 +251,10 @@ func RemoteControl(id string, enabled bool) []byte {
 	return ControlRequestLine(id, map[string]any{"subtype": "remote_control", "enabled": enabled})
 }
 
+func RenameSession(id, title string) []byte {
+	return ControlRequestLine(id, map[string]any{"subtype": "rename_session", "title": title, "source": "host"})
+}
+
 type Decision int
 
 const (

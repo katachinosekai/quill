@@ -22,6 +22,7 @@ type Info struct {
 	Path       string
 	Cwd        string
 	Title      string
+	Named      bool
 	Last       time.Time
 	Messages   int
 	Entrypoint string
@@ -298,6 +299,7 @@ func (fs *fileScan) result() Info {
 			info.Days[u.day] = info.Days[u.day].Add(u.t)
 		}
 	}
+	info.Named = true
 	switch {
 	case fs.customTitle != "":
 		info.Title = fs.customTitle
@@ -307,6 +309,7 @@ func (fs *fileScan) result() Info {
 		info.Title = fs.summary
 	default:
 		info.Title = oneLine(fs.firstPrompt, 80)
+		info.Named = false
 	}
 	if info.Title == "" {
 		info.Title = "(untitled)"

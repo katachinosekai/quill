@@ -69,6 +69,15 @@ func Run() {
 				} else {
 					ack(m, nil)
 				}
+			case "rename_session":
+				if out := os.Getenv("FAKE_RENAME_OUT"); out != "" {
+					if f, err := os.OpenFile(out, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+						title, _ := req["title"].(string)
+						f.WriteString(title + "\n")
+						f.Close()
+					}
+				}
+				ack(m, map[string]any{})
 			case "initialize":
 				ack(m, map[string]any{"commands": []any{
 					map[string]any{"name": "compact", "description": "Clear history but keep a summary", "argumentHint": "<instructions>"},
