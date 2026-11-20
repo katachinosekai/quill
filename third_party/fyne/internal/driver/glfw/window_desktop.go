@@ -924,3 +924,23 @@ func (w *window) view() *glfw.Window {
 func wrapInnerWindow(*container.InnerWindow, fyne.Window, *gLDriver) fyne.Window {
 	return nil
 }
+
+func (w *window) Maximized() bool {
+	if v := w.view(); v != nil {
+		return v.GetAttrib(glfw.Maximized) == glfw.True
+	}
+	return false
+}
+
+func (w *window) Maximize() {
+	w.runOnMainWhenCreated(func() {
+		w.viewport.Maximize()
+	})
+}
+
+func (w *window) Position() (int, int) {
+	if v := w.view(); v != nil {
+		return v.GetPos()
+	}
+	return 0, 0
+}

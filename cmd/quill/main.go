@@ -86,6 +86,7 @@ func runWindowWith(claudeBin, sock string) int {
 		if st.Width > 200 && st.Height > 200 {
 			w.Resize(fyne.NewSize(st.Width, st.Height))
 		}
+		placeWindow(w, st)
 	}
 	w.SetCloseIntercept(d.confirmClose)
 	if !d.setupBackground() {

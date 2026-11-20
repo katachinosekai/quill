@@ -144,9 +144,9 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## Bundled Fyne (third_party/fyne)
 
-Quill builds against a patched copy of Fyne v2.8.2 in `third_party/fyne` (go.mod `replace`). The only change is in `widget/entry.go`: an `Alignment` field on `Entry`, applied to the text and placeholder segments, and `CursorPosition` adds `rowAlignOffset` so the cursor lines up with centered text (clicks and selection already handle alignment upstream). The diff is `third_party/fyne-entry-align.patch`.
+Quill builds against a patched copy of Fyne v2.8.2 in `third_party/fyne` (go.mod `replace`). Changes: `widget/entry.go` gets an `Alignment` field on `Entry` (applied to the text and placeholder segments; `CursorPosition` adds `rowAlignOffset` so the cursor lines up with centered text), and `internal/driver/glfw/window_desktop.go` gets `Maximized`, `Maximize` and `Position` on the window so Quill can reopen maximized (and at the same position on X11) after an update. The diff is `third_party/fyne.patch`.
 
-To upgrade Fyne: copy the new version from the module cache into `third_party/fyne` (without `_test.go`/`testdata`), re-apply the patch (`patch -p1 -d third_party/fyne < third_party/fyne-entry-align.patch`), fix any rejected hunks by hand, run the tests (`TestCenteredTyping`).
+To upgrade Fyne: copy the new version from the module cache into `third_party/fyne` (without `_test.go`/`testdata`), re-apply the patch (`patch -p1 -d third_party/fyne < third_party/fyne.patch`), fix any rejected hunks by hand, run the tests (`TestCenteredTyping`).
 
 ## Built-in speech to text (internal/whisper)
 

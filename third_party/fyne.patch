@@ -1,4 +1,35 @@
---- a/widget/entry.go	2026-11-19 13:31:09.107551907 -0800
+Only in a: .gitattributes
+Only in a: .github
+Only in a: .gitignore
+
+--- a/internal/driver/glfw/window_desktop.go	2026-11-19 04:15:14.046525466 -0800
++++ b/internal/driver/glfw/window_desktop.go	2026-11-19 18:03:26.997886885 -0800
+@@ -924,3 +924,23 @@
+ func wrapInnerWindow(*container.InnerWindow, fyne.Window, *gLDriver) fyne.Window {
+ 	return nil
+ }
++
++func (w *window) Maximized() bool {
++	if v := w.view(); v != nil {
++		return v.GetAttrib(glfw.Maximized) == glfw.True
++	}
++	return false
++}
++
++func (w *window) Maximize() {
++	w.runOnMainWhenCreated(func() {
++		w.viewport.Maximize()
++	})
++}
++
++func (w *window) Position() (int, int) {
++	if v := w.view(); v != nil {
++		return v.GetPos()
++	}
++	return 0, 0
++}
+
+--- a/widget/entry.go	2026-11-19 04:15:14.084158856 -0800
 +++ b/widget/entry.go	2026-11-19 13:31:09.114095645 -0800
 @@ -44,6 +44,7 @@
  	Text     string

@@ -31,6 +31,9 @@ type restoreState struct {
 	Height  float32         `json:"height"`
 	ScrollY float32         `json:"scrollY"`
 	Hidden  bool            `json:"hidden"`
+	Max     bool            `json:"maximized"`
+	X       int             `json:"x"`
+	Y       int             `json:"y"`
 	Running []string        `json:"running"`
 	Handed  []handedSession `json:"handed"`
 }
@@ -143,6 +146,7 @@ func (d *desk) trySwap() {
 	}
 	size := d.win.Canvas().Size()
 	st.Width, st.Height = size.Width, size.Height
+	st.Max, st.X, st.Y = windowPlacement(d.win)
 	st.ScrollY = d.chat.scroll.Offset.Y
 	running := d.runningSessions()
 	type meta struct {
@@ -299,5 +303,34 @@ func (d *desk) applyRestore(st *restoreState) {
 				d.chat.scroll.Refresh()
 			})
 		}()
+	}
+}
+
+type placedWindow interface {
+	Maximized() bool
+	Maximize()
+	Position() (int, int)
+	RequestPosition(x, y int)
+}
+
+func windowPlacement(w fyne.Window) (bool, int, int) {
+	if p, ok := w.(placedWindow); ok {
+		x, y := p.Position()
+		return p.Maximized(), x, y
+	}
+	return false, 0, 0
+}
+
+func placeWindow(w fyne.Window, st *restoreState) {
+	p, ok := w.(placedWindow)
+	if !ok {
+		return
+	}
+	if st.Max {
+		p.Maximize()
+		return
+	}
+	if os.Getenv("WAYLAND_DISPLAY") == "" && (st.X != 0 || st.Y != 0) {
+		p.RequestPosition(st.X, st.Y)
 	}
 }

@@ -235,3 +235,29 @@ func TestReattachRestoresPendingApproval(t *testing.T) {
 		t.Fatalf("restoring into the same session must not duplicate: %d", n)
 	}
 }
+
+type fakePlaced struct {
+	fyne.Window
+	max      bool
+	maxCalls int
+	x, y     int
+}
+
+func (f *fakePlaced) Maximized() bool          { return f.max }
+func (f *fakePlaced) Maximize()                { f.maxCalls++ }
+func (f *fakePlaced) Position() (int, int)     { return f.x, f.y }
+func (f *fakePlaced) RequestPosition(x, y int) { f.x, f.y = x, y }
+
+func TestWindowPlacementSurvivesUpdate(t *testing.T) {
+	w := &fakePlaced{max: true, x: 10, y: 20}
+	max, x, y := windowPlacement(w)
+	st := &restoreState{Max: max, X: x, Y: y}
+	b, _ := json.Marshal(st)
+	var back restoreState
+	_ = json.Unmarshal(b, &back)
+	nw := &fakePlaced{}
+	placeWindow(nw, &back)
+	if nw.maxCalls != 1 {
+		t.Fatal("a maximized window reopens maximized")
+	}
+}
