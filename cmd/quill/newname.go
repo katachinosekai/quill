@@ -45,7 +45,16 @@ func (d *desk) askNewName(s *deskSession, fallback string) {
 	bgr.CornerRadius = 14
 	bgr.StrokeColor = color.NRGBA{0xff, 0xff, 0xff, 0x22}
 	bgr.StrokeWidth = 1
-	body := container.New(layout.NewCustomPaddedLayout(8, 10, 12, 12), container.NewVBox(head, sized(300, 0, e), hint))
+	rows := []fyne.CanvasObject{head, sized(300, 0, e), hint}
+	var kmemSel *widget.Select
+	if d.kmemAvailable() {
+		kmemSel = d.kmemSelect(nil)
+		kh := canvas.NewText("Memory", colMuted)
+		kh.TextSize = fontMeta
+		kh.TextStyle.Bold = true
+		rows = append(rows, kh, sized(300, 0, kmemSel))
+	}
+	body := container.New(layout.NewCustomPaddedLayout(8, 10, 12, 12), container.NewVBox(rows...))
 	card := container.NewStack(bgr, body)
 	at := fyne.NewPos(8, 8)
 	drv := fyne.CurrentApp().Driver()
@@ -57,6 +66,18 @@ func (d *desk) askNewName(s *deskSession, fallback string) {
 	var closeFn func()
 	dd := &dropdown{card: card, at: at, onClosed: func() {
 		d.nameClose = nil
+		if kmemSel != nil {
+			title := strings.TrimSpace(e.Text)
+			resume := choiceHandoff(kmemSel.Selected)
+			if title == "" && resume != "" {
+				e.SetText(resume)
+				title = resume
+			}
+			if title == "" {
+				title = fallback
+			}
+			d.applyKmemChoice(s, kmemSel.Selected, title)
+		}
 		if name := strings.TrimSpace(e.Text); name != "" {
 			d.org.Titles[s.id] = name
 			d.saveOrg()

@@ -105,6 +105,7 @@ func (d *desk) deleteSession(id string) {
 	delete(d.created, id)
 	delete(d.org.Place, id)
 	delete(d.org.Titles, id)
+	delete(d.org.Kmem, id)
 	delete(d.sorted.Place, id)
 	d.unkeepSession(id)
 	d.saveOrg()

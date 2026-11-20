@@ -153,6 +153,16 @@ func handoffPrompt(oldID, path, title string, conv *chat.Conversation, brief str
 
 func (d *desk) askRelaunch(id string) {
 	title, _, _ := d.rowText(id)
+	if name := d.org.Kmem[id]; name != "" && d.kmemAvailable() {
+		dialog.ShowConfirm("Restart from kmem?",
+			fmt.Sprintf("“%s” is asked to save its kmem handoff “%s”. Once it is saved, a fresh session with the same name, folder, model and mode resumes from it, and this session is deleted (its knowledge is in kmem). If the handoff isn't saved, nothing is deleted.", title, name),
+			func(ok bool) {
+				if ok {
+					d.relaunchViaKmem(id, name)
+				}
+			}, d.win)
+		return
+	}
 	dialog.ShowConfirm("Restart as a new session?",
 		fmt.Sprintf("“%s” will be closed and moved to Archive. A fresh session with the same name, folder, model and mode starts. Claude compacts the old conversation into a short brief, and the new session takes over from that brief and the last few messages. The old session's history is kept.", title),
 		func(ok bool) {
@@ -178,38 +188,14 @@ func (d *desk) relaunchSession(id string) {
 			conv = c
 		}
 	}
-	place := d.placement(id)
 	if old.running() {
 		p := old.proc
 		old.stopping = true
 		go func() { _ = p.Stop(5 * time.Second) }()
 	}
-	ns := d.createSession(old.cwd, old.model, old.mode)
-	d.org.Titles[ns.id] = title
-	if strings.HasPrefix(place, folderPrefix) || place == placeAuto {
-		d.org.Place[ns.id] = place
-	}
+	ns := d.replaceWith(old, title)
 	d.org.Place[id] = placeArchive
-	var tabs []string
-	replaced := false
-	for _, t := range d.tabs {
-		switch t {
-		case ns.id:
-			continue
-		case id:
-			tabs = append(tabs, ns.id)
-			replaced = true
-		default:
-			tabs = append(tabs, t)
-		}
-	}
-	if !replaced {
-		tabs = append(tabs, ns.id)
-	}
-	d.tabs = tabs
-	d.saveTabs()
 	d.saveOrg()
-	d.open(ns.id)
 	ns.compacting = true
 	d.notify(ns, fmt.Sprintf("Compacting “%s” for the hand-off. Messages you send now are queued until it's done.", title))
 	compact := d.compactor
@@ -230,4 +216,35 @@ func (d *desk) relaunchSession(id string) {
 			d.sendTo(ns, handoffPrompt(id, path, title, conv, brief))
 		})
 	}()
+}
+
+func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
+	id := old.id
+	place := d.placement(id)
+	ns := d.createSession(old.cwd, old.model, old.mode)
+	d.org.Titles[ns.id] = title
+	if strings.HasPrefix(place, folderPrefix) || place == placeAuto {
+		d.org.Place[ns.id] = place
+	}
+	var tabs []string
+	replaced := false
+	for _, t := range d.tabs {
+		switch t {
+		case ns.id:
+			continue
+		case id:
+			tabs = append(tabs, ns.id)
+			replaced = true
+		default:
+			tabs = append(tabs, t)
+		}
+	}
+	if !replaced {
+		tabs = append(tabs, ns.id)
+	}
+	d.tabs = tabs
+	d.saveTabs()
+	d.saveOrg()
+	d.open(ns.id)
+	return ns
 }
