@@ -107,6 +107,22 @@ func (c *Conversation) AddPlan() *Item {
 	return c.add(&Item{Kind: Plan, PermState: PermPending})
 }
 
+func (c *Conversation) AsksApproval() bool {
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		it := c.Items[i]
+		if it.Kind == User || it.Kind == Plan {
+			return false
+		}
+		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
+			continue
+		}
+		t := strings.TrimRight(strings.TrimSpace(it.Text), "*_ ")
+		last := t[strings.LastIndex(t, "\n")+1:]
+		return strings.HasSuffix(t, "?") && strings.Contains(strings.ToLower(last), "approve")
+	}
+	return false
+}
+
 func (c *Conversation) MarkPlanText() []*Item {
 	var out []*Item
 	for i := len(c.Items) - 1; i >= 0; i-- {

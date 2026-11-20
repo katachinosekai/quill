@@ -1283,8 +1283,12 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		d.updateChrome()
 		return
 	}
-	if d.planFirst && isApproval(text) {
-		d.approveByText(s)
+	if d.planFirst {
+		if isApproval(text) {
+			d.approveByText(s)
+		} else if text != planGoMessage {
+			s.runAll, s.runAllNext = false, false
+		}
 	}
 	it := s.conv.AddUser(text)
 	if s.title == "" {
@@ -1895,19 +1899,127 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		if !d.planFirst {
 			return nil
 		}
+		if readOnlyRequest(it.Request) {
+			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
+				it.PermState = chat.PermAutoAllowed
+			}
+			return nil
+		}
 		if s.proc.DenyWith(it.RequestID, it.Request, planAskMessage) == nil {
 			it.PermState = chat.PermPlanAsked
 			s.planWait = true
 		}
+	case ev.Type == "user" && d.planFirst:
+		for _, it := range items {
+			if it.Kind != chat.User {
+				continue
+			}
+			if isApproval(it.Text) || it.Text == planGoMessage {
+				d.approveNow(s)
+			} else {
+				s.runAll, s.runAllNext = false, false
+			}
+		}
 	case ev.Type == "result":
-		s.runAll, s.runAllNext = s.runAllNext, false
-		if s.planWait {
+		if s.runAllNext {
+			s.runAll, s.runAllNext = true, false
+		}
+		if s.planWait || d.planFirst && !s.runAll && s.conv.AsksApproval() {
 			s.planWait = false
 			marked := s.conv.MarkPlanText()
 			return append(marked, s.conv.AddPlan())
 		}
 	}
 	return nil
+}
+
+func (d *desk) approveNow(s *deskSession) {
+	for _, it := range s.conv.PendingPermissions() {
+		if it.Kind == chat.Plan {
+			it.PermState = chat.PermAllowed
+			d.chatFor(s, []*chat.Item{it})
+		}
+	}
+	s.runAll, s.runAllNext = true, false
+}
+
+var readOnlyTools = map[string]bool{"Read": true, "Grep": true, "Glob": true, "LS": true, "ToolSearch": true, "ListAgents": true, "NotebookRead": true}
+
+var readOnlyCommands = map[string]bool{
+	"ls": true, "cat": true, "head": true, "tail": true, "grep": true, "rg": true, "wc": true, "file": true, "stat": true,
+	"sort": true, "uniq": true, "cut": true, "tr": true, "diff": true, "cmp": true, "sha256sum": true, "md5sum": true,
+	"du": true, "df": true, "pwd": true, "which": true, "date": true, "echo": true, "printf": true, "true": true,
+	"pgrep": true, "ps": true, "uptime": true, "free": true, "id": true, "whoami": true, "basename": true, "dirname": true,
+	"realpath": true, "readlink": true, "tree": true, "jq": true, "column": true, "nl": true, "strings": true,
+}
+
+var readOnlyGit = map[string]bool{"status": true, "log": true, "diff": true, "show": true, "branch": true, "remote": true, "rev-parse": true, "ls-files": true, "blame": true, "describe": true}
+
+func readOnlyRequest(r *protocol.ControlRequest) bool {
+	if r == nil {
+		return false
+	}
+	if readOnlyTools[r.ToolName] {
+		return true
+	}
+	if r.ToolName != "Bash" {
+		return false
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(r.Input, &in) != nil {
+		return false
+	}
+	return readOnlyCommand(in.Command)
+}
+
+func readOnlyCommand(cmd string) bool {
+	c := strings.TrimSpace(cmd)
+	if c == "" || strings.ContainsAny(c, "`\n") || strings.Contains(c, "$(") || strings.Contains(c, "<(") {
+		return false
+	}
+	for _, ok := range []string{"2>/dev/null", ">/dev/null", "2>&1"} {
+		c = strings.ReplaceAll(c, ok, "")
+	}
+	if strings.ContainsAny(c, "><") {
+		return false
+	}
+	c = strings.NewReplacer("&&", ";", "||", ";", "|", ";").Replace(c)
+	for _, part := range strings.Split(c, ";") {
+		f := strings.Fields(part)
+		if len(f) == 0 {
+			continue
+		}
+		name := f[0]
+		switch {
+		case name == "sed":
+			for _, a := range f[1:] {
+				if strings.HasPrefix(a, "-i") || a == "--in-place" || strings.Contains(a, "w ") {
+					return false
+				}
+			}
+		case name == "find":
+			for _, a := range f[1:] {
+				if a == "-delete" || strings.HasPrefix(a, "-exec") || strings.HasPrefix(a, "-ok") || strings.HasPrefix(a, "-fprint") || a == "-fls" {
+					return false
+				}
+			}
+		case name == "git":
+			if len(f) < 2 || !readOnlyGit[f[1]] {
+				return false
+			}
+		case name == "awk":
+			if strings.Contains(part, "system(") || strings.Contains(part, "print >") {
+				return false
+			}
+		default:
+			if !readOnlyCommands[name] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 var approvalWords = map[string]bool{

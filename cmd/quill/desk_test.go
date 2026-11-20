@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"image/color"
 	"os"
@@ -1011,10 +1012,10 @@ func TestPlanFirstApproval(t *testing.T) {
 			t.Fatal("approving the plan should pre-approve the request")
 		}
 	})
-	h.eventually("approval turn done", func() bool { return !s.conv.Busy && !s.runAll })
+	h.eventually("approval turn done", func() bool { return !s.conv.Busy })
 	h.ui(func() {
-		s.runAll = true
 		h.d.send("write")
+		s.runAll = true
 	})
 	h.eventually("tool auto-approved", func() bool {
 		it := lastItem(s)
@@ -1251,8 +1252,20 @@ func TestTypedApproval(t *testing.T) {
 			t.Fatal("typing yes should approve the plan, no second approval needed")
 		}
 	})
-	h.eventually("turn done", func() bool { return !s.conv.Busy && !s.runAll })
+	h.eventually("turn done", func() bool { return !s.conv.Busy })
 	h.ui(func() {
+		if !s.runAll {
+			t.Fatal("an approval lasts across turns (background tasks restart the turn) until the next real request")
+		}
+		h.d.planGate(s, &protocol.Event{Type: "user"}, []*chat.Item{{Kind: chat.User, Text: "now something else"}})
+		if s.runAll {
+			t.Fatal("a new request from any channel ends the approval")
+		}
+		h.d.planGate(s, &protocol.Event{Type: "user"}, []*chat.Item{{Kind: chat.User, Text: "yes"}})
+		if !s.runAll {
+			t.Fatal("yes typed on another device (Remote Control) approves too")
+		}
+		s.runAll = false
 		s.conv.Busy = true
 		h.d.approveByText(s)
 		if s.runAll || !s.runAllNext {
@@ -1335,4 +1348,47 @@ func TestWidthSliders(t *testing.T) {
 			t.Fatal("chat keeps its usable minimum")
 		}
 	})
+}
+
+func TestReadOnlyRequests(t *testing.T) {
+	bash := func(c string) *protocol.ControlRequest {
+		in, _ := json.Marshal(map[string]string{"command": c})
+		return &protocol.ControlRequest{ToolName: "Bash", Input: in}
+	}
+	for c, want := range map[string]bool{
+		"ls -la ~/.ssh":                              true,
+		"grep -rn foo src | head -5":                 true,
+		"git -C repo status --short":                 false,
+		"git status --short && git log --oneline -3": true,
+		"sed -n 1,40p file.go":                       true,
+		"cat a 2>/dev/null; wc -l b":                 true,
+		"sed -i s/a/b/ f":                            false,
+		"find . -name x -delete":                     false,
+		"echo hi > file":                             false,
+		"cat $(ls)":                                  false,
+		"rm -rf x":                                   false,
+		"git push":                                   false,
+		"ls; rm x":                                   false,
+	} {
+		if readOnlyRequest(bash(c)) != want {
+			t.Errorf("readOnlyRequest(%q) = %v", c, !want)
+		}
+	}
+	if !readOnlyRequest(&protocol.ControlRequest{ToolName: "Read"}) || readOnlyRequest(&protocol.ControlRequest{ToolName: "Write"}) {
+		t.Fatal("Read is read-only, Write is not")
+	}
+}
+
+func TestAsksApprovalShowsPlanCard(t *testing.T) {
+	c := chat.New()
+	c.AddUser("do it all")
+	c.Items = append(c.Items, &chat.Item{Kind: chat.Assistant, Text: "Plan:\n1. build\n\n**Approve in Quill?**"})
+	if !c.AsksApproval() {
+		t.Fatal("a reply ending with an approval question should show the plan card")
+	}
+	c.AddUser("ok")
+	c.Items = append(c.Items, &chat.Item{Kind: chat.Assistant, Text: "Done. Anything else?"})
+	if c.AsksApproval() {
+		t.Fatal("an ordinary question is not a plan")
+	}
 }
