@@ -192,3 +192,7 @@ The old conversation is compacted by a tool-less `claude -p --no-session-persist
 ## Third-party licences
 
 `scripts/thirdparty.sh` writes THIRD_PARTY_LICENSES.txt: whisper.cpp plus every non-std Go module in the x11 and wayland builds, full licence text and any NOTICE; it fails if a module has no licence file. The spec installs it as %license (so the RPM and the AppImage carry it). Re-run it after any go.mod or third_party change.
+
+## Notifications (notify.go, internal/folders/events.go)
+
+One event source feeds both outputs: attentionKind turns a chat event into approval, question, plan, finished or error. A process that exits unexpectedly also counts as error. Desktop notifications go over D-Bus with the desktop-entry hint, only for sessions you aren't looking at, and clicking one opens that session. Phone events go to the pairing server's GET /events (same key and pinned TLS) whether or not you're looking: a 200-event ring per boot, an inclusive `since` cursor, and `wait` long polls of up to 25 s, with the write deadline raised for that request only and at most 4 waiters. The events carry only ids, titles, folder names and the type, never message or tool content. The phone setting turns the endpoint off (404).

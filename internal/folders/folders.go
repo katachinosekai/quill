@@ -164,12 +164,18 @@ func Fingerprint(der []byte) string {
 }
 
 type Server struct {
-	mu   sync.Mutex
-	key  string
-	data []byte
-	ln   net.Listener
-	srv  *http.Server
-	Port int
+	mu       sync.Mutex
+	key      string
+	data     []byte
+	ln       net.Listener
+	srv      *http.Server
+	Port     int
+	eventsOn bool
+	boot     string
+	next     int64
+	ring     []Event
+	wake     chan struct{}
+	waiters  int
 }
 
 func Listen(cert tls.Certificate, port int, key string) (*Server, error) {
@@ -180,7 +186,7 @@ func Listen(cert tls.Certificate, port int, key string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{key: key, ln: ln, Port: ln.Addr().(*net.TCPAddr).Port}
+	s := &Server{key: key, ln: ln, Port: ln.Addr().(*net.TCPAddr).Port, boot: newBoot(), next: 1, wake: make(chan struct{}), eventsOn: true}
 	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 8 << 10}
 	go s.srv.Serve(ln)
 	return s, nil
@@ -203,7 +209,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet || r.URL.Path != "/folders.json" {
+	if r.Method != http.MethodGet || r.URL.Path != "/folders.json" && r.URL.Path != "/events" {
 		http.NotFound(w, r)
 		return
 	}
@@ -213,6 +219,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	got := r.Header.Get("X-Quill-Key")
 	if key == "" || subtle.ConstantTimeCompare([]byte(got), []byte(key)) != 1 {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.URL.Path == "/events" {
+		s.serveEvents(w, r)
 		return
 	}
 	if data == nil {

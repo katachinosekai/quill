@@ -279,6 +279,7 @@ func (d *desk) startPhoneServer() error {
 	}
 	prefs.SetInt("phonePort", s.Port)
 	prefs.SetBool("phoneServe", true)
+	s.SetEvents(prefs.BoolWithFallback("phoneNotify", true))
 	p.server, p.fp = s, fp
 	d.publishPhone(true)
 	return nil
@@ -431,8 +432,15 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	}
 	d.updatePhoneRow()
 	d.phoneGistChk.OnChanged = d.toggleGist
+	notifyChk := widget.NewCheck("Send notifications to paired phones", func(on bool) {
+		d.app.Preferences().SetBool("phoneNotify", on)
+		if p.server != nil {
+			p.server.SetEvents(on)
+		}
+	})
+	notifyChk.Checked = d.app.Preferences().BoolWithFallback("phoneNotify", true)
 	head := mutedText("Phone", fontMeta)
-	return container.NewVBox(head, pairBtn, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), d.phoneGistChk, p.status)
+	return container.NewVBox(head, pairBtn, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), d.phoneGistChk, notifyChk, p.status)
 }
 
 func (d *desk) updatePhoneRow() {
