@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"image/color"
@@ -107,6 +108,7 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(h.w.Close)
 	h.d = newDesk(a, h.w, config{ProjectsRoot: projects, SessionsDir: sessions, ClaudeBin: exe})
 	h.d.planFirst = false
+	h.d.compactor = func(context.Context, string, string) (string, error) { return "Goal: test brief", nil }
 	h.d.do = func(f func()) {
 		uiMu.Lock()
 		defer uiMu.Unlock()

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -429,5 +431,68 @@ func TestUncheckAutoSplitReturnsToSingle(t *testing.T) {
 		if h.d.split() || h.d.current == nil || h.d.current.id != ids[0] {
 			t.Fatal("unchecking returns to the single view of the session open before")
 		}
+	})
+}
+
+func TestRelaunchCompactsAndTrims(t *testing.T) {
+	h := newHarness(t)
+	release := make(chan struct{})
+	var gotModel, gotSrc string
+	h.d.compactor = func(ctx context.Context, model, text string) (string, error) {
+		gotModel, gotSrc = model, text
+		<-release
+		return "Goal: ship the launcher\nNext steps: packaging", nil
+	}
+	var old, ns *deskSession
+	h.ui(func() {
+		old = h.d.createSession(h.proj, "sonnet", "default")
+		old.conv.AddUser("build the launcher")
+		old.conv.Items = append(old.conv.Items,
+			&chat.Item{Seq: 500, Kind: chat.Tool, ToolName: "Bash", Summary: "go build ./...", Result: strings.Repeat("noise ", 5000), HasResult: true},
+			&chat.Item{Seq: 501, Kind: chat.Assistant, Text: "Step 1 done, " + strings.Repeat("x", 3000)})
+		h.d.relaunchSession(old.id)
+		ns = h.d.current
+		if !ns.compacting {
+			t.Fatal("the new session waits for the compacted brief")
+		}
+		h.d.send("also add tests")
+		if len(ns.queue) != 1 {
+			t.Fatalf("messages sent while compacting are queued: %v", ns.queue)
+		}
+	})
+	close(release)
+	h.eventually("handoff sent", func() bool {
+		for _, it := range ns.conv.Items {
+			if it.Kind == chat.User && strings.Contains(it.Text, "Compacted brief") {
+				if !strings.Contains(it.Text, "Next steps: packaging") || !strings.Contains(it.Text, "Step 1 done") || strings.Contains(it.Text, strings.Repeat("x", 900)) {
+					t.Fatalf("brief plus trimmed recent messages: %q", it.Text)
+				}
+				return true
+			}
+		}
+		return false
+	})
+	if gotModel != "sonnet" || !strings.Contains(gotSrc, "[Bash] go build ./...") || strings.Contains(gotSrc, "noise") {
+		t.Fatalf("compactor gets the model and a trimmed conversation without tool output: %q %q", gotModel, gotSrc)
+	}
+}
+
+func TestRelaunchFallsBackWhenCompactFails(t *testing.T) {
+	h := newHarness(t)
+	h.d.compactor = func(context.Context, string, string) (string, error) { return "", errors.New("offline") }
+	var ns *deskSession
+	h.ui(func() {
+		old := h.d.createSession(h.proj, "default", "default")
+		old.conv.AddUser("build the launcher")
+		h.d.relaunchSession(old.id)
+		ns = h.d.current
+	})
+	h.eventually("fallback handoff", func() bool {
+		for _, it := range ns.conv.Items {
+			if it.Kind == chat.User && strings.Contains(it.Text, "Its most recent conversation") && strings.Contains(it.Text, "build the launcher") {
+				return !ns.compacting
+			}
+		}
+		return false
 	})
 }

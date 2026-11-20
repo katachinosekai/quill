@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -12,16 +16,32 @@ import (
 )
 
 const (
-	handoffItems    = 40
-	handoffItemMax  = 1500
-	handoffTotalMax = 16000
+	handoffItems     = 40
+	handoffItemMax   = 1500
+	handoffTotalMax  = 16000
+	recentItems      = 6
+	recentItemMax    = 800
+	recentTotalMax   = 4000
+	compactItemMax   = 4000
+	compactToolMax   = 200
+	compactInputMax  = 120000
+	compactTimeout   = 3 * time.Minute
+	compactSystemMsg = "You compact a Claude Code session so a fresh session can take over its work. The conversation is inside <conversation>. Write a concise hand-off brief in Markdown with these sections: Goal; Done so far; Current state; Next steps; Open questions and pending user requests; Constraints and preferences the user stated; Key files, commands and ids. Keep facts exact (paths, names, versions, commit ids). Leave out chit-chat and finished details that no longer matter. Never invent anything. Stay under 600 words. Output only the brief."
 )
 
-func handoffPrompt(oldID, path, title string, conv *chat.Conversation) string {
+func clip(text string, n int) string {
+	text = strings.TrimSpace(text)
+	if r := []rune(text); len(r) > n {
+		return string(r[:n]) + " [...]"
+	}
+	return text
+}
+
+func recentParts(conv *chat.Conversation, n, itemMax, totalMax int) []string {
 	var parts []string
 	total := 0
 	items := conv.Items
-	for i := len(items) - 1; i >= 0 && len(parts) < handoffItems; i-- {
+	for i := len(items) - 1; i >= 0 && len(parts) < n; i-- {
 		it := items[i]
 		var who string
 		switch it.Kind {
@@ -32,14 +52,11 @@ func handoffPrompt(oldID, path, title string, conv *chat.Conversation) string {
 		default:
 			continue
 		}
-		text := strings.TrimSpace(it.Text)
+		text := clip(it.Text, itemMax)
 		if text == "" {
 			continue
 		}
-		if r := []rune(text); len(r) > handoffItemMax {
-			text = string(r[:handoffItemMax]) + " [...]"
-		}
-		if total+len(text) > handoffTotalMax {
+		if total+len(text) > totalMax {
 			break
 		}
 		total += len(text)
@@ -48,13 +65,88 @@ func handoffPrompt(oldID, path, title string, conv *chat.Conversation) string {
 	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
 		parts[i], parts[j] = parts[j], parts[i]
 	}
+	return parts
+}
+
+func compactSource(conv *chat.Conversation) string {
+	var parts []string
+	total := 0
+	items := conv.Items
+	for i := len(items) - 1; i >= 0; i-- {
+		it := items[i]
+		var line string
+		switch it.Kind {
+		case chat.User:
+			line = "User: " + clip(it.Text, compactItemMax)
+		case chat.Assistant:
+			line = "Claude: " + clip(it.Text, compactItemMax)
+		case chat.Tool:
+			what := it.Summary
+			if what == "" {
+				what = string(it.Input)
+			}
+			line = "[" + it.ToolName + "] " + clip(what, compactToolMax)
+			if it.ResultError {
+				line += " (failed)"
+			}
+		case chat.Error:
+			line = "Error: " + clip(it.Text, compactToolMax)
+		default:
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if total+len(line) > compactInputMax {
+			break
+		}
+		total += len(line)
+		parts = append(parts, line)
+	}
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (d *desk) claudeCompact(ctx context.Context, model, text string) (string, error) {
+	args := []string{"-p", "--tools", "", "--max-turns", "1", "--no-session-persistence", "--output-format", "text", "--system-prompt", compactSystemMsg}
+	if model != "" && model != "default" {
+		args = append(args, "--model", model)
+	}
+	cmd := exec.CommandContext(ctx, d.cfg.ClaudeBin, args...)
+	cmd.Dir = privateDir()
+	cmd.Stdin = strings.NewReader("<conversation>\n" + text + "\n</conversation>")
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%v %s", err, clip(errb.String(), 300))
+	}
+	res := strings.TrimSpace(out.String())
+	if res == "" {
+		return "", errors.New("the summary came back empty")
+	}
+	return clip(res, 12000), nil
+}
+
+func handoffPrompt(oldID, path, title string, conv *chat.Conversation, brief string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are taking over from a previous Claude Code session named %q (session %s), which was closed so the work could continue in a fresh session.", title, oldID)
 	if path != "" {
 		fmt.Fprintf(&b, " Its full transcript is at %s if you need more detail.", path)
 	}
-	b.WriteString(" Take over its name and its job: other sessions may message you by this name, so answer them as that session would.\n\nIts most recent conversation:\n\n")
-	b.WriteString(strings.Join(parts, "\n\n"))
+	b.WriteString(" Take over its name and its job: other sessions may message you by this name, so answer them as that session would.\n\n")
+	if strings.TrimSpace(brief) != "" {
+		b.WriteString("Compacted brief of its work:\n\n")
+		b.WriteString(strings.TrimSpace(brief))
+		if parts := recentParts(conv, recentItems, recentItemMax, recentTotalMax); len(parts) > 0 {
+			b.WriteString("\n\nIts last messages (trimmed):\n\n")
+			b.WriteString(strings.Join(parts, "\n\n"))
+		}
+	} else {
+		b.WriteString("Its most recent conversation:\n\n")
+		b.WriteString(strings.Join(recentParts(conv, handoffItems, handoffItemMax, handoffTotalMax), "\n\n"))
+	}
 	b.WriteString("\n\nStart by summarizing in two or three lines where the work stands, then continue with the next step. Ask me before anything risky or irreversible.")
 	return b.String()
 }
@@ -62,7 +154,7 @@ func handoffPrompt(oldID, path, title string, conv *chat.Conversation) string {
 func (d *desk) askRelaunch(id string) {
 	title, _, _ := d.rowText(id)
 	dialog.ShowConfirm("Restart as a new session?",
-		fmt.Sprintf("“%s” will be closed and moved to Archive. A fresh session with the same name, folder, model and mode starts and takes over its job from its recent conversation.", title),
+		fmt.Sprintf("“%s” will be closed and moved to Archive. A fresh session with the same name, folder, model and mode starts. Claude compacts the old conversation into a short brief, and the new session takes over from that brief and the last few messages. The old session's history is kept.", title),
 		func(ok bool) {
 			if ok {
 				d.relaunchSession(id)
@@ -86,7 +178,6 @@ func (d *desk) relaunchSession(id string) {
 			conv = c
 		}
 	}
-	prompt := handoffPrompt(id, path, title, conv)
 	place := d.placement(id)
 	if old.running() {
 		p := old.proc
@@ -119,5 +210,24 @@ func (d *desk) relaunchSession(id string) {
 	d.saveTabs()
 	d.saveOrg()
 	d.open(ns.id)
-	d.sendTo(ns, prompt)
+	ns.compacting = true
+	d.notify(ns, fmt.Sprintf("Compacting “%s” for the hand-off. Messages you send now are queued until it's done.", title))
+	compact := d.compactor
+	if compact == nil {
+		compact = d.claudeCompact
+	}
+	src, model := compactSource(conv), old.model
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), compactTimeout)
+		brief, err := compact(ctx, model, src)
+		cancel()
+		d.do(func() {
+			ns.compacting = false
+			if err != nil {
+				brief = ""
+				d.notify(ns, "Compacting failed ("+clip(err.Error(), 200)+"); handing over the trimmed conversation instead.")
+			}
+			d.sendTo(ns, handoffPrompt(id, path, title, conv, brief))
+		})
+	}()
 }
