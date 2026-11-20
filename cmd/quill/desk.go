@@ -833,7 +833,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
 	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.autoSplitCheck()), container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
-		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
+		layout.NewSpacer())
 	d.bookRow = d.buildBookmarks()
 	d.tabRow = d.buildTabs()
 	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.bookRow, d.tabRow, widget.NewSeparator())
