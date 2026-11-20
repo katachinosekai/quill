@@ -586,6 +586,7 @@ func TestKmemRestartSavesThenDeletes(t *testing.T) {
 		return "", errors.New("unexpected")
 	}
 	var old, ns *deskSession
+	var plan *chat.Item
 	h.ui(func() {
 		old = h.d.createSession(h.proj, "sonnet", "default")
 		h.d.org.Titles[old.id] = "PZ Launcher"
@@ -602,6 +603,14 @@ func TestKmemRestartSavesThenDeletes(t *testing.T) {
 		if perm.PermState != chat.PermAutoAllowed {
 			t.Fatal("kmem commands run without a plan round while saving the handoff")
 		}
+		plan = old.conv.AddPlan()
+		h.d.kmemAfterTurn(old)
+	})
+	h.eventually("a turn that ends asking for plan approval keeps the restart waiting", func() bool {
+		return old.kmemSave != nil && old.kmemSave.prompt == "" && strings.Contains(old.conv.Items[len(old.conv.Items)-1].Text, "approve the plan")
+	})
+	h.ui(func() {
+		plan.PermState = chat.PermCancelled
 		h.d.kmemAfterTurn(old)
 	})
 	h.eventually("an unsaved handoff cancels the restart", func() bool {
