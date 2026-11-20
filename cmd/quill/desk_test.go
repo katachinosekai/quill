@@ -1065,8 +1065,12 @@ func TestNewSessionInstant(t *testing.T) {
 		a := h.d.current
 		h.d.newSessionDialog()
 		b := h.d.current
-		if len(h.w.Canvas().Overlays().List()) != 0 {
-			t.Fatal("new session must not open a dialog")
+		ovs := h.w.Canvas().Overlays().List()
+		if len(ovs) != 1 {
+			t.Fatalf("only one name field, no dialog: %d overlays", len(ovs))
+		}
+		if _, ok := ovs[0].(*dropdown); !ok {
+			t.Fatalf("the name field is a drop-down, not a dialog: %T", ovs[0])
 		}
 		if h.d.org.Titles[a.id] != "New session 1" || h.d.org.Titles[b.id] != "New session 2" {
 			t.Fatalf("names: %q %q", h.d.org.Titles[a.id], h.d.org.Titles[b.id])
