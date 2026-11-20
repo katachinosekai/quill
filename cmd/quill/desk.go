@@ -134,19 +134,22 @@ type sideRow struct {
 }
 
 type desk struct {
-	compactor func(ctx context.Context, model, text string) (string, error)
-	app       fyne.App
-	win       fyne.Window
-	cfg       config
-	scanner   *transcript.Scanner
-	finder    *live.Finder
-	center    bool
-	sessions  map[string]*deskSession
-	infos     map[string]transcript.Info
-	order     []transcript.Info
-	terms     map[string]live.Process
-	current   *deskSession
-	ownPIDs   sync.Map
+	notifier   *notifier
+	notifySink func(sid, title, body string)
+	foreground bool
+	compactor  func(ctx context.Context, model, text string) (string, error)
+	app        fyne.App
+	win        fyne.Window
+	cfg        config
+	scanner    *transcript.Scanner
+	finder     *live.Finder
+	center     bool
+	sessions   map[string]*deskSession
+	infos      map[string]transcript.Info
+	order      []transcript.Info
+	terms      map[string]live.Process
+	current    *deskSession
+	ownPIDs    sync.Map
 
 	rows           []sideRow
 	list           *widget.List
@@ -372,7 +375,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	top := container.NewVBox(padTop(40), newBtn, d.search)
 	updChk := widget.NewCheck("Check for updates (signed releases only)", func(on bool) { d.app.Preferences().SetBool("checkUpdates", on) })
 	updChk.Checked = d.app.Preferences().BoolWithFallback("checkUpdates", true)
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, updChk, rulesBtn, alignRow, d.buildPhoneRow(), legend)
+	notifyChk := widget.NewCheck("Notify me about approvals and finished sessions", func(on bool) { d.app.Preferences().SetBool("desktopNotify", on) })
+	notifyChk.Checked = d.notifyOn()
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, updChk, notifyChk, rulesBtn, alignRow, d.buildPhoneRow(), legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -1244,6 +1249,7 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
 	items = append(items, d.planGate(s, ev, items)...)
+	d.attention(s, ev, items)
 	switch ev.Type {
 	case "control_request", "control_cancel_request", "result":
 		d.keepSession(s)
