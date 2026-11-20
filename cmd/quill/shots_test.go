@@ -182,6 +182,7 @@ func TestScreenshots(t *testing.T) {
 
 	var s *deskSession
 	h.ui(func() {
+		h.d.center = true
 		s = h.d.createSession(h.proj, "haiku", "default")
 		h.d.send("demo")
 	})

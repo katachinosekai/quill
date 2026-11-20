@@ -926,6 +926,7 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 	qs := protocol.ParseQuestions(it.Input)
 	var parts []fyne.CanvasObject
 	head := widget.NewLabel("Claude is asking")
+	head.Alignment = v.align()
 	head.TextStyle = fyne.TextStyle{Bold: true}
 	parts = append(parts, head)
 	if it.PermState != chat.PermPending {
@@ -997,13 +998,13 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 		}
 		v.d.answerQuestions(v.s, it, answers)
 	})
-	send.Importance = widget.HighImportance
-	skip := widget.NewButtonWithIcon("Skip", theme.CancelIcon(), func() { v.d.answer(v.s, it, protocol.Deny) })
-	if !v.d.canAnswer(v.s) {
+	ok := v.d.canAnswer(v.s)
+	if !ok {
 		send.Disable()
-		skip.Disable()
 	}
-	parts = append(parts, container.NewHBox(send, skip))
+	sendG := glowWrap(send, colIdle, ok)
+	skip := glowButton("Skip", theme.CancelIcon(), colError, ok, func() { v.d.answer(v.s, it, protocol.Deny) })
+	parts = append(parts, v.buttonRow(sendG, skip))
 	return questionCard(parts, true)
 }
 
@@ -1024,31 +1025,28 @@ func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
 		return v.renderQuestions(it)
 	}
 	title := widget.NewLabel("Allow " + it.ToolName + "?")
+	title.Alignment = v.align()
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	parts := []fyne.CanvasObject{title}
 	if it.Request != nil && it.Request.DecisionReason != "" {
 		r := widget.NewLabel(it.Request.DecisionReason)
 		r.Wrapping = fyne.TextWrapWord
+		r.Alignment = v.align()
 		parts = append(parts, r)
 	}
 	if it.Summary != "" {
 		s := widget.NewLabel(it.Summary)
 		s.Wrapping = fyne.TextWrapWord
+		s.Alignment = v.align()
 		parts = append(parts, s)
 	}
 	parts = append(parts, permDetail(v, it)...)
 	if it.PermState == chat.PermPending {
-		allow := widget.NewButtonWithIcon("Allow", theme.ConfirmIcon(), func() { v.d.answer(v.s, it, protocol.Allow) })
-		allow.Importance = widget.HighImportance
-		always := widget.NewButton("Allow always (this session)", func() { v.d.answer(v.s, it, protocol.AllowAlways) })
-		deny := widget.NewButtonWithIcon("Deny", theme.CancelIcon(), func() { v.d.answer(v.s, it, protocol.Deny) })
-		deny.Importance = widget.DangerImportance
-		if !v.d.canAnswer(v.s) {
-			allow.Disable()
-			always.Disable()
-			deny.Disable()
-		}
-		parts = append(parts, container.NewHBox(allow, always, deny))
+		ok := v.d.canAnswer(v.s)
+		allow := glowButton("Allow", theme.ConfirmIcon(), colIdle, ok, func() { v.d.answer(v.s, it, protocol.Allow) })
+		always := glowButton("Allow always (this session)", nil, colAccent, ok, func() { v.d.answer(v.s, it, protocol.AllowAlways) })
+		deny := glowButton("Deny", theme.CancelIcon(), colError, ok, func() { v.d.answer(v.s, it, protocol.Deny) })
+		parts = append(parts, v.buttonRow(allow, always, deny))
 	} else {
 		parts = append(parts, mutedText(permStateText(it.PermState), fontBody))
 	}
@@ -1436,6 +1434,7 @@ func centerLists(segs []widget.RichTextSegment, indent string) []widget.RichText
 
 func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	title := widget.NewLabel("Approve this plan?")
+	title.Alignment = v.align()
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	msg := widget.NewLabel("Approving runs all of it: every command and change for this request is approved automatically until Claude finishes.")
 	msg.Wrapping = fyne.TextWrapWord
@@ -1449,14 +1448,9 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	parts = append(parts, msg)
 	border := colAccent
 	if it.PermState == chat.PermPending {
-		run := widget.NewButtonWithIcon("Approve plan & run all", theme.ConfirmIcon(), func() { v.d.answerPlan(v.s, it, true) })
-		run.Importance = widget.HighImportance
-		no := widget.NewButtonWithIcon("Don't run", theme.CancelIcon(), func() { v.d.answerPlan(v.s, it, false) })
-		no.Importance = widget.DangerImportance
-		if !v.d.canAnswer(v.s) {
-			run.Disable()
-		}
-		parts = append(parts, container.NewHBox(run, no))
+		run := glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, v.d.canAnswer(v.s), func() { v.d.answerPlan(v.s, it, true) })
+		no := glowButton("Don't run", theme.CancelIcon(), colError, true, func() { v.d.answerPlan(v.s, it, false) })
+		parts = append(parts, v.buttonRow(run, no))
 	} else {
 		text := "Not run"
 		switch it.PermState {
@@ -1551,4 +1545,46 @@ func (v *chatView) reflow() {
 	relayout(v.box)
 	relayout(v.inner)
 	v.scroll.Base.Refresh()
+}
+
+func (v *chatView) buttonRow(btns ...fyne.CanvasObject) fyne.CanvasObject {
+	var objs []fyne.CanvasObject
+	for i, b := range btns {
+		if i > 0 {
+			objs = append(objs, padLeft(6))
+		}
+		objs = append(objs, b)
+	}
+	row := container.NewHBox(objs...)
+	if v.d.center {
+		return container.NewCenter(row)
+	}
+	return row
+}
+
+func glowButton(label string, icon fyne.Resource, tint color.Color, enabled bool, tap func()) fyne.CanvasObject {
+	b := widget.NewButtonWithIcon(label, icon, tap)
+	b.Importance = widget.LowImportance
+	if !enabled {
+		b.Disable()
+	}
+	return glowWrap(b, tint, enabled)
+}
+
+func glowWrap(b *widget.Button, tint color.Color, enabled bool) fyne.CanvasObject {
+	b.Importance = widget.LowImportance
+	b.Refresh()
+	a := 1.0
+	if !enabled {
+		a = 0.35
+	}
+	halo := canvas.NewRectangle(color.Transparent)
+	halo.CornerRadius = 12
+	halo.StrokeColor = fade(tint, 0.22*a)
+	halo.StrokeWidth = 5
+	face := canvas.NewRectangle(fade(tint, 0.16*a))
+	face.CornerRadius = 9
+	face.StrokeColor = fade(tint, 0.75*a)
+	face.StrokeWidth = 1.5
+	return container.NewStack(halo, container.New(layout.NewCustomPaddedLayout(2, 2, 2, 2), container.NewStack(face, b)))
 }
