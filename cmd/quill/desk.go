@@ -193,6 +193,10 @@ type desk struct {
 	bookRow        fyne.CanvasObject
 	tabRow         fyne.CanvasObject
 	settingsBox    *fyne.Container
+	phoneSync      *phoneSync
+	phoneFileBtn   *widget.Button
+	phoneFileOff   *widget.Button
+	phoneGistChk   *widget.Check
 	settingsSlot   *fyne.Container
 	settingsBtn    *widget.Button
 	settingsPop    *widget.PopUp
@@ -279,6 +283,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 	for _, id := range a.Preferences().StringList("createdSessions") {
 		d.created[id] = true
 	}
+	d.initPhone()
 	return d
 }
 
@@ -357,7 +362,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, legend)
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, d.buildPhoneRow(), legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -684,6 +689,7 @@ func (d *desk) rebuildRows() {
 		addGroup("auto", d.folderTitle("auto", "Created by Claude"), auto)
 		d.syncBookmarks()
 		d.syncTabs()
+		d.phoneChanged()
 	}
 	var rows []sideRow
 	if len(active) > 0 {
@@ -1579,6 +1585,7 @@ func (d *desk) autoRemote(s *deskSession) {
 				return
 			}
 			s.rcOn, s.rcURL = true, info.SessionURL
+			d.rememberRC(s.id, info.SessionURL)
 			d.syncRCNames()
 			if d.current == s {
 				d.updateChrome()
@@ -1611,6 +1618,9 @@ func (d *desk) setRemoteControl(s *deskSession, on bool) {
 			} else {
 				s.rcOn = on
 				s.rcURL = info.SessionURL
+				if on {
+					d.rememberRC(s.id, info.SessionURL)
+				}
 				s.rcName = ""
 				d.syncRCNames()
 				if on {

@@ -55,7 +55,19 @@ The header shows status only ("● Remote Control on" / "Remote Control off" / "
 
 Remote Control names carry Quill's folder (rcnames.go, user 2026-11-19, for the Android app in Projects/quill-android). For every running session with Remote Control on, Quill sends control_request `{subtype:"rename_session", title:"<Folder> · <Title>", source:"host"}`. It does this after RC turns on and on every `rebuildRows` when the name changed (move, rename, automatic demotion, folder rename). `rowPlace` records which top folder each session landed in. The CLI relays the title to claude.ai (verified for real: both names showed) and also appends a `custom-title` record to the transcript, which the user accepted. It counts as a user rename, so the CLI stops auto-titling that session, and `claude --resume` in a terminal shows the prefixed title. That is why sessions are only renamed once they have a real title (`transcript.Info.Named`: custom/ai/summary title, or a Quill rename); prompt-only sessions wait for their ai-title. `sideOrg.RC[id] = {sent, base}` is saved before sending, and when a transcript title equals `sent`, Quill shows `base` instead (`unRCTitle` in `refresh`), so its sidebar never shows the prefix and prefixes never stack. A different title (renamed on claude.ai) is taken as the new base. Failed renames are not retried until the name changes.
 
-## Sessions open in a terminal (takeover)
+## Phone folder sync (phonesync.go, internal/folders; user 2026-11-19)
+
+Quill for Android (Projects/quill-android) groups sessions by Quill's folders. Since e0d62ee, Remote Control names are plain titles, so the folders travel in a separate file instead:
+`{"version":1,"updatedMs","updated","host","order":[folder titles in d.groups order],"sessions":{"session_<claude.ai id>":"<folder title>"}}`.
+- The claude.ai ids come from Remote Control responses (`session_url`): `rememberRC` in autoRemote/setRemoteControl stores rcID → Quill session id in pref `phoneRC` (cap 4000). Every rcID a session ever had keeps mapping to its current folder.
+- `phoneChanged` (end of rebuildRows) republishes with a 1 s debounce, only when the content changed (`File.SameContent`), so updatedMs only moves forward on real changes.
+- Three outputs, combined by the app (newest updatedMs wins, last copy cached):
+  - Local network: Settings → Phone → "Pair phone..." starts `folders.Server`. It is HTTPS with a self-signed ECDSA cert in ~/.config/quill/phone (QUILL_PHONE_DIR), and the phone pins its SHA-256 fingerprint. Only `GET /folders.json` with header `X-Quill-Key` (32 random bytes, constant-time compare) is answered, other requests get 403/404. The random port 20000–60000 is saved in `phonePort` (Fedora's FedoraWorkstation zone allows 1025–65535). It is off until paired (`phoneServe`). The dialog shows a QR code (rsc.io/qr, BSD, packaged as LICENSE.qr) of `quillpair://pair?h=<LAN IPs>,<host>.local&p&k&fp&f&g&n`, with Copy pairing link, New key (unpairs) and Stop sharing.
+  - Synced file: "Write folders file to..." writes quill-folders.json atomically (temp + rename) into a folder the user syncs (Syncthing, Nextcloud, Drive, ...). Pref `phoneDir`.
+  - Secret gist: "Publish to a secret gist" (only shown when `gh` is on PATH; QUILL_GH overrides) runs `gh gist create`, then `gh gist edit <id> --filename quill-folders.json <file>` at most once a minute. Pref `phoneGist` = owner/id, included in the pairing link.
+- Test: TestPhoneSyncFileServerAndGist (fake gh script, real TLS server, pinned fingerprint, moves update the file).
+
+
 
 `~/.claude/sessions/<pid>.json` (pid, sessionId, cwd, procStart, kind, status). A session counts as open elsewhere when that pid is alive, not a zombie, and its `/proc/<pid>/stat` start time equals procStart; the app's own children are excluded. Exiting an interactive CLI session can leave it held by a background process (`kind:"bg"`, `claude bg-spare`), which is why "exited in Konsole, still blocked in Quill" happened.
 

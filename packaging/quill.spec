@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        MIT AND BSD-3-Clause AND (MIT-0 OR Unlicense)
@@ -36,6 +36,7 @@ claude CLI to be installed separately.
 cp third_party/fyne/LICENSE LICENSE.fyne
 cp third_party/whisper.cpp/LICENSE LICENSE.whisper.cpp
 cp vendor/github.com/gen2brain/malgo/LICENSE LICENSE.malgo
+cp vendor/rsc.io/qr/LICENSE LICENSE.qr
 
 %build
 export GOFLAGS="-mod=vendor -trimpath"
@@ -56,7 +57,7 @@ install -Dm644 cmd/quill/icon.svg %{buildroot}%{_datadir}/icons/hicolor/scalable
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinosekai.quill.desktop
 
 %files
-%license LICENSE LICENSE.fyne LICENSE.whisper.cpp LICENSE.malgo
+%license LICENSE LICENSE.fyne LICENSE.whisper.cpp LICENSE.malgo LICENSE.qr
 %doc README.md
 %{_bindir}/quill
 %{_libexecdir}/quill/
@@ -65,5 +66,8 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
 
 %changelog
+* Thu Nov 19 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.1-1
+- Phone folder sync for Quill for Android (pairing QR, local network, synced file, secret gist); tabs, split view and layout updates
+
 * Thu Nov 19 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.0-1
 - First packaged release
