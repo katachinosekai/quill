@@ -81,8 +81,9 @@ func (d *desk) buildTabs() fyne.CanvasObject {
 	d.applyTabCentering()
 	newTab := widget.NewButtonWithIcon("", theme.ContentAddIcon(), d.newSessionDialog)
 	newTab.Importance = widget.LowImportance
-	scroll := container.NewHScroll(d.tabCenter)
-	return container.NewBorder(nil, nil, nil, newTab, scroll)
+	d.strip.plus = newTab
+	d.strip.setChips(nil)
+	return container.NewHScroll(d.tabCenter)
 }
 
 type tabChip struct {

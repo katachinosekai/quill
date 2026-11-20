@@ -81,3 +81,17 @@ func TestCtrlTOpensNewSession(t *testing.T) {
 		}
 	})
 }
+
+func TestPlusFollowsLastTab(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.newSessionDialog()
+		h.d.newSessionDialog()
+		h.d.strip.box.Refresh()
+		last := h.d.tabChips[h.d.tabs[len(h.d.tabs)-1]]
+		gap := h.d.strip.plus.Position().X - (last.Position().X + last.Size().Width)
+		if gap < 0 || gap > tabGap+0.5 {
+			t.Fatalf("+ should sit right after the last tab with tab spacing, gap %.1f", gap)
+		}
+	})
+}

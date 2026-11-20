@@ -18,6 +18,7 @@ type tabStrip struct {
 	chips  []*tabChip
 	ids    map[*tabChip]string
 	cur    map[*tabChip]float32
+	plus   fyne.CanvasObject
 	held   *tabChip
 	heldID string
 	grab   float32
@@ -32,9 +33,12 @@ func (t *tabStrip) setChips(chips []*tabChip) {
 	for id, c := range t.d.tabChips {
 		t.ids[c] = id
 	}
-	objs := make([]fyne.CanvasObject, len(chips))
-	for i, c := range chips {
-		objs[i] = c
+	objs := make([]fyne.CanvasObject, 0, len(chips)+1)
+	for _, c := range chips {
+		objs = append(objs, c)
+	}
+	if t.plus != nil {
+		objs = append(objs, t.plus)
 	}
 	t.box.Objects = objs
 	t.box.Refresh()
@@ -92,8 +96,26 @@ func (t *tabStrip) MinSize(objs []fyne.CanvasObject) fyne.Size {
 	return fyne.NewSize(w, h)
 }
 
+func (t *tabStrip) end() float32 {
+	x := float32(0)
+	for _, c := range t.chips {
+		x += c.MinSize().Width + tabGap
+	}
+	return x
+}
+
+func (t *tabStrip) placePlus(size fyne.Size) {
+	if t.plus == nil {
+		return
+	}
+	m := t.plus.MinSize()
+	t.plus.Resize(m)
+	t.plus.Move(fyne.NewPos(t.end(), (size.Height-m.Height)/2))
+}
+
 func (t *tabStrip) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	tg := t.targets()
+	t.placePlus(size)
 	for _, o := range objs {
 		c, ok := o.(*tabChip)
 		if !ok {
