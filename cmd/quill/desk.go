@@ -229,6 +229,7 @@ type desk struct {
 	collapseChips  bool
 	hideChips      bool
 	updBtn         *widget.Button
+	sizesCard      fyne.CanvasObject
 	updRelease     *updater.Release
 	rules          sortRules
 	centerAll      *widget.Check
@@ -896,10 +897,15 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
 	toolbar := windowCentered(d.inputWidth, d.sidebarWidth, d.viewToolbar())
-	bottom := container.NewPadded(container.NewVBox(toolbar, d.bottomBox))
+	d.sizesCard = d.sizePanel()
+	cornerCard := container.New(layout.NewGridWrapLayout(fyne.NewSize(300, d.sizesCard.MinSize().Height)), d.sizesCard)
+	corner := container.NewVBox(layout.NewSpacer(), container.NewHBox(layout.NewSpacer(), cornerCard))
+	bottom := container.NewPadded(container.New(cornerLayout{}, container.NewVBox(toolbar, d.bottomBox), corner))
 	d.usage = newUsagePanel(d)
 	d.chatHost = container.NewStack(d.chat.root)
-	d.usageBox = container.New(usageLayout{d}, d.chatHost, d.usage.root, d.sizePanel())
+	spare := canvas.NewRectangle(color.Transparent)
+	spare.Hide()
+	d.usageBox = container.New(usageLayout{d}, d.chatHost, d.usage.root, spare)
 	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, d.usageBox)
 	d.updateChrome()
 	return d.mainPane

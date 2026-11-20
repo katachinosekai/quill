@@ -281,8 +281,10 @@ func (d *desk) afterSplit() {
 	if d.bottomBox != nil {
 		if d.split() {
 			d.bottomBox.Hide()
+			d.sizesCard.Hide()
 		} else {
 			d.bottomBox.Show()
+			d.sizesCard.Show()
 		}
 	}
 	d.syncPanes()
