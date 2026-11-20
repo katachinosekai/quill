@@ -157,6 +157,7 @@ func (d *desk) sessionMenu(id string, at fyne.Position) {
 		fyne.NewMenuItem("Resume", func() { d.resumeSession(id) }),
 		fyne.NewMenuItem("Open in split view", func() { d.openInSplit(id) }),
 		fyne.NewMenuItem("End session", func() { d.endSession(id) }),
+		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
 		fyne.NewMenuItem("Delete session...", func() { d.askDelete(id) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Set active", move(placeActive)),

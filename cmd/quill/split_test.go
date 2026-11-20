@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -137,5 +138,29 @@ func TestLayoutModes(t *testing.T) {
 		if !h.d.sideOff || !h.d.tabRow.Visible() {
 			t.Fatal("back to horizontal")
 		}
+	})
+}
+
+func TestRelaunchTakesOverNameAndJob(t *testing.T) {
+	h := newHarness(t)
+	var old, ns *deskSession
+	h.ui(func() {
+		old = h.d.createSession(h.proj, "sonnet", "default")
+		old.conv.AddUser("build the launcher")
+		old.conv.Items = append(old.conv.Items, &chat.Item{Seq: 500, Kind: chat.Assistant, Text: "Step 1 done, next is packaging"})
+		h.d.org.Titles[old.id] = "PZ Launcher"
+		h.d.relaunchSession(old.id)
+		ns = h.d.current
+		if ns == old || h.d.org.Titles[ns.id] != "PZ Launcher" || ns.model != "sonnet" || h.d.org.Place[old.id] != placeArchive {
+			t.Fatalf("new session takes the name, keeps the model, old one is archived: same=%v title=%q model=%q place=%q", ns == old, h.d.org.Titles[ns.id], ns.model, h.d.org.Place[old.id])
+		}
+	})
+	h.eventually("handoff sent", func() bool {
+		for _, it := range ns.conv.Items {
+			if it.Kind == chat.User && strings.Contains(it.Text, "taking over") && strings.Contains(it.Text, "next is packaging") {
+				return true
+			}
+		}
+		return false
 	})
 }

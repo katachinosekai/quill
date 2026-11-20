@@ -510,7 +510,9 @@ func (d *desk) rowText(id string) (string, string, status) {
 	if s != nil {
 		st = s.status()
 		if !ok {
-			title = s.title
+			if d.org.Titles[id] == "" {
+				title = s.title
+			}
 			last = s.created
 		}
 		if s.loaded && countMessages(s.conv) > msgs {
