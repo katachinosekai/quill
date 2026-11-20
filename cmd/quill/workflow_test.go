@@ -69,3 +69,15 @@ func TestFeatureWorkflow(t *testing.T) {
 		check("resize")
 	})
 }
+
+func TestCtrlTOpensNewSession(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.setupShortcuts()
+		before := len(h.d.sessions)
+		h.d.input.TypedShortcut(newTabShortcut)
+		if len(h.d.sessions) != before+1 || len(h.d.tabs) == 0 || h.d.tabs[len(h.d.tabs)-1] != h.d.current.id {
+			t.Fatal("Ctrl+T in the message box opens a new session in a new tab")
+		}
+	})
+}

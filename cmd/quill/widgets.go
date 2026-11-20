@@ -72,6 +72,14 @@ type sendEntry struct {
 	onSendNow  func(string)
 	ctrl       bool
 	menuOpen   func() bool
+	onShortcut func(fyne.Shortcut) bool
+}
+
+func (e *sendEntry) TypedShortcut(s fyne.Shortcut) {
+	if e.onShortcut != nil && e.onShortcut(s) {
+		return
+	}
+	e.Entry.TypedShortcut(s)
 }
 
 func (e *sendEntry) setSuggestion(s string) {

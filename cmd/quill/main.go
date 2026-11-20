@@ -92,6 +92,7 @@ func runWindowWith(claudeBin, sock string) int {
 	if !d.setupBackground() {
 		startHidden = false
 	}
+	d.setupShortcuts()
 	d.listenInstance(sock)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
