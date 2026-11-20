@@ -2378,11 +2378,7 @@ func (d *desk) approveByText(s *deskSession) {
 			d.chatFor(s, []*chat.Item{it})
 		}
 	}
-	if s.conv.Busy || s.proc != nil && s.proc.Busy() {
-		s.runAllNext = true
-		return
-	}
-	s.runAll = true
+	s.runAll, s.runAllNext = true, false
 }
 
 func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
