@@ -82,6 +82,8 @@ type deskSession struct {
 	runAll      bool
 	runAllNext  bool
 	queue       []string
+	lastSent    string
+	inTurn      bool
 	restoreMode string
 	takeover    bool
 	loading     bool
@@ -1422,10 +1424,12 @@ func (d *desk) sendTo(s *deskSession, text string) {
 	if d.planFirst {
 		if isApproval(text) {
 			d.approveByText(s)
-		} else if text != planGoMessage {
+		} else if text != planGoMessage && !s.inTurn {
 			s.runAll, s.runAllNext = false, false
 		}
 	}
+	s.lastSent = text
+	s.inTurn = true
 	it := s.conv.AddUser(text)
 	if s.title == "" {
 		s.title = oneLine(text, 60)
@@ -1464,7 +1468,20 @@ func (d *desk) chatFor(s *deskSession, items []*chat.Item) {
 
 func (d *desk) sendNow(text string) {
 	s := d.current
-	if s == nil || strings.TrimSpace(text) == "" {
+	if s == nil {
+		return
+	}
+	if len(s.queue) > 0 {
+		parts := append([]string{}, s.queue...)
+		if strings.TrimSpace(text) != "" {
+			parts = append(parts, text)
+		}
+		s.queue = nil
+		d.syncQueue(s)
+		d.clearInputFor(s, text)
+		text = strings.Join(parts, "\n\n")
+	}
+	if strings.TrimSpace(text) == "" {
 		return
 	}
 	p := s.proc
@@ -2093,11 +2110,13 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			if isApproval(it.Text) || it.Text == planGoMessage {
 				d.approveNow(s)
-			} else {
+			} else if !s.inTurn {
 				s.runAll, s.runAllNext = false, false
 			}
+			s.inTurn = true
 		}
 	case ev.Type == "result":
+		s.inTurn = false
 		if s.restoreMode != "" {
 			mode := s.restoreMode
 			s.restoreMode = ""
@@ -2283,19 +2302,33 @@ var approvalWords = map[string]bool{
 	"approve plan": true, "approve it": true, "go for it": true, "ship it": true,
 }
 
+var approvalStarts = []string{"yes", "yeah", "yep", "yup", "ok", "okay", "sure", "approve", "approved", "go ahead", "go for it", "do it", "proceed", "lgtm", "sounds good", "run it", "ship it", "please do"}
+
+var notApproval = []string{"but", "don't", "dont", "do not", "not ", "no ", "wait", "instead", "hold", "stop", "except", "change", "first", "before", "?"}
+
 func isApproval(text string) bool {
 	t := strings.ToLower(strings.TrimSpace(text))
-	t = strings.TrimRight(t, ".!? ")
-	if len(t) > 30 {
+	t = strings.TrimRight(t, ".! ")
+	if t == "" || len(t) > 200 {
 		return false
 	}
 	if approvalWords[t] {
 		return true
 	}
-	for _, p := range []string{"yes ", "yes, ", "ok ", "okay ", "sure ", "go ahead ", "do it "} {
-		if strings.HasPrefix(t, p) && approvalWords[strings.TrimSpace(strings.TrimPrefix(t, p))] {
-			return true
+	for _, w := range approvalStarts {
+		if !strings.HasPrefix(t, w) {
+			continue
 		}
+		rest := t[len(w):]
+		if rest != "" && !strings.ContainsAny(rest[:1], " ,:;-—") {
+			continue
+		}
+		for _, n := range notApproval {
+			if strings.Contains(" "+rest+" ", n) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }

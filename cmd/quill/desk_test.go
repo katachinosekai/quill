@@ -1436,3 +1436,31 @@ func TestActiveOrderStaysFixed(t *testing.T) {
 		}
 	})
 }
+
+func TestPlanApprovalSymptoms(t *testing.T) {
+	for in, want := range map[string]bool{
+		"approve": true, "Approved": true, "yes": true, "yes, use option B": true, "approved - go with the second one": true,
+		"yes but skip step 2": false, "yes, wait for the build": false, "ok?": false, "yesterday's log": false,
+		"don't run it": false, "stuck": false, "run emulator in background": false,
+	} {
+		if isApproval(in) != want {
+			t.Errorf("isApproval(%q) = %v, want %v", in, !want, want)
+		}
+	}
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.planFirst = true
+		s := h.d.createSession(h.proj, "default", "default")
+		s.runAll = true
+		s.inTurn = true
+		h.d.planGate(s, &protocol.Event{Type: "user"}, []*chat.Item{{Kind: chat.User, Text: "stuck?"}})
+		if !s.runAll {
+			t.Fatal("a message sent mid-turn must not reset the approval")
+		}
+		h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
+		h.d.planGate(s, &protocol.Event{Type: "user"}, []*chat.Item{{Kind: chat.User, Text: "now a brand new task"}})
+		if s.runAll {
+			t.Fatal("a new request after the turn ends needs a new plan")
+		}
+	})
+}
