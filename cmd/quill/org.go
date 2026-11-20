@@ -34,6 +34,7 @@ type sideOrg struct {
 	Names   map[string]string  `json:"names"`
 	Folders []orgFolder        `json:"folders"`
 	RC      map[string]rcTitle `json:"rc,omitempty"`
+	Kmem    map[string]string  `json:"kmem,omitempty"`
 }
 
 func (d *desk) loadOrg() {
@@ -49,6 +50,9 @@ func (d *desk) loadOrg() {
 	}
 	if d.org.Names == nil {
 		d.org.Names = map[string]string{}
+	}
+	if d.org.Kmem == nil {
+		d.org.Kmem = map[string]string{}
 	}
 	for id, place := range d.org.Place {
 		var n int
@@ -159,6 +163,7 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 		fyne.NewMenuItem("Open in split view", func() { d.openInSplit(id) }),
 		fyne.NewMenuItem("End session", func() { d.endSession(id) }),
 		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
+		fyne.NewMenuItem("kmem name...", func() { d.askKmemName(id) }),
 		fyne.NewMenuItem("Delete session...", func() { d.askDelete(id) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Set active", move(placeActive)),

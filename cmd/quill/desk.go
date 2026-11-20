@@ -89,6 +89,8 @@ type deskSession struct {
 	retryCmd    string
 	retryRules  []protocol.Rule
 	retryDest   string
+	kmemSave    *kmemSave
+	kmemNew     bool
 	limitSeen   string
 	compacting  bool
 	takeover    bool
@@ -145,6 +147,8 @@ type desk struct {
 	notifySink func(sid, title, body string)
 	foreground bool
 	compactor  func(ctx context.Context, model, text string) (string, error)
+	kmemRun    func(prog string, args ...string) (string, error)
+	kmemOff    bool
 	app        fyne.App
 	win        fyne.Window
 	cfg        config
@@ -576,6 +580,9 @@ func (d *desk) rowText(id string) (string, string, status) {
 	}
 	if st != stNone {
 		meta += "  ·  " + st.String()
+	}
+	if k := d.org.Kmem[id]; k != "" {
+		meta += "  ·  kmem " + k
 	}
 	return title, meta, st
 }
@@ -1270,6 +1277,9 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
 	items = append(items, d.planGate(s, ev, items)...)
+	if ev.Type == "result" {
+		d.kmemAfterTurn(s)
+	}
 	d.checkLimitMessage(s, items)
 	d.attention(s, ev, items)
 	switch ev.Type {
@@ -1460,6 +1470,12 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start claude: " + err.Error())})
 		d.updateChrome()
 		return
+	}
+	if s.kmemNew {
+		s.kmemNew = false
+		if k := d.org.Kmem[s.id]; k != "" {
+			text = kmemIntro(k) + text
+		}
 	}
 	if d.planFirst {
 		if approvesPlan(s, text) && text != planGoMessage {
@@ -2142,7 +2158,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			return nil
 		}
-		if s.runAll {
+		if s.runAll || d.kmemSaveAllowed(s, it.Request) {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}

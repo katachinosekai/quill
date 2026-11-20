@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
@@ -14,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 func TestSplitView(t *testing.T) {
@@ -494,5 +496,138 @@ func TestRelaunchFallsBackWhenCompactFails(t *testing.T) {
 			}
 		}
 		return false
+	})
+}
+
+func TestKmemNamesAndParsing(t *testing.T) {
+	hs := parseHandoffList("pz-lock-audit  8 items, saved 2026-11-20T12:45:55-08:00\nquill  4 items, saved 2026-11-20T12:16:10-08:00\nnoise line\n")
+	if len(hs) != 2 || hs[1].Name != "quill" || hs[1].Saved.Hour() != 12 {
+		t.Fatalf("handoff list parses: %+v", hs)
+	}
+	taken := func(n string) bool { return n == "pz-launcher" || n == "pz-launcher-2" }
+	if got := kmemSlug("PZ Launcher!", taken); got != "pz-launcher-3" {
+		t.Fatalf("slug avoids names in use: %q", got)
+	}
+	if got := kmemSlug("  ", func(string) bool { return false }); got != "session" {
+		t.Fatalf("empty title slug: %q", got)
+	}
+	if choiceHandoff(kmemChoices(hs)[2]) != "quill" || choiceHandoff(kmemNewChoice) != "" {
+		t.Fatal("resume choices map back to handoff names")
+	}
+}
+
+func TestKmemNewSessionAndResume(t *testing.T) {
+	h := newHarness(t)
+	var calls []string
+	h.d.kmemOff = false
+	h.d.kmemRun = func(prog string, args ...string) (string, error) {
+		calls = append(calls, prog+" "+strings.Join(args, " "))
+		switch {
+		case prog == "kmem" && len(args) > 1 && args[1] == "list":
+			return "quill  4 items, saved 2026-11-20T12:16:10-08:00\n", nil
+		case prog == "kmem-resume":
+			return "RESUME PROMPT for " + args[0], nil
+		}
+		return "", errors.New("unexpected")
+	}
+	var fresh, resumed *deskSession
+	h.ui(func() {
+		fresh = h.d.createSession(h.proj, "default", "default")
+		h.d.applyKmemChoice(fresh, kmemNewChoice, "Quill")
+		if h.d.org.Kmem[fresh.id] != "quill" || !fresh.kmemNew {
+			t.Fatalf("new kmem takes the session title as name: %q", h.d.org.Kmem[fresh.id])
+		}
+	})
+	h.eventually("a new kmem name never reuses an existing handoff", func() bool {
+		return h.d.org.Kmem[fresh.id] == "quill-2"
+	})
+	h.ui(func() {
+		h.d.sendTo(fresh, "hello")
+		if it := fresh.conv.Items[len(fresh.conv.Items)-1]; !strings.Contains(it.Text, `kmem name is "quill-2"`) || !strings.HasSuffix(it.Text, "hello") {
+			t.Fatalf("the first message tells Claude its kmem name: %q", it.Text)
+		}
+		h.d.sendTo(fresh, "again")
+		if it := fresh.conv.Items[len(fresh.conv.Items)-1]; it.Text != "again" {
+			t.Fatal("only the first message carries the intro")
+		}
+		if _, meta, _ := h.d.rowText(fresh.id); !strings.Contains(meta, "kmem quill-2") {
+			t.Fatalf("the sidebar shows the kmem name: %q", meta)
+		}
+		resumed = h.d.createSession(h.proj, "default", "default")
+		h.d.applyKmemChoice(resumed, kmemChoices(h.d.kmemHandoffs())[1], "quill")
+	})
+	h.eventually("resume sends the kmem-resume prompt", func() bool {
+		for _, it := range resumed.conv.Items {
+			if it.Kind == chat.User && it.Text == "RESUME PROMPT for quill" {
+				return true
+			}
+		}
+		return false
+	})
+	h.ui(func() {
+		if h.d.org.Kmem[resumed.id] != "quill" {
+			t.Fatal("a resumed session takes over the handoff's name")
+		}
+	})
+}
+
+func TestKmemRestartSavesThenDeletes(t *testing.T) {
+	h := newHarness(t)
+	saved := ""
+	h.d.kmemOff = false
+	h.d.kmemRun = func(prog string, args ...string) (string, error) {
+		switch {
+		case prog == "kmem" && len(args) > 1 && args[1] == "list":
+			return saved, nil
+		case prog == "kmem-resume":
+			return "", errors.New("unknown name")
+		}
+		return "", errors.New("unexpected")
+	}
+	var old, ns *deskSession
+	h.ui(func() {
+		old = h.d.createSession(h.proj, "sonnet", "default")
+		h.d.org.Titles[old.id] = "PZ Launcher"
+		h.d.org.Kmem[old.id] = "launcher"
+		h.d.relaunchViaKmem(old.id, "launcher")
+		if old.kmemSave == nil || !strings.Contains(old.conv.Items[len(old.conv.Items)-1].Text, "kmem handoff save launcher") {
+			t.Fatal("the old session is asked to save its handoff")
+		}
+		perm := &chat.Item{Kind: chat.Permission, ToolName: "Bash", RequestID: "k1", Input: []byte(`{"command":"kmem handoff save launcher --state 'x'"}`),
+			Request: &protocol.ControlRequest{Subtype: "can_use_tool", ToolName: "Bash", Input: []byte(`{"command":"kmem handoff save launcher --state 'x'"}`)}}
+		old.conv.Items = append(old.conv.Items, perm)
+		h.d.planFirst = true
+		h.d.planGate(old, &protocol.Event{Type: "control_request", RequestID: "k1", Request: perm.Request}, []*chat.Item{perm})
+		if perm.PermState != chat.PermAutoAllowed {
+			t.Fatal("kmem commands run without a plan round while saving the handoff")
+		}
+		h.d.kmemAfterTurn(old)
+	})
+	h.eventually("an unsaved handoff cancels the restart", func() bool {
+		return old.kmemSave == nil
+	})
+	h.ui(func() {
+		if h.d.current != old || h.d.sessions[old.id] == nil {
+			t.Fatal("nothing is deleted when the handoff isn't saved")
+		}
+		h.d.relaunchViaKmem(old.id, "launcher")
+		saved = "launcher  3 items, saved " + time.Now().Format(time.RFC3339) + "\n"
+		h.d.kmemAfterTurn(old)
+	})
+	h.eventually("a saved handoff starts the new session and deletes the old one", func() bool {
+		return h.d.sessions[old.id] == nil && h.d.current != old
+	})
+	h.ui(func() {
+		ns = h.d.current
+		if h.d.org.Titles[ns.id] != "PZ Launcher" || h.d.org.Kmem[ns.id] != "launcher" || h.d.org.Kmem[old.id] != "" || ns.model != "sonnet" {
+			t.Fatalf("the new session takes the name, kmem name and model: %q %q", h.d.org.Titles[ns.id], h.d.org.Kmem[ns.id])
+		}
+		found := false
+		for _, it := range ns.conv.Items {
+			found = found || it.Kind == chat.User && strings.Contains(it.Text, "kmem handoff get launcher")
+		}
+		if !found {
+			t.Fatal("without kmem-resume for the name, the built-in resume prompt is sent")
+		}
 	})
 }
