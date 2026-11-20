@@ -2137,6 +2137,13 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			return nil
 		}
+		if d.approvedInTranscript(s) {
+			d.approveNow(s)
+			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
+				it.PermState = chat.PermAutoAllowed
+			}
+			return nil
+		}
 		if s.proc.DenyWith(it.RequestID, it.Request, planAskMessage) == nil {
 			it.PermState = chat.PermPlanAsked
 			s.planWait = true
