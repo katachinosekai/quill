@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.6
+Version:        0.1.7
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -62,6 +62,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
 
 %changelog
+* Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.7-1
+- Plan card stays until you answer it or send a new request (no longer disappears when other turns end)
+
 * Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.6-1
 - Approvals always reach the session that asked (fixes plan approval sent to the wrong session); a typed "approve"/"yes" works mid-turn; Claude's limit message in every chat; usage credits status; split-view drag and drop; name field for new tabs; sharper pairing QR
 
