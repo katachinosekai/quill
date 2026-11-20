@@ -3,6 +3,7 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -32,9 +33,9 @@ func (d *desk) layoutButtons() fyne.CanvasObject {
 	})
 	d.layoutSel.Horizontal = true
 	d.layoutSel.Required = true
-	d.settingsBtn = widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
+	d.settingsBtn = widget.NewButtonWithIcon("Alignment", theme.SettingsIcon(), d.showSettings)
 	d.settingsBtn.Importance = widget.LowImportance
-	return container.NewHBox(container.NewCenter(mutedText("Tabs", fontMeta)), d.layoutSel, d.settingsBtn)
+	return container.NewHBox(container.NewCenter(mutedText("Tabs", fontMeta)), d.layoutSel)
 }
 
 func (d *desk) setLayoutMode(mode string) {
@@ -54,7 +55,6 @@ func (d *desk) applyLayoutMode() {
 	if mode == layoutVertical {
 		d.bookRow.Hide()
 		d.tabRow.Hide()
-		d.settingsBtn.Hide()
 		d.sideToggle.Show()
 		if d.settingsPop != nil {
 			d.settingsPop.Hide()
@@ -67,7 +67,6 @@ func (d *desk) applyLayoutMode() {
 	} else {
 		d.bookRow.Show()
 		d.tabRow.Show()
-		d.settingsBtn.Show()
 		d.sideToggle.Hide()
 		d.settingsSlot.Objects = nil
 		d.settingsSlot.Refresh()
@@ -83,13 +82,33 @@ func (d *desk) applyLayoutMode() {
 }
 
 func (d *desk) showSettings() {
+	d.settingsSlot.Objects = nil
+	d.settingsSlot.Refresh()
+	done := widget.NewButton("Done", d.closeSettings)
+	done.Importance = widget.HighImportance
+	content := container.NewPadded(container.NewVBox(d.settingsBox, container.NewHBox(layout.NewSpacer(), done)))
 	if d.settingsPop == nil {
-		d.settingsPop = widget.NewPopUp(container.NewPadded(d.settingsBox), d.win.Canvas())
+		d.settingsPop = widget.NewPopUp(content, d.win.Canvas())
 	} else {
-		d.settingsPop.Content = container.NewPadded(d.settingsBox)
+		d.settingsPop.Content = content
 	}
 	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(d.settingsBtn)
-	size := d.settingsBox.MinSize()
+	size := content.MinSize()
 	x := min(pos.X, d.win.Canvas().Size().Width-size.Width-24)
-	d.settingsPop.ShowAtPosition(fyne.NewPos(max(8, x), pos.Y+d.settingsBtn.Size().Height))
+	y := max(8, pos.Y-size.Height-8)
+	d.settingsPop.ShowAtPosition(fyne.NewPos(max(8, x), y))
+}
+
+func (d *desk) closeSettings() {
+	if d.settingsPop != nil {
+		d.settingsPop.Hide()
+	}
+	if d.layoutMode() == layoutVertical {
+		d.settingsSlot.Objects = []fyne.CanvasObject{d.settingsBox}
+		d.settingsSlot.Refresh()
+	}
+}
+
+func (d *desk) viewToolbar() fyne.CanvasObject {
+	return container.NewHBox(d.settingsBtn, layout.NewSpacer(), d.splitButtons())
 }

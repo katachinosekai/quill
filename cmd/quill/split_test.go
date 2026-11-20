@@ -373,3 +373,25 @@ func TestAutoSplitFillsActive(t *testing.T) {
 		}
 	})
 }
+
+func TestCenteringAppliesToEveryPane(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		b := h.d.createSession(h.proj, "default", "default")
+		h.d.open(a.id)
+		h.d.openInSplit(b.id)
+		h.d.setStatusCenter(true)
+		for _, p := range h.d.panes {
+			if p.view.live.Alignment != fyne.TextAlignCenter {
+				t.Fatal("status centering reaches every pane")
+			}
+		}
+		h.d.setCenter(!h.d.center)
+		for _, p := range h.d.panes {
+			if p.view.s == nil {
+				t.Fatal("re-centering keeps each pane's session")
+			}
+		}
+	})
+}

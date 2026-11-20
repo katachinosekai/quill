@@ -105,6 +105,60 @@ func (d *desk) setRateLimit(r *protocol.RateLimit) {
 		d.app.Preferences().SetString("rateLimit", string(b))
 	}
 	d.usage.update()
+	d.syncLimitBanner()
+}
+
+func (d *desk) limitMessage() string {
+	if d.rate == nil {
+		return ""
+	}
+	now := time.Now().Unix()
+	check := func(status string, util float64, resets int64) string {
+		if resets > 0 && resets <= now {
+			return ""
+		}
+		if status == "rejected" || util >= 1 {
+			msg := "Usage limit reached"
+			if r := resetText(resets); r != "" {
+				msg += " · " + r
+			}
+			return msg + "\nClaude can't answer until then."
+		}
+		return ""
+	}
+	for _, name := range []string{"five_hour", "seven_day"} {
+		if w, ok := d.rate.Window(name); ok {
+			if m := check(w.Status, w.Utilization, w.ResetsAt); m != "" {
+				return m
+			}
+		}
+	}
+	return check(d.rate.Status, d.rate.Utilization, d.rate.ResetsAt)
+}
+
+func (d *desk) syncLimitBanner() {
+	msg := d.limitMessage()
+	views := []*chatView{d.single}
+	for _, p := range d.panes {
+		views = append(views, p.view)
+	}
+	for _, v := range views {
+		if v == nil || v.limit == nil {
+			continue
+		}
+		if msg == "" {
+			if v.limit.Visible() {
+				v.limit.Hide()
+			}
+			continue
+		}
+		if v.limitText.Text != msg {
+			v.limitText.SetText(msg)
+		}
+		if !v.limit.Visible() {
+			v.limit.Show()
+		}
+	}
 }
 
 func tok(n int64) string {

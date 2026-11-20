@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fyne.io/fyne/v2/widget"
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 	"strings"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
@@ -217,6 +221,54 @@ func TestKeyCombinationsLikeTheRealWindow(t *testing.T) {
 		e.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierAlt})
 		if len(sent) != 1 || len(sentNow) != 1 {
 			t.Fatal("Alt+Enter does nothing")
+		}
+	})
+}
+
+func TestLimitBannerAndBlockedCard(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "auto")
+		h.d.setSplit(2)
+		h.d.setRateLimit(&protocol.RateLimit{Status: "rejected", Type: "five_hour", Utilization: 1, ResetsAt: time.Now().Add(time.Hour).Unix()})
+		for _, p := range h.d.panes {
+			if !p.view.limit.Visible() {
+				t.Fatal("every split pane shows the limit banner")
+			}
+		}
+		h.d.setSplit(1)
+		if !h.d.single.limit.Visible() || !strings.Contains(h.d.single.limitText.Text, "Usage limit reached") {
+			t.Fatal("the single view shows the limit banner too")
+		}
+		h.d.setRateLimit(&protocol.RateLimit{Status: "allowed", Type: "five_hour", Utilization: 0.2, ResetsAt: time.Now().Add(time.Hour).Unix()})
+		if h.d.single.limit.Visible() {
+			t.Fatal("the banner goes away when usage is allowed again")
+		}
+
+		blocked := &chat.Item{Seq: 777, Kind: chat.Tool, ToolName: "Bash", HasResult: true, ResultError: true,
+			Input:  []byte(`{"command":"git push origin master"}`),
+			Result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Destructive or Unwanted Actions]."}
+		if !autoBlocked(blocked) || blockedCommand(blocked) != "git push origin master" {
+			t.Fatal("auto-mode denials are recognized with their command")
+		}
+		h.d.chat.show(s)
+		card := h.d.chat.blockedCard(blocked)
+		found := false
+		walk(card, func(o fyne.CanvasObject) {
+			if l, ok := o.(*widget.Label); ok && strings.Contains(l.Text, "Destructive or Unwanted Actions") {
+				found = true
+			}
+		})
+		if !found {
+			t.Fatal("the card names the reason")
+		}
+		h.d.retryBlocked(s, blocked)
+		if s.mode != "default" || s.restoreMode != "auto" {
+			t.Fatalf("retry runs with normal approval prompts, mode %q restore %q", s.mode, s.restoreMode)
+		}
+		h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
+		if s.mode != "auto" || s.restoreMode != "" {
+			t.Fatal("auto mode comes back after the retry finishes")
 		}
 	})
 }

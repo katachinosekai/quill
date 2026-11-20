@@ -64,28 +64,29 @@ func (s status) String() string {
 }
 
 type deskSession struct {
-	id         string
-	cwd        string
-	title      string
-	conv       *chat.Conversation
-	loaded     bool
-	loadedMod  time.Time
-	persisted  bool
-	proc       *session.Process
-	model      string
-	mode       string
-	failed     string
-	stopping   bool
-	terminal   *live.Process
-	planWait   bool
-	runAll     bool
-	runAllNext bool
-	takeover   bool
-	loading    bool
-	rcURL      string
-	rcOn       bool
-	rcName     string
-	created    time.Time
+	id          string
+	cwd         string
+	title       string
+	conv        *chat.Conversation
+	loaded      bool
+	loadedMod   time.Time
+	persisted   bool
+	proc        *session.Process
+	model       string
+	mode        string
+	failed      string
+	stopping    bool
+	terminal    *live.Process
+	planWait    bool
+	runAll      bool
+	runAllNext  bool
+	restoreMode string
+	takeover    bool
+	loading     bool
+	rcURL       string
+	rcOn        bool
+	rcName      string
+	created     time.Time
 }
 
 func (s *deskSession) running() bool {
@@ -355,13 +356,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	legend := container.NewHBox(
 		legendDot(stRunning), legendDot(stWaiting), legendDot(stIdle), legendDot(stError), legendDot(stTerminal),
 	)
-	logo := canvas.NewImageFromResource(appIcon)
-	logo.FillMode = canvas.ImageFillContain
-	brandName := canvas.NewText("Quill", colText)
-	brandName.TextSize = fontBrand
-	brandName.TextStyle.Bold = true
-	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
-	top := container.NewVBox(brand, newBtn, d.search)
+	top := container.NewVBox(padTop(40), newBtn, d.search)
 	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, d.buildPhoneRow(), legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
@@ -835,7 +830,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.rcStatus.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(container.NewCenter(d.layoutButtons()), container.NewCenter(d.splitButtons()), container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.autoSplitCheck()), container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
 	d.bookRow = d.buildBookmarks()
 	d.tabRow = d.buildTabs()
@@ -889,7 +884,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
-	bottom := container.NewPadded(d.bottomBox)
+	toolbar := windowCentered(d.inputWidth, d.sidebarWidth, d.viewToolbar())
+	bottom := container.NewPadded(container.NewVBox(toolbar, d.bottomBox))
 	d.usage = newUsagePanel(d)
 	d.chatHost = container.NewStack(d.chat.root)
 	d.usageBox = container.New(usageLayout{d}, d.chatHost, d.usage.root, d.sizePanel())
@@ -900,6 +896,15 @@ func (d *desk) buildMain() fyne.CanvasObject {
 
 func (d *desk) updateChrome() {
 	d.keepView()
+	if d.note != nil {
+		noteWas := d.note.Visible()
+		defer func() {
+			if d.note.Visible() != noteWas && d.mainPane != nil {
+				d.headerBox.Refresh()
+				relayout(d.mainPane)
+			}
+		}()
+	}
 	s := d.current
 	d.suppress = true
 	defer func() { d.suppress = false }()
@@ -1684,6 +1689,7 @@ func (d *desk) refresh() {
 			}
 		}
 		d.updateChrome()
+		d.syncLimitBanner()
 		d.trySwap()
 	})
 }
@@ -1942,14 +1948,29 @@ func (d *desk) syncCenterAll() {
 
 func (d *desk) setStatusCenter(on bool) {
 	d.app.Preferences().SetBool("centerStatus", on)
-	if d.chat == nil || d.chat.live == nil {
-		return
+	for _, v := range d.allViews() {
+		if v.live == nil {
+			continue
+		}
+		v.live.Alignment = fyne.TextAlignLeading
+		if on {
+			v.live.Alignment = fyne.TextAlignCenter
+		}
+		v.live.Refresh()
 	}
-	d.chat.live.Alignment = fyne.TextAlignLeading
-	if on {
-		d.chat.live.Alignment = fyne.TextAlignCenter
+}
+
+func (d *desk) allViews() []*chatView {
+	var out []*chatView
+	if d.single != nil {
+		out = append(out, d.single)
+	} else if d.chat != nil {
+		out = append(out, d.chat)
 	}
-	d.chat.live.Refresh()
+	for _, p := range d.panes {
+		out = append(out, p.view)
+	}
+	return out
 }
 
 func (d *desk) setCollapseChips(on bool) {
@@ -1992,8 +2013,13 @@ func (d *desk) setCenter(on bool) {
 	}
 	d.center = on
 	d.app.Preferences().SetBool("centerText", on)
-	if d.current != nil {
-		d.chat.show(d.current)
+	for _, v := range d.allViews() {
+		v.cache = map[*deskSession]*sessView{}
+		v.order = nil
+		if s := v.s; s != nil {
+			v.s = nil
+			v.show(s)
+		}
 	}
 }
 
@@ -2045,6 +2071,11 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 		}
 	case ev.Type == "result":
+		if s.restoreMode != "" {
+			mode := s.restoreMode
+			s.restoreMode = ""
+			d.setMode(s, mode)
+		}
 		if s.runAllNext {
 			s.runAll, s.runAllNext = true, false
 		}

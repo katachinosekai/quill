@@ -276,6 +276,7 @@ func (d *desk) setSplit(n int) {
 }
 
 func (d *desk) afterSplit() {
+	defer d.syncLimitBanner()
 	if d.bottomBox != nil {
 		if d.split() {
 			d.bottomBox.Hide()
@@ -448,14 +449,7 @@ func (d *desk) splitButtons() fyne.CanvasObject {
 	for _, b := range btns {
 		objs = append(objs, b)
 	}
-	d.autoChk = widget.NewCheck("Auto split", func(on bool) {
-		d.app.Preferences().SetBool("autoSplit", on)
-		if on {
-			d.autoSplitSync()
-		}
-	})
-	d.autoChk.Checked = d.app.Preferences().Bool("autoSplit")
-	objs = append(objs, d.autoChk)
+
 	return container.NewHBox(objs...)
 }
 
@@ -621,4 +615,15 @@ func (d *desk) restoreSplit(st *splitState) {
 	if st.Focus >= 0 && st.Focus < len(d.panes) {
 		d.focusPane(d.panes[st.Focus])
 	}
+}
+
+func (d *desk) autoSplitCheck() fyne.CanvasObject {
+	d.autoChk = widget.NewCheck("Auto split", func(on bool) {
+		d.app.Preferences().SetBool("autoSplit", on)
+		if on {
+			d.autoSplitSync()
+		}
+	})
+	d.autoChk.Checked = d.app.Preferences().Bool("autoSplit")
+	return d.autoChk
 }
