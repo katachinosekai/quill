@@ -182,6 +182,7 @@ type desk struct {
 	panes          []*pane
 	focused        *pane
 	chatHost       *fyne.Container
+	chatDropHL     *canvas.Rectangle
 	splitBtns      []*widget.Button
 	groups         []bookGroup
 	tabs           []string
@@ -914,7 +915,12 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	cornerCard := container.New(layout.NewGridWrapLayout(fyne.NewSize(300, d.sizesCard.MinSize().Height)), d.sizesCard)
 	corner := container.NewVBox(layout.NewSpacer(), container.NewHBox(layout.NewSpacer(), cornerCard))
 	bottom := container.NewPadded(container.New(cornerLayout{}, container.NewVBox(toolbar, d.bottomBox), corner))
-	d.chatHost = container.NewStack(d.chat.root)
+	d.chatDropHL = canvas.NewRectangle(fade(colAccent, 0.10))
+	d.chatDropHL.CornerRadius = 14
+	d.chatDropHL.StrokeColor = colAccent
+	d.chatDropHL.StrokeWidth = 2
+	d.chatDropHL.Hide()
+	d.chatHost = container.NewStack(d.chat.root, d.chatDropHL)
 	spare := canvas.NewRectangle(color.Transparent)
 	spare.Hide()
 	d.usageBox = container.New(usageLayout{d}, d.chatHost, d.usage.root, spare)

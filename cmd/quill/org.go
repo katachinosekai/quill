@@ -397,6 +397,7 @@ func (it *sideItem) Dragged(e *fyne.DragEvent) {
 	it.d.dragID = r.id
 	it.d.dragAt = e.AbsolutePosition
 	it.d.markDropTarget()
+	it.d.hintDrop(e.AbsolutePosition, true)
 }
 
 func (it *sideItem) DragEnd() {
@@ -409,9 +410,15 @@ func (it *sideItem) DragEnd() {
 	d.dragID = ""
 	target, ok := d.rowAt(d.dragAt)
 	d.clearDropTarget()
-	if ok && id != "" {
-		d.dropOn(id, target)
+	d.hintDrop(d.dragAt, false)
+	if id == "" {
+		return
 	}
+	if ok {
+		d.dropOn(id, target)
+		return
+	}
+	d.dropSession(id, d.dragAt)
 }
 
 func (it *sideItem) Cursor() desktop.Cursor {

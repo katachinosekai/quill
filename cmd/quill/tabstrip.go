@@ -144,6 +144,7 @@ func (t *tabStrip) drag(c *tabChip, id string, e *fyne.DragEvent) {
 	}
 	t.ptr = e.AbsolutePosition.X - origin.X
 	t.abs = e.AbsolutePosition
+	t.d.hintDrop(t.abs, t.abs.Y > origin.Y+t.box.Size().Height+8)
 }
 
 func (t *tabStrip) drop() {
@@ -151,14 +152,13 @@ func (t *tabStrip) drop() {
 		return
 	}
 	origin := fyne.CurrentApp().Driver().AbsolutePositionForObject(t.box)
-	if t.d.split() && t.abs.Y > origin.Y+t.box.Size().Height+8 {
-		if p := t.d.paneAt(t.abs); p != nil {
-			id := t.heldID
-			t.held, t.heldID = nil, ""
-			t.animate()
-			t.d.showInPane(p, id)
-			return
-		}
+	t.d.hintDrop(t.abs, false)
+	if t.abs.Y > origin.Y+t.box.Size().Height+8 {
+		id := t.heldID
+		t.held, t.heldID = nil, ""
+		t.animate()
+		t.d.dropSession(id, t.abs)
+		return
 	}
 	final := t.order()
 	var ids []string
