@@ -4,7 +4,7 @@ Name:           quill
 Version:        0.1.4
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
-License:        MIT AND BSD-3-Clause AND (MIT-0 OR Unlicense)
+License:        MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
 URL:            https://github.com/katachinosekai/quill
 Source0:        %{name}-%{version}.tar.gz
 ExclusiveArch:  x86_64
@@ -33,10 +33,6 @@ claude CLI to be installed separately.
 
 %prep
 %autosetup
-cp third_party/fyne/LICENSE LICENSE.fyne
-cp third_party/whisper.cpp/LICENSE LICENSE.whisper.cpp
-cp vendor/github.com/gen2brain/malgo/LICENSE LICENSE.malgo
-cp vendor/rsc.io/qr/LICENSE LICENSE.qr
 
 %build
 export GOFLAGS="-mod=vendor -trimpath"
@@ -57,7 +53,7 @@ install -Dm644 cmd/quill/icon.svg %{buildroot}%{_datadir}/icons/hicolor/scalable
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinosekai.quill.desktop
 
 %files
-%license LICENSE LICENSE.fyne LICENSE.whisper.cpp LICENSE.malgo LICENSE.qr
+%license LICENSE THIRD_PARTY_LICENSES.txt
 %doc README.md
 %{_bindir}/quill
 %{_libexecdir}/quill/

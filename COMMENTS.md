@@ -188,3 +188,7 @@ The private signing key lives only at `~/.config/quill-release/release.key` (mod
 ## Restart as new session (relaunch.go)
 
 The old conversation is compacted by a tool-less `claude -p --no-session-persistence` call (same model, run in the private runtime dir so it never shows up as a session). Its input is trimmed: user and Claude messages up to 4,000 characters each, tool calls as one-line summaries without output, 120,000 characters in all. The hand-off is the brief plus the last 6 messages trimmed to 800 characters each. If compacting fails or takes over 3 minutes, the old trimmed hand-off (last 40 messages) is sent instead. While compacting, the new session queues anything you send. The old transcript is never changed.
+
+## Third-party licences
+
+`scripts/thirdparty.sh` writes THIRD_PARTY_LICENSES.txt: whisper.cpp plus every non-std Go module in the x11 and wayland builds, full licence text and any NOTICE; it fails if a module has no licence file. The spec installs it as %license (so the RPM and the AppImage carry it). Re-run it after any go.mod or third_party change.
