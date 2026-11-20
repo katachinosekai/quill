@@ -88,6 +88,7 @@ const memorySoftLimit = 512 << 20
 
 func runWindowWith(claudeBin, sock string) int {
 	debug.SetMemoryLimit(memorySoftLimit)
+	app.SetMetadata(fyne.AppMetadata{ID: appID, Name: "Quill", Version: version, Icon: appIcon})
 	a := app.NewWithID(appID)
 	a.Settings().SetTheme(deskTheme{})
 	a.SetIcon(appIcon)
@@ -98,6 +99,8 @@ func runWindowWith(claudeBin, sock string) int {
 		ClaudeBin:    claudeBin,
 	})
 	d.animate = true
+	d.watchFocus()
+	d.startNotifier()
 	d.keeper = newKeeperClient()
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1280, 860))
