@@ -272,3 +272,33 @@ func TestLimitBannerAndBlockedCard(t *testing.T) {
 		}
 	})
 }
+
+func TestChipsHiddenUntilOpened(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		tool := &chat.Item{Seq: 900, Kind: chat.Tool, ToolName: "Bash", HasResult: true, Input: []byte(`{"command":"ls"}`)}
+		s.conv.Items = append(s.conv.Items, tool)
+		h.d.chat.show(s)
+		count := func() int {
+			n := 0
+			walk(h.d.chat.stepRun(tool), func(o fyne.CanvasObject) {
+				if _, ok := o.(*tapRow); ok {
+					n++
+				}
+			})
+			return n
+		}
+		if !h.d.hideChips || count() != 0 {
+			t.Fatal("chips are hidden by default")
+		}
+		h.d.setAllChips(true)
+		if h.d.hideChips || count() == 0 {
+			t.Fatal("Open chips shows them")
+		}
+		h.d.setAllChips(false)
+		if !h.d.hideChips || count() != 0 {
+			t.Fatal("Collapse chips hides them again")
+		}
+	})
+}

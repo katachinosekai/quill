@@ -223,6 +223,7 @@ type desk struct {
 	groupProjects  bool
 	planFirst      bool
 	collapseChips  bool
+	hideChips      bool
 	rules          sortRules
 	centerAll      *widget.Check
 	centerChecks   []*widget.Check
@@ -274,6 +275,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		groupProjects: a.Preferences().Bool("groupByProject"),
 		planFirst:     a.Preferences().BoolWithFallback("planFirst", true),
 		collapseChips: a.Preferences().Bool("collapseChips"),
+		hideChips:     a.Preferences().BoolWithFallback("hideChips", true),
 		created:       map[string]bool{},
 		do:            fyne.Do,
 		doWait:        fyne.DoAndWait,
@@ -1992,6 +1994,18 @@ func (d *desk) setCollapseChips(on bool) {
 }
 
 func (d *desk) setAllChips(open bool) {
+	if d.hideChips == open {
+		d.hideChips = !open
+		d.app.Preferences().SetBool("hideChips", d.hideChips)
+		for _, v := range d.allViews() {
+			v.cache = map[*deskSession]*sessView{}
+			v.order = nil
+			if vs := v.s; vs != nil && v != d.chat {
+				v.s = nil
+				v.show(vs)
+			}
+		}
+	}
 	s := d.current
 	if s == nil {
 		return

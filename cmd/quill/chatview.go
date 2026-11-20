@@ -1280,6 +1280,18 @@ func (v *chatView) stepRun(it *chat.Item) fyne.CanvasObject {
 	if v.s.conv.Items[start] != it {
 		return container.NewWithoutLayout()
 	}
+	if v.d.hideChips {
+		var cards []fyne.CanvasObject
+		for _, t := range v.s.conv.Items[start : end+1] {
+			if autoBlocked(t) && !v.dismissed[t] {
+				cards = append(cards, v.blockedCard(t))
+			}
+		}
+		if len(cards) == 0 {
+			return container.NewWithoutLayout()
+		}
+		return container.NewVBox(cards...)
+	}
 	var chips, open []fyne.CanvasObject
 	for _, t := range v.s.conv.Items[start : end+1] {
 		chips = append(chips, v.stepChip(t))
