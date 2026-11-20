@@ -18,6 +18,7 @@ type sortRules struct {
 	ActiveMinutes int  `json:"activeMinutes"`
 	ArchiveDays   int  `json:"archiveDays"`
 	ClaudeFolder  bool `json:"claudeFolder"`
+	RecentActive  bool `json:"recentActive"`
 }
 
 func defaultRules() sortRules {
@@ -55,6 +56,8 @@ func (d *desk) rulesDialog() {
 	archiveE.SetText(strconv.Itoa(r.ArchiveDays))
 	claudeChk := widget.NewCheck("Put sessions started by tools in Created by Claude", nil)
 	claudeChk.Checked = r.ClaudeFolder
+	fixedChk := widget.NewCheck("Keep Active sessions in a fixed order (new ones join at the bottom)", nil)
+	fixedChk.Checked = !r.RecentActive
 	warnChk := widget.NewCheck("Warn before deleting a session", nil)
 	warnChk.Checked = !d.app.Preferences().Bool("skipDeleteWarning")
 	explain := widget.NewLabel("Active: open, running, in a terminal, or used in the last N minutes.\n" +
@@ -73,9 +76,10 @@ func (d *desk) rulesDialog() {
 		activeE.SetText(strconv.Itoa(def.ActiveMinutes))
 		archiveE.SetText(strconv.Itoa(def.ArchiveDays))
 		claudeChk.SetChecked(def.ClaudeFolder)
+		fixedChk.SetChecked(!def.RecentActive)
 	})
 	reset.Importance = widget.LowImportance
-	body := container.NewVBox(form, claudeChk, warnChk, explain, container.NewHBox(reset))
+	body := container.NewVBox(form, claudeChk, fixedChk, warnChk, explain, container.NewHBox(reset))
 	dlg := dialog.NewCustomConfirm("Format Rules", "Save", "Cancel", body, func(ok bool) {
 		if !ok {
 			return
@@ -87,7 +91,7 @@ func (d *desk) rulesDialog() {
 			return
 		}
 		d.app.Preferences().SetBool("skipDeleteWarning", !warnChk.Checked)
-		d.setRules(sortRules{ActiveMinutes: a, ArchiveDays: b, ClaudeFolder: claudeChk.Checked})
+		d.setRules(sortRules{ActiveMinutes: a, ArchiveDays: b, ClaudeFolder: claudeChk.Checked, RecentActive: !fixedChk.Checked})
 		d.resortNow()
 	}, d.win)
 	dlg.Resize(fyne.NewSize(520, 360))
@@ -97,8 +101,9 @@ func (d *desk) rulesDialog() {
 const demoteEvery = 30 * time.Minute
 
 type sortState struct {
-	Place map[string]string `json:"place"`
-	At    int64             `json:"at"`
+	Place  map[string]string `json:"place"`
+	At     int64             `json:"at"`
+	Active []string          `json:"active"`
 }
 
 func placeRank(p string) int {
@@ -160,4 +165,43 @@ func (d *desk) stickyPlace(e sideEntry, demote bool) string {
 func (d *desk) resortNow() {
 	d.sorted.At = 0
 	d.rebuildRows()
+}
+
+func (d *desk) fixedActive(es []sideEntry) []sideEntry {
+	in := map[string]sideEntry{}
+	for _, e := range es {
+		in[e.id] = e
+	}
+	var order []string
+	var out []sideEntry
+	for _, id := range d.sorted.Active {
+		if e, ok := in[id]; ok {
+			order = append(order, id)
+			out = append(out, e)
+			delete(in, id)
+		}
+	}
+	for _, e := range sortRecent(es) {
+		if _, ok := in[e.id]; ok {
+			order = append(order, e.id)
+			out = append(out, e)
+		}
+	}
+	if !equalIDs(order, d.sorted.Active) {
+		d.sorted.Active = order
+		d.sortDirty = true
+	}
+	return out
+}
+
+func equalIDs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

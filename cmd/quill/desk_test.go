@@ -1405,3 +1405,38 @@ func TestAsksApprovalShowsPlanCard(t *testing.T) {
 		t.Fatal("an ordinary question is not a plan")
 	}
 }
+
+func TestActiveOrderStaysFixed(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		b := h.d.createSession(h.proj, "default", "default")
+		c := h.d.createSession(h.proj, "default", "default")
+		h.d.rebuildRows()
+		order := func() []string {
+			var ids []string
+			for _, r := range h.d.rows {
+				if r.parent == "a" && r.id != "" {
+					ids = append(ids, r.id)
+				}
+			}
+			return ids
+		}
+		before := order()
+		if len(before) < 3 {
+			t.Fatalf("three active sessions: %v", before)
+		}
+		a.created, b.created, c.created = time.Now().Add(time.Minute), time.Now().Add(2*time.Minute), time.Now().Add(3*time.Minute)
+		h.d.rebuildRows()
+		after := order()
+		for i := range before {
+			if before[i] != after[i] {
+				t.Fatalf("activity must not reorder Active: %v -> %v", before, after)
+			}
+		}
+		h.d.setRules(sortRules{ActiveMinutes: 30, ArchiveDays: 7, ClaudeFolder: true, RecentActive: true})
+		if got := order(); got[0] != c.id {
+			t.Fatalf("with the option off, most recent comes first: %v", got)
+		}
+	})
+}

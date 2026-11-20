@@ -622,6 +622,14 @@ func (d *desk) rebuildRows() {
 		d.sortDirty = false
 		d.saveSortState()
 	}
+	fixed := q == "" && !d.rules.RecentActive
+	if fixed {
+		active = d.fixedActive(active)
+		if d.sortDirty {
+			d.sortDirty = false
+			d.saveSortState()
+		}
+	}
 	if q == "" {
 		d.groups = d.groups[:0]
 		addGroup := func(key, title string, es []sideEntry) {
@@ -629,7 +637,10 @@ func (d *desk) rebuildRows() {
 				return
 			}
 			g := bookGroup{key: key, title: title}
-			for _, e := range sortRecent(es) {
+			if !(fixed && key == placeActive) {
+				es = sortRecent(es)
+			}
+			for _, e := range es {
 				g.ids = append(g.ids, e.id)
 			}
 			d.groups = append(d.groups, g)
@@ -649,7 +660,13 @@ func (d *desk) rebuildRows() {
 		open := q != "" || d.isOpen(placeActive)
 		rows = append(rows, sideRow{header: d.folderTitle(placeActive, "Active"), key: placeActive, count: len(active), open: open})
 		if open {
-			rows = append(rows, d.projectRows(active, 1, "a:", q != "")...)
+			if fixed && !d.groupProjects {
+				for _, e := range active {
+					rows = append(rows, sideRow{id: e.id, depth: 1, parent: "a"})
+				}
+			} else {
+				rows = append(rows, d.projectRows(active, 1, "a:", q != "")...)
+			}
 		}
 	}
 	for _, f := range d.sortedFolders(custom) {
