@@ -525,7 +525,7 @@ func (d *desk) autoSplitSync() {
 }
 
 func (d *desk) sendNowFromPane(p *pane, text string) {
-	if p.view.s == nil || strings.TrimSpace(text) == "" {
+	if p.view.s == nil || strings.TrimSpace(text) == "" && len(p.view.s.queue) == 0 {
 		return
 	}
 	d.focusPane(p)

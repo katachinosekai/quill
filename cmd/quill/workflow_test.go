@@ -366,3 +366,69 @@ func TestQueueAndHistory(t *testing.T) {
 		}
 	})
 }
+
+func TestCtrlEnterSendsQueueNow(t *testing.T) {
+	h := newHarness(t)
+	h.d.do = func(f func()) {
+		go func() {
+			uiMu.Lock()
+			defer uiMu.Unlock()
+			f()
+		}()
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("slow")
+	})
+	h.eventually("busy", func() bool { return s.running() && (s.conv.Busy || s.proc.Busy()) })
+	h.ui(func() {
+		h.d.send("queued one")
+		h.d.input.SetText("and this")
+		h.d.input.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierControl})
+		if len(s.queue) != 0 {
+			t.Fatal("Ctrl+Enter takes the queue right away")
+		}
+	})
+	h.eventually("queue and box sent together", func() bool {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.User && strings.Contains(it.Text, "queued one") && strings.Contains(it.Text, "and this") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestCtrlEnterEmptyBoxSendsQueue(t *testing.T) {
+	h := newHarness(t)
+	h.d.do = func(f func()) {
+		go func() {
+			uiMu.Lock()
+			defer uiMu.Unlock()
+			f()
+		}()
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("slow")
+	})
+	h.eventually("busy", func() bool { return s.running() && (s.conv.Busy || s.proc.Busy()) })
+	h.ui(func() {
+		h.d.send("queued one")
+		h.d.input.SetText("")
+		h.d.input.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierControl})
+		if len(s.queue) != 0 {
+			t.Fatal("Ctrl+Enter in an empty box sends the queued message right away")
+		}
+	})
+	h.eventually("queued message sent", func() bool {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.User && it.Text == "queued one" {
+				return true
+			}
+		}
+		return false
+	})
+}

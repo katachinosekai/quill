@@ -637,7 +637,10 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	case chat.Plan:
 		return v.renderPlan(it)
 	case chat.Thinking:
-		return v.renderThinking(it, iv)
+		if strings.TrimSpace(it.Text) == "" {
+			return container.NewWithoutLayout()
+		}
+		return msgText(v.markdown(it.Text))
 	case chat.Notice:
 		l := widget.NewLabel(it.Text)
 		l.Wrapping = fyne.TextWrapWord
