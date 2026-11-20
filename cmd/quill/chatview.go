@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"image/color"
@@ -95,6 +96,7 @@ func newChatView(d *desk) *chatView {
 	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
 	v.live = widget.NewLabel(" ")
 	v.live.TextStyle.Italic = true
+	v.live.Truncation = fyne.TextTruncateEllipsis
 	if d.app.Preferences().Bool("centerStatus") {
 		v.live.Alignment = fyne.TextAlignCenter
 	}
@@ -367,6 +369,23 @@ func (v *chatView) pinned() bool {
 func (v *chatView) stick() {
 	if v.follow && !v.gliding && v.s != nil && !v.steps && !v.pinned() {
 		v.scrollBottom()
+	}
+}
+
+func (v *chatView) followGuard(ctx context.Context) {
+	t := time.NewTicker(700 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			v.d.do(func() {
+				if v.follow && !v.d.hidden {
+					v.stick()
+				}
+			})
+		}
 	}
 }
 
