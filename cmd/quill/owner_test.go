@@ -183,6 +183,12 @@ func TestStepListApprovesPendingPlan(t *testing.T) {
 			t.Errorf("isStepList(%q) = %v", text, !want)
 		}
 	}
+	if n := stepNumbers("1-4"); len(n) != 4 || !n[1] || !n[4] {
+		t.Fatalf("1-4 is 1 through 4: %v", n)
+	}
+	if stepNumbers("4-1") != nil {
+		t.Fatal("a backwards range is not a step list")
+	}
 	h := newHarness(t)
 	h.ui(func() {
 		h.d.planFirst = true
@@ -195,11 +201,32 @@ func TestStepListApprovesPendingPlan(t *testing.T) {
 		}
 		s.conv.Apply(&protocol.Event{Type: "result", Subtype: "success"})
 		h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
-		s.inTurn = false
-		plan := s.conv.AddPlan()
+		newPlan := func(text string) *chat.Item {
+			s.conv.Apply(&protocol.Event{Type: "result", Subtype: "success"})
+			h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
+			s.inTurn, s.runAll = false, false
+			s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, Text: text, InPlan: true})
+			return s.conv.AddPlan()
+		}
+		plan := newPlan("Plan:\n1. build\n2. test\n   1) unit\n3. commit\n4. reload\n5. push\n6. release")
+		h.d.sendTo(s, "1-4")
+		if plan.PermState == chat.PermAllowed || s.runAll {
+			t.Fatal("1-4 on a 6-step plan leaves steps 5 and 6 unapproved, so it is not an approval")
+		}
+		plan = newPlan("Plan:\n1. build\n2. test\n3. commit\n4. reload")
 		h.d.sendTo(s, "1-4")
 		if plan.PermState != chat.PermAllowed || !s.runAll {
-			t.Fatal("a step list reply to a plan card approves the whole plan")
+			t.Fatal("1-4 means 1 through 4 and covers every step of a 4-step plan")
+		}
+		plan = newPlan("Plan:\n**1.** build\n**2.** test\n(3) commit")
+		h.d.sendTo(s, "1, 2 and 3")
+		if plan.PermState != chat.PermAllowed {
+			t.Fatal("a list naming every step approves")
+		}
+		plan = newPlan("I will build, test and commit.")
+		h.d.sendTo(s, "1-3")
+		if plan.PermState == chat.PermAllowed {
+			t.Fatal("a plan without numbered steps needs a real yes")
 		}
 	})
 }

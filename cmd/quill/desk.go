@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2233,17 +2234,62 @@ func isStepList(text string) bool {
 	return len(t) <= 60 && stepList.MatchString(t)
 }
 
-func hasPendingPlan(s *deskSession) bool {
-	for _, it := range s.conv.PendingPermissions() {
-		if it.Kind == chat.Plan {
-			return true
+var (
+	stepItem = regexp.MustCompile(`(?i)#?(\d+)(?:\s*(?:-|–|—|\bto\b)\s*#?(\d+))?`)
+	planStep = regexp.MustCompile(`(?m)^(?:\*\*)?\(?(\d+)[.)]`)
+)
+
+func stepNumbers(text string) map[int]bool {
+	out := map[int]bool{}
+	for _, m := range stepItem.FindAllStringSubmatch(text, -1) {
+		a, _ := strconv.Atoi(m[1])
+		b := a
+		if m[2] != "" {
+			b, _ = strconv.Atoi(m[2])
+		}
+		if b < a || b-a > 100 {
+			return nil
+		}
+		for n := a; n <= b; n++ {
+			out[n] = true
 		}
 	}
-	return false
+	return out
+}
+
+func planSteps(text string) int {
+	n := 0
+	for _, m := range planStep.FindAllStringSubmatch(text, -1) {
+		if v, _ := strconv.Atoi(m[1]); v > n {
+			n = v
+		}
+	}
+	return n
+}
+
+func coversPlan(s *deskSession, text string) bool {
+	nums := stepNumbers(strings.TrimRight(strings.TrimSpace(text), ".! "))
+	found := false
+	for _, it := range s.conv.PendingPermissions() {
+		if it.Kind != chat.Plan {
+			continue
+		}
+		n := planSteps(s.conv.PlanText(it))
+		if n == 0 {
+			return false
+		}
+		for i := 1; i <= n; i++ {
+			if !nums[i] {
+				return false
+			}
+		}
+		found = true
+	}
+	return found
 }
 
 func approvesPlan(s *deskSession, text string) bool {
-	return approves(text) || isStepList(text) && hasPendingPlan(s)
+	return approves(text) || isStepList(text) && coversPlan(s, text)
 }
 
 func isRetry(text string) bool {
