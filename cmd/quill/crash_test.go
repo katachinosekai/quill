@@ -13,16 +13,16 @@ const samplePanic = `panic: runtime error: index out of range [3] with length 3
 
 goroutine 1 [running]:
 main.(*desk).open(0xc000123456, {0xc0001, 0x24})
-	/home/kata/Projects/quill/cmd/quill/desk.go:120 +0x1f
+	/home/someone/Projects/quill/cmd/quill/desk.go:120 +0x1f
 main.main()
-	/home/kata/Projects/quill/cmd/quill/main.go:40 +0x2a
+	/home/someone/Projects/quill/cmd/quill/main.go:40 +0x2a
 token=sk-ant-abc123DEF456 user someone@example.com session 11111111-2222-3333-4444-555555555555 at 192.168.1.25
 https://bob:hunter2@example.com/x
 `
 
 func TestRedactRemovesSensitiveData(t *testing.T) {
 	home, _ := os.UserHomeDir()
-	text := strings.ReplaceAll(samplePanic, "/home/kata", home)
+	text := strings.ReplaceAll(samplePanic, "/home/someone", home)
 	out := redact(text, redactOptions{Home: true, Paths: true, Emails: true, Sessions: true, Hosts: true, Extra: []string{"quill"}})
 	for _, leak := range []string{"sk-ant-", "someone@example", "11111111-2222", "192.168.1.25", "hunter2", home} {
 		if strings.Contains(out, leak) {
