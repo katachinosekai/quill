@@ -85,6 +85,7 @@ type deskSession struct {
 	lastSent    string
 	inTurn      bool
 	restoreMode string
+	compacting  bool
 	takeover    bool
 	loading     bool
 	rcURL       string
@@ -133,18 +134,19 @@ type sideRow struct {
 }
 
 type desk struct {
-	app      fyne.App
-	win      fyne.Window
-	cfg      config
-	scanner  *transcript.Scanner
-	finder   *live.Finder
-	center   bool
-	sessions map[string]*deskSession
-	infos    map[string]transcript.Info
-	order    []transcript.Info
-	terms    map[string]live.Process
-	current  *deskSession
-	ownPIDs  sync.Map
+	compactor func(ctx context.Context, model, text string) (string, error)
+	app       fyne.App
+	win       fyne.Window
+	cfg       config
+	scanner   *transcript.Scanner
+	finder    *live.Finder
+	center    bool
+	sessions  map[string]*deskSession
+	infos     map[string]transcript.Info
+	order     []transcript.Info
+	terms     map[string]live.Process
+	current   *deskSession
+	ownPIDs   sync.Map
 
 	rows           []sideRow
 	list           *widget.List
@@ -1374,7 +1376,7 @@ func (d *desk) send(text string) {
 		d.takeOver(s, t, text)
 		return
 	}
-	if s.running() && (s.conv.Busy || s.proc.Busy()) {
+	if s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
 		d.enqueue(s, text)
 		return
 	}

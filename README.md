@@ -19,7 +19,7 @@ Quill needs the Claude Code CLI (`claude`) installed and signed in. Installed co
 - Browser-style tabs (drag to reorder, middle-click to close, Ctrl+T new, Ctrl+1–9 to switch) with folder drop-downs, or a vertical sidebar
 - Folders: Active, Inactive, Archive, Created by Claude and your own, with Format Rules for sorting; Active keeps a fixed order
 - Split view (2 or 3 panes), each with its own full message box; Auto split shows your Active sessions side by side
-- Rename, restart as a fresh session that takes over the job, delete, open in split, drag between folders
+- Rename, restart as a fresh session that takes over the job from a compacted brief, delete, open in split, drag between folders
 - Takes over a session that is open in a terminal when you send a message
 
 **Chat**

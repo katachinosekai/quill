@@ -184,3 +184,7 @@ Installed builds (RPM under /usr/libexec/quill, or an AppImage via $APPIMAGE) ch
 AppImage installs swap the file in place (keeping `.old`) and Quill execs into it with the usual session hand-off. RPM installs run `pkexec dnf install -y -- <file>` (no shell), and the binary watcher then live-updates.
 
 The private signing key lives only at `~/.config/quill-release/release.key` (mode 600, never committed). `go run ./cmd/quill-sign -genkey` created it once. `scripts/build-packages.sh` copies this version's packages (plus the Android APK) into `dist/release-<version>/` and signs them. Upload `SHA256SUMS` and `SHA256SUMS.sig` with the release, or the updater refuses it. If the key is lost, ship a build with a new public key; older installs then can't auto-update to it.
+
+## Restart as new session (relaunch.go)
+
+The old conversation is compacted by a tool-less `claude -p --no-session-persistence` call (same model, run in the private runtime dir so it never shows up as a session). Its input is trimmed: user and Claude messages up to 4,000 characters each, tool calls as one-line summaries without output, 120,000 characters in all. The hand-off is the brief plus the last 6 messages trimmed to 800 characters each. If compacting fails or takes over 3 minutes, the old trimmed hand-off (last 40 messages) is sent instead. While compacting, the new session queues anything you send. The old transcript is never changed.
