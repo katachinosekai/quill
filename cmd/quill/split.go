@@ -298,7 +298,7 @@ func (d *desk) splitButtons() fyne.CanvasObject {
 }
 
 func splitLabel(n int) string {
-	return [...]string{"", "Tabs", "Split 2", "Split 3"}[n]
+	return [...]string{"", "Single", "Split 2", "Split 3"}[n]
 }
 
 func (d *desk) syncSplitButtons() {

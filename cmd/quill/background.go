@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -61,6 +63,8 @@ func (d *desk) listenInstance(path string) {
 				switch strings.TrimSpace(line) {
 				case "show":
 					d.do(d.showWindow)
+				case "profile":
+					go writeProfile()
 				case "reload":
 					d.do(func() {
 						d.forceSwap = true
@@ -105,4 +109,18 @@ func (d *desk) hideWindow() {
 		d.cmds.hide()
 	}
 	d.win.Hide()
+}
+
+func writeProfile() {
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("quill-cpu-%d.pprof", os.Getpid()))
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if pprof.StartCPUProfile(f) != nil {
+		return
+	}
+	time.Sleep(10 * time.Second)
+	pprof.StopCPUProfile()
 }

@@ -94,6 +94,18 @@ func (d *desk) syncTabs() {
 	if d.tabBar == nil {
 		return
 	}
+	sig := ""
+	if d.current != nil {
+		sig = d.current.id
+	}
+	for _, id := range d.tabs {
+		title, _, st := d.rowText(id)
+		sig += "|" + id + title + fmt.Sprint(st)
+	}
+	if sig == d.tabSig {
+		return
+	}
+	d.tabSig = sig
 	var objs []fyne.CanvasObject
 	var kept []string
 	for _, id := range d.tabs {
@@ -137,6 +149,14 @@ func (d *desk) syncBookmarks() {
 	if d.bookBar == nil {
 		return
 	}
+	sig := ""
+	for _, g := range d.groups {
+		sig += fmt.Sprintf("|%s:%s:%d", g.key, g.title, len(g.ids))
+	}
+	if sig == d.bookSig {
+		return
+	}
+	d.bookSig = sig
 	var objs []fyne.CanvasObject
 	for _, g := range d.groups {
 		g := g
@@ -154,6 +174,11 @@ func (d *desk) syncBookmarks() {
 
 func (d *desk) folderMenu2(g bookGroup, at fyne.Position) {
 	var pop *widget.PopUp
+	for _, x := range d.groups {
+		if x.key == g.key {
+			g = x
+		}
+	}
 	list := widget.NewList(
 		func() int { return len(g.ids) },
 		func() fyne.CanvasObject {

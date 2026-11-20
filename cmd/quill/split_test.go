@@ -117,3 +117,25 @@ func TestDeleteSessionEndToEnd(t *testing.T) {
 		return os.IsNotExist(err) && !hasRow(h.d.rows, editsID)
 	})
 }
+
+func TestLayoutModes(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		if h.d.layoutMode() != layoutHorizontal || !h.d.sideOff || !h.d.tabRow.Visible() || h.d.sideToggle.Visible() {
+			t.Fatal("starts horizontal: tabs and folder bar shown, sidebar off")
+		}
+		h.d.showSettings()
+		if len(h.w.Canvas().Overlays().List()) == 0 {
+			t.Fatal("settings open from the header in horizontal mode")
+		}
+		h.d.settingsPop.Hide()
+		h.d.setLayoutMode(layoutVertical)
+		if h.d.sideOff || h.d.tabRow.Visible() || h.d.bookRow.Visible() || len(h.d.settingsSlot.Objects) != 1 {
+			t.Fatal("vertical: sidebar with settings, no tab or folder bar")
+		}
+		h.d.setLayoutMode(layoutHorizontal)
+		if !h.d.sideOff || !h.d.tabRow.Visible() {
+			t.Fatal("back to horizontal")
+		}
+	})
+}

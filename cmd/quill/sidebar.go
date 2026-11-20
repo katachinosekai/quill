@@ -55,6 +55,7 @@ func (d *desk) build() fyne.CanvasObject {
 	d.sideFrac = 1
 	d.sideToggle = smallArrow(theme.NavigateBackIcon(), func() { d.setSidebar(d.sideOff) })
 	d.root = container.New(slideLayout{d}, d.sidebar, main, edge, d.sideToggle)
+	defer d.applyLayoutMode()
 	if d.app.Preferences().Bool("sidebarHidden") {
 		d.sideFrac = 0
 		d.sideOff = true
@@ -112,7 +113,9 @@ func (d *desk) chatWidthFor(side float32) float32 {
 
 func (d *desk) setSidebar(show bool) {
 	d.sideOff = !show
-	d.app.Preferences().SetBool("sidebarHidden", !show)
+	if d.layoutMode() == layoutVertical {
+		d.app.Preferences().SetBool("sidebarHidden", !show)
+	}
 	from, to := d.sideFrac, float32(0)
 	if show {
 		to = 1

@@ -141,93 +141,104 @@ type desk struct {
 	current  *deskSession
 	ownPIDs  sync.Map
 
-	rows          []sideRow
-	list          *widget.List
-	search        *widget.Entry
-	chat          *chatView
-	title         *widget.Label
-	subtitle      *canvas.Text
-	note          *widget.Label
-	rcStatus      *canvas.Text
-	usage         *usagePanel
-	rate          *protocol.RateLimit
-	rateAt        time.Time
-	input         *sendEntry
-	modelSel      *widget.Select
-	modeSel       *widget.Select
-	folder        *canvas.Text
-	stats         *canvas.Text
-	stopBtn       *widget.Button
-	sendBtn       *widget.Button
-	acctBtn       *widget.Button
-	acct          account.Status
-	acctErr       string
-	signingIn     context.CancelFunc
-	glowBoxes     map[*canvas.Rectangle]glow
-	pulsing       atomic.Int32
-	keeper        *keeperClient
-	single        *chatView
-	panes         []*pane
-	focused       *pane
-	chatHost      *fyne.Container
-	splitBtns     []*widget.Button
-	groups        []bookGroup
-	tabs          []string
-	tabBar        *fyne.Container
-	bookBar       *fyne.Container
-	shares        map[string]float32
-	bottomBox     *fyne.Container
-	keptView      string
-	keptHidden    bool
-	lightboxClose func()
-	swapTo        string
-	swapping      bool
-	restore       *restoreState
-	cmdList       []protocol.Command
-	pending       []*chat.Item
-	pendingSeen   map[*chat.Item]bool
-	pendingChrome bool
-	pendingFor    *deskSession
-	lastTyped     time.Time
-	stt           *speech
-	autoRC        bool
-	groupProjects bool
-	planFirst     bool
-	collapseChips bool
-	rules         sortRules
-	centerAll     *widget.Check
-	centerChecks  []*widget.Check
-	suppressAlign bool
-	forceSwap     bool
-	flushTimer    *time.Timer
-	cmds          *cmdMenu
-	sidebar       fyne.CanvasObject
-	background    bool
-	hidden        bool
-	sideFrac      float32
-	sideAnim      *fyne.Animation
-	animate       bool
-	root          *fyne.Container
-	sideToggle    *tapRow
-	headPad       *canvas.Rectangle
-	chatFreeze    float32
-	sideOff       bool
-	sideBody      *fyne.Container
-	folderOpen    map[string]bool
-	sorted        sortState
-	sortDirty     bool
-	org           sideOrg
-	rowPlace      map[string]string
-	sideItems     []*sideItem
-	dragID        string
-	dragAt        fyne.Position
-	created       map[string]bool
-	suppress      bool
-	refreshMu     sync.Mutex
-	headerBox     *fyne.Container
-	mainPane      *fyne.Container
-	do            func(func())
-	doWait        func(func())
+	rows           []sideRow
+	list           *widget.List
+	search         *widget.Entry
+	chat           *chatView
+	title          *widget.Label
+	subtitle       *canvas.Text
+	note           *widget.Label
+	rcStatus       *canvas.Text
+	usage          *usagePanel
+	rate           *protocol.RateLimit
+	rateAt         time.Time
+	input          *sendEntry
+	modelSel       *widget.Select
+	modeSel        *widget.Select
+	folder         *canvas.Text
+	stats          *canvas.Text
+	stopBtn        *widget.Button
+	sendBtn        *widget.Button
+	acctBtn        *widget.Button
+	acct           account.Status
+	acctErr        string
+	signingIn      context.CancelFunc
+	glowBoxes      map[*canvas.Rectangle]glow
+	pulsing        atomic.Int32
+	keeper         *keeperClient
+	single         *chatView
+	panes          []*pane
+	focused        *pane
+	chatHost       *fyne.Container
+	splitBtns      []*widget.Button
+	groups         []bookGroup
+	tabs           []string
+	tabBar         *fyne.Container
+	bookBar        *fyne.Container
+	tabSig         string
+	bookSig        string
+	bookRow        fyne.CanvasObject
+	tabRow         fyne.CanvasObject
+	settingsBox    *fyne.Container
+	settingsSlot   *fyne.Container
+	settingsBtn    *widget.Button
+	settingsPop    *widget.PopUp
+	layoutSel      *widget.RadioGroup
+	suppressLayout bool
+	sideDirty      bool
+	shares         map[string]float32
+	bottomBox      *fyne.Container
+	keptView       string
+	keptHidden     bool
+	lightboxClose  func()
+	swapTo         string
+	swapping       bool
+	restore        *restoreState
+	cmdList        []protocol.Command
+	pending        []*chat.Item
+	pendingSeen    map[*chat.Item]bool
+	pendingChrome  bool
+	pendingFor     *deskSession
+	lastTyped      time.Time
+	stt            *speech
+	autoRC         bool
+	groupProjects  bool
+	planFirst      bool
+	collapseChips  bool
+	rules          sortRules
+	centerAll      *widget.Check
+	centerChecks   []*widget.Check
+	suppressAlign  bool
+	forceSwap      bool
+	flushTimer     *time.Timer
+	cmds           *cmdMenu
+	sidebar        fyne.CanvasObject
+	background     bool
+	hidden         bool
+	sideFrac       float32
+	sideAnim       *fyne.Animation
+	animate        bool
+	root           *fyne.Container
+	sideToggle     *tapRow
+	headPad        *canvas.Rectangle
+	chatFreeze     float32
+	sideOff        bool
+	sideBody       *fyne.Container
+	folderOpen     map[string]bool
+	sorted         sortState
+	sortDirty      bool
+	org            sideOrg
+	rowPlace       map[string]string
+	sideItems      []*sideItem
+	dragID         string
+	dragAt         fyne.Position
+	created        map[string]bool
+	suppress       bool
+	refreshMu      sync.Mutex
+	headerBox      *fyne.Container
+	mainPane       *fyne.Container
+	do             func(func())
+	doWait         func(func())
 }
 
 func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
@@ -332,7 +343,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	brandName.TextStyle.Bold = true
 	brand := container.NewHBox(sized(32, 32, logo), container.NewCenter(brandName))
 	top := container.NewVBox(brand, newBtn, d.search)
-	bottom := container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, legend)
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, rulesBtn, alignRow, legend)
+	d.settingsSlot = container.NewStack(d.settingsBox)
+	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
 	d.sideBody = container.NewBorder(top, bottom, nil, nil, container.NewThemeOverride(d.list, compactTheme{}))
 	return container.NewStack(r, container.NewPadded(d.sideBody))
@@ -770,6 +783,20 @@ func (d *desk) matches(id, cwd, q string) bool {
 
 func (d *desk) refreshSidebar() {
 	d.list.Refresh()
+	d.syncTabs()
+}
+
+func (d *desk) refreshSidebarSoon() {
+	if d.sideDirty {
+		return
+	}
+	d.sideDirty = true
+	time.AfterFunc(500*time.Millisecond, func() {
+		d.do(func() {
+			d.sideDirty = false
+			d.refreshSidebar()
+		})
+	})
 }
 
 func (d *desk) buildMain() fyne.CanvasObject {
@@ -785,9 +812,11 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.rcStatus.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(container.NewCenter(d.splitButtons()), container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(container.NewCenter(d.layoutButtons()), container.NewCenter(d.splitButtons()), container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildBookmarks(), d.buildTabs(), widget.NewSeparator())
+	d.bookRow = d.buildBookmarks()
+	d.tabRow = d.buildTabs()
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.bookRow, d.tabRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
@@ -1174,8 +1203,10 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	}
 	urgent := ev.Type == "result" || ev.Type == "control_request" || ev.Type == "prompt_suggestion" || ev.Type == "system" && ev.Subtype == "init"
 	if urgent {
-		d.flushUI()
-		d.refreshSidebar()
+		if d.current == s {
+			d.flushUI()
+		}
+		d.refreshSidebarSoon()
 	}
 	if ev.Type == "result" {
 		d.trySwap()

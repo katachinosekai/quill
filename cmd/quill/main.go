@@ -24,12 +24,20 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version")
 	claudeBin := flag.String("claude", "claude", "claude CLI to run")
 	reload := flag.Bool("reload", false, "ask the running Quill to switch to this build now")
+	profile := flag.Bool("profile", false, "record 10 s of the running Quill's CPU use into $TMPDIR/quill-cpu-<pid>.pprof")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
 		return
 	}
 	sock := instanceSocket()
+	if *profile {
+		if !sendCommand(sock, "profile") {
+			fmt.Fprintln(os.Stderr, "no running Quill answered")
+			os.Exit(1)
+		}
+		return
+	}
 	if *reload {
 		if !sendCommand(sock, "reload") {
 			fmt.Fprintln(os.Stderr, "no running Quill answered")
