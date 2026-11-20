@@ -22,7 +22,16 @@ func listableURI(path string) (fyne.ListableURI, error) {
 	return storage.ListerForURI(storage.NewFileURI(path))
 }
 
+const appID = "io.github.katachinosekai.quill"
+
+func audioIdentity() {
+	if os.Getenv("PULSE_PROP_OVERRIDE") == "" {
+		os.Setenv("PULSE_PROP_OVERRIDE", "application.name='Quill' application.id='"+appID+"' application.icon_name='"+appID+"'")
+	}
+}
+
 func main() {
+	audioIdentity()
 	showVersion := flag.Bool("version", false, "print the version")
 	claudeBin := flag.String("claude", "claude", "claude CLI to run")
 	reload := flag.Bool("reload", false, "ask the running Quill to switch to this build now")
@@ -79,7 +88,7 @@ const memorySoftLimit = 512 << 20
 
 func runWindowWith(claudeBin, sock string) int {
 	debug.SetMemoryLimit(memorySoftLimit)
-	a := app.NewWithID("io.github.katachinosekai.quill")
+	a := app.NewWithID(appID)
 	a.Settings().SetTheme(deskTheme{})
 	a.SetIcon(appIcon)
 	w := a.NewWindow("Quill")
