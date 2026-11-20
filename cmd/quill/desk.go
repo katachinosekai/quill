@@ -85,6 +85,7 @@ type deskSession struct {
 	lastSent    string
 	inTurn      bool
 	restoreMode string
+	limitSeen   string
 	compacting  bool
 	takeover    bool
 	loading     bool
@@ -134,6 +135,7 @@ type sideRow struct {
 }
 
 type desk struct {
+	limitMsg   string
 	notifier   *notifier
 	notifySink func(sid, title, body string)
 	foreground bool
@@ -1127,6 +1129,8 @@ func (d *desk) open(id string) {
 				s.conv = conv
 				s.loaded = true
 				s.loadedMod = mod
+				s.limitSeen = ""
+				d.copyLimit(s)
 				if conv.Cwd != "" {
 					s.cwd = conv.Cwd
 				}
@@ -1249,6 +1253,7 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
 	items = append(items, d.planGate(s, ev, items)...)
+	d.checkLimitMessage(s, items)
 	d.attention(s, ev, items)
 	switch ev.Type {
 	case "control_request", "control_cancel_request", "result":
@@ -1744,7 +1749,6 @@ func (d *desk) refresh() {
 			}
 		}
 		d.updateChrome()
-		d.syncLimitBanner()
 		d.trySwap()
 	})
 }

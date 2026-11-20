@@ -277,7 +277,6 @@ func (d *desk) setSplit(n int) {
 }
 
 func (d *desk) afterSplit() {
-	defer d.syncLimitBanner()
 	if d.bottomBox != nil {
 		if d.split() {
 			d.bottomBox.Hide()
