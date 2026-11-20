@@ -183,8 +183,22 @@ func (c *Conversation) Permission(requestID string) *Item {
 func (c *Conversation) CancelPending() []*Item {
 	var out []*Item
 	for _, it := range c.PendingPermissions() {
+		if it.Kind == Plan {
+			continue
+		}
 		it.PermState = PermCancelled
 		out = append(out, it)
+	}
+	return out
+}
+
+func (c *Conversation) CancelPlans() []*Item {
+	var out []*Item
+	for _, it := range c.PendingPermissions() {
+		if it.Kind == Plan {
+			it.PermState = PermCancelled
+			out = append(out, it)
+		}
 	}
 	return out
 }
