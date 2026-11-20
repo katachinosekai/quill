@@ -870,7 +870,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.app.Preferences().SetString("newMode", v)
 		d.setMode(d.current, v)
 	})
-	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · / commands", 10)
+	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands", 10)
 	d.stats = mutedText("", 12)
 	d.stopBtn = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
 		if d.current != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -66,10 +67,87 @@ func (d *desk) closeTab(id string) {
 	}
 	d.tabs = append(d.tabs[:idx], d.tabs[idx+1:]...)
 	d.saveTabs()
-	if d.current != nil && d.current.id == id && len(d.tabs) > 0 {
+	wasCurrent := d.current != nil && d.current.id == id
+	if wasCurrent && len(d.tabs) > 0 {
 		d.open(d.tabs[min(idx, len(d.tabs)-1)])
 	}
+	if d.isEmptySession(id) {
+		d.purgeEmpty(id)
+	}
 	d.syncTabs()
+}
+
+func (d *desk) isEmptySession(id string) bool {
+	s := d.sessions[id]
+	if s == nil || s.persisted || s.running() || s.loading || s.takeover {
+		return false
+	}
+	if _, ok := d.infos[id]; ok {
+		return false
+	}
+	return countMessages(s.conv) == 0 && strings.TrimSpace(d.strip.draft(id)) == "" && !(d.current == s && strings.TrimSpace(d.input.Text) != "")
+}
+
+func (d *desk) purgeEmpty(id string) {
+	if p := d.paneFor(d.sessions[id]); p != nil && len(d.panes) > 1 {
+		p.view.show(nil)
+	}
+	if d.current != nil && d.current.id == id {
+		d.current = nil
+		d.chat.show(nil)
+	}
+	delete(d.sessions, id)
+	delete(d.created, id)
+	delete(d.org.Titles, id)
+	delete(d.org.Place, id)
+	delete(d.sorted.Place, id)
+	for i, t := range d.tabs {
+		if t == id {
+			d.tabs = append(d.tabs[:i], d.tabs[i+1:]...)
+			break
+		}
+	}
+	d.saveTabs()
+	d.saveOrg()
+	d.updateChrome()
+}
+
+func (d *desk) deleteEmptySessions() int {
+	var ids []string
+	for id := range d.sessions {
+		if d.current != nil && d.current.id == id {
+			continue
+		}
+		if d.isEmptySession(id) {
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range ids {
+		d.purgeEmpty(id)
+	}
+	d.tabSig = ""
+	d.syncTabs()
+	return len(ids)
+}
+
+func (d *desk) openTabNumber(n int) {
+	if len(d.tabs) == 0 {
+		return
+	}
+	i := n - 1
+	if n == 9 || i >= len(d.tabs) {
+		i = len(d.tabs) - 1
+	}
+	id := d.tabs[i]
+	if d.split() {
+		if s := d.session(id); s != nil {
+			if p := d.paneFor(s); p != nil {
+				d.focusPane(p)
+				return
+			}
+		}
+	}
+	d.open(id)
 }
 
 func (d *desk) buildTabs() fyne.CanvasObject {

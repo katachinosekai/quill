@@ -95,3 +95,75 @@ func TestPlusFollowsLastTab(t *testing.T) {
 		}
 	})
 }
+
+func TestCtrlNumberAndEmptySessions(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.setupShortcuts()
+		var ids []string
+		for i := 0; i < 3; i++ {
+			h.d.newSessionDialog()
+			ids = append(ids, h.d.current.id)
+			h.d.current.conv.AddUser("hi")
+		}
+		h.d.input.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.Key1, Modifier: fyne.KeyModifierShortcutDefault})
+		if h.d.current.id != h.d.tabs[0] {
+			t.Fatal("Ctrl+1 opens the first tab")
+		}
+		h.d.input.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.Key9, Modifier: fyne.KeyModifierShortcutDefault})
+		if h.d.current.id != h.d.tabs[len(h.d.tabs)-1] {
+			t.Fatal("Ctrl+9 opens the last tab")
+		}
+
+		h.d.newSessionDialog()
+		empty := h.d.current.id
+		h.d.closeTab(empty)
+		if h.d.session(empty) != nil || h.d.org.Titles[empty] != "" {
+			t.Fatal("closing an empty session deletes it")
+		}
+		if h.d.session(ids[0]) == nil {
+			t.Fatal("sessions with messages are kept")
+		}
+
+		h.d.newSessionDialog()
+		drafted := h.d.current.id
+		h.d.input.SetText("unsent idea")
+		h.d.open(ids[0])
+		h.d.closeTab(drafted)
+		if h.d.session(drafted) == nil {
+			t.Fatal("a session with an unsent draft is not empty")
+		}
+
+		h.d.newSessionDialog()
+		e1 := h.d.current.id
+		h.d.newSessionDialog()
+		e2 := h.d.current.id
+		h.d.open(ids[1])
+		if n := h.d.deleteEmptySessions(); n < 2 || h.d.session(e1) != nil || h.d.session(e2) != nil {
+			t.Fatalf("Delete empty sessions removes them all, removed %d", n)
+		}
+		for _, id := range h.d.tabs {
+			if id == e1 || id == e2 {
+				t.Fatal("their tabs go too")
+			}
+		}
+
+		h.d.newSessionDialog()
+		only := h.d.current.id
+		h.d.tabs = []string{only}
+		h.d.closeTab(only)
+		if h.d.current != nil || len(h.d.tabs) != 0 {
+			t.Fatal("closing the last, empty tab leaves an empty view")
+		}
+
+		h.d.newSessionDialog()
+		inPane := h.d.current.id
+		h.d.openInSplit(ids[0])
+		h.d.closeTab(inPane)
+		for _, p := range h.d.panes {
+			if p.view.s != nil && p.view.s.id == inPane {
+				t.Fatal("a deleted empty session leaves its split pane")
+			}
+		}
+	})
+}

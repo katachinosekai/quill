@@ -199,6 +199,7 @@ func (d *desk) folderMenu(r sideRow, at fyne.Position) {
 		}),
 		fyne.NewMenuItem("New folder...", func() { d.newFolder(nil) }),
 		fyne.NewMenuItem("Open all in tabs", func() { d.openAllInTabs(r.key) }),
+		fyne.NewMenuItem("Delete empty sessions", func() { d.deleteEmptySessions() }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Expand all folders", func() { d.setAllFolders(true) }),
 		fyne.NewMenuItem("Collapse all folders", func() { d.setAllFolders(false) }),

@@ -107,13 +107,7 @@ func (d *desk) newPane() *pane {
 	p.input.SetMinRowsVisible(2)
 	p.input.hint = "Message Claude"
 	p.input.SetPlaceHolder(p.input.hint)
-	p.input.onShortcut = func(sc fyne.Shortcut) bool {
-		if isNewTab(sc) {
-			d.newSessionDialog()
-			return true
-		}
-		return false
-	}
+	p.input.onShortcut = d.handleShortcut
 	sendBtn := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.sendFromPane(p, p.input.Text) })
 	sendBtn.Importance = widget.HighImportance
 	p.stop = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
