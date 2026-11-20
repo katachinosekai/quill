@@ -331,6 +331,59 @@ func alwaysRules(req *ControlRequest) []any {
 	return out
 }
 
+type Rule struct {
+	Tool    string
+	Content string
+}
+
+func ParseRule(s string) (Rule, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return Rule{}, false
+	}
+	i := strings.IndexByte(s, '(')
+	if i < 0 {
+		return Rule{Tool: s}, !strings.ContainsAny(s, " )")
+	}
+	if !strings.HasSuffix(s, ")") || i == 0 || strings.ContainsAny(s[:i], " )") {
+		return Rule{}, false
+	}
+	r := Rule{Tool: s[:i], Content: strings.TrimSpace(s[i+1 : len(s)-1])}
+	return r, r.Content != ""
+}
+
+func (r Rule) String() string {
+	if r.Content == "" {
+		return r.Tool
+	}
+	return r.Tool + "(" + r.Content + ")"
+}
+
+func AllowWithRules(requestID string, req *ControlRequest, rules []Rule, destination string) []byte {
+	input := json.RawMessage(`{}`)
+	if req != nil && len(req.Input) > 0 {
+		input = req.Input
+	}
+	var values []any
+	for _, r := range rules {
+		v := map[string]any{"toolName": r.Tool}
+		if r.Content != "" {
+			v["ruleContent"] = r.Content
+		}
+		values = append(values, v)
+	}
+	return ControlResponseLine(requestID, map[string]any{
+		"behavior":     "allow",
+		"updatedInput": input,
+		"updatedPermissions": []any{map[string]any{
+			"type":        "addRules",
+			"rules":       values,
+			"behavior":    "allow",
+			"destination": destination,
+		}},
+	})
+}
+
 func ControlResponseLine(requestID string, body any) []byte {
 	return line(map[string]any{
 		"type": "control_response",

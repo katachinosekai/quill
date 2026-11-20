@@ -478,6 +478,10 @@ func (p *Process) Respond(requestID string, d protocol.Decision, req *protocol.C
 	return p.write(protocol.PermissionResponse(requestID, d, req, ""))
 }
 
+func (p *Process) AllowWithRules(requestID string, req *protocol.ControlRequest, rules []protocol.Rule, destination string) error {
+	return p.write(protocol.AllowWithRules(requestID, req, rules, destination))
+}
+
 func (p *Process) Answer(requestID string, req *protocol.ControlRequest, answers map[string]string) error {
 	return p.write(protocol.AnswerQuestions(requestID, req, answers))
 }

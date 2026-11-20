@@ -1084,6 +1084,10 @@ func permStateText(s chat.PermState) string {
 		return "Approved with the plan"
 	case chat.PermPlanAsked:
 		return "Held: asked Claude for its full plan first"
+	case chat.PermRetryAllowed:
+		return "Allowed: you approved it on the blocked card"
+	case chat.PermRuleAllowed:
+		return "Allowed, and your rules were added"
 	}
 	return ""
 }
