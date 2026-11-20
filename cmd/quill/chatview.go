@@ -91,7 +91,7 @@ type sessView struct {
 	more        fyne.CanvasObject
 }
 
-const cachedViews = 12
+const cachedViews = 8
 
 func newChatView(d *desk) *chatView {
 	return newChatViewWith(d, d.chatWidth, d.sidebarWidth)

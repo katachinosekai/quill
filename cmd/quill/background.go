@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"strings"
 	"time"
@@ -65,6 +66,8 @@ func (d *desk) listenInstance(path string) {
 					d.do(d.showWindow)
 				case "profile":
 					go writeProfile()
+				case "heap":
+					go writeHeap()
 				case "reload":
 					d.do(func() {
 						d.forceSwap = true
@@ -124,4 +127,16 @@ func writeProfile() {
 	}
 	time.Sleep(10 * time.Second)
 	pprof.StopCPUProfile()
+}
+
+func writeHeap() {
+	path := filepath.Join(privateDir(), fmt.Sprintf("quill-heap-%d.pprof", os.Getpid()))
+	_ = os.Remove(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	runtime.GC()
+	_ = pprof.WriteHeapProfile(f)
 }
