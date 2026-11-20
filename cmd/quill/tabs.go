@@ -437,10 +437,11 @@ func (d *desk) folderMenu2(g bookGroup, at fyne.Position) {
 
 type dropdown struct {
 	widget.BaseWidget
-	card   fyne.CanvasObject
-	at     fyne.Position
-	close  func()
-	onMenu func(fyne.Position)
+	card     fyne.CanvasObject
+	at       fyne.Position
+	close    func()
+	onMenu   func(fyne.Position)
+	onClosed func()
 }
 
 func (dd *dropdown) CreateRenderer() fyne.WidgetRenderer {
@@ -475,8 +476,11 @@ func (r *dropdownRenderer) Destroy()                     {}
 func (r *dropdownRenderer) Objects() []fyne.CanvasObject { return []fyne.CanvasObject{r.card} }
 
 func (d *desk) showDropdown(card fyne.CanvasObject, at fyne.Position, onMenu func(fyne.Position)) func() {
+	return d.showDropdownWith(&dropdown{card: card, at: at, onMenu: onMenu})
+}
+
+func (d *desk) showDropdownWith(dd *dropdown) func() {
 	c := d.win.Canvas()
-	dd := &dropdown{card: card, at: at, onMenu: onMenu}
 	dd.ExtendBaseWidget(dd)
 	prev := c.OnTypedKey()
 	closed := false
@@ -487,6 +491,9 @@ func (d *desk) showDropdown(card fyne.CanvasObject, at fyne.Position, onMenu fun
 		closed = true
 		c.Overlays().Remove(dd)
 		c.SetOnTypedKey(prev)
+		if dd.onClosed != nil {
+			dd.onClosed()
+		}
 	}
 	c.Unfocus()
 	c.SetOnTypedKey(func(k *fyne.KeyEvent) {

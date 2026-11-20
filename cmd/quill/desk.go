@@ -135,6 +135,7 @@ type sideRow struct {
 }
 
 type desk struct {
+	nameClose  func()
 	limitMsg   string
 	notifier   *notifier
 	notifySink func(sid, title, body string)
@@ -1174,9 +1175,12 @@ func (d *desk) newSessionDialog() {
 	}
 	prefs := d.app.Preferences()
 	s := d.createSession(cwd, prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback("newMode", "auto"))
-	d.org.Titles[s.id] = d.nextSessionName()
+	name := d.nextSessionName()
+	d.org.Titles[s.id] = name
 	d.saveOrg()
 	d.updateChrome()
+	d.syncTabs()
+	d.askNewName(s, name)
 }
 
 func (d *desk) nextSessionName() string {
