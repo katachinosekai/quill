@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"rsc.io/qr"
 
@@ -453,4 +454,10 @@ func (d *desk) updatePhoneRow() {
 		d.phoneGistChk.SetChecked(on)
 		d.phoneGistChk.OnChanged = cb
 	}
+}
+
+func (d *desk) phoneButton() fyne.CanvasObject {
+	b := widget.NewButtonWithIcon("Phone", theme.ComputerIcon(), d.pairDialog)
+	b.Importance = widget.LowImportance
+	return b
 }
