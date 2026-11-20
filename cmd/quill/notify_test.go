@@ -13,6 +13,7 @@ import (
 	"fyne.io/fyne/v2/test"
 
 	"github.com/katachinosekai/quill/internal/folders"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 func TestDesktopNotifications(t *testing.T) {
@@ -129,6 +130,24 @@ func TestReattachedSessionKeepsPhoneLink(t *testing.T) {
 		h.d.reclaimRC(s)
 		if h.d.phone().rc["session_01ReattachAAA"] != s.id {
 			t.Fatal("a session handed over by a reload keeps its phone link, so notifications can open it")
+		}
+	})
+}
+
+func TestPhoneUsageSnapshot(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "haiku", "default")
+		s.conv.Stats.ContextUsed, s.conv.Stats.ContextMax = 1200, 200000
+		h.d.phone().rc["session_01UsageAAA"] = s.id
+		h.d.setRateLimit(&protocol.RateLimit{Status: "allowed", Type: "five_hour", Utilization: 0.37, ResetsAt: 1795162800, OverageStatus: "rejected", OverageReason: "out_of_credits"})
+		u := h.d.phoneUsage()
+		m, ok := u.Meta["session_01UsageAAA"]
+		if !ok || m.Status != "none" || m.Context != 1200 || m.ContextMax != 200000 {
+			t.Fatalf("meta for each phone-linked session: %+v %v", m, ok)
+		}
+		if u.Usage.FiveHour == nil || u.Usage.FiveHour.Utilization != 0.37 || u.Usage.Credits != "out of credits" || u.Usage.At == 0 {
+			t.Fatalf("usage mirrors the strip: %+v", u.Usage)
 		}
 	})
 }

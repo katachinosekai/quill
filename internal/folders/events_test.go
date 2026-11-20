@@ -140,3 +140,29 @@ func TestEventsLongPoll(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageEndpoint(t *testing.T) {
+	s, get := eventServer(t)
+	const key = "secret-key-123456"
+	if code, _ := get("/usage.json", ""); code != http.StatusForbidden {
+		t.Fatalf("key required: %d", code)
+	}
+	if code, _ := get("/usage.json", key); code != http.StatusServiceUnavailable {
+		t.Fatalf("not ready without a source: %d", code)
+	}
+	calls := 0
+	s.SetUsageSource(func() []byte {
+		calls++
+		b, _ := json.Marshal(Usage{Version: 1, Usage: UsageTotals{Credits: "available", Today: 5}, Meta: map[string]SessionMeta{"session_01A": {Status: "idle", Msgs: 3}}})
+		return b
+	})
+	code, body := get("/usage.json", key)
+	var u Usage
+	if code != 200 || json.Unmarshal([]byte(body), &u) != nil || u.Usage.Credits != "available" || u.Meta["session_01A"].Msgs != 3 {
+		t.Fatalf("usage served: %d %q", code, body)
+	}
+	get("/usage.json", key)
+	if calls != 1 {
+		t.Fatalf("cached briefly so polling phones don't recompute: %d", calls)
+	}
+}
