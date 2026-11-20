@@ -177,6 +177,10 @@ type desk struct {
 	bookBar        *fyne.Container
 	tabSig         string
 	tabChips       map[string]*tabChip
+	strip          *tabStrip
+	resizeFreeze   float32
+	resizeTimer    *time.Timer
+	lastRootSize   fyne.Size
 	tabDrag        string
 	tabDragX       float32
 	tabCenter      *fyne.Container
@@ -1046,6 +1050,9 @@ func (d *desk) open(id string) {
 	}
 	d.current = s
 	d.addTab(s.id)
+	if s.persisted || d.infos[s.id].ID != "" {
+		d.app.Preferences().SetString("lastTab", s.id)
+	}
 	defer d.syncPanes()
 	if !d.rowShown(id) {
 		d.rebuildRows()
@@ -1670,6 +1677,7 @@ func (d *desk) watch(ctx context.Context) {
 		d.restore = nil
 		d.do(func() { d.applyRestore(st) })
 	}
+	d.do(d.reopenLastTab)
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
 	go d.chat.followGuard(ctx)

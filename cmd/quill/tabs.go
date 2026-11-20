@@ -73,7 +73,9 @@ func (d *desk) closeTab(id string) {
 
 func (d *desk) buildTabs() fyne.CanvasObject {
 	d.loadTabs()
-	d.tabBar = container.New(layout.NewCustomPaddedLayout(4, 4, 8, 8), container.NewHBox())
+	d.strip = &tabStrip{d: d, cur: map[*tabChip]float32{}}
+	d.strip.box = container.New(d.strip)
+	d.tabBar = container.New(layout.NewCustomPaddedLayout(4, 4, 8, 8), d.strip.box)
 	d.tabCenter = container.NewStack(d.tabBar)
 	d.applyTabCentering()
 	newTab := widget.NewButtonWithIcon("", theme.ContentAddIcon(), d.newSessionDialog)
@@ -123,21 +125,23 @@ func (d *desk) syncTabs() {
 	}
 	for _, id := range d.tabs {
 		title, _, st := d.rowText(id)
-		sig += "|" + id + title + fmt.Sprint(st)
+		sig += "|" + id + title + fmt.Sprint(st) + fmt.Sprint(d.session(id) != nil)
 	}
 	if sig == d.tabSig {
 		return
 	}
 	d.tabSig = sig
-	d.tabChips = map[string]*tabChip{}
-	var objs []fyne.CanvasObject
-	var kept []string
+	if d.tabChips == nil {
+		d.tabChips = map[string]*tabChip{}
+	}
+	var chips []*tabChip
+	seen := map[string]bool{}
 	for _, id := range d.tabs {
 		if d.session(id) == nil {
 			continue
 		}
-		kept = append(kept, id)
 		id := id
+		seen[id] = true
 		title, _, st := d.rowText(id)
 		active := d.current != nil && d.current.id == id
 		label := canvas.NewText(oneLine(title, tabTitleRunes), colText)
@@ -156,21 +160,27 @@ func (d *desk) syncTabs() {
 			bg.StrokeWidth = 2
 		}
 		row := container.NewHBox(padLeft(10), container.NewCenter(sized(9, 9, dt)), padLeft(2), container.NewCenter(label), padLeft(2), container.NewCenter(sized(22, 22, closeBtn)), padLeft(4))
-		content := container.NewStack(bg, container.New(layout.NewCustomPaddedLayout(5, 5, 0, 0), row))
-		chip := newChip(content, func() { d.open(id) }, func(at fyne.Position) { d.tabMenu(id, at) })
-		chip.onDrag = func(e *fyne.DragEvent) {
-			d.tabDrag, d.tabDragX = id, e.AbsolutePosition.X
+		inner := []fyne.CanvasObject{bg, container.New(layout.NewCustomPaddedLayout(5, 5, 0, 0), row)}
+		chip := d.tabChips[id]
+		if chip == nil {
+			holder := container.NewStack(inner...)
+			chip = newChip(holder, func() { d.open(id) }, func(at fyne.Position) { d.tabMenu(id, at) })
+			chip.onDrag = func(e *fyne.DragEvent) { d.strip.drag(chip, id, e) }
+			chip.onDrop = func() { d.strip.drop() }
+			d.tabChips[id] = chip
+		} else {
+			holder := chip.content.(*fyne.Container)
+			holder.Objects = inner
+			holder.Refresh()
 		}
-		chip.onDrop = func() { d.dropTab() }
-		d.tabChips[id] = chip
-		objs = append(objs, chip, padLeft(6))
+		chips = append(chips, chip)
 	}
-	if len(kept) != len(d.tabs) {
-		d.tabs = kept
+	for id := range d.tabChips {
+		if !seen[id] {
+			delete(d.tabChips, id)
+		}
 	}
-	strip := d.tabBar.Objects[0].(*fyne.Container)
-	strip.Objects = objs
-	strip.Refresh()
+	d.strip.setChips(chips)
 }
 
 func (d *desk) buildBookmarks() fyne.CanvasObject {
@@ -202,44 +212,6 @@ func (d *desk) applyTabCentering() {
 func (d *desk) setTabCenter(on bool) {
 	d.app.Preferences().SetBool("centerTabs", on)
 	d.applyTabCentering()
-}
-
-func (d *desk) dropTab() {
-	id := d.tabDrag
-	d.tabDrag = ""
-	if id == "" {
-		return
-	}
-	target := len(d.tabs)
-	for i, t := range d.tabs {
-		chip := d.tabChips[t]
-		if chip == nil {
-			continue
-		}
-		pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(chip)
-		if d.tabDragX < pos.X+chip.Size().Width/2 {
-			target = i
-			break
-		}
-	}
-	from := -1
-	for i, t := range d.tabs {
-		if t == id {
-			from = i
-		}
-	}
-	if from < 0 {
-		return
-	}
-	rest := append(append([]string{}, d.tabs[:from]...), d.tabs[from+1:]...)
-	if target > from {
-		target--
-	}
-	target = max(0, min(target, len(rest)))
-	d.tabs = append(rest[:target], append([]string{id}, rest[target:]...)...)
-	d.saveTabs()
-	d.tabSig = ""
-	d.syncTabs()
 }
 
 func (d *desk) syncBookmarks() {
@@ -341,4 +313,21 @@ func (d *desk) tabMenu(id string, at fyne.Position) {
 		fyne.NewMenuItem("Close other tabs", func() { closeOthers(func(i, at int) bool { return i == at }) }),
 		fyne.NewMenuItem("Close tabs to the right", func() { closeOthers(func(i, at int) bool { return i <= at }) }),
 	)
+}
+
+func (d *desk) reopenLastTab() {
+	if d.current != nil {
+		return
+	}
+	id := d.app.Preferences().String("lastTab")
+	if _, ok := d.infos[id]; ok {
+		d.open(id)
+		return
+	}
+	for i := len(d.tabs) - 1; i >= 0; i-- {
+		if _, ok := d.infos[d.tabs[i]]; ok {
+			d.open(d.tabs[i])
+			return
+		}
+	}
 }

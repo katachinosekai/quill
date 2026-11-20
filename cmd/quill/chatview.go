@@ -97,7 +97,7 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 	v := &chatView{d: d, views: map[int]*itemView{}}
 	v.box = container.NewVBox()
 	v.cache = map[*deskSession]*sessView{}
-	v.inner = container.New(layout.NewCustomPaddedLayout(10, 10, 14, 14), v.box)
+	v.inner = container.New(shownPad{10, 10, 14, 14}, v.box)
 	v.live = widget.NewLabel(" ")
 	v.live.TextStyle.Italic = true
 	v.live.Truncation = fyne.TextTruncateEllipsis
@@ -170,8 +170,53 @@ func (v *chatView) forget(s *deskSession) {
 
 func (v *chatView) setBox(b *fyne.Container) {
 	v.box = b
-	v.inner.Objects = []fyne.CanvasObject{b}
+	keep := map[fyne.CanvasObject]bool{b: true}
+	for _, sv := range v.cache {
+		keep[sv.box] = true
+	}
+	objs := v.inner.Objects[:0]
+	found := false
+	for _, o := range v.inner.Objects {
+		if !keep[o] {
+			continue
+		}
+		if o == b {
+			found = true
+			o.Show()
+		} else {
+			o.Hide()
+		}
+		objs = append(objs, o)
+	}
+	if !found {
+		objs = append(objs, b)
+		b.Show()
+	}
+	v.inner.Objects = objs
 	v.inner.Refresh()
+}
+
+type shownPad struct{ top, bottom, left, right float32 }
+
+func (l shownPad) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	var s fyne.Size
+	for _, o := range objs {
+		if o.Visible() {
+			s = s.Max(o.MinSize())
+		}
+	}
+	return s.Add(fyne.NewSize(l.left+l.right, l.top+l.bottom))
+}
+
+func (l shownPad) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	inner := fyne.NewSize(size.Width-l.left-l.right, size.Height-l.top-l.bottom)
+	for _, o := range objs {
+		if !o.Visible() {
+			continue
+		}
+		o.Move(fyne.NewPos(l.left, l.top))
+		o.Resize(inner)
+	}
 }
 
 func (v *chatView) setLive(text string) {

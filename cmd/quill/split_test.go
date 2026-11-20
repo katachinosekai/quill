@@ -176,11 +176,11 @@ func TestTabDragMenusAndCentering(t *testing.T) {
 			ids = append(ids, s.id)
 		}
 		first := ids[0]
-		h.d.tabDrag = first
-		last := h.d.tabChips[h.d.tabs[len(h.d.tabs)-1]]
-		pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(last)
-		h.d.tabDragX = pos.X + last.Size().Width
-		h.d.dropTab()
+		chip := h.d.tabChips[first]
+		h.d.strip.held, h.d.strip.heldID = chip, first
+		h.d.strip.grab = 0
+		h.d.strip.ptr = 10000
+		h.d.strip.drop()
 		if h.d.tabs[len(h.d.tabs)-1] != first {
 			var dbg []string
 			for _, id := range h.d.tabs {

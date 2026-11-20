@@ -26,6 +26,7 @@ func (l slideLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
 }
 
 func (l slideLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	l.d.noteResize(size)
 	side, main, edge, toggle := objs[0], objs[1], objs[2], objs[3]
 	w := float32(sideW) * l.d.sideFrac
 	ts := toggle.MinSize()
@@ -82,6 +83,9 @@ func (d *desk) sidebarWidth() float32 {
 func (d *desk) chatWidth() float32 {
 	if d.chatFreeze > 0 {
 		return d.chatFreeze
+	}
+	if d.resizeFreeze > 0 {
+		return d.resizeFreeze
 	}
 	if d.root == nil || d.root.Size().Width <= 0 {
 		return chatMaxWidth
@@ -289,4 +293,33 @@ func (d *desk) setShare(pref string, v float32) {
 	if d.mainPane != nil {
 		d.mainPane.Refresh()
 	}
+}
+
+const resizeSettle = 180 * time.Millisecond
+
+func (d *desk) noteResize(size fyne.Size) {
+	if d.lastRootSize == size {
+		return
+	}
+	first := d.lastRootSize.IsZero()
+	d.lastRootSize = size
+	if first || !d.animate || d.root == nil || d.chatFreeze > 0 {
+		return
+	}
+	if d.resizeFreeze == 0 {
+		d.resizeFreeze = d.chatWidthFor(d.sidebarWidth())
+	}
+	if d.resizeTimer != nil {
+		d.resizeTimer.Stop()
+	}
+	d.resizeTimer = time.AfterFunc(resizeSettle, func() {
+		d.do(func() {
+			d.resizeFreeze = 0
+			d.resizeTimer = nil
+			if d.mainPane != nil {
+				d.mainPane.Refresh()
+			}
+			d.chat.relayout()
+		})
+	})
 }
