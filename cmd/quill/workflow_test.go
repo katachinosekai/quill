@@ -251,6 +251,7 @@ func TestLimitBannerAndBlockedCard(t *testing.T) {
 		if !autoBlocked(blocked) || blockedCommand(blocked) != "git push origin master" {
 			t.Fatal("auto-mode denials are recognized with their command")
 		}
+		s.conv.Items = append(s.conv.Items, blocked)
 		h.d.chat.show(s)
 		card := h.d.chat.blockedCard(blocked)
 		found := false
