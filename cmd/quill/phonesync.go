@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"image"
 	"math/rand/v2"
 	"os"
 	"os/exec"
@@ -322,8 +323,8 @@ func (d *desk) pairDialog() {
 		dialog.ShowError(err, d.win)
 		return
 	}
-	img := canvas.NewImageFromResource(nil)
-	img.FillMode = canvas.ImageFillContain
+	img := canvas.NewImageFromImage(nil)
+	img.FillMode = canvas.ImageFillOriginal
 	img.ScaleMode = canvas.ImageScalePixels
 	linkText := widget.NewLabel("")
 	linkText.Wrapping = fyne.TextWrapBreak
@@ -331,12 +332,15 @@ func (d *desk) pairDialog() {
 	var link string
 	show := func() {
 		link = d.pairLink()
-		code, err := qr.Encode(link, qr.M)
+		code, err := qr.Encode(link, qr.L)
 		if err != nil {
 			dialog.ShowError(err, d.win)
 			return
 		}
-		img.Resource = fyne.NewStaticResource("pair.png", code.PNG())
+		scale := d.win.Canvas().Scale()
+		px, side := qrLayout(code.Size, scale)
+		img.Image = qrImage(code, px)
+		img.SetMinSize(fyne.NewSquareSize(side))
 		img.Refresh()
 		linkText.SetText(link)
 	}
@@ -364,7 +368,7 @@ func (d *desk) pairDialog() {
 		d.app.Preferences().SetBool("phoneServe", false)
 		d.updatePhoneRow()
 	})
-	body := container.NewVBox(sized(300, 300, img), help, container.NewGridWithColumns(2, copyBtn, showBtn), container.NewGridWithColumns(2, newKey, stop), linkText)
+	body := container.NewVBox(container.NewCenter(img), help, container.NewGridWithColumns(2, copyBtn, showBtn), container.NewGridWithColumns(2, newKey, stop), linkText)
 	dlg := dialog.NewCustom("Pair phone", "Close", body, d.win)
 	dlg.Resize(fyne.NewSize(460, 600))
 	dlg.SetOnClosed(d.updatePhoneRow)
@@ -468,4 +472,41 @@ func (d *desk) phoneButton() fyne.CanvasObject {
 	b := widget.NewButtonWithIcon("Phone", theme.ComputerIcon(), d.pairDialog)
 	b.Importance = widget.LowImportance
 	return b
+}
+
+const (
+	qrQuiet  = 4
+	qrTarget = 320
+)
+
+func qrLayout(modules int, scale float32) (int, float32) {
+	if scale <= 0 {
+		scale = 1
+	}
+	total := modules + 2*qrQuiet
+	px := max(2, int(qrTarget*scale)/total)
+	return px, float32(total*px) / scale
+}
+
+func qrImage(code *qr.Code, px int) image.Image {
+	total := code.Size + 2*qrQuiet
+	img := image.NewGray(image.Rect(0, 0, total*px, total*px))
+	for i := range img.Pix {
+		img.Pix[i] = 0xff
+	}
+	for y := 0; y < code.Size; y++ {
+		for x := 0; x < code.Size; x++ {
+			if !code.Black(x, y) {
+				continue
+			}
+			x0, y0 := (x+qrQuiet)*px, (y+qrQuiet)*px
+			for yy := y0; yy < y0+px; yy++ {
+				row := img.Pix[yy*img.Stride:]
+				for xx := x0; xx < x0+px; xx++ {
+					row[xx] = 0
+				}
+			}
+		}
+	}
+	return img
 }
