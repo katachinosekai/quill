@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/protocol"
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 const (
@@ -213,6 +214,26 @@ func (d *desk) applyKmemChoice(s *deskSession, choice, title string) {
 	}()
 }
 
+func (d *desk) linkKmem(infos []transcript.Info) {
+	changed := false
+	for _, info := range infos {
+		if info.Kmem == "" {
+			continue
+		}
+		if _, set := d.org.Kmem[info.ID]; set {
+			continue
+		}
+		if d.kmemTaken(nil)(info.Kmem) {
+			continue
+		}
+		d.org.Kmem[info.ID] = info.Kmem
+		changed = true
+	}
+	if changed {
+		d.saveOrg()
+	}
+}
+
 func (d *desk) askKmemName(id string) {
 	e := widget.NewSelectEntry(nil)
 	e.SetText(d.org.Kmem[id])
@@ -237,7 +258,7 @@ func (d *desk) askKmemName(id string) {
 			return
 		}
 		if name := strings.TrimSpace(e.Text); name == "" {
-			delete(d.org.Kmem, id)
+			d.org.Kmem[id] = ""
 		} else {
 			d.org.Kmem[id] = name
 		}
