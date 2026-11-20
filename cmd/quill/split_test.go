@@ -8,6 +8,8 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
 )
@@ -220,6 +222,49 @@ func TestMiddleClickClosesTab(t *testing.T) {
 			if id == a.id {
 				t.Fatal("middle click closes the tab")
 			}
+		}
+	})
+}
+
+func TestSplitPanesHaveOwnInputsPickerAndDrop(t *testing.T) {
+	h := newHarness(t)
+	var a, b, c, e *deskSession
+	h.ui(func() {
+		a = h.d.createSession(h.proj, "default", "default")
+		b = h.d.createSession(h.proj, "default", "default")
+		c = h.d.createSession(h.proj, "default", "default")
+		e = h.d.createSession(h.proj, "default", "default")
+		h.d.open(a.id)
+		h.d.setSplit(3)
+		if h.d.bottomBox.Visible() {
+			t.Fatal("the shared message box hides in split view")
+		}
+		empty := h.d.panes[2]
+		if !empty.picker.Visible() || len(empty.choices.Objects) == 0 {
+			t.Fatal("an empty pane offers the tabs that are not shown")
+		}
+		test.Tap(empty.choices.Objects[0].(*widget.Button))
+		if empty.view.s == nil || empty.picker.Visible() {
+			t.Fatal("picking a tab fills the pane")
+		}
+		h.d.focusPane(h.d.panes[0])
+		h.d.panes[2].input.SetText("hello from pane three")
+		h.d.sendFromPane(h.d.panes[2], "hello from pane three")
+		if h.d.focused != h.d.panes[2] || h.d.panes[2].input.Text != "" {
+			t.Fatal("sending from a pane focuses it and clears its own box")
+		}
+		target := h.d.panes[0]
+		pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(target.root)
+		h.d.strip.held, h.d.strip.heldID = h.d.tabChips[e.id], e.id
+		h.d.strip.abs = pos.Add(fyne.NewPos(20, 200))
+		h.d.strip.drop()
+		if target.view.s != e {
+			t.Fatal("dropping a tab on a pane shows it there")
+		}
+		_, _ = b, c
+		h.d.setSplit(1)
+		if !h.d.bottomBox.Visible() {
+			t.Fatal("the shared message box returns with a single view")
 		}
 	})
 }

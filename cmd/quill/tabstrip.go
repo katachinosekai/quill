@@ -23,6 +23,7 @@ type tabStrip struct {
 	heldID string
 	grab   float32
 	ptr    float32
+	abs    fyne.Position
 	ticker *time.Ticker
 	stop   chan struct{}
 }
@@ -140,11 +141,22 @@ func (t *tabStrip) drag(c *tabChip, id string, e *fyne.DragEvent) {
 		t.animate()
 	}
 	t.ptr = e.AbsolutePosition.X - origin.X
+	t.abs = e.AbsolutePosition
 }
 
 func (t *tabStrip) drop() {
 	if t.held == nil {
 		return
+	}
+	origin := fyne.CurrentApp().Driver().AbsolutePositionForObject(t.box)
+	if t.d.split() && t.abs.Y > origin.Y+t.box.Size().Height+8 {
+		if p := t.d.paneAt(t.abs); p != nil {
+			id := t.heldID
+			t.held, t.heldID = nil, ""
+			t.animate()
+			t.d.showInPane(p, id)
+			return
+		}
 	}
 	final := t.order()
 	var ids []string

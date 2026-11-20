@@ -193,6 +193,9 @@ func (d *desk) syncTabs() {
 		}
 	}
 	d.strip.setChips(chips)
+	if d.split() {
+		d.syncPanes()
+	}
 }
 
 func (d *desk) buildBookmarks() fyne.CanvasObject {
@@ -257,6 +260,7 @@ func (d *desk) syncBookmarks() {
 	}
 	d.bookBar.Objects = objs
 	d.bookBar.Refresh()
+	d.autoSplitSync()
 }
 
 func (d *desk) folderMenu2(g bookGroup, at fyne.Position) {

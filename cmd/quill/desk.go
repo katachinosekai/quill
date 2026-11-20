@@ -178,6 +178,8 @@ type desk struct {
 	tabSig         string
 	tabChips       map[string]*tabChip
 	strip          *tabStrip
+	autoChk        *widget.Check
+	autoSyncing    bool
 	listTheme      *container.ThemeOverride
 	usageBox       *fyne.Container
 	resizeFreeze   float32
