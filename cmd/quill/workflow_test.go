@@ -302,3 +302,67 @@ func TestChipsHiddenUntilOpened(t *testing.T) {
 		}
 	})
 }
+
+func TestQueueAndHistory(t *testing.T) {
+	h := newHarness(t)
+	h.d.do = func(f func()) {
+		go func() {
+			uiMu.Lock()
+			defer uiMu.Unlock()
+			f()
+		}()
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("slow")
+	})
+	h.eventually("busy", func() bool { return s.running() && (s.conv.Busy || s.proc.Busy()) })
+	h.ui(func() {
+		h.d.input.SetText("first follow-up")
+		h.d.send("first follow-up")
+		h.d.input.SetText("second follow-up")
+		h.d.send("second follow-up")
+		if len(s.queue) != 2 || h.d.input.Text != "" || len(h.d.chat.queueBox.Objects) != 3 {
+			t.Fatalf("messages sent while busy are queued and shown: %d %q", len(s.queue), h.d.input.Text)
+		}
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyUp})
+		if h.d.input.Text != "second follow-up" || len(s.queue) != 1 {
+			t.Fatal("Up in an empty box pulls the last queued message back for editing")
+		}
+		h.d.input.SetText("second, edited")
+		h.d.send("second, edited")
+		if len(s.queue) != 2 {
+			t.Fatal("the edited message goes back in the queue")
+		}
+		h.d.interrupt(s)
+	})
+	h.eventually("queue flushed after the turn", func() bool {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.User && strings.Contains(it.Text, "first follow-up") && strings.Contains(it.Text, "second, edited") {
+				return len(s.queue) == 0
+			}
+		}
+		return false
+	})
+	h.eventually("idle", func() bool { return !s.conv.Busy })
+	h.ui(func() {
+		h.d.input.SetText("draft")
+		h.d.input.CursorRow = 0
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyUp})
+		if !strings.Contains(h.d.input.Text, "second, edited") {
+			t.Fatalf("Up recalls the last sent message, got %q", h.d.input.Text)
+		}
+		h.d.input.CursorRow = 0
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyUp})
+		if h.d.input.Text != "slow" {
+			t.Fatalf("Up again goes further back, got %q", h.d.input.Text)
+		}
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDown})
+		h.d.input.CursorRow = strings.Count(h.d.input.Text, "\n")
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDown})
+		if h.d.input.Text != "draft" {
+			t.Fatalf("Down past the newest brings the draft back, got %q", h.d.input.Text)
+		}
+	})
+}

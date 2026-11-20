@@ -73,6 +73,9 @@ type sendEntry struct {
 	ctrl       bool
 	menuOpen   func() bool
 	onShortcut func(fyne.Shortcut) bool
+	onHistory  func(*fyne.KeyEvent) bool
+	hist       *history
+	browsing   bool
 }
 
 func (e *sendEntry) TypedShortcut(s fyne.Shortcut) {
@@ -143,6 +146,12 @@ func (e *sendEntry) KeyUp(k *fyne.KeyEvent) {
 func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 	if e.onKey != nil && e.onKey(k) {
 		return
+	}
+	if e.onHistory != nil && e.onHistory(k) {
+		return
+	}
+	if k.Name != fyne.KeyUp && k.Name != fyne.KeyDown && !e.browsing {
+		e.hist = nil
 	}
 	if k.Name == fyne.KeyTab && e.AcceptsTab() {
 		e.SetText(e.suggestion)

@@ -57,6 +57,7 @@ type chatView struct {
 	autoScrolling bool
 	gliding       bool
 	limit         *fyne.Container
+	queueBox      *fyne.Container
 	dismissed     map[*chat.Item]bool
 	limitText     *widget.Label
 	stickTimer    *time.Timer
@@ -147,7 +148,9 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 	limitBg.StrokeWidth = 1.5
 	v.limit = container.NewCenter(sized(360, 0, container.NewStack(limitBg, container.NewPadded(v.limitText))))
 	v.limit.Hide()
-	v.root = container.NewBorder(nil, liveRow, nil, nil, container.NewStack(framed, overlay, v.limit))
+	v.queueBox = container.NewVBox()
+	queueRow := windowCentered(width, shift, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), v.queueBox))
+	v.root = container.NewBorder(nil, container.NewVBox(queueRow, liveRow), nil, nil, container.NewStack(framed, overlay, v.limit))
 	return v
 }
 

@@ -81,6 +81,7 @@ type deskSession struct {
 	planWait    bool
 	runAll      bool
 	runAllNext  bool
+	queue       []string
 	restoreMode string
 	takeover    bool
 	loading     bool
@@ -853,6 +854,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.cmds.update(t)
 	}
 	d.input.onSendNow = d.sendNow
+	d.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(d.input, d.current, k) }
 	d.input.hint = "Message Claude"
 	d.input.SetPlaceHolder(d.input.hint)
 	if d.app.Preferences().Bool("centerInput") {
@@ -1249,6 +1251,7 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		d.refreshSidebarSoon()
 	}
 	if ev.Type == "result" {
+		d.flushQueue(s)
 		d.trySwap()
 	}
 }
@@ -1358,6 +1361,10 @@ func (d *desk) send(text string) {
 			return
 		}
 		d.takeOver(s, t, text)
+		return
+	}
+	if s.running() && (s.conv.Busy || s.proc.Busy()) {
+		d.enqueue(s, text)
 		return
 	}
 	d.sendTo(s, text)
