@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	kmemTimeout   = 20 * time.Second
-	kmemNewChoice = "New kmem"
-	kmemNoChoice  = "No kmem"
-	kmemResumeOf  = "Resume "
+	kmemTimeout    = 20 * time.Second
+	kmemRecentSave = 10 * time.Minute
+	kmemNewChoice  = "New kmem"
+	kmemNoChoice   = "No kmem"
+	kmemResumeOf   = "Resume "
 )
 
 type kmemHandoff struct {
@@ -139,7 +140,7 @@ func kmemIntro(name string) string {
 
 func kmemSaveMessage(name string) string {
 	return fmt.Sprintf("Quill is restarting this session as a fresh one that resumes from kmem, and this session will then be deleted. "+
-		"Save your kmem handoff now: run `kmem handoff save %s` with --pointer and --state lines for everything the next session needs. "+
+		"Save your kmem handoff now: run `kmem handoff save %s` with --pointer and --state lines for everything the next session needs; run it again even if you saved it recently, Quill checks the save time. "+
 		"It refuses until your claims, pzlock turn, background jobs and uncommitted files are recorded, so record those first. "+
 		"Don't start other work. Reply with one line once it is saved.", name)
 }
@@ -294,11 +295,20 @@ func (d *desk) kmemAfterTurn(s *deskSession) {
 	}
 	ks.prompt = "checking"
 	go func() {
-		saved := false
+		saved, recent := false, false
 		for _, h := range d.kmemHandoffs() {
-			if h.Name == ks.name && !h.Saved.Before(ks.asked.Truncate(time.Second)) {
-				saved = true
+			if h.Name != ks.name {
+				continue
 			}
+			if !h.Saved.Before(ks.asked.Truncate(time.Second)) {
+				saved = true
+			} else if ks.asked.Sub(h.Saved) <= kmemRecentSave {
+				recent = true
+			}
+		}
+		if !saved && recent {
+			out, _ := d.runKmem("kmem", "handoff", "get", ks.name)
+			saved = strings.Contains(out, "session cs:"+s.id+")")
 		}
 		prompt := ""
 		if saved {
