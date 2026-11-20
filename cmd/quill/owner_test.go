@@ -173,3 +173,33 @@ func TestSuggestedRules(t *testing.T) {
 		}
 	}
 }
+
+func TestStepListApprovesPendingPlan(t *testing.T) {
+	for text, want := range map[string]bool{
+		"1-4": true, "1,3": true, "1, 2 and 4": true, "steps 1-3": true, "1 to 4.": true, "#1-#4": true, "1 3": true, "1–4": true,
+		"2": false, "1-4 but skip 3": false, "v1.2": false, "1,3?": false, "": false, "call 555-1234 now": false,
+	} {
+		if isStepList(text) != want {
+			t.Errorf("isStepList(%q) = %v", text, !want)
+		}
+	}
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.planFirst = true
+		s := h.d.createSession(h.proj, "haiku", "default")
+		s.conv.AddUser("pick which ones")
+		s.conv.Apply(&protocol.Event{Type: "result", Subtype: "success"})
+		h.d.sendTo(s, "1,3")
+		if s.runAll {
+			t.Fatal("without a plan card, a numbered answer is not an approval")
+		}
+		s.conv.Apply(&protocol.Event{Type: "result", Subtype: "success"})
+		h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
+		s.inTurn = false
+		plan := s.conv.AddPlan()
+		h.d.sendTo(s, "1-4")
+		if plan.PermState != chat.PermAllowed || !s.runAll {
+			t.Fatal("a step list reply to a plan card approves the whole plan")
+		}
+	})
+}
