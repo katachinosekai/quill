@@ -67,4 +67,4 @@ go build -tags wayland ./cmd/quill       # or without the tag for X11
 
 ## License
 
-MIT. Bundled components keep their own licenses (Fyne BSD-3-Clause, whisper.cpp MIT, malgo/miniaudio, rsc.io/qr).
+MIT. Bundled components keep their own licenses (MIT, BSD, ISC, Apache 2.0, public domain); the full texts are in [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt), which the packages install as a license file.
