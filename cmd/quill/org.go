@@ -199,13 +199,16 @@ func (d *desk) folderMenu(r sideRow, at fyne.Position) {
 		}),
 		fyne.NewMenuItem("New folder...", func() { d.newFolder(nil) }),
 		fyne.NewMenuItem("Open all in tabs", func() { d.openAllInTabs(r.key) }),
+		fyne.NewMenuItem("Open in split view", func() { d.openAllInSplit(r.key) }),
 		fyne.NewMenuItem("Delete empty sessions", func() { d.deleteEmptySessions() }),
+		fyne.NewMenuItem("Format Rules...", d.rulesDialog),
 		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Expand all folders", func() { d.setAllFolders(true) }),
-		fyne.NewMenuItem("Collapse all folders", func() { d.setAllFolders(false) }),
 	}
 	if d.layoutMode() == layoutVertical {
-		items = append(items, fyne.NewMenuItem("Switch to horizontal tabs", func() { d.setLayoutMode(layoutHorizontal) }))
+		items = append(items,
+			fyne.NewMenuItem("Expand all folders", func() { d.setAllFolders(true) }),
+			fyne.NewMenuItem("Collapse all folders", func() { d.setAllFolders(false) }),
+			fyne.NewMenuItem("Switch to horizontal tabs", func() { d.setLayoutMode(layoutHorizontal) }))
 	} else {
 		items = append(items, fyne.NewMenuItem("Switch to vertical sidebar", func() { d.setLayoutMode(layoutVertical) }))
 	}
@@ -472,6 +475,25 @@ func (d *desk) setAllFolders(open bool) {
 		d.app.Preferences().SetString("folderOpen", string(b))
 	}
 	d.rebuildRows()
+}
+
+func (d *desk) openAllInSplit(key string) {
+	for _, g := range d.groups {
+		if g.key != key || len(g.ids) == 0 {
+			continue
+		}
+		ids := g.ids[:min(len(g.ids), maxPanes)]
+		if len(ids) == 1 {
+			d.openInSplit(ids[0])
+			return
+		}
+		d.setSplit(len(ids))
+		for i, id := range ids {
+			d.focusPane(d.panes[i])
+			d.open(id)
+		}
+		d.focusPane(d.panes[0])
+	}
 }
 
 func (d *desk) openAllInTabs(key string) {

@@ -432,14 +432,15 @@ func (d *desk) folderMenu2(g bookGroup, at fyne.Position) {
 	h := min(float32(menuMaxHeight), top.MinSize().Height+float32(len(g.ids))*50+4)
 	body := container.NewBorder(top, nil, nil, nil, container.NewThemeOverride(list, compactTheme{}))
 	card := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(6, 8, 6, 6), sized(menuWidth, h, body)))
-	closeMenu = d.showDropdown(card, at)
+	closeMenu = d.showDropdown(card, at, func(p fyne.Position) { d.folderMenu(sideRow{header: g.title, key: g.key}, p) })
 }
 
 type dropdown struct {
 	widget.BaseWidget
-	card  fyne.CanvasObject
-	at    fyne.Position
-	close func()
+	card   fyne.CanvasObject
+	at     fyne.Position
+	close  func()
+	onMenu func(fyne.Position)
 }
 
 func (dd *dropdown) CreateRenderer() fyne.WidgetRenderer {
@@ -447,6 +448,13 @@ func (dd *dropdown) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (dd *dropdown) Tapped(*fyne.PointEvent) { dd.close() }
+
+func (dd *dropdown) TappedSecondary(e *fyne.PointEvent) {
+	dd.close()
+	if dd.onMenu != nil {
+		dd.onMenu(e.AbsolutePosition)
+	}
+}
 
 type dropdownRenderer struct {
 	dd   *dropdown
@@ -466,9 +474,9 @@ func (r *dropdownRenderer) Refresh()                     { r.card.Refresh() }
 func (r *dropdownRenderer) Destroy()                     {}
 func (r *dropdownRenderer) Objects() []fyne.CanvasObject { return []fyne.CanvasObject{r.card} }
 
-func (d *desk) showDropdown(card fyne.CanvasObject, at fyne.Position) func() {
+func (d *desk) showDropdown(card fyne.CanvasObject, at fyne.Position, onMenu func(fyne.Position)) func() {
 	c := d.win.Canvas()
-	dd := &dropdown{card: card, at: at}
+	dd := &dropdown{card: card, at: at, onMenu: onMenu}
 	dd.ExtendBaseWidget(dd)
 	prev := c.OnTypedKey()
 	closed := false
