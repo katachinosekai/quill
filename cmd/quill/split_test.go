@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
 
 	"github.com/katachinosekai/quill/internal/chat"
 )
@@ -202,6 +203,23 @@ func TestTabDragMenusAndCentering(t *testing.T) {
 			Layout([]fyne.CanvasObject, fyne.Size)
 		}); !ok || !h.d.app.Preferences().Bool("centerTabs") {
 			t.Fatal("tab centering toggles")
+		}
+	})
+}
+
+func TestMiddleClickClosesTab(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		b := h.d.createSession(h.proj, "default", "default")
+		h.d.open(a.id)
+		h.d.open(b.id)
+		chip := h.d.tabChips[a.id]
+		chip.MouseUp(&desktop.MouseEvent{Button: desktop.MouseButtonTertiary})
+		for _, id := range h.d.tabs {
+			if id == a.id {
+				t.Fatal("middle click closes the tab")
+			}
 		}
 	})
 }

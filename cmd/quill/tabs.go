@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -86,11 +87,20 @@ func (d *desk) buildTabs() fyne.CanvasObject {
 
 type tabChip struct {
 	widget.BaseWidget
-	content fyne.CanvasObject
-	onTap   func()
-	onMenu  func(at fyne.Position)
-	onDrag  func(e *fyne.DragEvent)
-	onDrop  func()
+	content  fyne.CanvasObject
+	onTap    func()
+	onMenu   func(at fyne.Position)
+	onDrag   func(e *fyne.DragEvent)
+	onDrop   func()
+	onMiddle func()
+}
+
+func (c *tabChip) MouseDown(*desktop.MouseEvent) {}
+
+func (c *tabChip) MouseUp(e *desktop.MouseEvent) {
+	if e.Button == desktop.MouseButtonTertiary && c.onMiddle != nil {
+		c.onMiddle()
+	}
 }
 
 func (c *tabChip) Dragged(e *fyne.DragEvent) {
@@ -167,6 +177,7 @@ func (d *desk) syncTabs() {
 			chip = newChip(holder, func() { d.open(id) }, func(at fyne.Position) { d.tabMenu(id, at) })
 			chip.onDrag = func(e *fyne.DragEvent) { d.strip.drag(chip, id, e) }
 			chip.onDrop = func() { d.strip.drop() }
+			chip.onMiddle = func() { d.closeTab(id) }
 			d.tabChips[id] = chip
 		} else {
 			holder := chip.content.(*fyne.Container)

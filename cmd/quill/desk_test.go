@@ -508,7 +508,7 @@ func TestAutoRemoteControl(t *testing.T) {
 	})
 }
 
-func TestRemoteControlNamesCarryFolder(t *testing.T) {
+func TestRemoteControlNamesAreStableTitles(t *testing.T) {
 	h := newHarness(t)
 	out := filepath.Join(t.TempDir(), "renames")
 	t.Setenv("FAKE_RENAME_OUT", out)
@@ -532,37 +532,33 @@ func TestRemoteControlNamesCarryFolder(t *testing.T) {
 	h.eventually("history", func() bool { return s.loaded && !s.loading })
 	h.ui(func() { h.d.send("hello") })
 	var first string
-	h.eventually("rename with folder", func() bool {
+	h.eventually("rename to the Quill title", func() bool {
 		r := renames()
 		if len(r) == 0 {
 			return false
 		}
 		first = r[0]
-		return strings.HasSuffix(first, rcSep+"Fix edits")
+		return true
 	})
 	h.ui(func() {
-		if want := h.d.rcFolderLabel(editsID) + rcSep + "Fix edits"; first != want {
-			t.Fatalf("first rename %q, want %q", first, want)
+		if first != "Fix edits" {
+			t.Fatalf("agent name should be the Quill title, got %q", first)
 		}
 		h.d.setPlacement(editsID, placeArchive)
-	})
-	h.eventually("rename after move", func() bool {
-		r := renames()
-		return len(r) > 0 && r[len(r)-1] == "Archive"+rcSep+"Fix edits"
-	})
-	h.ui(func() {
-		if got := h.d.unRCTitle(editsID, "Archive"+rcSep+"Fix edits"); got != "Fix edits" {
-			t.Fatalf("prefixed title shown as %q", got)
-		}
 		h.d.rebuildRows()
-		if s.rcName != "Archive"+rcSep+"Fix edits" {
-			t.Fatalf("rcName %q", s.rcName)
-		}
 	})
 	time.Sleep(300 * time.Millisecond)
-	if n := len(renames()); n != 2 {
-		t.Fatalf("unchanged names must not be sent again, got %d renames: %q", n, renames())
+	if n := len(renames()); n != 1 {
+		t.Fatalf("moving folders must not rename the agent, got %q", renames())
 	}
+	h.ui(func() {
+		h.d.org.Titles[editsID] = "Fix edits v2"
+		h.d.saveOrg()
+	})
+	h.eventually("rename after title change", func() bool {
+		r := renames()
+		return len(r) == 2 && r[1] == "Fix edits v2"
+	})
 }
 
 func TestInactiveAndArchiveFolders(t *testing.T) {
