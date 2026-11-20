@@ -120,3 +120,15 @@ func TestPhoneEvents(t *testing.T) {
 		t.Fatalf("event names the session: %+v", e)
 	}
 }
+
+func TestReattachedSessionKeepsPhoneLink(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "haiku", "default")
+		s.rcOn, s.rcURL = true, "https://claude.ai/code/session_01ReattachAAA"
+		h.d.reclaimRC(s)
+		if h.d.phone().rc["session_01ReattachAAA"] != s.id {
+			t.Fatal("a session handed over by a reload keeps its phone link, so notifications can open it")
+		}
+	})
+}
