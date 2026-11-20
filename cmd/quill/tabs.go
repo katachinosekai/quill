@@ -215,6 +215,12 @@ func (d *desk) followDraft() {
 	if cur == d.strip.lastCur {
 		return
 	}
+	if d.current != nil {
+		defer d.syncQueue(d.current)
+	} else if d.chat != nil && d.chat.queueBox != nil {
+		d.chat.queueBox.Objects = nil
+		d.chat.queueBox.Refresh()
+	}
 	first := d.strip.lastCur == ""
 	d.strip.keepDraft(d.strip.lastCur, d.input.Text)
 	d.strip.lastCur = cur

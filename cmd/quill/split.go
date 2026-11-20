@@ -108,6 +108,7 @@ func (d *desk) newPane() *pane {
 	p.input.hint = "Message Claude"
 	p.input.SetPlaceHolder(p.input.hint)
 	p.input.onShortcut = d.handleShortcut
+	p.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(p.input, p.view.s, k) }
 	sendBtn := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.sendFromPane(p, p.input.Text) })
 	sendBtn.Importance = widget.HighImportance
 	p.stop = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
@@ -376,6 +377,9 @@ func (d *desk) syncPanes() {
 			p.lastID = id
 		}
 		d.syncPaneControls(p)
+		if p.view.s != nil {
+			d.syncQueue(p.view.s)
+		}
 		if p.view.s == nil {
 			var btns []fyne.CanvasObject
 			for _, id := range d.tabs {
