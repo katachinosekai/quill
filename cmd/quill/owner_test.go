@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 func TestPlanApprovalGoesToCardOwner(t *testing.T) {
@@ -71,6 +72,34 @@ func TestBlockedRetryGoesToCardOwner(t *testing.T) {
 		}
 		if it := a.conv.Items[len(a.conv.Items)-1]; it.Kind != chat.User {
 			t.Fatal("retry goes to the card's session")
+		}
+	})
+}
+
+func TestPlanCardSurvivesOtherTurns(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.planFirst = true
+		s := h.d.createSession(h.proj, "haiku", "default")
+		s.conv.AddUser("fix the tabs")
+		plan := s.conv.AddPlan()
+		s.conv.Apply(&protocol.Event{Type: "result", Subtype: "success"})
+		h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
+		if plan.PermState != chat.PermPending {
+			t.Fatal("a turn ending (peer message, background task) must not take the plan card away")
+		}
+		pending := 0
+		for _, it := range s.conv.PendingPermissions() {
+			if it.Kind == chat.Plan {
+				pending++
+			}
+		}
+		if pending != 1 {
+			t.Fatalf("one plan card at a time: %d", pending)
+		}
+		h.d.sendTo(s, "actually do something else")
+		if plan.PermState != chat.PermCancelled {
+			t.Fatal("a new request replaces the plan")
 		}
 	})
 }

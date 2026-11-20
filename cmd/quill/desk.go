@@ -1459,6 +1459,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 			d.approveByText(s)
 		} else if text != planGoMessage && !s.inTurn {
 			s.runAll, s.runAllNext = false, false
+			d.chatFor(s, s.conv.CancelPlans())
 		}
 	}
 	s.lastSent = text
@@ -2172,8 +2173,9 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		}
 		if s.planWait || d.planFirst && !s.runAll && s.conv.AsksApproval() {
 			s.planWait = false
-			marked := s.conv.MarkPlanText()
-			return append(marked, s.conv.AddPlan())
+			out := s.conv.CancelPlans()
+			out = append(out, s.conv.MarkPlanText()...)
+			return append(out, s.conv.AddPlan())
 		}
 	}
 	return nil
