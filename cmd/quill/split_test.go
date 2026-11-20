@@ -574,12 +574,14 @@ func TestKmemNewSessionAndResume(t *testing.T) {
 
 func TestKmemRestartSavesThenDeletes(t *testing.T) {
 	h := newHarness(t)
-	saved := ""
+	saved, savedBy := "", ""
 	h.d.kmemOff = false
 	h.d.kmemRun = func(prog string, args ...string) (string, error) {
 		switch {
 		case prog == "kmem" && len(args) > 1 && args[1] == "list":
 			return saved, nil
+		case prog == "kmem" && len(args) > 1 && args[1] == "get":
+			return savedBy, nil
 		case prog == "kmem-resume":
 			return "", errors.New("unknown name")
 		}
@@ -621,10 +623,11 @@ func TestKmemRestartSavesThenDeletes(t *testing.T) {
 			t.Fatal("nothing is deleted when the handoff isn't saved")
 		}
 		h.d.relaunchViaKmem(old.id, "launcher")
-		saved = "launcher  3 items, saved " + time.Now().Format(time.RFC3339) + "\n"
+		saved = "launcher  3 items, saved " + time.Now().Add(-5*time.Minute).Format(time.RFC3339) + "\n"
+		savedBy = "[f1] history: Handoff artifact launcher: saved by pid1 (session cs:" + old.id + ") at ..."
 		h.d.kmemAfterTurn(old)
 	})
-	h.eventually("a saved handoff starts the new session and deletes the old one", func() bool {
+	h.eventually("a handoff this session saved minutes before the request counts, and the restart finishes", func() bool {
 		return h.d.sessions[old.id] == nil && h.d.current != old
 	})
 	h.ui(func() {
