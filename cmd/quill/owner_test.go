@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -64,7 +66,7 @@ func TestBlockedRetryGoesToCardOwner(t *testing.T) {
 		blocked := &chat.Item{Seq: 900, Kind: chat.Tool, ToolName: "Bash", Result: "blocked"}
 		a.conv.Items = append(a.conv.Items, blocked)
 		h.d.open(b.id)
-		h.d.retryBlocked(b, blocked)
+		h.d.retryBlocked(b, blocked, nil, "")
 		for _, it := range b.conv.Items {
 			if it.Kind == chat.User {
 				t.Fatal("retry went to the focused session")
@@ -112,7 +114,7 @@ func TestRetryRunsOnlyTheBlockedCommand(t *testing.T) {
 		s.runAll = true
 		blocked := &chat.Item{Seq: 900, Kind: chat.Tool, ToolName: "Bash", Input: []byte(`{"command":"git push origin master"}`), Result: "blocked"}
 		s.conv.Items = append(s.conv.Items, blocked)
-		h.d.retryBlocked(s, blocked)
+		h.d.retryBlocked(s, blocked, nil, "")
 		if s.retryCmd != "git push origin master" || !s.runAll {
 			t.Fatal("the retry message neither resets nor widens the approval")
 		}
@@ -120,11 +122,54 @@ func TestRetryRunsOnlyTheBlockedCommand(t *testing.T) {
 		perm := &chat.Item{Kind: chat.Permission, ToolName: "Bash", RequestID: "r1", Input: []byte(`{"command":"git push origin master"}`), Request: &protocol.ControlRequest{Subtype: "can_use_tool"}}
 		s.conv.Items = append(s.conv.Items, perm)
 		h.d.planGate(s, &protocol.Event{Type: "control_request", RequestID: "r1", Request: perm.Request}, []*chat.Item{perm})
-		if perm.PermState != chat.PermPending || s.retryCmd != "" {
-			t.Fatal("the retried command skips plan-first once and waits for the normal Allow prompt")
+		if perm.PermState != chat.PermRetryAllowed || s.retryCmd != "" {
+			t.Fatalf("the retried command is allowed once by the card's approval, state %v", perm.PermState)
+		}
+		other := &chat.Item{Kind: chat.Permission, ToolName: "Bash", RequestID: "r2", Input: []byte(`{"command":"git push --force"}`), Request: &protocol.ControlRequest{Subtype: "can_use_tool"}}
+		s.conv.Items = append(s.conv.Items, other)
+		h.d.planGate(s, &protocol.Event{Type: "control_request", RequestID: "r2", Request: other.Request}, []*chat.Item{other})
+		if other.PermState == chat.PermRetryAllowed || other.PermState == chat.PermAutoAllowed {
+			t.Fatal("the approval covers only one run of the exact blocked command")
+		}
+		h.d.retryBlocked(s, blocked, []protocol.Rule{{Tool: "Bash", Content: "git push *"}}, "session")
+		again := &chat.Item{Kind: chat.Permission, ToolName: "Bash", RequestID: "r3", Input: []byte(`{"command":"git push origin master"}`), Request: &protocol.ControlRequest{Subtype: "can_use_tool"}}
+		s.conv.Items = append(s.conv.Items, again)
+		h.d.planGate(s, &protocol.Event{Type: "control_request", RequestID: "r3", Request: again.Request}, []*chat.Item{again})
+		if again.PermState != chat.PermRuleAllowed || s.retryRules != nil {
+			t.Fatal("Always allow sends its rules with the retried command's approval")
 		}
 		if !approves(planGoMessage) || approves(retryPrefix+"rm -rf x") {
 			t.Fatal("a retry approves only its own command, never the whole plan")
 		}
 	})
+}
+
+func TestSuggestedRules(t *testing.T) {
+	bash := func(c string) *chat.Item {
+		in, _ := json.Marshal(map[string]string{"command": c})
+		return &chat.Item{Kind: chat.Tool, ToolName: "Bash", Input: in}
+	}
+	for c, want := range map[string]string{
+		"kill -TERM 1 2; sleep 3; ps -p 1 || echo gone":   "Bash(kill *)\nBash(sleep *)",
+		"cd ~/x && for id in a b; do gio trash $id; done": "Bash(gio trash *)",
+		"ssh pzserver powershell -File x.ps1":             "Bash(ssh pzserver *)",
+		"git push origin master":                          "Bash(git push *)",
+		"cat <<EOF > f\nx\nEOF":                           "Bash(cat *)",
+	} {
+		if got := strings.Join(suggestedRules(bash(c)), "\n"); got != want {
+			t.Errorf("suggestedRules(%q) = %q, want %q", c, got, want)
+		}
+	}
+	if got := suggestedRules(&chat.Item{Kind: chat.Tool, ToolName: "Edit"}); len(got) != 1 || got[0] != "Edit" {
+		t.Fatalf("other tools suggest the tool name, got %v", got)
+	}
+	rules, err := parseRules("Bash(gio trash *)\n\nEdit\n")
+	if err != nil || len(rules) != 2 || rules[0].Content != "gio trash *" || rules[1].Tool != "Edit" {
+		t.Fatalf("parseRules: %v %v", rules, err)
+	}
+	for _, bad := range []string{"", "Bash(", "Bash()", "rm -rf x", "(x)"} {
+		if _, err := parseRules(bad); err == nil {
+			t.Errorf("parseRules(%q) should fail", bad)
+		}
+	}
 }

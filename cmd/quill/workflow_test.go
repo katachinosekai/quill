@@ -273,7 +273,7 @@ func TestLimitMessageAndBlockedCard(t *testing.T) {
 		if !found {
 			t.Fatal("the card names the reason")
 		}
-		h.d.retryBlocked(s, blocked)
+		h.d.retryBlocked(s, blocked, nil, "")
 		if s.mode != "default" || s.restoreMode != "auto" {
 			t.Fatalf("retry runs with normal approval prompts, mode %q restore %q", s.mode, s.restoreMode)
 		}

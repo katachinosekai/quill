@@ -33,6 +33,8 @@ const (
 	PermCancelled
 	PermAutoAllowed
 	PermPlanAsked
+	PermRetryAllowed
+	PermRuleAllowed
 )
 
 type Item struct {

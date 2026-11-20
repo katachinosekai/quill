@@ -85,6 +85,8 @@ type deskSession struct {
 	inTurn      bool
 	restoreMode string
 	retryCmd    string
+	retryRules  []protocol.Rule
+	retryDest   string
 	limitSeen   string
 	compacting  bool
 	takeover    bool
@@ -2127,7 +2129,15 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			return nil
 		}
 		if s.retryCmd != "" && blockedCommand(it) == s.retryCmd {
-			s.retryCmd = ""
+			rules, dest := s.retryRules, s.retryDest
+			s.retryCmd, s.retryRules, s.retryDest = "", nil, ""
+			if len(rules) > 0 {
+				if s.proc.AllowWithRules(it.RequestID, it.Request, rules, dest) == nil {
+					it.PermState = chat.PermRuleAllowed
+				}
+			} else if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
+				it.PermState = chat.PermRetryAllowed
+			}
 			return nil
 		}
 		if s.runAll {
