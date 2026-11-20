@@ -395,3 +395,24 @@ func TestCenteringAppliesToEveryPane(t *testing.T) {
 		}
 	})
 }
+
+func TestUncheckAutoSplitReturnsToSingle(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		var ids []string
+		for i := 0; i < 3; i++ {
+			ids = append(ids, h.d.createSession(h.proj, "default", "default").id)
+		}
+		h.d.open(ids[0])
+		h.d.autoChk.SetChecked(true)
+		h.d.rebuildRows()
+		if !h.d.split() {
+			t.Fatal("auto split splits")
+		}
+		h.d.focusPane(h.d.panes[len(h.d.panes)-1])
+		h.d.autoChk.SetChecked(false)
+		if h.d.split() || h.d.current == nil || h.d.current.id != ids[0] {
+			t.Fatal("unchecking returns to the single view of the session open before")
+		}
+	})
+}
