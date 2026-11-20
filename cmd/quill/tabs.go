@@ -137,9 +137,15 @@ func (d *desk) followDraft() {
 	if cur == d.strip.lastCur {
 		return
 	}
+	first := d.strip.lastCur == ""
 	d.strip.keepDraft(d.strip.lastCur, d.input.Text)
 	d.strip.lastCur = cur
-	if text := d.strip.draft(cur); text != d.input.Text {
+	text := d.strip.draft(cur)
+	if first && text == "" {
+		d.strip.keepDraft(cur, d.input.Text)
+		return
+	}
+	if text != d.input.Text {
 		d.input.SetText(text)
 	}
 }

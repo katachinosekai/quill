@@ -327,3 +327,49 @@ func TestDraftsFollowTheirSession(t *testing.T) {
 		}
 	})
 }
+
+func TestRestoredDraftSurvivesFirstOpen(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		h.d.strip.lastCur = ""
+		h.d.strip.drafts = nil
+		h.d.current = nil
+		h.d.input.SetText("typed before the update")
+		h.d.open(a.id)
+		if h.d.input.Text != "typed before the update" {
+			t.Fatalf("the draft restored after an update must stay, got %q", h.d.input.Text)
+		}
+	})
+}
+
+func TestAutoSplitFillsActive(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		var ids []string
+		for i := 0; i < 3; i++ {
+			s := h.d.createSession(h.proj, "default", "default")
+			ids = append(ids, s.id)
+		}
+		h.d.autoChk.SetChecked(true)
+		h.d.rebuildRows()
+		if !h.d.split() {
+			t.Fatal("auto split turns on with several active sessions")
+		}
+		shown := map[string]bool{}
+		for _, p := range h.d.panes {
+			if p.view.s != nil {
+				shown[p.view.s.id] = true
+			}
+		}
+		for _, id := range ids {
+			if !shown[id] {
+				t.Fatalf("active session %s should be in a pane", id[:8])
+			}
+		}
+		h.d.rebuildRows()
+		if len(h.d.panes) > maxPanes {
+			t.Fatal("never more than three panes")
+		}
+	})
+}
