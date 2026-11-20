@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.1
+Version:        0.1.2
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        MIT AND BSD-3-Clause AND (MIT-0 OR Unlicense)
@@ -66,6 +66,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
 
 %changelog
+* Thu Nov 19 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.2-1
+- Signed self-updater, split view message boxes, tab shortcuts, crash reporter, security fixes
+
 * Thu Nov 19 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.1-1
 - Phone folder sync for Quill for Android (pairing QR, local network, synced file, secret gist); tabs, split view and layout updates
 
