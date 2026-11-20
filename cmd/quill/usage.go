@@ -249,7 +249,9 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		sizes.Hide()
 		return
 	}
-	sizes.Show()
+	if !sizes.Visible() {
+		sizes.Resize(fyne.NewSize(0, 0))
+	}
 	w := min(size.Width, l.d.chatWidth())
 	x := (size.Width-w)/2 - l.d.sidebarWidth()/2
 	x = max(0, min(x, size.Width-w))
@@ -257,10 +259,6 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	sm := sizes.MinSize()
 	sw := max(sm.Width, min(usageMaxWidth, margin-usageGap-18))
 	sx := size.Width - sw - usageEdge
-	if margin >= sw+usageGap {
-		left := x + w + usageGap/2
-		sx = left + (size.Width-usageEdge-left-sw)/2
-	}
 	sy := size.Height - sm.Height - 12
 	sizes.Resize(fyne.NewSize(sw, sm.Height))
 	sizes.Move(fyne.NewPos(sx, sy))
@@ -304,4 +302,17 @@ func (d *desk) sizePanel() fyne.CanvasObject {
 	r := canvas.NewRectangle(colCard)
 	r.CornerRadius = 12
 	return container.NewStack(r, container.New(layout.NewCustomPaddedLayout(2, 2, 6, 6), body))
+}
+
+type cornerLayout struct{}
+
+func (cornerLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	return objs[0].MinSize()
+}
+
+func (cornerLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	for _, o := range objs {
+		o.Move(fyne.NewPos(0, 0))
+		o.Resize(size)
+	}
 }
