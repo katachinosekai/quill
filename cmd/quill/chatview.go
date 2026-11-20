@@ -615,7 +615,10 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		}
 		return v.renderTool(it, iv)
 	case chat.Permission:
-		if it.PermState == chat.PermAutoAllowed || it.PermState == chat.PermPlanAsked {
+		if it.PermState == chat.PermAutoAllowed {
+			return container.NewWithoutLayout()
+		}
+		if it.PermState == chat.PermPlanAsked {
 			l := widget.NewLabel(it.ToolName + ": " + permStateText(it.PermState))
 			l.Importance = widget.LowImportance
 			l.SizeName = theme.SizeNameCaptionText
