@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -33,6 +34,9 @@ type usagePanel struct {
 	asOf    *canvas.Text
 	sess    *widget.Label
 	today   *widget.Label
+
+	strip    []*stripItem
+	stripRow *fyne.Container
 }
 
 func usageText(s string) *canvas.Text {
@@ -232,6 +236,68 @@ func (u *usagePanel) update() {
 		}
 	}
 	setLabel(u.today, "Today "+tok(today.Total())+"  ·  7 days "+tok(week.Total()))
+	short := strings.Replace(strings.Replace(sess, "  ·  context ", " · ctx ", 1), " tokens", " tok", 1)
+	u.syncStrip(short, "Today "+tok(today.Total())+" · 7d "+tok(week.Total()))
+}
+
+type stripItem struct {
+	bar   *widget.ProgressBar
+	value *canvas.Text
+}
+
+func (u *usagePanel) buildStrip() fyne.CanvasObject {
+	item := func(title string, withBar bool) (fyne.CanvasObject, *stripItem) {
+		it := &stripItem{value: usageText("")}
+		head := canvas.NewText(title, colMuted)
+		head.TextSize = fontMeta
+		head.TextStyle.Bold = true
+		parts := []fyne.CanvasObject{container.NewCenter(head)}
+		if withBar {
+			it.bar = widget.NewProgressBar()
+			it.bar.TextFormatter = func() string { return "" }
+			parts = append(parts, container.NewCenter(container.NewGridWrap(fyne.NewSize(56, 8), it.bar)))
+		}
+		parts = append(parts, container.NewCenter(it.value))
+		return container.NewHBox(parts...), it
+	}
+	five, fiveIt := item("5-hour session", true)
+	sess, sessIt := item("This session", false)
+	all, allIt := item("All sessions", false)
+	week, weekIt := item("Weekly", true)
+	u.strip = []*stripItem{fiveIt, sessIt, allIt, weekIt}
+	sep := func() fyne.CanvasObject { return container.NewCenter(mutedText("│", fontMeta)) }
+	gap := func() fyne.CanvasObject { return padLeft(10) }
+	row := container.NewHBox(five, gap(), sep(), gap(), sess, gap(), sep(), gap(), all, gap(), sep(), gap(), week)
+	u.stripRow = container.New(layout.NewCustomPaddedLayout(2, 4, 0, 0), container.New(&clipLayout{}, container.NewCenter(row)))
+	return u.stripRow
+}
+
+func (u *usagePanel) syncStrip(sess, all string) {
+	if len(u.strip) != 4 {
+		return
+	}
+	win := func(it *stripItem, name string) {
+		w, ok := u.d.rate.Window(name)
+		if !ok {
+			setText(it.value, "no data yet")
+			return
+		}
+		if it.bar.Value != w.Utilization {
+			it.bar.SetValue(w.Utilization)
+		}
+		txt := fmt.Sprintf("%d%%", int(w.Utilization*100+0.5))
+		if r := resetText(w.ResetsAt); r != "" {
+			txt += " · " + r
+		}
+		setText(it.value, txt)
+	}
+	win(u.strip[0], "five_hour")
+	setText(u.strip[1].value, sess)
+	setText(u.strip[2].value, all)
+	win(u.strip[3], "seven_day")
+	if u.stripRow != nil && u.stripRow.Visible() {
+		u.stripRow.Refresh()
+	}
 }
 
 type usageLayout struct{ d *desk }
@@ -244,10 +310,12 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	chat, panel, sizes := objs[0], objs[1], objs[2]
 	chat.Resize(size)
 	chat.Move(fyne.NewPos(0, 0))
-	if l.d.split() {
+	if l.d.split() || l.d.layoutMode() == layoutHorizontal {
 		panel.Hide()
-		sizes.Hide()
-		return
+		if l.d.split() {
+			sizes.Hide()
+			return
+		}
 	}
 	if !sizes.Visible() {
 		sizes.Resize(fyne.NewSize(0, 0))
@@ -263,7 +331,7 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	sizes.Resize(fyne.NewSize(sw, sm.Height))
 	sizes.Move(fyne.NewPos(sx, sy))
 	room := sy - 12
-	if margin < usageMinMargin || panel.MinSize().Height > room-8 {
+	if l.d.layoutMode() == layoutHorizontal || margin < usageMinMargin || panel.MinSize().Height > room-8 {
 		panel.Hide()
 		return
 	}

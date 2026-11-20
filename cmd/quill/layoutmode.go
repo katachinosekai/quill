@@ -55,6 +55,7 @@ func (d *desk) applyLayoutMode() {
 	if mode == layoutVertical {
 		d.bookRow.Hide()
 		d.tabRow.Hide()
+		d.usageRow.Hide()
 		d.sideToggle.Show()
 		if d.settingsPop != nil {
 			d.settingsPop.Hide()
@@ -67,6 +68,7 @@ func (d *desk) applyLayoutMode() {
 	} else {
 		d.bookRow.Show()
 		d.tabRow.Show()
+		d.usageRow.Show()
 		d.sideToggle.Hide()
 		d.settingsSlot.Objects = nil
 		d.settingsSlot.Refresh()
@@ -78,6 +80,9 @@ func (d *desk) applyLayoutMode() {
 	}
 	if d.headerBox != nil {
 		d.headerBox.Refresh()
+	}
+	if d.usageBox != nil {
+		relayout(d.usageBox)
 	}
 }
 

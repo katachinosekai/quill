@@ -231,6 +231,7 @@ type desk struct {
 	hideChips      bool
 	updBtn         *widget.Button
 	sizesCard      fyne.CanvasObject
+	usageRow       fyne.CanvasObject
 	updRelease     *updater.Release
 	rules          sortRules
 	centerAll      *widget.Check
@@ -846,7 +847,9 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		layout.NewSpacer())
 	d.bookRow = d.buildBookmarks()
 	d.tabRow = d.buildTabs()
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.bookRow, d.tabRow, widget.NewSeparator())
+	d.usage = newUsagePanel(d)
+	d.usageRow = d.usage.buildStrip()
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
@@ -902,7 +905,6 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	cornerCard := container.New(layout.NewGridWrapLayout(fyne.NewSize(300, d.sizesCard.MinSize().Height)), d.sizesCard)
 	corner := container.NewVBox(layout.NewSpacer(), container.NewHBox(layout.NewSpacer(), cornerCard))
 	bottom := container.NewPadded(container.New(cornerLayout{}, container.NewVBox(toolbar, d.bottomBox), corner))
-	d.usage = newUsagePanel(d)
 	d.chatHost = container.NewStack(d.chat.root)
 	spare := canvas.NewRectangle(color.Transparent)
 	spare.Hide()
