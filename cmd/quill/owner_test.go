@@ -103,3 +103,28 @@ func TestPlanCardSurvivesOtherTurns(t *testing.T) {
 		}
 	})
 }
+
+func TestRetryRunsOnlyTheBlockedCommand(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.planFirst = true
+		s := h.d.createSession(h.proj, "haiku", "auto")
+		s.runAll = true
+		blocked := &chat.Item{Seq: 900, Kind: chat.Tool, ToolName: "Bash", Input: []byte(`{"command":"git push origin master"}`), Result: "blocked"}
+		s.conv.Items = append(s.conv.Items, blocked)
+		h.d.retryBlocked(s, blocked)
+		if s.retryCmd != "git push origin master" || !s.runAll {
+			t.Fatal("the retry message neither resets nor widens the approval")
+		}
+		s.runAll = false
+		perm := &chat.Item{Kind: chat.Permission, ToolName: "Bash", RequestID: "r1", Input: []byte(`{"command":"git push origin master"}`), Request: &protocol.ControlRequest{Subtype: "can_use_tool"}}
+		s.conv.Items = append(s.conv.Items, perm)
+		h.d.planGate(s, &protocol.Event{Type: "control_request", RequestID: "r1", Request: perm.Request}, []*chat.Item{perm})
+		if perm.PermState != chat.PermPending || s.retryCmd != "" {
+			t.Fatal("the retried command skips plan-first once and waits for the normal Allow prompt")
+		}
+		if !approves(planGoMessage) || approves(retryPrefix+"rm -rf x") {
+			t.Fatal("a retry approves only its own command, never the whole plan")
+		}
+	})
+}

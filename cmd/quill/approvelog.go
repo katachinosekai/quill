@@ -75,5 +75,5 @@ func (d *desk) approvedInTranscript(s *deskSession) bool {
 		return false
 	}
 	text, ok := lastHumanMessage(path)
-	return ok && (isApproval(text) || text == planGoMessage)
+	return ok && approves(text)
 }

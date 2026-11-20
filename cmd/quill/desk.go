@@ -85,6 +85,7 @@ type deskSession struct {
 	lastSent    string
 	inTurn      bool
 	restoreMode string
+	retryCmd    string
 	limitSeen   string
 	compacting  bool
 	takeover    bool
@@ -1455,9 +1456,9 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		return
 	}
 	if d.planFirst {
-		if isApproval(text) {
+		if approves(text) && text != planGoMessage {
 			d.approveByText(s)
-		} else if text != planGoMessage && !s.inTurn {
+		} else if text != planGoMessage && !isRetry(text) && !s.inTurn {
 			s.runAll, s.runAllNext = false, false
 			d.chatFor(s, s.conv.CancelPlans())
 		}
@@ -2123,6 +2124,10 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		if it == nil || it.PermState != chat.PermPending || s.proc == nil || isQuestion(it) {
 			return nil
 		}
+		if s.retryCmd != "" && blockedCommand(it) == s.retryCmd {
+			s.retryCmd = ""
+			return nil
+		}
 		if s.runAll {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
@@ -2154,9 +2159,9 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			if it.Kind != chat.User {
 				continue
 			}
-			if isApproval(it.Text) || it.Text == planGoMessage {
+			if approves(it.Text) {
 				d.approveNow(s)
-			} else if !s.inTurn {
+			} else if !isRetry(it.Text) && !s.inTurn {
 				s.runAll, s.runAllNext = false, false
 			}
 			s.inTurn = true
@@ -2352,6 +2357,16 @@ var approvalWords = map[string]bool{
 var approvalStarts = []string{"yes", "yeah", "yep", "yup", "ok", "okay", "sure", "approve", "approved", "go ahead", "go for it", "do it", "proceed", "lgtm", "sounds good", "run it", "ship it", "please do"}
 
 var notApproval = []string{"but", "don't", "dont", "do not", "not ", "no ", "wait", "instead", "hold", "stop", "except", "change", "first", "before", "?"}
+
+const retryPrefix = "I approve the action that Claude Code's auto-mode check blocked: "
+
+func approves(text string) bool {
+	return isApproval(text) || text == planGoMessage
+}
+
+func isRetry(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), retryPrefix)
+}
 
 func isApproval(text string) bool {
 	t := strings.ToLower(strings.TrimSpace(text))
