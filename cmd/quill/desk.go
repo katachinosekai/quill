@@ -166,6 +166,15 @@ type desk struct {
 	glowBoxes     map[*canvas.Rectangle]glow
 	pulsing       atomic.Int32
 	keeper        *keeperClient
+	single        *chatView
+	panes         []*pane
+	focused       *pane
+	chatHost      *fyne.Container
+	splitBtns     []*widget.Button
+	groups        []bookGroup
+	tabs          []string
+	tabBar        *fyne.Container
+	bookBar       *fyne.Container
 	shares        map[string]float32
 	bottomBox     *fyne.Container
 	keptView      string
@@ -310,7 +319,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	planChk.Checked = d.planFirst
 	chipChk := widget.NewCheck("New tool chips start collapsed", d.setCollapseChips)
 	chipChk.Checked = d.collapseChips
-	rulesBtn := widget.NewButtonWithIcon("Sorting rules...", theme.SettingsIcon(), d.rulesDialog)
+	rulesBtn := widget.NewButtonWithIcon("Format Rules...", theme.SettingsIcon(), d.rulesDialog)
 	rulesBtn.Importance = widget.LowImportance
 	rulesBtn.Alignment = widget.ButtonAlignLeading
 	legend := container.NewHBox(
@@ -613,6 +622,28 @@ func (d *desk) rebuildRows() {
 		d.sortDirty = false
 		d.saveSortState()
 	}
+	if q == "" {
+		d.groups = d.groups[:0]
+		addGroup := func(key, title string, es []sideEntry) {
+			if len(es) == 0 {
+				return
+			}
+			g := bookGroup{key: key, title: title}
+			for _, e := range sortRecent(es) {
+				g.ids = append(g.ids, e.id)
+			}
+			d.groups = append(d.groups, g)
+		}
+		addGroup(placeActive, d.folderTitle(placeActive, "Active"), active)
+		for _, f := range d.sortedFolders(custom) {
+			addGroup(folderPrefix+f.ID, f.Name, custom[folderPrefix+f.ID])
+		}
+		addGroup("inactive", d.folderTitle("inactive", "Inactive"), idle)
+		addGroup("archive", d.folderTitle("archive", "Archive"), old)
+		addGroup("auto", d.folderTitle("auto", "Created by Claude"), auto)
+		d.syncBookmarks()
+		d.syncTabs()
+	}
 	var rows []sideRow
 	if len(active) > 0 {
 		open := q != "" || d.isOpen(placeActive)
@@ -731,15 +762,15 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.subtitle = mutedText("", 12)
 	d.note = widget.NewLabel("")
 	d.note.Importance = widget.WarningImportance
-	d.note.Wrapping = fyne.TextWrapWord
+	d.note.Truncation = fyne.TextTruncateEllipsis
 	d.note.Hide()
 	d.rcStatus = mutedText("", 12)
 	d.rcStatus.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, d.headPad, container.NewHBox(container.NewCenter(d.splitButtons()), container.NewCenter(d.rcStatus), container.NewCenter(d.acctBtn)),
 		container.NewVBox(d.title, container.NewPadded(d.subtitle)))
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, widget.NewSeparator())
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildBookmarks(), d.buildTabs(), widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
@@ -791,7 +822,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
 	bottom := container.NewPadded(d.bottomBox)
 	d.usage = newUsagePanel(d)
-	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chat.root, d.usage.root, d.sizePanel()))
+	d.chatHost = container.NewStack(d.chat.root)
+	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, container.New(usageLayout{d}, d.chatHost, d.usage.root, d.sizePanel()))
 	d.updateChrome()
 	return d.mainPane
 }
@@ -954,7 +986,13 @@ func (d *desk) open(id string) {
 	if s == nil {
 		return
 	}
+	if p := d.paneFor(s); p != nil && p != d.focused {
+		d.focusPane(p)
+		return
+	}
 	d.current = s
+	d.addTab(s.id)
+	defer d.syncPanes()
 	if !d.rowShown(id) {
 		d.rebuildRows()
 	}
@@ -1111,6 +1149,8 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	}
 	if d.current == s {
 		d.queueUI(s, items)
+	} else if p := d.paneFor(s); p != nil {
+		p.queue(items)
 	}
 	if ev.Type == "rate_limit_event" {
 		d.setRateLimit(ev.RateLimit)
@@ -1322,6 +1362,8 @@ func oneLine(s string, n int) string {
 func (d *desk) chatFor(s *deskSession, items []*chat.Item) {
 	if d.current == s {
 		d.chat.update(items)
+	} else if p := d.paneFor(s); p != nil {
+		p.view.update(items)
 	}
 }
 

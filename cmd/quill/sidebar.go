@@ -48,6 +48,7 @@ func (l slideLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 
 func (d *desk) build() fyne.CanvasObject {
 	d.chat = newChatView(d)
+	d.single = d.chat
 	d.sidebar = d.buildSidebar()
 	main := d.buildMain()
 	edge := canvas.NewRectangle(color.NRGBA{0x3a, 0x3a, 0x37, 0xff})
@@ -95,6 +96,9 @@ const (
 )
 
 func (d *desk) inputWidth() float32 {
+	if d.split() {
+		return fill
+	}
 	chat := d.chatWidth()
 	if d.root == nil || d.root.Size().Width <= 0 {
 		return chat

@@ -90,6 +90,10 @@ type sessView struct {
 const cachedViews = 12
 
 func newChatView(d *desk) *chatView {
+	return newChatViewWith(d, d.chatWidth, d.sidebarWidth)
+}
+
+func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 	v := &chatView{d: d, views: map[int]*itemView{}}
 	v.box = container.NewVBox()
 	v.cache = map[*deskSession]*sessView{}
@@ -108,8 +112,8 @@ func newChatView(d *desk) *chatView {
 	border.StrokeWidth = 1
 	border.CornerRadius = 16
 	inside := container.New(layout.NewCustomPaddedLayout(2, 2, 2, 2), v.scroll)
-	v.frame = windowCentered(d.chatWidth, d.sidebarWidth, container.NewStack(border, inside))
-	liveRow := windowCentered(d.chatWidth, d.sidebarWidth, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), v.live))
+	v.frame = windowCentered(width, shift, container.NewStack(border, inside))
+	liveRow := windowCentered(width, shift, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), v.live))
 	v.follow = true
 	v.scroll.OnScrolled = func(fyne.Position) {
 		if v.autoScrolling {
@@ -130,7 +134,7 @@ func newChatView(d *desk) *chatView {
 		}
 	}
 	v.jump = v.newJump()
-	overlay := container.NewVBox(layout.NewSpacer(), windowCentered(d.chatWidth, d.sidebarWidth, container.NewCenter(v.jump)), padTop(18))
+	overlay := container.NewVBox(layout.NewSpacer(), windowCentered(width, shift, container.NewCenter(v.jump)), padTop(18))
 	framed := container.New(layout.NewCustomPaddedLayout(8, 2, 4, 4), container.NewPadded(v.frame))
 	v.root = container.NewBorder(nil, liveRow, nil, nil, container.NewStack(framed, overlay))
 	return v

@@ -149,6 +149,11 @@ func TestLightboxAndVideoPlayer(t *testing.T) {
 		}
 	})
 	var vp *videoPlayer
+	state := func() (float64, bool) {
+		vp.mu.Lock()
+		defer vp.mu.Unlock()
+		return vp.pos, vp.playing
+	}
 	h.ui(func() {
 		vp = newVideoPlayer(h.d, vid, nil)
 		closeFn := h.d.showLightbox(container.NewBorder(nil, vp.controls(), nil, nil, vp.view()), vp.close)
@@ -156,26 +161,30 @@ func TestLightboxAndVideoPlayer(t *testing.T) {
 		_ = closeFn
 	})
 	h.eventually("frames playing", func() bool {
-		return vp.img.Image != nil && vp.pos > 0.3
+		pos, _ := state()
+		return vp.img.Image != nil && pos > 0.3
 	})
 	h.ui(func() {
-		if vp.info.w != 160 || vp.info.duration < 2.5 {
-			t.Fatalf("probe: %+v", vp.info)
+		vp.mu.Lock()
+		info := vp.info
+		vp.mu.Unlock()
+		if info.w != 160 || info.duration < 2.5 {
+			t.Fatalf("probe: %+v", info)
 		}
 		vp.pause()
 	})
-	var at float64
-	h.ui(func() { at = vp.pos })
+	at, _ := state()
 	time.Sleep(400 * time.Millisecond)
 	h.ui(func() {
-		if vp.pos != at || vp.playing {
+		if pos, playing := state(); pos != at || playing {
 			t.Fatal("pause should stop playback")
 		}
 		vp.seekTo(2.5)
 		vp.play()
 	})
 	h.eventually("plays to the end", func() bool {
-		return !vp.playing && vp.pos >= 2.9
+		pos, playing := state()
+		return !playing && pos >= 2.9
 	})
 	h.ui(func() {
 		h.d.lightboxClose()

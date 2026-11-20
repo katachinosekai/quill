@@ -55,6 +55,8 @@ func (d *desk) rulesDialog() {
 	archiveE.SetText(strconv.Itoa(r.ArchiveDays))
 	claudeChk := widget.NewCheck("Put sessions started by tools in Created by Claude", nil)
 	claudeChk.Checked = r.ClaudeFolder
+	warnChk := widget.NewCheck("Warn before deleting a session", nil)
+	warnChk.Checked = !d.app.Preferences().Bool("skipDeleteWarning")
 	explain := widget.NewLabel("Active: open, running, in a terminal, or used in the last N minutes.\n" +
 		"Inactive: everything else used in the last N days.\n" +
 		"Archive: not used for N days or more.\n" +
@@ -73,8 +75,8 @@ func (d *desk) rulesDialog() {
 		claudeChk.SetChecked(def.ClaudeFolder)
 	})
 	reset.Importance = widget.LowImportance
-	body := container.NewVBox(form, claudeChk, explain, container.NewHBox(reset))
-	dlg := dialog.NewCustomConfirm("Sorting rules", "Save", "Cancel", body, func(ok bool) {
+	body := container.NewVBox(form, claudeChk, warnChk, explain, container.NewHBox(reset))
+	dlg := dialog.NewCustomConfirm("Format Rules", "Save", "Cancel", body, func(ok bool) {
 		if !ok {
 			return
 		}
@@ -84,6 +86,7 @@ func (d *desk) rulesDialog() {
 			dialog.ShowError(fmt.Errorf("enter whole numbers of 1 or more"), d.win)
 			return
 		}
+		d.app.Preferences().SetBool("skipDeleteWarning", !warnChk.Checked)
 		d.setRules(sortRules{ActiveMinutes: a, ArchiveDays: b, ClaudeFolder: claudeChk.Checked})
 		d.resortNow()
 	}, d.win)

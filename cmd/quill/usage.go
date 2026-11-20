@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -189,6 +190,12 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	chat, panel, sizes := objs[0], objs[1], objs[2]
 	chat.Resize(size)
 	chat.Move(fyne.NewPos(0, 0))
+	if l.d.split() {
+		panel.Hide()
+		sizes.Hide()
+		return
+	}
+	sizes.Show()
 	w := min(size.Width, l.d.chatWidth())
 	x := (size.Width-w)/2 - l.d.sidebarWidth()/2
 	x = max(0, min(x, size.Width-w))
@@ -220,8 +227,9 @@ func (l usageLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 
 func (d *desk) sizePanel() fyne.CanvasObject {
 	row := func(name, pref string, lo float32, get func() float32) fyne.CanvasObject {
-		label := usageText("")
-		show := func(v float32) { setText(label, fmt.Sprintf("%s  %d%%", name, int(v*100+0.5))) }
+		label := usageText(name)
+		val := usageText("")
+		show := func(v float32) { setText(val, fmt.Sprintf("%d%%", int(v*100+0.5))) }
 		sl := widget.NewSlider(float64(lo), 1)
 		sl.Step = 0.01
 		sl.Value = float64(get())
@@ -231,7 +239,9 @@ func (d *desk) sizePanel() fyne.CanvasObject {
 			d.setShare(pref, float32(v))
 		}
 		sl.OnChangeEnded = func(v float64) { d.app.Preferences().SetFloat(pref, v) }
-		return container.NewVBox(label, sl)
+		left := container.NewGridWrap(fyne.NewSize(84, 24), container.NewCenter(label))
+		right := container.NewGridWrap(fyne.NewSize(36, 24), container.NewCenter(val))
+		return container.NewBorder(nil, nil, left, right, container.NewThemeOverride(sl, compactTheme{}))
 	}
 	body := container.NewVBox(
 		row("Chat width", "chatShare", minChatShare, d.chatShare),
@@ -239,5 +249,5 @@ func (d *desk) sizePanel() fyne.CanvasObject {
 	)
 	r := canvas.NewRectangle(colCard)
 	r.CornerRadius = 12
-	return container.NewStack(r, container.NewPadded(body))
+	return container.NewStack(r, container.New(layout.NewCustomPaddedLayout(2, 2, 6, 6), body))
 }

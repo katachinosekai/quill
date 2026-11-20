@@ -225,6 +225,18 @@ func TestScreenshots(t *testing.T) {
 	})
 	time.Sleep(300 * time.Millisecond)
 	snap("media.png")
+	h.ui(func() {
+		ids := []string{}
+		for id := range h.d.sessions {
+			ids = append(ids, id)
+		}
+		for _, id := range ids[:min(2, len(ids))] {
+			h.d.openInSplit(id)
+		}
+	})
+	time.Sleep(200 * time.Millisecond)
+	snap("split.png")
+	h.ui(func() { h.d.setSplit(1) })
 	h.ui(func() { h.d.viewMedia(mediaRef{src: mpic, kind: mediaImage}, nil) })
 	time.Sleep(200 * time.Millisecond)
 	snap("lightbox.png")
