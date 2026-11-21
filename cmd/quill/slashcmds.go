@@ -222,6 +222,8 @@ func (d *desk) cmdDiff(s *deskSession) {
 
 // memory
 
+var memoryNames = []string{"Your notes", "Project notes", "Project notes", "Private project notes", "Claude's auto memory"}
+
 func memoryFiles(cwd string) []string {
 	h := homeDir()
 	return []string{
@@ -238,13 +240,21 @@ func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
 	var fill func()
 	fill = func() {
 		box.Objects = nil
-		for _, f := range memoryFiles(cwd) {
+		for i, f := range memoryFiles(cwd) {
 			f := f
 			_, err := os.Stat(f)
-			l := widget.NewLabel(tildePath(f))
-			l.Truncation = fyne.TextTruncateEllipsis
+			exists := err == nil
+			name := widget.NewLabel(memoryNames[i])
+			name.TextStyle = fyne.TextStyle{Bold: true}
+			path := tildePath(f)
+			if !exists {
+				path += "  ·  not created yet"
+			}
+			sub := widget.NewLabel(path)
+			sub.SizeName = theme.SizeNameCaptionText
+			sub.Wrapping = fyne.TextWrapBreak
 			var btn *widget.Button
-			if err == nil {
+			if exists {
 				btn = widget.NewButtonWithIcon("Open", theme.DocumentIcon(), func() { d.openPath(f) })
 			} else {
 				btn = widget.NewButtonWithIcon("Create", theme.ContentAddIcon(), func() {
@@ -254,9 +264,11 @@ func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
 						fill()
 					}
 				})
-				l.Importance = widget.LowImportance
 			}
-			box.Add(container.NewBorder(nil, nil, nil, btn, l))
+			btn.Importance = widget.MediumImportance
+			text := container.New(&tightVBox{}, name, sub)
+			box.Add(container.NewBorder(nil, nil, nil, container.NewCenter(btn), text))
+			box.Add(widget.NewSeparator())
 		}
 		box.Refresh()
 	}
@@ -265,8 +277,8 @@ func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
 }
 
 func (d *desk) cmdMemory(s *deskSession) {
-	dlg := dialog.NewCustom("Memory files", "Close", d.memoryPane(s.cwd), d.win)
-	dlg.Resize(fyne.NewSize(700, 320))
+	dlg := dialog.NewCustom("Memory files", "Close", container.NewVScroll(d.memoryPane(s.cwd)), d.win)
+	dlg.Resize(fyne.NewSize(720, 460))
 	dlg.Show()
 }
 

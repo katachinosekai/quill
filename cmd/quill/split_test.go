@@ -1920,14 +1920,31 @@ func TestOneViewButton(t *testing.T) {
 			s := h.d.createSession(h.proj, "default", "default")
 			h.d.open(s.id)
 		}
+		state := func() string {
+			v := splitLabel(max(1, len(h.d.panes)))
+			if h.d.autoChk.Checked {
+				v = "Auto split"
+			}
+			icon := "single"
+			switch h.d.viewBtn.Icon {
+			case theme.GridIcon():
+				icon = "grid"
+			case theme.ViewRefreshIcon():
+				icon = "auto"
+			}
+			return v + "/" + icon
+		}
+		if h.d.viewBtn.Text != "" {
+			t.Fatal("the view button has no text")
+		}
 		var seen []string
 		for i := 0; i < 4; i++ {
-			seen = append(seen, h.d.viewBtn.Text)
+			seen = append(seen, state())
 			test.Tap(h.d.viewBtn)
 		}
-		seen = append(seen, h.d.viewBtn.Text)
-		if strings.Join(seen, ",") != "Single,Split 2,Split 3,Auto split,Single" {
-			t.Fatalf("one button cycles the views: %v", seen)
+		seen = append(seen, state())
+		if strings.Join(seen, ",") != "Single/single,Split 2/grid,Split 3/grid,Auto split/auto,Single/single" {
+			t.Fatalf("one icon button cycles the views: %v", seen)
 		}
 		if h.d.autoChk.Checked {
 			t.Fatal("leaving Auto split turns it off")
