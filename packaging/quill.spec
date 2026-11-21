@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.16
+Version:        0.1.17
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -70,6 +70,11 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.17-1
+- kmem 1.5.1 bundled, now also on Windows: the Windows zip carries kmem, Setup sets it up (and offers Python 3 through winget when it's missing), hooks run through Python
+- quill --resume NAME opens one kmem session (the live one, or a fresh one from its handoff) in the running Quill Desktop
+- Option buttons for questions that mark their options "(option 1)", "(A)" and so on, however long; unmarked options may have up to 16 words
+- Bundles Quill for Android 0.9.15
 * Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.16-1
 - Settings → Setup: what Quill Desktop needs, with one button each: Claude Code (Anthropic's installer, after asking), sign-in, kmem, python3 and hunspell (through your package manager, after asking), device password and local models; shown at first start when something required is missing
 - Open-weight models: Local models window with Ollama status, suggested tool-capable models to pull with progress and larger-context copies, and other local servers with an Anthropic-compatible API (llama.cpp, vLLM, LM Studio, LiteLLM) whose models appear under Local
