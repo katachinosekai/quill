@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"time"
 
 	"fyne.io/fyne/v2/widget"
@@ -50,14 +55,31 @@ func setBackendButton(b *widget.Button, model string) {
 	}
 }
 
-func fetchOllamaModels(host string) []string {
-	c := http.Client{Timeout: 2 * time.Second}
-	resp, err := c.Get(host + "/api/tags")
+type localInfo struct {
+	Name   string
+	Window int
+}
+
+const ollamaBodyLimit = 1 << 20
+
+var numCtx = regexp.MustCompile(`(?m)^num_ctx\s+(\d+)`)
+
+func ollamaJSON(c *http.Client, req *http.Request, v any) bool {
+	resp, err := c.Do(req)
 	if err != nil {
-		return nil
+		return false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, ollamaBodyLimit)).Decode(v) == nil
+}
+
+func fetchOllamaModels(host string) []localInfo {
+	c := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, host+"/api/tags", nil)
+	if err != nil {
 		return nil
 	}
 	var tags struct {
@@ -65,14 +87,34 @@ func fetchOllamaModels(host string) []string {
 			Name string `json:"name"`
 		} `json:"models"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&tags) != nil {
+	if !ollamaJSON(c, req, &tags) {
 		return nil
 	}
-	var out []string
+	var out []localInfo
 	for _, m := range tags.Models {
-		if m.Name != "" {
-			out = append(out, session.LocalPrefix+m.Name)
+		if m.Name == "" {
+			continue
 		}
+		info := localInfo{Name: session.LocalPrefix + m.Name}
+		body, _ := json.Marshal(map[string]string{"model": m.Name})
+		req, err := http.NewRequest(http.MethodPost, host+"/api/show", bytes.NewReader(body))
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		var show struct {
+			Capabilities *[]string `json:"capabilities"`
+			Parameters   string    `json:"parameters"`
+		}
+		if ollamaJSON(c, req, &show) {
+			if show.Capabilities != nil && !contains(*show.Capabilities, "tools") {
+				continue
+			}
+			if m := numCtx.FindStringSubmatch(show.Parameters); m != nil {
+				info.Window, _ = strconv.Atoi(m[1])
+			}
+		}
+		out = append(out, info)
 	}
 	return out
 }
@@ -87,16 +129,53 @@ func (d *desk) refreshLocalModels() {
 		fetch = fetchOllamaModels
 	}
 	go func() {
-		names := fetch(session.OllamaHost())
+		infos := fetch(session.OllamaHost())
 		d.do(func() {
 			d.localBusy = false
-			d.localModels = names
+			d.localModels = nil
+			for _, in := range infos {
+				d.localModels = append(d.localModels, in.Name)
+				if in.Window > 0 {
+					d.localWindows[in.Name] = in.Window
+				}
+			}
 			d.updateChrome()
 			for _, p := range d.panes {
 				d.syncPaneControls(p)
 			}
 		})
 	}()
+}
+
+func (d *desk) defaultLocal() string {
+	list := d.localModelList()
+	for _, m := range localFallback {
+		if contains(list, m) {
+			return m
+		}
+	}
+	return list[0]
+}
+
+func (d *desk) localEnv(model string) []string {
+	n := d.localWindows[model]
+	if !isLocal(model) || n <= 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("CLAUDE_CODE_MAX_CONTEXT_TOKENS=%d", n), fmt.Sprintf("CLAUDE_CODE_AUTO_COMPACT_WINDOW=%d", n)}
+}
+
+func (d *desk) warnInsecureOllama(s *deskSession) {
+	host := session.OllamaHost()
+	if !isLocal(s.model) || d.warnedOllama || !session.OllamaInsecure(host) {
+		return
+	}
+	d.warnedOllama = true
+	d.notify(s, "This local session talks to "+host+" over plain http: code, file contents and tool output cross the network unencrypted. Use https or a local Ollama if that network isn't trusted.")
+}
+
+func (d *desk) rcForLocal() bool {
+	return d.app.Preferences().BoolWithFallback("rcLocal", true)
 }
 
 func (d *desk) localModelList() []string {
@@ -147,7 +226,10 @@ func (d *desk) setBackend(s *deskSession, backend string) {
 	if backend == backendLocal {
 		s.lastClaude = s.model
 		prefs.SetString("lastClaudeModel", s.model)
-		model = d.localModelList()[0]
+		model = d.defaultLocal()
+		if d.autoRC && d.rcForLocal() {
+			d.notify(s, "Remote Control is on, so this local session is still relayed through claude.ai. Turn off \"Remote Control for local sessions\" in the sidebar settings to keep it on this machine.")
+		}
 		d.refreshLocalModels()
 	} else {
 		model = s.lastClaude

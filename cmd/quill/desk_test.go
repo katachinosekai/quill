@@ -109,7 +109,7 @@ func newHarness(t *testing.T) *harness {
 	h.d = newDesk(a, h.w, config{ProjectsRoot: projects, SessionsDir: sessions, ClaudeBin: exe})
 	h.d.planFirst = false
 	h.d.kmemOff = true
-	h.d.fetchLocal = func(string) []string { return nil }
+	h.d.fetchLocal = func(string) []localInfo { return nil }
 	h.d.compactor = func(context.Context, string, string) (string, error) { return "Goal: test brief", nil }
 	h.d.do = func(f func()) {
 		uiMu.Lock()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -784,16 +785,36 @@ func TestAutoHandoffAsksThenRotates(t *testing.T) {
 }
 
 func TestOnlineLocalSwitch(t *testing.T) {
+	var shows []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/tags" {
+		switch r.URL.Path {
+		case "/api/tags":
+			w.Write([]byte(`{"models":[{"name":"llama9:8b"},{"name":"nomic-embed:latest"},{"name":"qwen3.8:27b-80k"},{"name":"old:1b"}]}`))
+		case "/api/show":
+			var req struct {
+				Model string `json:"model"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			shows = append(shows, req.Model)
+			switch req.Model {
+			case "nomic-embed:latest":
+				w.Write([]byte(`{"capabilities":["embedding"]}`))
+			case "qwen3.8:27b-80k":
+				w.Write([]byte(`{"capabilities":["completion","tools"],"parameters":"temperature 0.6\nnum_ctx                        81920\nstop \"x\""}`))
+			case "old:1b":
+				w.Write([]byte(`{"parameters":"num_ctx 4096"}`))
+			default:
+				w.Write([]byte(`{"capabilities":["completion","tools"]}`))
+			}
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		w.Write([]byte(`{"models":[{"name":"qwen3.8:27b-80k"},{"name":"llama9:8b"}]}`))
 	}))
 	defer srv.Close()
-	if got := fetchOllamaModels(srv.URL); len(got) != 2 || got[1] != "ollama:llama9:8b" {
-		t.Fatalf("live Ollama list: %v", got)
+	got := fetchOllamaModels(srv.URL)
+	want := []localInfo{{"ollama:llama9:8b", 0}, {"ollama:qwen3.8:27b-80k", 81920}, {"ollama:old:1b", 4096}}
+	if !reflect.DeepEqual(got, want) || len(shows) != 4 {
+		t.Fatalf("live Ollama list keeps tool models (or ones without capabilities) with their num_ctx: %+v (show calls %v)", got, shows)
 	}
 	if fetchOllamaModels("http://127.0.0.1:1") != nil {
 		t.Fatal("Ollama down gives no list")
@@ -834,6 +855,35 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		n := h.d.createSession(h.proj, "ollama:qwen3-coder:30b-48k", "auto")
 		if n.mode != "default" {
 			t.Fatal("a new local session never starts in auto mode")
+		}
+		h.d.localModels = []string{"ollama:llama9:8b", "ollama:qwen3.8:27b-80k"}
+		if h.d.defaultLocal() != "ollama:qwen3.8:27b-80k" {
+			t.Fatal("Local prefers the known Qwen tag over whatever Ollama lists first")
+		}
+		h.d.localWindows["ollama:qwen3.8:27b-80k"] = 81920
+		if env := strings.Join(h.d.localEnv("ollama:qwen3.8:27b-80k"), " "); env != "CLAUDE_CODE_MAX_CONTEXT_TOKENS=81920 CLAUDE_CODE_AUTO_COMPACT_WINDOW=81920" {
+			t.Fatalf("the CLI is told the real window: %q", env)
+		}
+		if h.d.localEnv("ollama:llama9:8b") != nil || h.d.localEnv("opus") != nil {
+			t.Fatal("unknown windows and Claude models get no override")
+		}
+		r := h.d.createSession(h.proj, "opus", "default")
+		h.d.sendTo(r, "hi")
+	})
+	var r *deskSession
+	h.ui(func() { r = h.d.current })
+	h.eventually("turn over", func() bool { return r.running() && !r.conv.Busy })
+	h.ui(func() {
+		r.rcOn, r.rcURL, r.rcName = true, "https://claude.ai/x", "rc"
+		h.d.setModel(r, "ollama:qwen3.8:27b-80k")
+		if r.rcOn || r.rcURL != "" || r.rcName != "" || r.proc != nil {
+			t.Fatal("switching Claude <-> local drops the process and its Remote Control state")
+		}
+		h.d.app.Preferences().SetBool("rcLocal", false)
+		h.d.autoRC = true
+		h.d.autoRemote(r)
+		if r.rcOn {
+			t.Fatal("with the setting off, local sessions never start Remote Control")
 		}
 	})
 }

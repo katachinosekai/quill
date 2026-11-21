@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -64,11 +66,31 @@ func LocalModel(model string) string {
 	return ""
 }
 
+const defaultOllama = "http://localhost:11434"
+
 func OllamaHost() string {
-	if host := os.Getenv("QUILL_OLLAMA_URL"); host != "" {
-		return host
+	host := strings.TrimRight(os.Getenv("QUILL_OLLAMA_URL"), "/")
+	if host == "" {
+		return defaultOllama
 	}
-	return "http://localhost:11434"
+	u, err := url.Parse(host)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return defaultOllama
+	}
+	return host
+}
+
+func OllamaInsecure(host string) bool {
+	u, err := url.Parse(host)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	h := u.Hostname()
+	if h == "localhost" {
+		return false
+	}
+	ip := net.ParseIP(h)
+	return ip == nil || !ip.IsLoopback()
 }
 
 func LocalEnv(model string) []string {
@@ -81,6 +103,7 @@ func LocalEnv(model string) []string {
 		"ANTHROPIC_API_KEY=",
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL=" + LocalModel(model),
 		"ANTHROPIC_SMALL_FAST_MODEL=" + LocalModel(model),
+		"CLAUDE_CODE_SUBAGENT_MODEL=" + LocalModel(model),
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 	}
 }

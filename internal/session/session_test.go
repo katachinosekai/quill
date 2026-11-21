@@ -460,3 +460,30 @@ func TestHandoffTwice(t *testing.T) {
 	}
 	r3.waitFor(t, isType("result"))
 }
+
+func TestOllamaHostChecks(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                      "http://localhost:11434",
+		"http://gpu-box:11434/": "http://gpu-box:11434",
+		"https://ollama.lan":    "https://ollama.lan",
+		"file:///etc/passwd":    "http://localhost:11434",
+		"gpu-box:11434":         "http://localhost:11434",
+		"javascript:alert(1)":   "http://localhost:11434",
+	} {
+		t.Setenv("QUILL_OLLAMA_URL", in)
+		if got := OllamaHost(); got != want {
+			t.Errorf("OllamaHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for host, want := range map[string]bool{
+		"http://localhost:11434": false, "http://127.0.0.1:11434": false, "http://[::1]:11434": false,
+		"http://gpu-box:11434": true, "http://192.168.1.5:11434": true, "https://gpu-box": false,
+	} {
+		if OllamaInsecure(host) != want {
+			t.Errorf("OllamaInsecure(%q) != %v", host, want)
+		}
+	}
+	if env := strings.Join(LocalEnv("ollama:qwen3.8:27b-80k"), "\n"); !strings.Contains(env, "CLAUDE_CODE_SUBAGENT_MODEL=qwen3.8:27b-80k") {
+		t.Error("subagents use the local model too")
+	}
+}

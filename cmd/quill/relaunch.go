@@ -119,7 +119,7 @@ func (d *desk) claudeCompact(ctx context.Context, model, text string) (string, e
 		args = append(args, "--model", model)
 	}
 	cmd := exec.CommandContext(ctx, d.cfg.ClaudeBin, args...)
-	cmd.Env = append(os.Environ(), session.LocalEnv(model)...)
+	cmd.Env = append(append(os.Environ(), session.LocalEnv(model)...), d.localEnv(model)...)
 	cmd.Dir = privateDir()
 	cmd.Stdin = strings.NewReader("<conversation>\n" + text + "\n</conversation>")
 	var out, errb bytes.Buffer
