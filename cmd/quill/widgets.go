@@ -162,6 +162,7 @@ type sendEntry struct {
 	onHistory  func(*fyne.KeyEvent) bool
 	hist       *history
 	browsing   bool
+	upArmed    time.Time
 	onFocus    func()
 	onEscape   func() bool
 	ac         *autocorrector
@@ -258,8 +259,8 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 	if k.Name == fyne.KeyEscape && e.onEscape != nil && e.onEscape() {
 		return
 	}
-	if k.Name != fyne.KeyUp && k.Name != fyne.KeyDown && !e.browsing {
-		e.hist = nil
+	if k.Name != fyne.KeyUp {
+		e.upArmed = time.Time{}
 	}
 	if k.Name == fyne.KeyTab && e.AcceptsTab() {
 		e.SetText(e.suggestion)

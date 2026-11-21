@@ -361,19 +361,22 @@ func TestQueueAndHistory(t *testing.T) {
 		h.d.input.SetText("draft")
 		h.d.input.CursorRow = 0
 		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyUp})
-		if !strings.Contains(h.d.input.Text, "second, edited") {
-			t.Fatalf("Up recalls the last sent message, got %q", h.d.input.Text)
+		if h.d.input.Text != "draft" {
+			t.Fatalf("with something typed, one Up stays in the draft: %q", h.d.input.Text)
 		}
-		h.d.input.CursorRow = 0
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyUp})
+		if !strings.Contains(h.d.input.Text, "second, edited") {
+			t.Fatalf("a second Up recalls the last sent message, got %q", h.d.input.Text)
+		}
 		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyUp})
 		if h.d.input.Text != "slow" {
-			t.Fatalf("Up again goes further back, got %q", h.d.input.Text)
+			t.Fatalf("while browsing one Up goes further back, got %q", h.d.input.Text)
 		}
+		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyLeft})
 		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDown})
-		h.d.input.CursorRow = strings.Count(h.d.input.Text, "\n")
 		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDown})
 		if h.d.input.Text != "draft" {
-			t.Fatalf("Down past the newest brings the draft back, got %q", h.d.input.Text)
+			t.Fatalf("Down past the newest brings the draft back, even after moving the cursor, got %q", h.d.input.Text)
 		}
 	})
 }

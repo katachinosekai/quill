@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -266,7 +267,12 @@ func (d *desk) editQueued(s *deskSession, i int) {
 type history struct {
 	idx   int
 	draft string
+	sid   string // the session whose box this is (tabs share one box)
 }
+
+// upAgain is how soon a second Up must follow to leave a new draft for the
+// queue or earlier messages (user 2026-11-21).
+const upAgain = 600 * time.Millisecond
 
 func userHistory(s *deskSession) []string {
 	var out []string
@@ -284,47 +290,78 @@ func userHistory(s *deskSession) []string {
 	return out
 }
 
+// historyKey: Up/Down in a message box (user 2026-11-21).
+//   - While writing, Up and Down move through the lines (wrapped lines too);
+//     only on the top line does Up leave the text. With something typed, that
+//     takes two presses within upAgain (the first shows a hint); an empty box
+//     needs one. Up pulls back the last queued message if any, else recalls
+//     earlier messages.
+//   - While browsing earlier messages, Up and Down change the message
+//     directly; Down past the newest brings the draft back.
+//   - The draft is kept from the first Up until the box is sent or cleared,
+//     whatever is edited or moved meanwhile.
 func (d *desk) historyKey(e *sendEntry, s *deskSession, k *fyne.KeyEvent) bool {
-	if s != nil && s.qedit != nil && (k.Name == fyne.KeyEscape || k.Name == fyne.KeyDown && e.CursorRow == strings.Count(e.Text, "\n")) {
+	if e.hist != nil && (e.Text == "" || s == nil || e.hist.sid != s.id) {
+		e.hist = nil // sent, cleared or another tab: the draft is done
+	}
+	if s != nil && s.qedit != nil && k.Name == fyne.KeyEscape {
 		return d.cancelQueueEdit(s)
 	}
-	if s == nil || (k.Name != fyne.KeyUp && k.Name != fyne.KeyDown) {
+	if s == nil || (k.Name != fyne.KeyUp && k.Name != fyne.KeyDown) || e.shift {
 		return false
 	}
-	if k.Name == fyne.KeyUp {
-		if e.CursorRow != 0 {
-			return false
-		}
-		if e.hist == nil && strings.TrimSpace(e.Text) == "" && len(s.queue) > 0 {
-			d.editQueued(s, len(s.queue)-1)
-			return true
-		}
+	if e.hist != nil {
 		list := userHistory(s)
-		if e.hist == nil {
-			if len(list) == 0 {
-				return false
+		if k.Name == fyne.KeyUp {
+			if e.hist.idx+1 < len(list) {
+				e.hist.idx++
+				e.setHistoryText(list[e.hist.idx])
 			}
-			e.hist = &history{idx: -1, draft: e.Text}
-		}
-		if e.hist.idx+1 >= len(list) {
 			return true
 		}
-		e.hist.idx++
+		e.hist.idx--
+		if e.hist.idx < 0 || e.hist.idx >= len(list) {
+			draft := e.hist.draft
+			e.hist = nil
+			e.setHistoryText(draft)
+			return true
+		}
 		e.setHistoryText(list[e.hist.idx])
 		return true
 	}
-	if e.hist == nil || e.CursorRow != strings.Count(e.Text, "\n") {
-		return false
-	}
-	list := userHistory(s)
-	e.hist.idx--
-	if e.hist.idx < 0 || e.hist.idx >= len(list) {
-		draft := e.hist.draft
-		e.hist = nil
-		e.setHistoryText(draft)
+	if k.Name == fyne.KeyDown {
+		row := e.CursorRow
+		e.Entry.TypedKey(k)
+		if row == e.CursorRow && s.qedit != nil {
+			return d.cancelQueueEdit(s) // Down on the last line undoes a queued-message edit
+		}
 		return true
 	}
-	e.setHistoryText(list[e.hist.idx])
+	if e.CursorRow > 0 {
+		return false // move up a line
+	}
+	if strings.TrimSpace(e.Text) != "" {
+		now := time.Now()
+		if e.upArmed.IsZero() || now.Sub(e.upArmed) > upAgain {
+			e.upArmed = now
+			e.Entry.TypedKey(k) // to the start of the line, like a normal Up
+			if e.onFix != nil && (len(s.queue) > 0 || len(userHistory(s)) > 0) {
+				e.onFix("Press ↑ again for earlier messages")
+			}
+			return true
+		}
+	}
+	e.upArmed = time.Time{}
+	if len(s.queue) > 0 && s.qedit == nil {
+		d.editQueued(s, len(s.queue)-1)
+		return true
+	}
+	list := userHistory(s)
+	if len(list) == 0 {
+		return false
+	}
+	e.hist = &history{idx: 0, draft: e.Text, sid: s.id}
+	e.setHistoryText(list[0])
 	return true
 }
 
