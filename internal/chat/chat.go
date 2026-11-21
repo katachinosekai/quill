@@ -48,6 +48,7 @@ type Item struct {
 	Streaming   bool
 	InPlan      bool
 	MsgID       string
+	UUID        string
 	ToolName    string
 	ToolID      string
 	Summary     string
@@ -376,7 +377,9 @@ func (c *Conversation) applyUser(ev *protocol.Event) []*Item {
 				out = append(out, c.AddNotice("Interrupted"))
 				continue
 			}
-			out = append(out, c.AddUser(t))
+			u := c.AddUser(t)
+			u.UUID = ev.UUID
+			out = append(out, u)
 		case "image":
 			out = append(out, c.AddUser("[image]"))
 		}
@@ -420,6 +423,9 @@ func (c *Conversation) applyAssistant(ev *protocol.Event) []*Item {
 			}
 			it.Text = b.Text
 			it.Streaming = false
+			if ev.UUID != "" {
+				it.UUID = ev.UUID
+			}
 			out = append(out, it)
 		case "thinking":
 			if strings.TrimSpace(b.Thinking) == "" {

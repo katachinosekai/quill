@@ -33,6 +33,7 @@ var localCommands = []protocol.Command{
 	{Name: "hooks", Description: "Show the configured hooks (handled by Quill)"},
 	{Name: "agents", Description: "List the configured subagents (handled by Quill)"},
 	{Name: "add-dir", Description: "Give this session another working folder (handled by Quill)", ArgumentHint: "[folder]"},
+	{Name: "rewind", Description: "Go back to an earlier message, optionally undoing file changes (handled by Quill)"},
 }
 
 func (d *desk) runLocalCommand(text string) bool {
@@ -72,7 +73,7 @@ func (d *desk) runLocalCommand(text string) bool {
 		}
 		d.setModel(s, arg)
 		note("Model set to " + arg + ".")
-	case "mcp", "chrome", "tasks", "permissions", "fork", "branch", "copy", "export", "diff", "memory", "hooks", "agents", "add-dir":
+	case "mcp", "chrome", "tasks", "permissions", "fork", "branch", "copy", "export", "diff", "memory", "hooks", "agents", "add-dir", "rewind":
 		if s == nil {
 			return false
 		}
@@ -101,6 +102,8 @@ func (d *desk) runLocalCommand(text string) bool {
 			d.cmdAgents(s)
 		case "add-dir":
 			d.cmdAddDir(s, arg)
+		case "rewind":
+			d.cmdRewind(s)
 		}
 	case "exit", "quit":
 		if s == nil {

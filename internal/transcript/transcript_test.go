@@ -151,3 +151,36 @@ func TestLoadEndsTasksFromAttachments(t *testing.T) {
 		t.Fatalf("a reloaded transcript doesn't resurrect finished tasks: %v %d", err, c.Background())
 	}
 }
+
+func TestLoadFollowsTheRewoundBranch(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	u := func(id, parent, text string) string {
+		return `{"type":"user","uuid":"` + id + `","parentUuid":"` + parent + `","message":{"role":"user","content":"` + text + `"}}` + "\n"
+	}
+	a := func(id, parent, text string) string {
+		return `{"type":"assistant","uuid":"` + id + `","parentUuid":"` + parent + `","message":{"role":"assistant","content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	}
+	lines := u("u0", "", "before compaction") + a("a0", "u0", "old answer") +
+		u("u1", "", "after compaction") + a("a1", "u1", "answer one") +
+		u("u2", "a1", "abandoned question") + a("a2", "u2", "abandoned answer") +
+		u("u3", "a1", "rewritten question") + a("a3", "u3", "new answer")
+	if err := os.WriteFile(p, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, it := range c.Items {
+		got = append(got, it.Text)
+	}
+	want := "before compaction|old answer|after compaction|answer one|rewritten question|new answer"
+	if strings.Join(got, "|") != want {
+		t.Fatalf("a rewound branch replaces the abandoned one, compacted history stays: %v", got)
+	}
+	if c.Items[4].UUID != "u3" || c.Items[3].UUID != "a1" {
+		t.Fatal("items keep their message ids")
+	}
+}

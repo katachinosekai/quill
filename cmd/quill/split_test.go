@@ -1653,3 +1653,56 @@ func deepWalk(o fyne.CanvasObject, fn func(fyne.CanvasObject)) {
 		return false
 	}, nil)
 }
+
+func TestRewind(t *testing.T) {
+	h := newHarness(t)
+	var reqs []map[string]any
+	var mu sync.Mutex
+	h.d.controlFn = func(_ *deskSession, req map[string]any) (json.RawMessage, error) {
+		mu.Lock()
+		reqs = append(reqs, req)
+		mu.Unlock()
+		return json.RawMessage(`{"filesChanged":["a.go","b.go"]}`), nil
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy && s.persisted })
+	var u2 *chat.Item
+	h.ui(func() {
+		s.conv.Items = append(s.conv.Items,
+			&chat.Item{Kind: chat.User, Text: "first", UUID: "U1"},
+			&chat.Item{Kind: chat.Assistant, Text: "one", UUID: "A1"},
+			&chat.Item{Kind: chat.User, Text: "second, to redo", UUID: "U2"},
+			&chat.Item{Kind: chat.Assistant, Text: "two", UUID: "A2"})
+		u2 = s.conv.Items[len(s.conv.Items)-2]
+		h.d.open(s.id)
+		h.d.rewindTo(s, u2, true)
+	})
+	h.eventually("rewound", func() bool { return s.resumeAt == "A1" })
+	h.ui(func() {
+		var last *chat.Item
+		for _, it := range s.conv.Items {
+			if it.Kind != chat.Notice {
+				last = it
+			}
+		}
+		if last.UUID != "A1" || s.proc != nil || h.d.input.Text != "second, to redo" {
+			t.Fatalf("the conversation is cut before that message and its text is back in the box: %+v", last)
+		}
+		mu.Lock()
+		if len(reqs) != 1 || reqs[0]["subtype"] != "rewind_files" || reqs[0]["user_message_id"] != "U2" {
+			t.Fatalf("files are rewound to that message: %v", reqs)
+		}
+		mu.Unlock()
+		h.d.sendTo(s, "second, rewritten")
+	})
+	h.eventually("resumed at A1", func() bool { return strings.Contains(h.args(), "--resume-session-at A1") })
+	h.ui(func() {
+		if s.resumeAt != "" {
+			t.Fatal("the resume point is used once")
+		}
+	})
+}
