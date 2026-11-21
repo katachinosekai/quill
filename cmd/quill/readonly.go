@@ -522,8 +522,10 @@ func parseReadOnlyExtra(text string) [][]string {
 	return out
 }
 
+const builtinReadOnly = "kmem brief\nkmem get\nkmem find\nkmem show\nkmem context\nkmem recall\nkmem rules\nkmem task list\nkmem task check\nkmem handoff get\nkmem handoff list\nkmem handoff policy"
+
 func (d *desk) readOnlyExtra() [][]string {
-	return parseReadOnlyExtra(d.app.Preferences().String("extraReadOnly"))
+	return parseReadOnlyExtra(builtinReadOnly + "\n" + d.app.Preferences().String("extraReadOnly"))
 }
 
 func (d *desk) readOnlyDialog() {

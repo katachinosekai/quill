@@ -318,3 +318,12 @@ func TestAwaitsReply(t *testing.T) {
 		t.Fatal("answered")
 	}
 }
+
+func TestMonitorIsNotWork(t *testing.T) {
+	c := New()
+	c.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"m1","name":"Monitor","input":{"description":"watch the log"}}]`)}})
+	c.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"m1","content":"Monitor started (task id: monabc123)"}]`)}})
+	if c.Background() != 1 || c.Working() != 0 {
+		t.Fatalf("a Monitor is listed but is not work: bg=%d working=%d", c.Background(), c.Working())
+	}
+}

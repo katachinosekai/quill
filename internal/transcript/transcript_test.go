@@ -184,3 +184,29 @@ func TestLoadFollowsTheRewoundBranch(t *testing.T) {
 		t.Fatal("items keep their message ids")
 	}
 }
+
+func TestParallelToolResultIsNotAnAbandonedBranch(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.jsonl")
+	lines := `{"type":"user","uuid":"u1","parentUuid":"","message":{"role":"user","content":"run the test"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"./check.sh","run_in_background":true}}]}}
+{"type":"assistant","uuid":"a2","parentUuid":"a1","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t2","name":"SendMessage","input":{"to":"x","message":"taking the lock"}}]}}
+{"type":"user","uuid":"r1","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Command running in background with ID: bkisea9gg. Output is being written to: /tmp/o"}]}}
+{"type":"user","uuid":"r2","parentUuid":"a2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"sent"}]}}
+{"type":"assistant","uuid":"a3","parentUuid":"r2","message":{"role":"assistant","content":[{"type":"text","text":"The test is running."}]}}
+`
+	if err := os.WriteFile(p, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Background() != 1 || c.Working() != 1 {
+		t.Fatalf("the background Bash started next to another tool call is tracked after a reload: %d", c.Background())
+	}
+	for _, it := range c.Items {
+		if it.ToolID == "t1" && !it.HasResult {
+			t.Fatal("and its result is shown")
+		}
+	}
+}

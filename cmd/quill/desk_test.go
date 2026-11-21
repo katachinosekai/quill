@@ -293,6 +293,9 @@ func TestResumePermissionAndInterrupt(t *testing.T) {
 		if s.status() != stRunning {
 			t.Fatalf("a background task alone still reads as running: %v bg=%d running=%v", s.status(), s.conv.Background(), s.running())
 		}
+		if _, meta, _ := h.d.rowText(s.id); !strings.Contains(meta, "running  ·  1 in background") {
+			t.Fatalf("the sidebar says the work is in the background: %q", meta)
+		}
 		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"text","text":"Tests are running.\n\n**Should I also rebuild the launcher?**"}]`)}})
 		if s.conv.Background() == 0 || s.status() != stWaiting {
 			t.Fatalf("a finished turn ending in a question waits for the user even with background tasks: %v", s.status())
@@ -1589,6 +1592,27 @@ func TestPlanApprovalSymptoms(t *testing.T) {
 		h.d.planGate(s, &protocol.Event{Type: "user"}, []*chat.Item{{Kind: chat.User, Text: "now a brand new task"}})
 		if s.runAll {
 			t.Fatal("a new request after the turn ends needs a new plan")
+		}
+	})
+}
+
+func TestKmemStartupIsReadOnly(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		ex := h.d.readOnlyExtra()
+		req := func(cmd string) *protocol.ControlRequest {
+			b, _ := json.Marshal(map[string]string{"command": cmd})
+			return &protocol.ControlRequest{ToolName: "Bash", Input: b}
+		}
+		for _, c := range []string{"kmem brief; kmem handoff get quill; kmem rules", "kmem task list", "kmem handoff policy"} {
+			if !readOnlyRequest(req(c), ex) {
+				t.Errorf("kmem startup command runs without a plan: %q", c)
+			}
+		}
+		for _, c := range []string{"kmem handoff save quill --state x", "kmem add quill/decisions x", "kmem task done t1"} {
+			if readOnlyRequest(req(c), ex) {
+				t.Errorf("kmem writes still need a plan: %q", c)
+			}
 		}
 	})
 }

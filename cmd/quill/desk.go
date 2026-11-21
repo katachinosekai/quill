@@ -134,7 +134,7 @@ func (s *deskSession) status() status {
 	if !busy && s.conv.AwaitsReply() {
 		return stWaiting
 	}
-	if busy || s.conv.Background() > 0 {
+	if busy || s.conv.Working() > 0 {
 		return stRunning
 	}
 	return stIdle
@@ -649,6 +649,9 @@ func (d *desk) rowText(id string) (string, string, status) {
 	}
 	if st != stNone {
 		meta += "  ·  " + st.String()
+	}
+	if s != nil && st == stRunning && !s.conv.Busy && !s.proc.Busy() {
+		meta += fmt.Sprintf("  ·  %d in background", s.conv.Working())
 	}
 	if k := d.org.Kmem[id]; k != "" {
 		meta += "  ·  kmem " + k

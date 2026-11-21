@@ -345,16 +345,24 @@ func abandoned(path string) map[string]bool {
 	defer f.Close()
 	parent := map[string]string{}
 	children := map[string][]string{}
+	results := map[string]bool{}
 	last := ""
 	r := bufio.NewReaderSize(f, 1<<20)
 	for {
 		line, err := r.ReadBytes('\n')
 		var rec struct {
-			UUID   string `json:"uuid"`
-			Parent string `json:"parentUuid"`
-			Side   bool   `json:"isSidechain"`
+			UUID    string `json:"uuid"`
+			Parent  string `json:"parentUuid"`
+			Side    bool   `json:"isSidechain"`
+			Type    string `json:"type"`
+			Message struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
 		}
 		if len(bytes.TrimSpace(line)) > 0 && json.Unmarshal(line, &rec) == nil && rec.UUID != "" && !rec.Side {
+			if rec.Type == "user" && resultOnly(rec.Message.Content) {
+				results[rec.UUID] = true
+			}
 			if _, seen := parent[rec.UUID]; !seen {
 				parent[rec.UUID] = rec.Parent
 				if rec.Parent != "" {
@@ -387,12 +395,27 @@ func abandoned(path string) map[string]bool {
 			continue
 		}
 		for _, k := range kids {
-			if !keep[k] {
+			if !keep[k] && !(results[k] && len(children[k]) == 0) {
 				cut(k)
 			}
 		}
 	}
 	return drop
+}
+
+func resultOnly(content json.RawMessage) bool {
+	var blocks []struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(content, &blocks) != nil || len(blocks) == 0 {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type != "tool_result" {
+			return false
+		}
+	}
+	return true
 }
 
 func Load(path string) (*chat.Conversation, error) {

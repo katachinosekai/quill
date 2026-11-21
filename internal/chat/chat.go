@@ -790,6 +790,16 @@ func (c *Conversation) Background() int {
 	return len(c.bgTasks)
 }
 
+func (c *Conversation) Working() int {
+	n := 0
+	for _, t := range c.bgTasks {
+		if t.Tool != "Monitor" {
+			n++
+		}
+	}
+	return n
+}
+
 func (c *Conversation) ClearBackground() {
 	c.bgTasks = nil
 }
