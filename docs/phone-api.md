@@ -358,6 +358,20 @@ Body `{}`. Same as "Resume now" on the pause banner. Response `{"v": 1, "usage":
 
 Body: `{"folder": "/home/user/Projects/demo", "backend": "online", "model": "opus", "mode": "default"}`. `folder` must be one of `/phone/folders`. Response: `{"v": 1, "session": {...}}`.
 
+Optional `start` (since 2026-11-21) does what the desktop's new-tab card does; without it the session starts as before and gets a kmem name from its title later (a tab, its session and its kmem name are one identity, so there is no "no kmem" choice):
+
+- `{"kmem": "resume", "name": "quill-android"}`: link the handoff and send its resume prompt; the title becomes the name. `409 blocked` when the handoff is open in another session (`openIn` in `/phone/handoffs`; offer "Open that session" instead).
+- `{"kmem": "new", "title": "Some name"}`: new kmem name from the title (empty title = the folder's default title).
+- Anything else: `422 bad_request`.
+
+### GET /phone/handoffs
+
+`{"v": 1, "handoffs": [{"name": "quill-android", "savedMs": 1795250000000, "openIn": {"id": "<session id>", "title": "Quill Android 2"}}]}`: saved kmem handoffs, newest first (same list as the desktop card); `openIn` is the open tab or running session that holds the name, else `null`. Empty list when kmem isn't available. Older Quill Desktop builds answer `404`; hide the Resume part then.
+
+### GET /phone/handoffs/slug?title=...
+
+`{"v": 1, "slug": "some-name"}`: the kmem name a new session with that title would get (empty for an empty title).
+
 ## Control setting
 
 Reads work for every paired phone, as today. Writes (every POST except `/phone/hello`) need both:

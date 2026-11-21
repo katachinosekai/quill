@@ -292,6 +292,51 @@ func TestPhoneAPIWrites(t *testing.T) {
 	if code != 200 || ns["mode"] != "plan" || ns["folder"] != folder {
 		t.Fatalf("new session: %d %v", code, m)
 	}
+	ks := &kmemStub{saved: map[string]bool{"demo-work": true, "busy-work": true}}
+	h.ui(func() {
+		h.d.kmemOff = false
+		h.d.kmemRun = ks.run
+		h.d.org.Kmem[editsID] = "busy-work"
+	})
+	code, m, _ = a.do("GET", "/phone/handoffs", "", nil)
+	list, _ := m["handoffs"].([]any)
+	if code != 200 || len(list) != 2 {
+		t.Fatalf("handoffs: %d %v", code, m)
+	}
+	for _, x := range list {
+		e := x.(map[string]any)
+		if e["name"] == "busy-work" && e["openIn"] == nil || e["name"] == "demo-work" && e["openIn"] != nil || e["savedMs"].(float64) <= 0 {
+			t.Fatalf("openIn marks the handoff that is open in a tab: %v", e)
+		}
+	}
+	if code, m, _ = a.do("GET", "/phone/handoffs/slug?title=Demo+Work+2", "", nil); code != 200 || m["slug"] != "demo-work-2" {
+		t.Fatalf("slug: %d %v", code, m)
+	}
+	if code, m, _ = a.do("POST", "/phone/sessions/new", key(), map[string]any{"folder": folder, "start": map[string]string{"kmem": "none"}}); code != 422 || errCode(m) != "bad_request" {
+		t.Fatalf("no kmem is not offered any more: %d %v", code, m)
+	}
+	if code, m, _ = a.do("POST", "/phone/sessions/new", key(), map[string]any{"folder": folder, "start": map[string]string{"kmem": "resume", "name": "busy-work"}}); code != 409 || errCode(m) != "blocked" {
+		t.Fatalf("resuming a handoff that is open elsewhere is blocked: %d %v", code, m)
+	}
+	code, m, _ = a.do("POST", "/phone/sessions/new", key(), map[string]any{"folder": folder, "start": map[string]string{"kmem": "resume", "name": "demo-work"}})
+	rs, _ := m["session"].(map[string]any)
+	if code != 200 {
+		t.Fatalf("resume: %d %v", code, m)
+	}
+	code, m, _ = a.do("POST", "/phone/sessions/new", key(), map[string]any{"folder": folder, "start": map[string]string{"kmem": "new", "title": "Tablet Thing"}})
+	ts, _ := m["session"].(map[string]any)
+	if code != 200 {
+		t.Fatalf("new with title: %d %v", code, m)
+	}
+	h.ui(func() {
+		if h.d.org.Kmem[rs["id"].(string)] != "demo-work" || h.d.org.Titles[rs["id"].(string)] != "demo-work" {
+			t.Fatalf("resume links the handoff: %q", h.d.org.Kmem[rs["id"].(string)])
+		}
+		if h.d.org.Kmem[ts["id"].(string)] != "tablet-thing" || h.d.org.Titles[ts["id"].(string)] != "Tablet Thing" {
+			t.Fatalf("new gets a kmem name from its title: %q", h.d.org.Kmem[ts["id"].(string)])
+		}
+		h.d.kmemOff = true
+	})
 	if code, m, _ := a.do("POST", "/phone/session/"+ns["id"].(string)+"/interrupt", key(), map[string]any{}); code != 409 || errCode(m) != "not_running" {
 		t.Fatalf("interrupt without a process: %d %v", code, m)
 	}

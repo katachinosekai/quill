@@ -25,6 +25,7 @@ func notFound(msg string) *apiErr { return &apiErr{http.StatusNotFound, "not_fou
 func stale(msg string) *apiErr    { return &apiErr{http.StatusConflict, "stale", msg} }
 
 type writeBody struct {
+	Start     *apiStart           `json:"start"`
 	Text      string              `json:"text"`
 	RequestID string              `json:"requestId"`
 	Seq       int                 `json:"seq"`
@@ -300,8 +301,16 @@ func (a *phoneAPI) newSession(in writeBody) (map[string]any, *apiErr) {
 	if !slices.Contains(modes, mode) {
 		return nil, badReq("unknown mode " + mode)
 	}
+	if in.Start != nil {
+		if fail := a.checkStart(in.Start); fail != nil {
+			return nil, fail
+		}
+	}
 	ns := d.addSession(in.Folder, model, mode, false)
 	d.addTab(ns.id)
+	if in.Start != nil {
+		a.applyStart(ns, in.Start)
+	}
 	_, group := a.sessionIDs()
 	return map[string]any{"session": a.session(ns.id, firstNonEmpty(group[ns.id], "Open"))}, nil
 }

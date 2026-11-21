@@ -50,9 +50,7 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 	start := widget.NewButton("Start new", func() { d.pickNew(s, name.Text) })
 	start.Importance = widget.HighImportance
 	name.OnSubmitted = func(string) { d.pickNew(s, name.Text) }
-	none := widget.NewButton("No kmem", func() { d.pickNone(s) })
-	none.Importance = widget.LowImportance
-	newRow := container.NewBorder(nil, nil, nil, container.NewHBox(start, none), name)
+	newRow := container.NewBorder(nil, nil, nil, start, name)
 	body := container.NewVBox(head, sub, widget.NewSeparator(), mutedText("Resume", fontMeta), resume,
 		widget.NewSeparator(), mutedText("New", fontMeta), newRow, preview)
 	bgr := canvas.NewRectangle(colCard)
@@ -108,15 +106,6 @@ func (d *desk) pickNew(s *deskSession, text string) {
 	s.pickPending = false
 	d.org.Titles[s.id] = title
 	d.applyKmemChoice(s, kmemNewChoice, title)
-	d.afterPick(s, true)
-}
-
-func (d *desk) pickNone(s *deskSession) {
-	if !s.pickPending {
-		return
-	}
-	s.pickPending = false
-	delete(d.org.Kmem, s.id)
 	d.afterPick(s, true)
 }
 

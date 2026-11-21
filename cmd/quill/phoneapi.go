@@ -103,6 +103,10 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.sessions(w, folders.PhoneID(r))
 	case r.Method == http.MethodGet && path == "folders":
 		a.folders(w)
+	case r.Method == http.MethodGet && path == "handoffs":
+		a.handoffs(w)
+	case r.Method == http.MethodGet && path == "handoffs/slug":
+		a.handoffSlug(w, r)
 	case r.Method == http.MethodGet && path == "stream":
 		a.stream(w, r)
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "items":

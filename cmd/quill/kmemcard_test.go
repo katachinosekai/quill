@@ -54,7 +54,7 @@ func TestNewTabKmemCard(t *testing.T) {
 		return strings.Contains(strings.Join(labels, "|"), "quill · saved")
 	})
 	joined := strings.Join(labels, "|")
-	if !strings.Contains(joined, "networking · saved") || !strings.Contains(joined, "open in tab") || !strings.Contains(joined, "Start new") || !strings.Contains(joined, "No kmem") {
+	if !strings.Contains(joined, "networking · saved") || !strings.Contains(joined, "open in tab") || !strings.Contains(joined, "Start new") || strings.Contains(joined, "No kmem") {
 		t.Fatalf("card buttons: %v", labels)
 	}
 	h.ui(func() {
@@ -93,12 +93,4 @@ func TestNewTabKmemCard(t *testing.T) {
 			t.Fatal("an unsaved handoff only changes the link; no kmem rename")
 		}
 	}
-	h.ui(func() {
-		h.d.newSessionDialog()
-		n := h.d.current
-		h.d.pickNone(n)
-		if n.pickPending || h.d.org.Kmem[n.id] != "" {
-			t.Fatal("No kmem leaves the session unlinked")
-		}
-	})
 }
