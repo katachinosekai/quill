@@ -252,6 +252,7 @@ func (v *chatView) show(s *deskSession) {
 	if s != v.s {
 		v.stash()
 	}
+	defer v.d.drawQueue(v, s)
 	if s != nil {
 		if sv, ok := v.cache[s]; ok && s != v.s && sv.conv == s.conv && sv.center == v.d.center {
 			v.s = s

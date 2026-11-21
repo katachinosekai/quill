@@ -53,11 +53,30 @@ func (d *desk) viewFor(s *deskSession) *chatView {
 }
 
 func (d *desk) syncQueue(s *deskSession) {
-	v := d.viewFor(s)
+	views := []*chatView{d.single}
+	for _, p := range d.panes {
+		views = append(views, p.view)
+	}
+	for _, v := range views {
+		if v != nil && v.s == s {
+			d.drawQueue(v, s)
+		}
+	}
+	if v := d.viewFor(s); v != nil && v.s != s {
+		d.drawQueue(v, s)
+	}
+}
+
+func (d *desk) drawQueue(v *chatView, s *deskSession) {
 	if v == nil || v.queueBox == nil {
 		return
 	}
 	var rows []fyne.CanvasObject
+	if s == nil {
+		v.queueBox.Objects = nil
+		v.queueBox.Refresh()
+		return
+	}
 	if len(s.queue) > 0 {
 		rows = append(rows, mutedText("Queued, sent when Claude finishes · ↑ in an empty box edits the last one", fontMeta))
 	}

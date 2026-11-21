@@ -1800,8 +1800,14 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgx","name":"Bash","input":{"command":"./test.sh","run_in_background":true}}]`)}})
 		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgx","content":"Command running in background with ID: tsk1. Output is being written to: /tmp/o"}]`)}})
 		h.d.updateChrome()
-		if !h.d.tasksBtn.Visible() || h.d.tasksBtn.Text() != "Background Tasks: ./test.sh" {
+		if !h.d.tasksBtn.Visible() || h.d.tasksBtn.Text() != "Background Task" {
 			t.Fatalf("the message bar shows this session's background task: %q %v", h.d.tasksBtn.Text(), h.d.tasksBtn.Visible())
+		}
+		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgy","name":"Bash","input":{"command":"./other.sh","run_in_background":true}}]`)}})
+		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgy","content":"Command running in background with ID: tsk2. Output is being written to: /tmp/o2"}]`)}})
+		h.d.updateChrome()
+		if h.d.tasksBtn.Text() != "Background Tasks" {
+			t.Fatalf("two tasks read as plural, without names: %q", h.d.tasksBtn.Text())
 		}
 		h.d.rewindTo(s, user, true)
 	})
@@ -2327,6 +2333,62 @@ func TestSplitKeepsQueueAndToolbarPlacement(t *testing.T) {
 		}
 		if rows != 1 {
 			t.Fatalf("and the single view shows it again: %d rows", rows)
+		}
+	})
+}
+
+func TestNoStaleQueueRowsAcrossViews(t *testing.T) {
+	h := newHarness(t)
+	rows := func(v *chatView) int {
+		n := 0
+		for _, o := range v.queueBox.Objects {
+			if _, ok := o.(*queueRow); ok {
+				n++
+			}
+		}
+		return n
+	}
+	var s, other *deskSession
+	h.ui(func() {
+		other = h.d.createSession(h.proj, "default", "default")
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.open(s.id)
+		s.compacting = true
+		h.d.send("queued in single view")
+		if rows(h.d.single) != 1 {
+			t.Fatal("queued row shows in single view")
+		}
+		h.d.setSplit(2)
+		s.queue = nil
+		h.d.syncQueue(s)
+		h.d.setSplit(1)
+		if rows(h.d.chat) != 0 {
+			t.Fatal("a queue emptied in split view leaves no row behind in single view")
+		}
+		s.queue = []string{"again"}
+		h.d.syncQueue(s)
+		h.d.setSplit(2)
+		var empty *pane
+		for _, p := range h.d.panes {
+			if p.view.s == nil {
+				empty = p
+			}
+		}
+		s.queue = nil
+		h.d.syncQueue(s)
+		h.d.closePane(empty)
+		if rows(h.d.chat) != 0 {
+			t.Fatal("closing the empty pane shows no stale row")
+		}
+		s.queue = []string{"third"}
+		h.d.syncQueue(s)
+		h.d.open(other.id)
+		if rows(h.d.chat) != 0 {
+			t.Fatal("another tab shows its own empty queue")
+		}
+		h.d.open(s.id)
+		if rows(h.d.chat) != 1 {
+			t.Fatal("and the queued tab shows its row again")
 		}
 	})
 }

@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"fyne.io/fyne/v2/widget"
@@ -360,11 +359,10 @@ func tasksLabel(s *deskSession) string {
 	if len(tasks) == 0 {
 		return ""
 	}
-	var names []string
-	for _, t := range tasks {
-		names = append(names, oneLine(firstNonEmpty(t.What, t.Tool), 28))
+	if len(tasks) == 1 {
+		return "Background Task"
 	}
-	return "Background Tasks: " + oneLine(strings.Join(names, ", "), 60)
+	return "Background Tasks"
 }
 
 func syncTasksButton(b *tasksChip, s *deskSession) bool {
