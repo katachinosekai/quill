@@ -212,23 +212,29 @@ type desk struct {
 	pausedIDs     []string
 	pauseBanner   *fyne.Container
 	pauseText     *widget.Label
-	controlFn     func(s *deskSession, req map[string]any) (json.RawMessage, error)
-	pingLocal     func(host string) bool
-	localWindows  map[string]int
-	warnedOllama  bool
-	backendBtn    *widget.Button
-	app           fyne.App
-	win           fyne.Window
-	cfg           config
-	scanner       *transcript.Scanner
-	finder        *live.Finder
-	center        bool
-	sessions      map[string]*deskSession
-	infos         map[string]transcript.Info
-	order         []transcript.Info
-	terms         map[string]live.Process
-	current       *deskSession
-	ownPIDs       sync.Map
+	// kmem banner: the user's decisions (recycle bin, audit problems); kmembanner.go
+	kmemBanner     *fyne.Container
+	kmemBannerText *widget.Label
+	kmemBinBtn     *widget.Button
+	kmemAuditBtn   *widget.Button
+	kmemBtns       *fyne.Container
+	controlFn      func(s *deskSession, req map[string]any) (json.RawMessage, error)
+	pingLocal      func(host string) bool
+	localWindows   map[string]int
+	warnedOllama   bool
+	backendBtn     *widget.Button
+	app            fyne.App
+	win            fyne.Window
+	cfg            config
+	scanner        *transcript.Scanner
+	finder         *live.Finder
+	center         bool
+	sessions       map[string]*deskSession
+	infos          map[string]transcript.Info
+	order          []transcript.Info
+	terms          map[string]live.Process
+	current        *deskSession
+	ownPIDs        sync.Map
 
 	rows          []sideRow
 	list          *widget.List
@@ -923,7 +929,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.tabRow = d.buildTabs()
 	d.usage = newUsagePanel(d)
 	d.usageRow = d.usage.buildStrip()
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildKmemBanner(), d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
@@ -2006,6 +2012,7 @@ func (d *desk) watch(ctx context.Context) {
 	go d.glowLoop(ctx)
 	go d.usageLoop(ctx)
 	go d.watchUpdates(ctx)
+	go d.watchKmemBanner(ctx)
 	go d.chat.followGuard(ctx)
 	go d.fetchCommands()
 	d.refreshAccount()

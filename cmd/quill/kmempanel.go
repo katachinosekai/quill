@@ -173,7 +173,9 @@ func (p *kmemPanel) reload() {
 		binOut, _ := d.runKmem("kmem", "trash", "list")
 		topics := parseTopics(topicsOut)
 		bin := parseBin(binOut)
+		needBin, audit := kmemNeeds(brief.Brief)
 		d.do(func() {
+			d.setKmemBanner(needBin, audit)
 			// Overview
 			var big []string
 			for _, t := range topics {
