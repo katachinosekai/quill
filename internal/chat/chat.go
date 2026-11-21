@@ -132,6 +132,23 @@ func (c *Conversation) AsksApproval() bool {
 	return false
 }
 
+func (c *Conversation) AwaitsReply() bool {
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		it := c.Items[i]
+		if it.Kind == User {
+			return false
+		}
+		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
+			continue
+		}
+		if it.Streaming {
+			return false
+		}
+		return strings.HasSuffix(strings.TrimRight(strings.TrimSpace(it.Text), "*_ "), "?")
+	}
+	return false
+}
+
 func (c *Conversation) MarkPlanText() []*Item {
 	var out []*Item
 	for i := len(c.Items) - 1; i >= 0; i-- {

@@ -129,7 +129,11 @@ func (s *deskSession) status() status {
 	if len(s.conv.PendingPermissions()) > 0 {
 		return stWaiting
 	}
-	if s.conv.Busy || s.proc.Busy() || s.conv.Background() > 0 {
+	busy := s.conv.Busy || s.proc.Busy()
+	if !busy && s.conv.AwaitsReply() {
+		return stWaiting
+	}
+	if busy || s.conv.Background() > 0 {
 		return stRunning
 	}
 	return stIdle
@@ -1124,7 +1128,7 @@ func (d *desk) updateChrome() {
 	if d.modeSel.Selected != s.mode {
 		d.modeSel.SetSelected(s.mode)
 	}
-	if st == stRunning || st == stWaiting {
+	if st == stRunning || st == stWaiting && !s.conv.AwaitsReply() || s.running() && s.conv.Background() > 0 {
 		d.stopBtn.Enable()
 	} else {
 		d.stopBtn.Disable()

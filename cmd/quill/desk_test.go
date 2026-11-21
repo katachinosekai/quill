@@ -288,6 +288,22 @@ func TestResumePermissionAndInterrupt(t *testing.T) {
 		return it != nil && it.Text == "done allow+always" && s.status() == stIdle
 	})
 	h.ui(func() {
+		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgq","name":"Bash","input":{"command":"./launch.sh","run_in_background":true}}]`)}})
+		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgq","content":"Command running in background with ID: tqa1. Output is being written to: /tmp/q"}]`)}})
+		if s.status() != stRunning {
+			t.Fatalf("a background task alone still reads as running: %v bg=%d running=%v", s.status(), s.conv.Background(), s.running())
+		}
+		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"text","text":"Tests are running.\n\n**Should I also rebuild the launcher?**"}]`)}})
+		if s.conv.Background() == 0 || s.status() != stWaiting {
+			t.Fatalf("a finished turn ending in a question waits for the user even with background tasks: %v", s.status())
+		}
+		s.conv.AddUser("yes")
+		if s.status() != stRunning {
+			t.Fatal("once answered, the background task counts again")
+		}
+		s.conv.ClearBackground()
+	})
+	h.ui(func() {
 		if h.button("Allow") != nil {
 			t.Fatal("answered prompt should drop its buttons")
 		}

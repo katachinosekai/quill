@@ -291,3 +291,30 @@ func TestTaskEndsWhenItsOutputReportsDone(t *testing.T) {
 		t.Fatal("reading a finished task's output ends it even without a notification")
 	}
 }
+
+func TestAwaitsReply(t *testing.T) {
+	c := New()
+	c.AddUser("go")
+	if c.AwaitsReply() {
+		t.Fatal("no reply yet")
+	}
+	it := c.add(&Item{Kind: Assistant, Text: "Done. **Want me to push?**"})
+	c.add(&Item{Kind: Notice, Text: "Background task finished"})
+	if !c.AwaitsReply() {
+		t.Fatal("a last reply ending in a question waits for the user, past later notices")
+	}
+	it.Streaming = true
+	if c.AwaitsReply() {
+		t.Fatal("not while the text is still streaming")
+	}
+	it.Streaming = false
+	c.add(&Item{Kind: Assistant, Text: "Pushed."})
+	if c.AwaitsReply() {
+		t.Fatal("a later plain reply ends it")
+	}
+	c.add(&Item{Kind: Assistant, Text: "Next?"})
+	c.AddUser("yes")
+	if c.AwaitsReply() {
+		t.Fatal("answered")
+	}
+}
