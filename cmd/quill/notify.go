@@ -88,14 +88,15 @@ var alertTitles = map[string]string{
 
 func (d *desk) alert(s *deskSession, kind, body string) {
 	title, _, _ := d.rowText(s.id)
-	d.phoneEvent(s.id, kind, title)
+	body = clip(body, 200)
+	d.phoneEvent(s.id, kind, title, body)
 	if !d.notifyOn() || d.seen(s) {
 		return
 	}
-	d.desktopNotify(s.id, title+alertTitles[kind], clip(body, 200))
+	d.desktopNotify(s.id, title+alertTitles[kind], body)
 }
 
-func (d *desk) phoneEvent(sid, kind, title string) {
+func (d *desk) phoneEvent(sid, kind, title, body string) {
 	p := d.phoneSync
 	if p == nil || p.server == nil {
 		return
@@ -114,7 +115,7 @@ func (d *desk) phoneEvent(sid, kind, title string) {
 			}
 		}
 	}
-	p.server.Emit(folders.Event{Type: kind, RC: rc, Quill: sid, Title: title, Folder: folder})
+	p.server.Emit(folders.Event{Type: kind, RC: rc, Quill: sid, Title: title, Folder: folder, Body: body})
 }
 
 func lastReply(c *chat.Conversation) string {

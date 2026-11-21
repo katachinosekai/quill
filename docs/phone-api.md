@@ -1,6 +1,6 @@
 # Quill phone control API, version 1
 
-The Android app uses this API to show and drive Quill desktop sessions. It runs on Quill's existing phone server: HTTPS with a self-signed certificate that the phone pins (fingerprint `fp` from the pairing link), on the port from the pairing link. It sits next to the existing `/folders.json`, `/events` and `/usage.json` endpoints, which keep working unchanged.
+The Android app uses this API to show and drive Quill desktop sessions. It runs on Quill's existing phone server: HTTPS with a self-signed certificate that the phone pins (fingerprint `fp` from the pairing link), on the port from the pairing link. It sits next to the existing `/folders.json`, `/events` and `/usage.json` endpoints, which keep working unchanged. `/events` items may carry an optional `body` (string, at most 200 characters, omitted when empty): the text the desktop notification for that event shows.
 
 Status of this document: agreed shape (kmem fe1c74f). Any change after the first commit goes to the Android session before it is committed.
 

@@ -23,6 +23,7 @@ type Event struct {
 	Quill  string `json:"quill"`
 	Title  string `json:"title"`
 	Folder string `json:"folder"`
+	Body   string `json:"body,omitempty"`
 }
 
 type EventPage struct {

@@ -61,7 +61,7 @@ func TestEventsCursorAndRing(t *testing.T) {
 	}
 	s.Emit(Event{Type: "approval", Quill: "q1", Title: "Launcher", Folder: "Active", RC: "session_01A"})
 	s.Emit(Event{Type: "bogus", Quill: "q1"})
-	s.Emit(Event{Type: "finished", Quill: "q1", Title: "Launcher", Folder: "Active"})
+	s.Emit(Event{Type: "finished", Quill: "q1", Title: "Launcher", Folder: "Active", Body: "Build passes."})
 	p = decode(t, func() string { _, b := get("/events?since=0", key); return b }())
 	if len(p.Events) != 2 || p.Events[0].ID != 1 || p.Events[1].ID != 2 || p.Next != 3 || p.Events[0].Time == 0 {
 		t.Fatalf("two events, ids 1 and 2, unknown types dropped: %+v", p)
@@ -69,6 +69,9 @@ func TestEventsCursorAndRing(t *testing.T) {
 	p = decode(t, func() string { _, b := get("/events?since=2", key); return b }())
 	if len(p.Events) != 1 || p.Events[0].Type != "finished" {
 		t.Fatalf("since is inclusive: %+v", p)
+	}
+	if p.Events[0].Body != "Build passes." {
+		t.Fatalf("optional body is passed through: %+v", p.Events[0])
 	}
 	p = decode(t, func() string { _, b := get("/events?since=3", key); return b }())
 	if len(p.Events) != 0 || p.Next != 3 {
