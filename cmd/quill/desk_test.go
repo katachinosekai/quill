@@ -1629,3 +1629,44 @@ func TestKmemStartupIsReadOnly(t *testing.T) {
 		}
 	})
 }
+
+func TestApprovalQuestionShowsCardEvenAfterApproval(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.planFirst = true
+		s := h.d.createSession(h.proj, "default", "default")
+		// A blocked call left a plan card; the user's "yes" to Claude's
+		// question approved it, so this request runs with runAll.
+		card := s.conv.AddPlan()
+		s.conv.AddUser("yes, add the settings row and close the task")
+		h.d.approveByText(s)
+		if !s.runAll || card.PermState != chat.PermAllowed {
+			t.Fatal("setup: the yes approves the open card")
+		}
+		// The turn ends with a new plan asking for approval.
+		s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, Text: "1. Add the row.\n\n**Approve this plan?**"})
+		out := h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
+		var plan *chat.Item
+		for _, it := range out {
+			if it.Kind == chat.Plan && it.PermState == chat.PermPending {
+				plan = it
+			}
+		}
+		if plan == nil {
+			t.Fatal("a turn that ends with 'Approve this plan?' shows the plan card")
+		}
+		if s.runAll || s.runAllNext {
+			t.Fatal("the earlier approval ends when Claude asks for a new one")
+		}
+		h.d.planGate(s, &protocol.Event{Type: "result"}, nil)
+		n := 0
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.Plan && it.PermState == chat.PermPending {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("a second result adds no second card: %d", n)
+		}
+	})
+}

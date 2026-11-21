@@ -2447,8 +2447,13 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		if s.runAllNext {
 			s.runAll, s.runAllNext = true, false
 		}
-		if s.planWait || d.planFirst && !s.runAll && s.conv.AsksApproval() {
+		// A turn that ends asking for approval gets the card even while an
+		// earlier approval is still in force: Claude is asking about new work,
+		// so that approval ends here (user 2026-11-21: no card and no autofill
+		// after an "Approve this plan?" that followed an approved card).
+		if s.planWait || d.planFirst && s.conv.AsksApproval() {
 			s.planWait = false
+			s.runAll, s.runAllNext = false, false
 			out := s.conv.CancelPlans()
 			out = append(out, s.conv.MarkPlanText()...)
 			return append(out, s.conv.AddPlan())
