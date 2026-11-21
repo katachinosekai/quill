@@ -42,6 +42,7 @@ func (v *chatView) blockedCard(it *chat.Item) fyne.CanvasObject {
 	title.Wrapping = fyne.TextWrapWord
 	title.Alignment = v.align()
 	cmd := mono(oneLine(blockedCommand(it), 400))
+	cmd.Alignment = v.align()
 	note := widget.NewLabel("Approving in chat doesn't lift this check. Approve and retry asks Claude to run exactly this command again and allows it once. Always allow also adds permission rules, so matching commands skip the check from now on.")
 	note.Wrapping = fyne.TextWrapWord
 	note.SizeName = theme.SizeNameCaptionText

@@ -586,6 +586,19 @@ func (v *chatView) align() fyne.TextAlign {
 	return fyne.TextAlignLeading
 }
 
+func (v *chatView) muted(s string, size float32) *canvas.Text {
+	t := mutedText(s, size)
+	t.Alignment = v.align()
+	return t
+}
+
+func (v *chatView) centered(o fyne.CanvasObject) fyne.CanvasObject {
+	if v.d.center {
+		return container.NewCenter(o)
+	}
+	return o
+}
+
 func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
@@ -949,6 +962,7 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 		}
 		l := widget.NewLabel(text)
 		l.Wrapping = fyne.TextWrapWord
+		l.Alignment = v.align()
 		parts = append(parts, l)
 		return questionCard(parts, false)
 	}
@@ -963,6 +977,7 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 		ql := widget.NewLabel(q.Question)
 		ql.Wrapping = fyne.TextWrapWord
 		ql.TextStyle = fyne.TextStyle{Bold: true}
+		ql.Alignment = v.align()
 		parts = append(parts, ql)
 		var labels []string
 		for _, o := range q.Options {
@@ -972,10 +987,10 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 		pk.other.SetPlaceHolder("Other (type your own answer)")
 		if q.MultiSelect {
 			pk.checks = widget.NewCheckGroup(labels, nil)
-			parts = append(parts, pk.checks)
+			parts = append(parts, v.centered(pk.checks))
 		} else {
 			pk.radio = widget.NewRadioGroup(labels, nil)
-			parts = append(parts, pk.radio)
+			parts = append(parts, v.centered(pk.radio))
 		}
 		for _, o := range q.Options {
 			if o.Description != "" {
@@ -983,6 +998,7 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 				d.Wrapping = fyne.TextWrapWord
 				d.SizeName = theme.SizeNameCaptionText
 				d.Importance = widget.LowImportance
+				d.Alignment = v.align()
 				parts = append(parts, d)
 			}
 		}
@@ -1062,7 +1078,7 @@ func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
 		deny := glowButton("Deny", theme.CancelIcon(), colError, ok, func() { v.d.answer(owner, it, protocol.Deny) })
 		parts = append(parts, v.buttonRow(allow, always, deny))
 	} else {
-		parts = append(parts, mutedText(permStateText(it.PermState), fontBody))
+		parts = append(parts, v.muted(permStateText(it.PermState), fontBody))
 	}
 	border := colAccent
 	if it.PermState != chat.PermPending {
@@ -1472,6 +1488,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	msg := widget.NewLabel("Approving runs all of it: every command and change for this request is approved automatically until Claude finishes.")
 	msg.Wrapping = fyne.TextWrapWord
+	msg.Alignment = v.align()
 	msg.SizeName = theme.SizeNameCaptionText
 	parts := []fyne.CanvasObject{title}
 	if plan := v.s.conv.PlanText(it); plan != "" {
@@ -1487,7 +1504,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		no := glowButton("Don't run", theme.CancelIcon(), colError, true, func() { v.d.answerPlan(owner, it, false) })
 		parts = append(parts, v.buttonRow(run, no))
 	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !replied(owner, it) {
-		parts = append(parts, mutedText("Approved, but Claude hasn't replied yet", fontBody))
+		parts = append(parts, v.muted("Approved, but Claude hasn't replied yet", fontBody))
 		resend := glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, func() { v.d.answerPlan(owner, it, true) })
 		parts = append(parts, v.buttonRow(resend))
 	} else {
@@ -1498,7 +1515,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		case chat.PermCancelled:
 			text = "No longer needed"
 		}
-		parts = append(parts, mutedText(text, fontBody))
+		parts = append(parts, v.muted(text, fontBody))
 		border = color.NRGBA{0x44, 0x44, 0x40, 0xff}
 	}
 	r := canvas.NewRectangle(colCard)

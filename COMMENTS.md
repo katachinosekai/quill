@@ -101,6 +101,8 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## UI notes
 
+- Approval cards follow "center messages" (user 2026-11-20): plan, permission, question, blocked and rotate cards align every label and status line with `v.align()`; status lines use `v.muted` (aligned canvas.Text) and the question card's radio/check groups are wrapped by `v.centered`. `setCenter` also drops `qcards` (cached open question cards), otherwise an open question kept its old alignment (an unsent pick on it resets). Test: TestApprovalCardsFollowCentering.
+
 - Local slash commands (localcmds.go): the headless CLI rejects interactive-only commands ("/upgrade isn't available in this environment"), so Quill handles /upgrade (opens claude.ai/upgrade), /login, /logout, /clear (new session in the same folder), /model <name>, /exit|/quit itself before anything is sent; they are listed first in the / suggestions and replace the CLI's entries of the same name.
 
 - Auto-scroll: the chat follows new messages/thoughts/steps while the view is at the bottom (`follow`); scrolling up (OnScrolled, not caused by Quill itself) stops following, and a glowing "Latest" button (pulsing accent behind it) appears at the bottom of the chat; clicking it glides down to the newest content (320 ms ease, `glideBottom`) and resumes following.
