@@ -94,6 +94,7 @@ type deskSession struct {
 	rotateAsk   int
 	rotateTried int
 	lastClaude  string
+	compactFrom string
 	limitSeen   string
 	compacting  bool
 	takeover    bool

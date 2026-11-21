@@ -201,24 +201,28 @@ func (d *desk) relaunchSession(id string) {
 	ns := d.replaceWith(old, title)
 	d.org.Place[id] = placeArchive
 	d.saveOrg()
-	ns.compacting = true
+	d.compactInto(ns, id, path, title, conv)
+}
+
+func (d *desk) compactInto(ns *deskSession, oldID, path, title string, conv *chat.Conversation) {
+	ns.compacting, ns.compactFrom = true, oldID
 	d.notify(ns, fmt.Sprintf("Compacting “%s” for the hand-off. Messages you send now are queued until it's done.", title))
 	compact := d.compactor
 	if compact == nil {
 		compact = d.claudeCompact
 	}
-	src, model := compactSource(conv), old.model
+	src, model := compactSource(conv), ns.model
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), compactTimeout)
 		brief, err := compact(ctx, model, src)
 		cancel()
 		d.do(func() {
-			ns.compacting = false
+			ns.compacting, ns.compactFrom = false, ""
 			if err != nil {
 				brief = ""
 				d.notify(ns, "Compacting failed ("+clip(err.Error(), 200)+"); handing over the trimmed conversation instead.")
 			}
-			d.sendTo(ns, handoffPrompt(id, path, title, conv, brief))
+			d.sendTo(ns, handoffPrompt(oldID, path, title, conv, brief))
 		})
 	}()
 }
