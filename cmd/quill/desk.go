@@ -91,6 +91,8 @@ type deskSession struct {
 	retryDest   string
 	kmemSave    *kmemSave
 	kmemNew     bool
+	rotateAsk   int
+	rotateTried int
 	limitSeen   string
 	compacting  bool
 	takeover    bool
@@ -149,6 +151,9 @@ type desk struct {
 	compactor  func(ctx context.Context, model, text string) (string, error)
 	kmemRun    func(prog string, args ...string) (string, error)
 	kmemOff    bool
+	policy     handoffPolicy
+	policyAt   time.Time
+	policyBusy bool
 	app        fyne.App
 	win        fyne.Window
 	cfg        config
@@ -1279,6 +1284,7 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	items = append(items, d.planGate(s, ev, items)...)
 	if ev.Type == "result" {
 		d.kmemAfterTurn(s)
+		d.checkAutoHandoff(s)
 	}
 	d.checkLimitMessage(s, items)
 	d.attention(s, ev, items)

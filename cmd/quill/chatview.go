@@ -629,6 +629,8 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		return v.renderPermission(it)
 	case chat.Plan:
 		return v.renderPlan(it)
+	case chat.Rotate:
+		return v.renderRotate(it)
 	case chat.Thinking:
 		if strings.TrimSpace(it.Text) == "" {
 			return container.NewWithoutLayout()
