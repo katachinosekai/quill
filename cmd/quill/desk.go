@@ -95,6 +95,8 @@ type deskSession struct {
 	retryDest      string
 	kmemSave       *kmemSave
 	kmemNew        bool
+	resumeNext     string
+	resumeAs       string
 	rotateAsk      int
 	rotateTried    int
 	lastClaude     string
@@ -1688,6 +1690,9 @@ func (d *desk) sendTo(s *deskSession, text string) {
 			d.chatFor(s, s.conv.CancelPlans())
 		}
 	}
+	if s.resumeNext != "" || !isRetry(text) {
+		s.resumeAs, s.resumeNext = s.resumeNext, ""
+	}
 	s.lastSent = text
 	s.inTurn = true
 	it := s.conv.AddUser(text)
@@ -2394,7 +2399,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			return nil
 		}
-		if s.runAll || d.kmemSaveAllowed(s, it.Request) {
+		if s.runAll || d.kmemSaveAllowed(s, it.Request) || d.kmemResumeAllowed(s, it.Request) {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}

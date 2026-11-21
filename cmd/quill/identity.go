@@ -201,7 +201,7 @@ func (d *desk) resumeFromHandoff(id string) {
 	d.notify(ns, fmt.Sprintf("Resuming from kmem handoff “%s”; the previous conversation stays in Inactive.", name))
 	go func() {
 		p := d.resumePrompt(name)
-		d.do(func() { d.sendTo(ns, p) })
+		d.do(func() { d.sendResume(ns, name, p) })
 	}()
 }
 

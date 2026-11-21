@@ -195,7 +195,7 @@ func (d *desk) applyKmemChoice(s *deskSession, choice, title string) {
 		d.saveOrg()
 		go func() {
 			p := d.resumePrompt(name)
-			d.do(func() { d.sendTo(s, p) })
+			d.do(func() { d.sendResume(s, name, p) })
 		}()
 		return
 	}
@@ -310,6 +310,30 @@ func (d *desk) kmemSaveAllowed(s *deskSession, r *protocol.ControlRequest) bool 
 	return readOnlyRequest(r, append(d.readOnlyExtra(), kmemSaveExtra...))
 }
 
+// sendResume sends Quill's own resume-from-handoff prompt. Until the next
+// message is sent, plan-first lets the session's read-only kmem startup
+// commands through even when they carry `--as <its kmem name>`, as the
+// prompt asks. New tabs and messages typed by the user are not affected.
+func (d *desk) sendResume(s *deskSession, name, prompt string) {
+	s.resumeNext = name
+	d.sendTo(s, prompt)
+}
+
+func (d *desk) kmemResumeAllowed(s *deskSession, r *protocol.ControlRequest) bool {
+	if s.resumeAs == "" || !d.planFirst {
+		return false
+	}
+	extra := d.readOnlyExtra()
+	for _, e := range extra {
+		if len(e) > 1 && e[0] == "kmem" {
+			extra = append(extra,
+				append([]string{"kmem", "--as", s.resumeAs}, e[1:]...),
+				append([]string{"kmem", "--as=" + s.resumeAs}, e[1:]...))
+		}
+	}
+	return readOnlyRequest(r, extra)
+}
+
 func (d *desk) kmemAfterTurn(s *deskSession) {
 	ks := s.kmemSave
 	if ks == nil || ks.prompt != "" {
@@ -375,7 +399,7 @@ func (d *desk) finishKmemRelaunch(old *deskSession, name, prompt string) {
 	d.org.Kmem[ns.id] = name
 	d.saveOrg()
 	d.notify(ns, fmt.Sprintf("Resuming from kmem handoff “%s”; the previous session was deleted.", name))
-	d.sendTo(ns, prompt)
+	d.sendResume(ns, name, prompt)
 	d.deleteSession(old.id)
 }
 
