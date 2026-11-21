@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -324,7 +325,25 @@ func TestLiveRewind(t *testing.T) {
 	if a1 == "" || u2 == "" {
 		t.Fatalf("could not find the first answer (%q) or the second prompt (%q) in the transcript", a1, u2)
 	}
+	dry := l.control(map[string]any{"subtype": "rewind_files", "user_message_id": u2, "dry_run": true})
+	t.Logf("LIVE rewind dry run: %s", dry)
+	var preview struct {
+		CanRewind    bool     `json:"canRewind"`
+		FilesChanged []string `json:"filesChanged"`
+		Insertions   int      `json:"insertions"`
+		Deletions    int      `json:"deletions"`
+	}
+	if json.Unmarshal(dry, &preview) != nil || !preview.CanRewind {
+		t.Errorf("dry run reply is not {canRewind:true,...}: %s", dry)
+	}
+	if !slices.ContainsFunc(preview.FilesChanged, func(f string) bool { return strings.HasSuffix(f, "note.txt") }) {
+		t.Errorf("dry run doesn't list note.txt in filesChanged: %s", dry)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "note.txt")); err != nil {
+		t.Error("a dry run must not touch the files")
+	}
 	raw := l.control(map[string]any{"subtype": "rewind_files", "user_message_id": u2})
+	t.Logf("LIVE rewind real run: %s", raw)
 	var reply struct {
 		CanRewind bool `json:"canRewind"`
 	}
