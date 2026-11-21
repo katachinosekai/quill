@@ -167,6 +167,7 @@ type desk struct {
 	localBusy    bool
 	fetchLocal   func(host string) []localInfo
 	after        func(time.Duration, func())
+	toolbarRow   *fyne.Container
 	chipBtns     [2]*widget.Button
 	toolbarBox   *fyne.Container
 	usagePaused  bool

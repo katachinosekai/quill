@@ -22,6 +22,7 @@ const (
 )
 
 type pane struct {
+	slot    *fyne.Container
 	tasks   *tasksChip
 	d       *desk
 	view    *chatView
@@ -162,7 +163,10 @@ func (d *desk) newPane() *pane {
 	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
 	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
 	p.stats = mutedText("", fontMeta)
-	inputRow := container.NewVBox(card, container.New(&clipLayout{}, p.stats))
+	p.slot = container.NewHBox()
+	slotPad := canvas.NewRectangle(color.Transparent)
+	slotPad.SetMinSize(fyne.NewSize(1, d.settingsBtn.MinSize().Height))
+	inputRow := container.NewVBox(container.NewStack(slotPad, p.slot), card, container.New(&clipLayout{}, p.stats))
 	p.choices = container.NewVBox()
 	hint := widget.NewLabelWithStyle(emptyPaneText, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	p.picker = container.NewCenter(container.NewVBox(hint, p.choices))
@@ -397,6 +401,8 @@ func (d *desk) afterSplit() {
 	}
 	d.syncPanes()
 	d.syncSplitButtons()
+	d.placeToolbar()
+	d.syncVisibleQueues()
 	if d.bottomBox != nil {
 		relayout(d.bottomBox)
 	}

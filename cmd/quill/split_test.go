@@ -2286,3 +2286,47 @@ func TestApprovalStopWordsAreWholeWords(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitKeepsQueueAndToolbarPlacement(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.open(s.id)
+		s.compacting = true
+		h.d.send("queued while busy")
+		h.d.setSplit(2)
+		if !reflect.DeepEqual(s.queue, []string{"queued while busy"}) {
+			t.Fatal("queue kept when splitting")
+		}
+		if h.d.toolbarBox.Visible() || len(h.d.panes[0].slot.Objects) == 0 || h.d.panes[0].slot.Objects[0] != fyne.CanvasObject(h.d.settingsBtn) {
+			t.Fatal("in split view Settings sits in the first pane's gap above its message box")
+		}
+		last := h.d.panes[len(h.d.panes)-1].slot.Objects
+		if last[len(last)-1] != fyne.CanvasObject(h.d.viewBtn) {
+			t.Fatal("and the view button in the last pane's gap")
+		}
+		var empty *pane
+		for _, p := range h.d.panes {
+			if p.view.s == nil {
+				empty = p
+			}
+		}
+		h.d.closePane(empty)
+		if h.d.split() || !h.d.toolbarBox.Visible() || h.d.toolbarRow.Objects[0] != fyne.CanvasObject(h.d.settingsBtn) {
+			t.Fatal("closing the empty pane returns the toolbar to its single-view place")
+		}
+		if !reflect.DeepEqual(s.queue, []string{"queued while busy"}) {
+			t.Fatalf("closing the empty pane keeps the queued message: %v", s.queue)
+		}
+		rows := 0
+		for _, o := range h.d.chat.queueBox.Objects {
+			if _, ok := o.(*queueRow); ok {
+				rows++
+			}
+		}
+		if rows != 1 {
+			t.Fatalf("and the single view shows it again: %d rows", rows)
+		}
+	})
+}

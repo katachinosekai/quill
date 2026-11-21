@@ -317,3 +317,22 @@ func (e *sendEntry) setHistoryText(text string) {
 	e.CursorColumn = len([]rune(text[strings.LastIndex(text, "\n")+1:]))
 	e.Refresh()
 }
+
+func (d *desk) syncVisibleQueues() {
+	var shown []*deskSession
+	if d.split() {
+		for _, p := range d.panes {
+			if p.view.s != nil {
+				shown = append(shown, p.view.s)
+			}
+		}
+	} else if d.current != nil {
+		shown = append(shown, d.current)
+	}
+	for _, s := range shown {
+		d.syncQueue(s)
+		if len(s.queue) > 0 && s.qedit == nil && d.idleForQueue(s) {
+			d.flushQueue(s)
+		}
+	}
+}

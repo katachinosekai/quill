@@ -131,5 +131,41 @@ func (d *desk) closeSettings() {
 }
 
 func (d *desk) viewToolbar() fyne.CanvasObject {
-	return container.NewHBox(d.settingsBtn, layout.NewSpacer(), d.splitButtons())
+	d.toolbarRow = container.NewHBox(d.settingsBtn, layout.NewSpacer(), d.splitButtons())
+	return d.toolbarRow
+}
+
+func (d *desk) placeToolbar() {
+	if d.toolbarRow == nil {
+		return
+	}
+	for _, p := range d.panes {
+		if p.slot != nil {
+			p.slot.Objects = nil
+			p.slot.Refresh()
+		}
+	}
+	if !d.split() {
+		d.toolbarRow.Objects = []fyne.CanvasObject{d.settingsBtn, layout.NewSpacer(), d.viewBtn}
+		d.toolbarRow.Refresh()
+		if d.toolbarBox != nil {
+			d.toolbarBox.Show()
+		}
+		return
+	}
+	d.toolbarRow.Objects = nil
+	d.toolbarRow.Refresh()
+	if d.toolbarBox != nil {
+		d.toolbarBox.Hide()
+	}
+	first, last := d.panes[0], d.panes[len(d.panes)-1]
+	first.slot.Objects = []fyne.CanvasObject{d.settingsBtn}
+	last.slot.Objects = append(last.slot.Objects, layout.NewSpacer(), d.viewBtn)
+	if first == last {
+		first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, layout.NewSpacer(), d.viewBtn}
+	}
+	first.slot.Layout = layout.NewHBoxLayout()
+	last.slot.Layout = layout.NewHBoxLayout()
+	first.slot.Refresh()
+	last.slot.Refresh()
 }
