@@ -159,7 +159,7 @@ func (d *desk) newPane() *pane {
 	})
 	closeAll.Importance = widget.MediumImportance
 	p.tasks = newTasksButton(func() *deskSession { return p.view.s }, d.cmdTasks)
-	controls := container.NewBorder(nil, nil, container.NewHBox(p.backend, boxed(p.model), boxed(p.mode)), container.NewHBox(openAll, closeAll), container.NewPadded(p.tasks))
+	controls := container.NewBorder(nil, nil, container.NewHBox(p.backend, boxed(p.model), boxed(p.mode)), container.NewHBox(openAll, closeAll), container.NewPadded(container.New(snugCenter{}, p.tasks)))
 	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
 	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
 	p.stats = mutedText("", fontMeta)

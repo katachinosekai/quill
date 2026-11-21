@@ -908,7 +908,28 @@ func TestChatFollowsAndJumpButton(t *testing.T) {
 		if h.d.chat.scroll.Offset.Y != 0 {
 			t.Fatal("must not scroll down while the user reads history")
 		}
-		h.d.chat.glideBottom()
+		var tap *jumpTap
+		var buttons int
+		deepWalk(h.d.chat.jump, func(o fyne.CanvasObject) {
+			if j, ok := o.(*jumpTap); ok {
+				tap = j
+			}
+			if _, ok := o.(*widget.Button); ok {
+				buttons++
+			}
+		})
+		if tap == nil || buttons != 0 {
+			t.Fatal("the Latest arrow is a round tap target, not a button with a square hover background")
+		}
+		tap.MouseIn(nil)
+		if h.d.chat.glow.StrokeWidth != 2.5 || h.d.chat.glow.CornerRadius != 20 {
+			t.Fatal("hover brightens the round ring")
+		}
+		tap.MouseOut()
+		if h.d.chat.glow.StrokeWidth != 1.5 {
+			t.Fatal("leaving restores the ring")
+		}
+		tap.Tapped(nil)
 		if !h.d.chat.follow || h.d.chat.jump.Visible() || !h.d.chat.atBottom() {
 			t.Fatal("Latest should bring the view to the bottom and resume following")
 		}

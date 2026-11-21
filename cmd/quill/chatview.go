@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -481,8 +482,16 @@ func (v *chatView) newJump() *fyne.Container {
 	glow.CornerRadius = 20
 	glow.StrokeColor = colorAlpha(colAccent, 0xc0)
 	glow.StrokeWidth = 1.5
-	btn := widget.NewButtonWithIcon("", theme.MoveDownIcon(), func() { v.glideBottom() })
-	btn.Importance = widget.LowImportance
+	btn := newJumpTap(theme.MoveDownIcon(), func() { v.glideBottom() }, func(on bool) {
+		if on {
+			glow.StrokeColor = colAccent
+			glow.StrokeWidth = 2.5
+		} else {
+			glow.StrokeColor = colorAlpha(colAccent, 0xc0)
+			glow.StrokeWidth = 1.5
+		}
+		glow.Refresh()
+	})
 	v.glow = glow
 	v.glowAnim = fyne.NewAnimation(1100*time.Millisecond, func(p float32) {
 		glow.FillColor = colorAlpha(colAccent, uint8(0x30+p*0x90))
@@ -490,10 +499,33 @@ func (v *chatView) newJump() *fyne.Container {
 	})
 	v.glowAnim.AutoReverse = true
 	v.glowAnim.RepeatCount = fyne.AnimationRepeatForever
-	box := container.New(layout.NewGridWrapLayout(fyne.NewSize(40, 40)), container.NewStack(glow, container.NewCenter(btn)))
+	box := container.New(layout.NewGridWrapLayout(fyne.NewSize(40, 40)), container.NewStack(glow, btn))
 	box.Hide()
 	return box
 }
+
+type jumpTap struct {
+	widget.BaseWidget
+	icon    fyne.Resource
+	onTap   func()
+	onHover func(bool)
+}
+
+func newJumpTap(icon fyne.Resource, onTap func(), onHover func(bool)) *jumpTap {
+	j := &jumpTap{icon: icon, onTap: onTap, onHover: onHover}
+	j.ExtendBaseWidget(j)
+	return j
+}
+
+func (j *jumpTap) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(container.NewCenter(sized(20, 20, widget.NewIcon(j.icon))))
+}
+
+func (j *jumpTap) Tapped(*fyne.PointEvent)        { j.onTap() }
+func (j *jumpTap) MouseIn(*desktop.MouseEvent)    { j.onHover(true) }
+func (j *jumpTap) MouseMoved(*desktop.MouseEvent) {}
+func (j *jumpTap) MouseOut()                      { j.onHover(false) }
+func (j *jumpTap) Cursor() desktop.Cursor         { return desktop.PointerCursor }
 
 func (v *chatView) syncJump() {
 	if v.jump == nil {

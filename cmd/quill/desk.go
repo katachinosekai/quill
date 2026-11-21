@@ -1001,7 +1001,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	closeAll := widget.NewButtonWithIcon("Collapse chips", theme.MenuDropUpIcon(), func() { d.setAllChips(false) })
 	closeAll.Importance = widget.MediumImportance
 	d.chipBtns = [2]*widget.Button{openAll, closeAll}
-	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, boxed(d.modelSel), boxed(d.modeSel), d.stt.langBtn), container.NewHBox(openAll, closeAll), container.NewPadded(d.tasksBtn))
+	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, boxed(d.modelSel), boxed(d.modeSel), d.stt.langBtn), container.NewHBox(openAll, closeAll), container.NewPadded(container.New(snugCenter{}, d.tasksBtn)))
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))

@@ -1809,6 +1809,18 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 		if h.d.tasksBtn.Text() != "Background Tasks" {
 			t.Fatalf("two tasks read as plural, without names: %q", h.d.tasksBtn.Text())
 		}
+		relayout(h.d.mainPane)
+		if w := h.d.tasksBtn.Size().Width; w > h.d.tasksBtn.natural()+1 || w < 60 {
+			t.Fatalf("the tasks box is as wide as its text, not the row: %v (natural %v)", w, h.d.tasksBtn.natural())
+		}
+		snugCenter{}.Layout([]fyne.CanvasObject{h.d.tasksBtn}, fyne.NewSize(600, 36))
+		if w := h.d.tasksBtn.Size().Width; h.d.tasksBtn.Position().X != (600-w)/2 || w >= 600 {
+			t.Fatal("and it sits centred in a wide slot")
+		}
+		snugCenter{}.Layout([]fyne.CanvasObject{h.d.tasksBtn}, fyne.NewSize(30, 36))
+		if h.d.tasksBtn.Size().Width != 30 || h.d.tasksBtn.Position().X != 0 {
+			t.Fatal("and shrinks to a narrow slot")
+		}
 		h.d.rewindTo(s, user, true)
 	})
 	h.eventually("rewound", func() bool { return s.resumeAt == "A8" })
