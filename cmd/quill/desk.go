@@ -215,7 +215,7 @@ type desk struct {
 	focused        *pane
 	chatHost       *fyne.Container
 	chatDropHL     *canvas.Rectangle
-	splitBtns      []*widget.Button
+	viewBtn        *widget.Button
 	groups         []bookGroup
 	tabs           []string
 	tabBar         *fyne.Container
@@ -925,16 +925,10 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.note.Hide()
 	d.rcStatus = mutedText("", fontMeta)
 	d.rcStatus.Hide()
-	d.tasksBtn = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
-		if d.current != nil {
-			d.cmdTasks(d.current)
-		}
-	})
-	d.tasksBtn.Importance = widget.LowImportance
-	d.tasksBtn.Hide()
+	d.tasksBtn = newTasksButton(func() *deskSession { return d.current }, d.cmdTasks)
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.updateButton()), container.NewCenter(d.autoSplitCheck()), container.NewCenter(d.tasksBtn), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.updateButton()), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
 		layout.NewSpacer())
 	d.bookRow = d.buildBookmarks()
 	d.tabRow = d.buildTabs()
@@ -992,10 +986,10 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.sendBtn.Importance = widget.HighImportance
 	d.stt = newSpeech(d)
 	openAll := widget.NewButtonWithIcon("Open chips", theme.MenuDropDownIcon(), func() { d.setAllChips(true) })
-	openAll.Importance = widget.LowImportance
+	openAll.Importance = widget.MediumImportance
 	closeAll := widget.NewButtonWithIcon("Collapse chips", theme.MenuDropUpIcon(), func() { d.setAllChips(false) })
-	closeAll.Importance = widget.LowImportance
-	controls := container.NewHBox(d.backendBtn, d.modelSel, d.modeSel, d.stt.langBtn, layout.NewSpacer(), openAll, closeAll)
+	closeAll.Importance = widget.MediumImportance
+	controls := container.NewVBox(container.NewHBox(d.tasksBtn), container.NewHBox(d.backendBtn, boxed(d.modelSel), boxed(d.modeSel), d.stt.langBtn, layout.NewSpacer(), openAll, closeAll))
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
@@ -1126,13 +1120,8 @@ func (d *desk) updateChrome() {
 		d.stopBtn.Disable()
 	}
 	setText(d.stats, statsLine(s))
-	if n := s.conv.Background(); n > 0 && s.running() {
-		if t := "Background tasks: " + strconv.Itoa(n); d.tasksBtn.Text != t {
-			d.tasksBtn.SetText(t)
-		}
-		d.tasksBtn.Show()
-	} else {
-		d.tasksBtn.Hide()
+	if syncTasksButton(d.tasksBtn, s) && d.mainPane != nil {
+		relayoutTree(d.mainPane)
 	}
 	if d.usage != nil {
 		d.usage.update()

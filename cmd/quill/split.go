@@ -22,6 +22,7 @@ const (
 )
 
 type pane struct {
+	tasks   *widget.Button
 	d       *desk
 	view    *chatView
 	title   *widget.Label
@@ -149,13 +150,14 @@ func (d *desk) newPane() *pane {
 		d.focusPane(p)
 		d.setAllChips(true)
 	})
-	openAll.Importance = widget.LowImportance
+	openAll.Importance = widget.MediumImportance
 	closeAll := widget.NewButtonWithIcon("", theme.MenuDropUpIcon(), func() {
 		d.focusPane(p)
 		d.setAllChips(false)
 	})
-	closeAll.Importance = widget.LowImportance
-	controls := container.NewHBox(p.backend, p.model, p.mode, layout.NewSpacer(), openAll, closeAll)
+	closeAll.Importance = widget.MediumImportance
+	p.tasks = newTasksButton(func() *deskSession { return p.view.s }, d.cmdTasks)
+	controls := container.NewVBox(container.NewHBox(p.tasks), container.NewHBox(p.backend, boxed(p.model), boxed(p.mode), layout.NewSpacer(), openAll, closeAll))
 	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
 	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
 	p.stats = mutedText("", fontMeta)
@@ -548,20 +550,24 @@ func (p *pane) queue(items []*chat.Item) {
 }
 
 func (d *desk) splitButtons() fyne.CanvasObject {
-	var btns []*widget.Button
-	for n := 1; n <= maxPanes; n++ {
-		b := widget.NewButton(splitLabel(n), func() { d.setSplit(n) })
-		b.Importance = widget.LowImportance
-		btns = append(btns, b)
-	}
-	d.splitBtns = btns
+	d.autoSplitCheck()
+	d.viewBtn = widget.NewButtonWithIcon("", theme.GridIcon(), d.nextView)
+	d.viewBtn.Importance = widget.MediumImportance
 	d.syncSplitButtons()
-	objs := []fyne.CanvasObject{container.NewCenter(mutedText("View", fontMeta))}
-	for _, b := range btns {
-		objs = append(objs, b)
-	}
+	return d.viewBtn
+}
 
-	return container.NewHBox(objs...)
+func (d *desk) nextView() {
+	switch {
+	case d.autoChk.Checked:
+		d.autoChk.SetChecked(false)
+		d.setSplit(1)
+	case max(1, len(d.panes)) >= maxPanes:
+		d.autoChk.SetChecked(true)
+	default:
+		d.setSplit(max(1, len(d.panes)) + 1)
+	}
+	d.syncSplitButtons()
 }
 
 func splitLabel(n int) string {
@@ -569,16 +575,15 @@ func splitLabel(n int) string {
 }
 
 func (d *desk) syncSplitButtons() {
-	n := max(1, len(d.panes))
-	for i, b := range d.splitBtns {
-		imp := widget.LowImportance
-		if i+1 == n {
-			imp = widget.HighImportance
-		}
-		if b.Importance != imp {
-			b.Importance = imp
-			b.Refresh()
-		}
+	if d.viewBtn == nil {
+		return
+	}
+	label := splitLabel(max(1, len(d.panes)))
+	if d.autoChk != nil && d.autoChk.Checked {
+		label = "Auto split"
+	}
+	if d.viewBtn.Text != label {
+		d.viewBtn.SetText(label)
 	}
 }
 
@@ -658,6 +663,9 @@ func (d *desk) syncPaneControls(p *pane) {
 	p.mode.Enable()
 	p.backend.Enable()
 	p.mic.Enable()
+	if syncTasksButton(p.tasks, s) && d.mainPane != nil {
+		relayoutTree(d.mainPane)
+	}
 	setOptions(p.model, d.modelOptions(s))
 	setOptions(p.mode, modeOptions(s))
 	setBackendButton(p.backend, s.model)
@@ -742,9 +750,11 @@ func (d *desk) autoSplitCheck() fyne.CanvasObject {
 				d.preAuto = d.current.id
 			}
 			d.autoSplitSync()
+			d.syncSplitButtons()
 			return
 		}
 		d.leaveAutoSplit()
+		d.syncSplitButtons()
 	})
 	d.autoChk.Checked = d.app.Preferences().Bool("autoSplit")
 	return d.autoChk

@@ -191,7 +191,7 @@ func newSpeech(d *desk) *speech {
 	sp.langBtn = widget.NewButton("Voice: "+strings.ToUpper(sp.lang()), func() {
 		d.pickLanguage(sp.lang(), func(code string) { sp.setLang(code) })
 	})
-	sp.langBtn.Importance = widget.LowImportance
+	sp.langBtn.Importance = widget.MediumImportance
 	return sp
 }
 
