@@ -2265,3 +2265,24 @@ func TestEscapePausedNotesAndChoiceReply(t *testing.T) {
 		}
 	})
 }
+
+func TestApprovalStopWordsAreWholeWords(t *testing.T) {
+	for text, want := range map[string]bool{
+		"yes, item 1 and the round corner button": true,
+		"yes, nothing else":                       true,
+		"ok, the stopwatch feature too":           true,
+		"yes but skip the push":                   false,
+		"yes, don't push":                         false,
+		"yes, don’t push":                         false,
+		"yes, wait for the build":                 false,
+		"yes, no push":                            false,
+		"yes, do it before lunch":                 false,
+		"yes, can you also add tests?":            false,
+		"yes approve all, but skip 3":             false,
+		"yes approve all, add the buttons":        true,
+	} {
+		if isApproval(text) != want {
+			t.Errorf("isApproval(%q) = %v", text, !want)
+		}
+	}
+}

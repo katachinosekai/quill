@@ -2504,10 +2504,8 @@ func isApproval(text string) bool {
 		if rest != "" && !strings.ContainsAny(rest[:1], " ,:;-—.!") {
 			continue
 		}
-		for _, n := range strongStop {
-			if strings.Contains(" "+rest+" ", n) {
-				return false
-			}
+		if hasStopWord(rest, strongStop) {
+			return false
 		}
 		return true
 	}
@@ -2525,12 +2523,31 @@ func isApproval(text string) bool {
 		if rest != "" && !strings.ContainsAny(rest[:1], " ,:;-—") {
 			continue
 		}
-		for _, n := range notApproval {
-			if strings.Contains(" "+rest+" ", n) {
-				return false
-			}
+		if hasStopWord(rest, notApproval) {
+			return false
 		}
 		return true
+	}
+	return false
+}
+
+var wordRun = regexp.MustCompile(`[a-z’']+|\?`)
+
+func hasStopWord(text string, stops []string) bool {
+	text = strings.ReplaceAll(strings.ToLower(text), "’", "'")
+	words := wordRun.FindAllString(text, -1)
+	joined := " " + strings.Join(words, " ") + " "
+	for _, n := range stops {
+		n = strings.TrimSpace(n)
+		if n == "?" {
+			if strings.Contains(text, "?") {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(joined, " "+strings.Join(wordRun.FindAllString(n, -1), " ")+" ") {
+			return true
+		}
 	}
 	return false
 }

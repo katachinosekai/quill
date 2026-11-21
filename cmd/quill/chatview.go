@@ -75,6 +75,7 @@ type chatView struct {
 	cache         map[*deskSession]*sessView
 	order         []*deskSession
 	sel           *selLayer
+	jumpBar       *fyne.Container
 }
 
 type sessView struct {
@@ -138,7 +139,8 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 		}
 	}
 	v.jump = v.newJump()
-	overlay := container.NewVBox(layout.NewSpacer(), windowCentered(width, shift, container.NewCenter(v.jump)), padTop(18))
+	overlay := container.NewVBox(layout.NewSpacer(), windowCentered(width, shift, container.NewHBox(layout.NewSpacer(), v.jump, padLeft(12))), padTop(12))
+	v.jumpBar = overlay
 	framed := container.New(layout.NewCustomPaddedLayout(8, 2, 4, 4), container.NewPadded(v.frame))
 	v.queueBox = container.NewVBox()
 	queueRow := windowCentered(width, shift, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), v.queueBox))
@@ -475,9 +477,11 @@ func (v *chatView) keepUp() {
 
 func (v *chatView) newJump() *fyne.Container {
 	glow := canvas.NewRectangle(colorAlpha(colAccent, 0x50))
-	glow.CornerRadius = 18
-	btn := widget.NewButtonWithIcon("Latest", theme.MoveDownIcon(), func() { v.glideBottom() })
-	btn.Importance = widget.HighImportance
+	glow.CornerRadius = 20
+	glow.StrokeColor = colorAlpha(colAccent, 0xc0)
+	glow.StrokeWidth = 1.5
+	btn := widget.NewButtonWithIcon("", theme.MoveDownIcon(), func() { v.glideBottom() })
+	btn.Importance = widget.LowImportance
 	v.glow = glow
 	v.glowAnim = fyne.NewAnimation(1100*time.Millisecond, func(p float32) {
 		glow.FillColor = colorAlpha(colAccent, uint8(0x30+p*0x90))
@@ -485,7 +489,7 @@ func (v *chatView) newJump() *fyne.Container {
 	})
 	v.glowAnim.AutoReverse = true
 	v.glowAnim.RepeatCount = fyne.AnimationRepeatForever
-	box := container.NewStack(glow, container.New(layout.NewCustomPaddedLayout(4, 4, 6, 6), btn))
+	box := container.New(layout.NewGridWrapLayout(fyne.NewSize(40, 40)), container.NewStack(glow, container.NewCenter(btn)))
 	box.Hide()
 	return box
 }
@@ -498,6 +502,11 @@ func (v *chatView) syncJump() {
 	if show == v.jump.Visible() {
 		return
 	}
+	defer func() {
+		if v.jumpBar != nil {
+			relayoutTree(v.jumpBar)
+		}
+	}()
 	if show {
 		v.jump.Show()
 		if v.d.animate {
@@ -1525,7 +1534,6 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		no := glowButton("Don't run", theme.CancelIcon(), colError, true, func() { v.d.answerPlan(owner, it, false) })
 		parts = append(parts, v.buttonRow(run, no))
 	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !replied(owner, it) {
-		parts = append(parts, v.muted("Approved, but Claude hasn't replied yet", fontBody))
 		resend := glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, func() { v.d.answerPlan(owner, it, true) })
 		parts = append(parts, v.buttonRow(resend))
 	} else {
