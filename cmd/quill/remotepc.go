@@ -827,7 +827,7 @@ func (d *desk) addRemotePCDialog(done func()) {
 	link.Wrapping = fyne.TextWrapBreak
 	name := widget.NewEntry()
 	name.SetPlaceHolder("Name, e.g. Office PC (optional)")
-	help := caption("On the other PC, open Quill Desktop → Devices → Pair, copy the pairing link and paste it here while that pairing window is still open (Quill there forgets a pairing that never connected), and set a password there (Settings → Sessions → Devices → Password for paired PCs). Connect from the PC's row in the sidebar; it asks for that password each time. Turn on \"Let paired devices control sessions\" there to send messages and answer approvals from here.")
+	help := caption("On the other PC, open Quill Desktop → Devices → Pair, copy the pairing link and paste it here while that pairing window is still open (Quill there forgets a pairing that never connected), and set a device password there (Settings → Sessions → Devices → Set password). Connect from the PC's row in the sidebar; it asks for that password each time. Turn on \"Let paired devices control sessions\" there to send messages and answer approvals from here.")
 	dlg := dialog.NewForm("Add a PC", "Pair", "Cancel", []*widget.FormItem{
 		widget.NewFormItem("Pairing link", link), widget.NewFormItem("Name", name), widget.NewFormItem("", help),
 	}, func(ok bool) {

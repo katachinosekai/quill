@@ -26,14 +26,14 @@ type Phone struct {
 	Lock *bool `json:"lock,omitempty"`
 }
 
-// NeedsUnlock: paired PCs (Quill Desktop says hello before anything else)
-// must unlock with the password; phones and devices that never said hello
-// only when Lock says so.
+// NeedsUnlock: every paired device, phones and devices that never said hello
+// included, must unlock with the password unless its Lock switch is off
+// (user 2026-11-21: "Every device, phones too").
 func (p Phone) NeedsUnlock() bool {
 	if p.Lock != nil {
 		return *p.Lock
 	}
-	return p.Kind == "pc"
+	return true
 }
 
 func HashKey(key string) string {

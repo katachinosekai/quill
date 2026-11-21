@@ -381,6 +381,15 @@ func (d *desk) updatePhoneList() {
 }
 
 func (d *desk) pairDialog() {
+	if d.app.Preferences().String(prefPCPassword) == "" {
+		d.setDevicePasswordDialog("Paired devices need a password to connect. Set it before pairing (you can change it later in Settings → Sessions → Devices).", func() {
+			if d.pcPassRefresh != nil {
+				d.pcPassRefresh()
+			}
+			d.pairDialog()
+		})
+		return
+	}
 	if err := d.startPhoneServer(); err != nil {
 		dialog.ShowError(err, d.win)
 		return

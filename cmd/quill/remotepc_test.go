@@ -208,19 +208,19 @@ func TestPCLock(t *testing.T) {
 	now := time.Unix(1000, 0)
 	l := newPCLock()
 	l.now = func() time.Time { return now }
-	if tok, msg := l.unlock("dev", "", "x"); tok != "" || !strings.HasPrefix(msg, "no password") {
-		t.Fatalf("no password set: %q %q", tok, msg)
+	if tok, code, msg := l.unlock("dev", "", "x"); tok != "" || code != "no_password" {
+		t.Fatalf("no password set: %q %q %q", tok, code, msg)
 	}
 	for i := 1; i <= pcMaxFails; i++ {
-		if tok, _ := l.unlock("dev", stored, "nope"); tok != "" {
+		if tok, _, _ := l.unlock("dev", stored, "nope"); tok != "" {
 			t.Fatal("wrong password unlocks")
 		}
 	}
-	if tok, msg := l.unlock("dev", stored, "correct horse"); tok != "" || !strings.HasPrefix(msg, "too many") {
+	if tok, code, msg := l.unlock("dev", stored, "correct horse"); tok != "" || code != "locked_out" {
 		t.Fatalf("locked out after %d wrong tries: %q", pcMaxFails, msg)
 	}
 	now = now.Add(pcLockout + time.Second)
-	tok, msg := l.unlock("dev", stored, "correct horse")
+	tok, _, msg := l.unlock("dev", stored, "correct horse")
 	if tok == "" {
 		t.Fatalf("unlocks after the lock-out: %q", msg)
 	}

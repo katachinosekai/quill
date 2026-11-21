@@ -28,8 +28,8 @@ func TestPhoneSessionMenu(t *testing.T) {
 	defer h.ui(h.d.stopPhone)
 	u, _ := url.Parse(link)
 	q := u.Query()
-	a := &apiClient{t: t, base: "https://127.0.0.1:" + q.Get("p"), key: q.Get("k"),
-		c: &http.Client{Timeout: 40 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}}
+	a := unlockedClient(h, &apiClient{t: t, base: "https://127.0.0.1:" + q.Get("p"), key: q.Get("k"),
+		c: &http.Client{Timeout: 40 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}})
 	n := 0
 	key := func() string {
 		n++

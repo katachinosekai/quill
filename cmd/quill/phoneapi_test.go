@@ -18,10 +18,29 @@ type apiClient struct {
 	base string
 	key  string
 	c    *http.Client
+	pw   string // set: unlock with it before the first request (every device needs the password)
+	tok  string
+}
+
+// phoneTestPassword is set on the test PC by unlockedClient.
+const phoneTestPassword = "test-password-1"
+
+func unlockedClient(h *harness, a *apiClient) *apiClient {
+	h.ui(func() { h.d.app.Preferences().SetString(prefPCPassword, hashPCPassword(phoneTestPassword)) })
+	a.pw = phoneTestPassword
+	return a
 }
 
 func (a *apiClient) do(method, path, idem string, body any) (int, map[string]any, http.Header) {
 	a.t.Helper()
+	if a.pw != "" && a.tok == "" && path != "/phone/unlock" {
+		code, m, _ := a.do("POST", "/phone/unlock", "unlock-"+a.key, map[string]string{"password": a.pw})
+		tok, _ := m["token"].(string)
+		if code != 200 || tok == "" {
+			a.t.Fatalf("unlock: %d %v", code, m)
+		}
+		a.tok = tok
+	}
 	var rd io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -29,6 +48,9 @@ func (a *apiClient) do(method, path, idem string, body any) (int, map[string]any
 	}
 	req, _ := http.NewRequest(method, a.base+path, rd)
 	req.Header.Set("X-Quill-Key", a.key)
+	if a.tok != "" {
+		req.Header.Set(unlockHeader, a.tok)
+	}
 	if idem != "" {
 		req.Header.Set("Idempotency-Key", idem)
 	}
@@ -64,8 +86,8 @@ func TestPhoneAPIReadSide(t *testing.T) {
 	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
 	u, _ := url.Parse(link)
 	q := u.Query()
-	a := &apiClient{t: t, base: "https://127.0.0.1:" + q.Get("p"), key: q.Get("k"),
-		c: &http.Client{Timeout: 40 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}}
+	a := unlockedClient(h, &apiClient{t: t, base: "https://127.0.0.1:" + q.Get("p"), key: q.Get("k"),
+		c: &http.Client{Timeout: 40 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}})
 
 	if code, m, _ := a.do("GET", "/phone/nope", "", nil); code != 404 || errCode(m) != "not_found" {
 		t.Fatalf("unknown path: %d %v", code, m)
@@ -211,8 +233,8 @@ func TestPhoneAPIWrites(t *testing.T) {
 	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
 	u, _ := url.Parse(link)
 	q := u.Query()
-	a := &apiClient{t: t, base: "https://127.0.0.1:" + q.Get("p"), key: q.Get("k"),
-		c: &http.Client{Timeout: 40 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}}
+	a := unlockedClient(h, &apiClient{t: t, base: "https://127.0.0.1:" + q.Get("p"), key: q.Get("k"),
+		c: &http.Client{Timeout: 40 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}})
 	n := 0
 	key := func() string {
 		n++

@@ -99,6 +99,18 @@ func TestPhoneSyncFileAndServer(t *testing.T) {
 	}}}
 	req, _ := http.NewRequest("GET", "https://127.0.0.1:"+strconv.Itoa(port)+"/folders.json", nil)
 	req.Header.Set("X-Quill-Key", key)
+	if resp, err := client.Do(req); err != nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("every paired device, phones too, is locked until it unlocks: %v %v", resp, err)
+	} else {
+		resp.Body.Close()
+	}
+	h.ui(func() {
+		for _, p := range h.d.phones() {
+			h.d.setDeviceLock(p.ID, false) // this device's Password switch off
+		}
+	})
+	req, _ = http.NewRequest("GET", "https://127.0.0.1:"+strconv.Itoa(port)+"/folders.json", nil)
+	req.Header.Set("X-Quill-Key", key)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)

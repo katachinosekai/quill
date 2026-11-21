@@ -117,18 +117,19 @@ func (l *pcLock) valid(id, tok string, idle time.Duration, touch bool) bool {
 	return true
 }
 
-// unlock checks the password; ok gives a fresh token, else msg says why.
-func (l *pcLock) unlock(id, stored, pw string) (tok string, msg string) {
+// unlock checks the password; ok gives a fresh token, else code and msg
+// say why (no_password, locked_out, wrong_password).
+func (l *pcLock) unlock(id, stored, pw string) (tok, code, msg string) {
 	l.mu.Lock()
 	f := l.fails[id]
 	now := l.now()
 	if f.n >= pcMaxFails && now.Before(f.until) {
 		l.mu.Unlock()
-		return "", fmt.Sprintf("too many wrong passwords; try again in %d min", int(f.until.Sub(now).Minutes())+1)
+		return "", "locked_out", fmt.Sprintf("too many wrong passwords; try again in %d min", int(f.until.Sub(now).Minutes())+1)
 	}
 	l.mu.Unlock()
 	if stored == "" {
-		return "", "no password is set on that PC: set one in Quill Desktop there (Settings → Sessions → Devices → Password for paired PCs)"
+		return "", "no_password", "Quill Desktop on that PC has no device password set yet: set one there (Settings → Sessions → Devices → Set password)"
 	}
 	ok := checkPCPassword(stored, pw)
 	l.mu.Lock()
@@ -142,16 +143,16 @@ func (l *pcLock) unlock(id, stored, pw string) (tok string, msg string) {
 		f.until = now.Add(pcLockout)
 		l.fails[id] = f
 		if f.n >= pcMaxFails {
-			return "", fmt.Sprintf("wrong password; locked for %d min", int(pcLockout.Minutes()))
+			return "", "locked_out", fmt.Sprintf("wrong password; locked for %d min", int(pcLockout.Minutes()))
 		}
-		return "", fmt.Sprintf("wrong password (%d of %d tries)", f.n, pcMaxFails)
+		return "", "wrong_password", fmt.Sprintf("wrong password (%d of %d tries)", f.n, pcMaxFails)
 	}
 	delete(l.fails, id)
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	tok = hex.EncodeToString(b)
 	l.tokens[id] = pcToken{tok: tok, last: now}
-	return tok, ""
+	return tok, "", ""
 }
 
 func (d *desk) pcIdle() time.Duration {
@@ -209,23 +210,44 @@ func (a *phoneAPI) unlockAPI(w http.ResponseWriter, r *http.Request, path, phone
 		folders.WriteJSON(w, http.StatusOK, map[string]any{"token": "", "idleMin": int(d.pcIdle().Minutes()), "needed": false})
 		return
 	}
-	tok, msg := d.pcLock.unlock(phone, d.app.Preferences().String(prefPCPassword), in.Password)
+	tok, code, msg := d.pcLock.unlock(phone, d.app.Preferences().String(prefPCPassword), in.Password)
 	if tok == "" {
-		code := "wrong_password"
-		if strings.HasPrefix(msg, "no password") {
-			code = "no_password"
-		} else if strings.HasPrefix(msg, "too many") {
-			code = "locked_out"
-		}
 		folders.WriteError(w, http.StatusForbidden, code, msg)
 		return
 	}
 	folders.WriteJSON(w, http.StatusOK, map[string]any{"token": tok, "idleMin": int(d.pcIdle().Minutes()), "needed": true})
 }
 
-// pcLockSettings: Settings → Sessions → Devices: the password other PCs must
-// enter, and the idle time (also how long this PC stays connected to other
-// PCs without activity).
+// setDevicePasswordDialog asks for a new device password; done runs after
+// it was saved.
+func (d *desk) setDevicePasswordDialog(why string, done func()) {
+	pw, again := widget.NewPasswordEntry(), widget.NewPasswordEntry()
+	items := []*widget.FormItem{widget.NewFormItem("Password", pw), widget.NewFormItem("Again", again)}
+	if why != "" {
+		items = append([]*widget.FormItem{widget.NewFormItem("", caption(why))}, items...)
+	}
+	items = append(items, widget.NewFormItem("", caption("At least 8 characters. Every paired device (phones and other PCs) asks for it when it connects; it is stored here only as a salted hash.")))
+	dlg := dialog.NewForm("Device password", "Save", "Cancel", items, func(ok bool) {
+		if !ok {
+			return
+		}
+		if len([]rune(pw.Text)) < 8 || pw.Text != again.Text {
+			dialog.ShowInformation("Password not saved", "The password must have at least 8 characters and both fields must match.", d.win)
+			return
+		}
+		d.app.Preferences().SetString(prefPCPassword, hashPCPassword(pw.Text))
+		d.pcLock.reset()
+		if done != nil {
+			done()
+		}
+	}, d.win)
+	dlg.Resize(fyne.NewSize(480, 300))
+	dlg.Show()
+}
+
+// pcLockSettings: Settings → Sessions → Devices: the password every paired
+// device must enter, and the idle time (also how long this PC stays
+// connected to other PCs without activity).
 func (d *desk) pcLockSettings() fyne.CanvasObject {
 	status := widget.NewLabel("")
 	status.Wrapping = fyne.TextWrapWord
@@ -237,35 +259,24 @@ func (d *desk) pcLockSettings() fyne.CanvasObject {
 	var refresh func()
 	refresh = func() {
 		if d.app.Preferences().String(prefPCPassword) == "" {
-			status.SetText("Password for paired PCs: not set. Other PCs can't connect to this one until you set it.")
+			status.SetText("⚠ No device password set: no paired device (phone or PC) can connect until you set one.")
+			status.Importance = widget.WarningImportance
 			btn.SetText("Set password...")
+			btn.Importance = widget.HighImportance
 			clear.Hide()
 		} else {
-			status.SetText("Password for paired PCs: set. Other PCs ask for it each time they connect.")
+			status.SetText("Device password: set. Paired phones and PCs ask for it when they connect (turn it off for one device with its Password switch).")
+			status.Importance = widget.MediumImportance
 			btn.SetText("Change password...")
+			btn.Importance = widget.LowImportance
 			clear.Show()
 		}
+		status.Refresh()
+		btn.Refresh()
 	}
-	btn.OnTapped = func() {
-		pw, again := widget.NewPasswordEntry(), widget.NewPasswordEntry()
-		dialog.ShowForm("Password for paired PCs", "Save", "Cancel", []*widget.FormItem{
-			widget.NewFormItem("Password", pw), widget.NewFormItem("Again", again),
-			widget.NewFormItem("", caption("At least 8 characters. Stored here only as a salted hash; connected PCs must enter it again.")),
-		}, func(ok bool) {
-			if !ok {
-				return
-			}
-			if len([]rune(pw.Text)) < 8 || pw.Text != again.Text {
-				dialog.ShowInformation("Password not saved", "The password must have at least 8 characters and both fields must match.", d.win)
-				return
-			}
-			d.app.Preferences().SetString(prefPCPassword, hashPCPassword(pw.Text))
-			d.pcLock.reset()
-			refresh()
-		}, d.win)
-	}
+	btn.OnTapped = func() { d.setDevicePasswordDialog("", refresh) }
 	clear.OnTapped = func() {
-		dialog.ShowConfirm("Remove the password?", "Paired PCs can't connect to this one without it.", func(ok bool) {
+		dialog.ShowConfirm("Remove the password?", "No paired device can connect without it (except devices whose Password switch is off).", func(ok bool) {
 			if ok {
 				d.app.Preferences().SetString(prefPCPassword, "")
 				d.pcLock.reset()
@@ -273,6 +284,7 @@ func (d *desk) pcLockSettings() fyne.CanvasObject {
 			}
 		}, d.win)
 	}
+	d.pcPassRefresh = refresh
 	refresh()
 	var labels []string
 	for _, m := range pcIdleChoices {
@@ -286,7 +298,7 @@ func (d *desk) pcLockSettings() fyne.CanvasObject {
 		}
 	})
 	idle.SetSelected(idleLabel(int(d.pcIdle().Minutes())))
-	idleRow := container.NewBorder(nil, nil, widget.NewLabel("Disconnect PCs after no activity for"), nil, container.NewHBox(idle))
+	idleRow := container.NewBorder(nil, nil, widget.NewLabel("Devices unlock again after no activity for"), nil, container.NewHBox(idle))
 	return container.NewVBox(status, container.NewHBox(btn, clear), idleRow)
 }
 
