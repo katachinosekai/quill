@@ -1130,3 +1130,77 @@ func TestReloadKeepsSessionState(t *testing.T) {
 		return false
 	})
 }
+
+func TestChatTextSelection(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		s.conv.Items = append(s.conv.Items,
+			&chat.Item{Seq: 901, Kind: chat.Assistant, Text: "Alpha beta gamma"},
+			&chat.Item{Seq: 902, Kind: chat.Assistant, Text: "Second **bold** line"})
+		s.conv.AddPlan()
+		h.d.chat.show(s)
+		h.d.chat.relayoutInner()
+	})
+	var runs []textRun
+	h.eventually("chat laid out", func() bool {
+		runs = collectRuns(h.d.chat.box)
+		for _, r := range runs {
+			if strings.Contains(r.t.Text, "Second") {
+				return true
+			}
+		}
+		return false
+	})
+	find := func(sub string) textRun {
+		for _, r := range runs {
+			if strings.Contains(r.t.Text, sub) {
+				return r
+			}
+		}
+		t.Fatalf("no drawn text with %q", sub)
+		return textRun{}
+	}
+	at := func(r textRun, sub string, after bool) fyne.Position {
+		i := strings.Index(r.t.Text, sub)
+		n := len([]rune(r.t.Text[:i]))
+		if after {
+			n += len([]rune(sub))
+		}
+		return fyne.NewPos(charX(r, n), r.pos.Y+r.t.Size().Height/2)
+	}
+	drag := func(from, to fyne.Position) {
+		sel := h.d.chat.sel
+		sel.dragging = false
+		sel.Dragged(&fyne.DragEvent{PointEvent: fyne.PointEvent{Position: to}, Dragged: fyne.NewDelta(to.X-from.X, to.Y-from.Y)})
+		sel.DragEnd()
+	}
+	h.ui(func() {
+		for _, r := range runs {
+			if strings.Contains(r.t.Text, "Approve plan") || strings.Contains(r.t.Text, "Don't run") {
+				t.Fatalf("button text is not selectable: %q", r.t.Text)
+			}
+		}
+		alpha := find("Alpha")
+		drag(at(alpha, "Alpha", false), at(alpha, "beta", true))
+		if got := h.d.chat.sel.text(); got != "Alpha beta" {
+			t.Fatalf("a drag inside one message selects exactly that text: %q", got)
+		}
+		if len(h.d.chat.sel.CreateRenderer().Objects()) != 0 {
+			t.Log("renderer starts empty until refreshed")
+		}
+		line := find("line")
+		drag(at(alpha, "gamma", false), at(line, "line", true))
+		if got := h.d.chat.sel.text(); got != "gamma\nSecond bold line" {
+			t.Fatalf("a drag across messages keeps the source text, bold included: %q", got)
+		}
+		if !h.d.copySelection() || h.d.app.Clipboard().Content() != "gamma\nSecond bold line" || h.d.chat.sel.has {
+			t.Fatal("Ctrl+C copies the selection and clears it")
+		}
+		drag(at(alpha, "Alpha", false), at(alpha, "beta", true))
+		h.d.clearSelections()
+		if h.d.chat.sel.has || h.d.copySelection() {
+			t.Fatal("Escape clears the selection")
+		}
+	})
+}
