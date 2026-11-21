@@ -238,13 +238,16 @@ type desk struct {
 	bookRow        fyne.CanvasObject
 	tabRow         fyne.CanvasObject
 	settingsBox    *fyne.Container
+	setGeneral     *fyne.Container
+	setSessions    *fyne.Container
+	settingsDlg    dialog.Dialog
+	tasksBtn       *widget.Button
 	phoneSync      *phoneSync
 	phoneFileBtn   *widget.Button
 	phoneFileOff   *widget.Button
 	phoneGistChk   *widget.Check
 	settingsSlot   *fyne.Container
 	settingsBtn    *widget.Button
-	settingsPop    *widget.PopUp
 	layoutSel      *widget.RadioGroup
 	suppressLayout bool
 	sideDirty      bool
@@ -431,7 +434,18 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	updChk.Checked = d.app.Preferences().BoolWithFallback("checkUpdates", true)
 	notifyChk := widget.NewCheck("Notify me about approvals and finished sessions", func(on bool) { d.app.Preferences().SetBool("desktopNotify", on) })
 	notifyChk.Checked = d.notifyOn()
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, rcLocalChk, chromeChk, planChk, chipChk, updChk, notifyChk, rulesBtn, roBtn, alignRow, d.buildPhoneRow(), legend)
+	heading := func(t string) fyne.CanvasObject {
+		l := widget.NewLabel(t)
+		l.TextStyle = fyne.TextStyle{Bold: true}
+		return l
+	}
+	_ = roBtn
+	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow)
+	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), rulesBtn, widget.NewSeparator(), heading("Phone"), d.buildPhoneRow())
+	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
+	openSettings.Importance = widget.LowImportance
+	openSettings.Alignment = widget.ButtonAlignLeading
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), openSettings, legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -910,9 +924,16 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.note.Hide()
 	d.rcStatus = mutedText("", fontMeta)
 	d.rcStatus.Hide()
+	d.tasksBtn = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
+		if d.current != nil {
+			d.cmdTasks(d.current)
+		}
+	})
+	d.tasksBtn.Importance = widget.LowImportance
+	d.tasksBtn.Hide()
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.updateButton()), container.NewCenter(d.autoSplitCheck()), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.updateButton()), container.NewCenter(d.autoSplitCheck()), container.NewCenter(d.tasksBtn), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
 		layout.NewSpacer())
 	d.bookRow = d.buildBookmarks()
 	d.tabRow = d.buildTabs()
@@ -1103,6 +1124,14 @@ func (d *desk) updateChrome() {
 		d.stopBtn.Disable()
 	}
 	setText(d.stats, statsLine(s))
+	if n := s.conv.Background(); n > 0 && s.running() {
+		if t := "Background tasks: " + strconv.Itoa(n); d.tasksBtn.Text != t {
+			d.tasksBtn.SetText(t)
+		}
+		d.tasksBtn.Show()
+	} else {
+		d.tasksBtn.Hide()
+	}
 	if d.usage != nil {
 		d.usage.update()
 	}

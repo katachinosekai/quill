@@ -3,6 +3,7 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -33,7 +34,7 @@ func (d *desk) layoutButtons() fyne.CanvasObject {
 	})
 	d.layoutSel.Horizontal = true
 	d.layoutSel.Required = true
-	d.settingsBtn = widget.NewButtonWithIcon("Alignment", theme.SettingsIcon(), d.showSettings)
+	d.settingsBtn = widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	d.settingsBtn.Importance = widget.LowImportance
 	return container.NewHBox(container.NewCenter(mutedText("Tabs", fontMeta)), d.layoutSel)
 }
@@ -57,9 +58,6 @@ func (d *desk) applyLayoutMode() {
 		d.tabRow.Hide()
 		d.usageRow.Hide()
 		d.sideToggle.Show()
-		if d.settingsPop != nil {
-			d.settingsPop.Hide()
-		}
 		d.settingsSlot.Objects = []fyne.CanvasObject{d.settingsBox}
 		d.settingsSlot.Refresh()
 		if d.sideOff {
@@ -86,31 +84,49 @@ func (d *desk) applyLayoutMode() {
 	}
 }
 
-func (d *desk) showSettings() {
-	d.settingsSlot.Objects = nil
-	d.settingsSlot.Refresh()
-	done := widget.NewButton("Done", d.closeSettings)
-	done.Importance = widget.HighImportance
-	content := container.NewPadded(container.NewVBox(d.settingsBox, container.NewHBox(layout.NewSpacer(), done)))
-	if d.settingsPop == nil {
-		d.settingsPop = widget.NewPopUp(content, d.win.Canvas())
-	} else {
-		d.settingsPop.Content = content
+func (d *desk) settingsCwd() string {
+	if d.current != nil && d.current.cwd != "" {
+		return d.current.cwd
 	}
-	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(d.settingsBtn)
-	size := content.MinSize()
-	x := min(pos.X, d.win.Canvas().Size().Width-size.Width-24)
-	y := max(8, pos.Y-size.Height-8)
-	d.settingsPop.ShowAtPosition(fyne.NewPos(max(8, x), y))
+	return homeDir()
+}
+
+func (d *desk) toolsPane() fyne.CanvasObject {
+	heading := func(t string) fyne.CanvasObject {
+		l := widget.NewLabel(t)
+		l.TextStyle = fyne.TextStyle{Bold: true}
+		return l
+	}
+	var mcp fyne.CanvasObject = widget.NewLabel("Open a session to see its MCP servers.")
+	if d.current != nil {
+		mcp = d.mcpPane(d.current)
+	}
+	hooks := widget.NewLabel(hooksText(d.settingsCwd()))
+	hooks.TextStyle = fyne.TextStyle{Monospace: true}
+	hooks.Wrapping = fyne.TextWrapBreak
+	return container.NewVScroll(container.NewVBox(heading("MCP servers"), mcp, widget.NewSeparator(),
+		heading("Subagents"), d.agentsPane(d.settingsCwd()), widget.NewSeparator(), heading("Hooks"), hooks))
+}
+
+func (d *desk) showSettings() {
+	tabs := container.NewAppTabs(
+		container.NewTabItem("General", container.NewVScroll(d.setGeneral)),
+		container.NewTabItem("Sessions", container.NewVScroll(d.setSessions)),
+		container.NewTabItem("Permissions", d.permissionsPane(d.settingsCwd())),
+		container.NewTabItem("Tools", d.toolsPane()),
+		container.NewTabItem("Memory", container.NewVScroll(d.memoryPane(d.settingsCwd()))),
+	)
+	d.settingsDlg = dialog.NewCustom("Settings", "Close", tabs, d.win)
+	d.settingsDlg.SetOnClosed(func() { d.settingsDlg = nil })
+	d.settingsDlg.Resize(fyne.NewSize(820, 580))
+	d.settingsDlg.Show()
 }
 
 func (d *desk) closeSettings() {
-	if d.settingsPop != nil {
-		d.settingsPop.Hide()
-	}
-	if d.layoutMode() == layoutVertical {
-		d.settingsSlot.Objects = []fyne.CanvasObject{d.settingsBox}
-		d.settingsSlot.Refresh()
+	if d.settingsDlg != nil {
+		dlg := d.settingsDlg
+		d.settingsDlg = nil
+		dlg.Hide()
 	}
 }
 

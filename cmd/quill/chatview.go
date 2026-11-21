@@ -608,6 +608,15 @@ func (v *chatView) centered(o fyne.CanvasObject) fyne.CanvasObject {
 }
 
 func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
+	o := v.renderItem(it, iv)
+	if (it.Kind == chat.User || it.Kind == chat.Assistant) && v.s != nil {
+		s := v.s
+		return newMsgMenu(o, func(at fyne.Position) { v.d.messageMenu(s, it, at) })
+	}
+	return o
+}
+
+func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
 		if strings.Contains(it.Text, "```") {
