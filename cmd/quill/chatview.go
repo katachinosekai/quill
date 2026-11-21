@@ -622,6 +622,9 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		if it.Streaming {
 			return msgText(v.markdown(closeOpenMarkdown(it.Text)))
 		}
+		if body, card := v.choiceCard(it); card != nil {
+			return container.NewVBox(msgText(v.markdown(body)), card)
+		}
 		md := msgText(v.markdown(it.Text))
 		if p := v.mediaPreviews(it.Text); p != nil {
 			return container.NewVBox(md, p)
@@ -1712,4 +1715,101 @@ func closeOpenMarkdown(s string) string {
 		add += "**"
 	}
 	return s + add
+}
+
+func parseChoices(line string) (string, []string, bool) {
+	clean := strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(line), "#>*-_ "))
+	q := strings.LastIndex(clean, "?")
+	if q < 0 {
+		return "", nil, false
+	}
+	ask := clean[:q]
+	sep := ", or "
+	i := strings.LastIndex(ask, sep)
+	if i < 0 {
+		sep = " or "
+		i = strings.LastIndex(ask, sep)
+	}
+	if i < 0 {
+		return "", nil, false
+	}
+	a := strings.TrimSpace(ask[:i])
+	b := strings.TrimSpace(ask[i+len(sep):])
+	if a == "" || b == "" || strings.Contains(b, " or ") {
+		return "", nil, false
+	}
+	cap := func(s string) string {
+		r := []rune(s)
+		r[0] = []rune(strings.ToUpper(string(r[0])))[0]
+		return string(r)
+	}
+	return strings.TrimRight(clean, "*_ "), []string{cap(a), cap(b)}, true
+}
+
+func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
+	s := v.s
+	if s == nil || it.Streaming {
+		return "", nil
+	}
+	text := strings.TrimRight(it.Text, " \n")
+	cut := strings.LastIndex(text, "\n")
+	line := text[cut+1:]
+	title, opts, ok := parseChoices(line)
+	if !ok {
+		return "", nil
+	}
+	latest := true
+	after := false
+	for _, x := range s.conv.Items {
+		if x == it {
+			after = true
+			continue
+		}
+		if !after {
+			continue
+		}
+		if x.Kind == chat.Plan {
+			return "", nil
+		}
+		if x.Kind == chat.User || x.Kind == chat.Assistant && strings.TrimSpace(x.Text) != "" {
+			latest = false
+		}
+	}
+	head := widget.NewLabel(title)
+	head.TextStyle = fyne.TextStyle{Bold: true}
+	head.Wrapping = fyne.TextWrapWord
+	head.Alignment = v.align()
+	parts := []fyne.CanvasObject{head}
+	if latest {
+		var btns []fyne.CanvasObject
+		for _, o := range opts {
+			o := o
+			label := o
+			if r := []rune(label); len(r) > 60 {
+				label = string(r[:59]) + "…"
+			}
+			btns = append(btns, glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(s), func() { v.d.pickChoice(s, it, o) }))
+		}
+		parts = append(parts, v.buttonRow(btns...))
+	}
+	body := ""
+	if cut > 0 {
+		body = text[:cut]
+	}
+	return body, questionCard(parts, latest)
+}
+
+func (d *desk) pickChoice(s *deskSession, it *chat.Item, option string) {
+	after := false
+	for _, x := range s.conv.Items {
+		if x == it {
+			after = true
+			continue
+		}
+		if after && (x.Kind == chat.User || x.Kind == chat.Assistant && strings.TrimSpace(x.Text) != "") {
+			return
+		}
+	}
+	d.sendTo(s, option)
+	d.chatFor(s, []*chat.Item{it})
 }

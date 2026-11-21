@@ -1417,3 +1417,68 @@ func TestColdCacheRotation(t *testing.T) {
 		}
 	})
 }
+
+func TestChoiceCard(t *testing.T) {
+	for line, want := range map[string][]string{
+		"**Push `4bc346e` now, or wait until you've seen it rotate a session?**": {"Push 4bc346e now", "Wait until you've seen it rotate a session"},
+		"Should I reload now or wait until you've sent the queued messages?":     {"Should I reload now", "Wait until you've sent the queued messages"},
+		"**Approve A–E, and which of 3–12 should I include?**":                   nil,
+		"Done. The suite passes.": nil,
+	} {
+		_, got, ok := parseChoices(line)
+		if !reflect.DeepEqual(got, want) || ok != (want != nil) {
+			t.Errorf("parseChoices(%q) = %v %v", line, got, ok)
+		}
+	}
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy })
+	h.ui(func() {
+		msg := &chat.Item{Seq: 990, Kind: chat.Assistant, Text: "Built it.\n\n**Push now, or wait for the release?**"}
+		s.conv.Items = append(s.conv.Items, msg)
+		h.d.chat.show(s)
+		body, card := h.d.chat.choiceCard(msg)
+		if card == nil || body != "Built it.\n" {
+			t.Fatalf("the question line becomes a card under the rest of the message: %q", body)
+		}
+		var labels []string
+		walk(card, func(o fyne.CanvasObject) {
+			if b, ok := o.(*widget.Button); ok {
+				labels = append(labels, b.Text)
+			}
+		})
+		if !reflect.DeepEqual(labels, []string{"Push now", "Wait for the release"}) {
+			t.Fatalf("one button per option: %v", labels)
+		}
+		h.d.pickChoice(s, msg, "Wait for the release")
+		last := s.conv.Items[len(s.conv.Items)-1]
+		if last.Kind != chat.User || last.Text != "Wait for the release" {
+			t.Fatalf("a button sends its option as the reply: %+v", last)
+		}
+		n := len(s.conv.Items)
+		h.d.pickChoice(s, msg, "Push now")
+		if len(s.conv.Items) != n {
+			t.Fatal("once answered, the old card can't send again")
+		}
+		_, card = h.d.chat.choiceCard(msg)
+		labels = nil
+		walk(card, func(o fyne.CanvasObject) {
+			if b, ok := o.(*widget.Button); ok {
+				labels = append(labels, b.Text)
+			}
+		})
+		if len(labels) != 0 {
+			t.Fatal("an answered card keeps the question but has no buttons")
+		}
+		withPlan := &chat.Item{Seq: 991, Kind: chat.Assistant, Text: "Plan.\n\n**Approve now, or change it first?**"}
+		s.conv.Items = append(s.conv.Items, withPlan)
+		s.conv.AddPlan()
+		if _, c := h.d.chat.choiceCard(withPlan); c != nil {
+			t.Fatal("no choice card when a plan card already asks")
+		}
+	})
+}
