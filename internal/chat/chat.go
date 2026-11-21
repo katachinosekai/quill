@@ -132,21 +132,37 @@ func (c *Conversation) AsksApproval() bool {
 	return false
 }
 
-func (c *Conversation) AwaitsReply() bool {
-	for i := len(c.Items) - 1; i >= 0; i-- {
-		it := c.Items[i]
-		if it.Kind == User {
-			return false
+func Automated(text string) bool {
+	t := strings.TrimSpace(text)
+	for _, p := range []string{"<cross-session-message", "<channel-message", "<scheduled-trigger"} {
+		if strings.HasPrefix(t, p) {
+			return true
 		}
-		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
-			continue
-		}
-		if it.Streaming {
-			return false
-		}
-		return strings.HasSuffix(strings.TrimRight(strings.TrimSpace(it.Text), "*_ "), "?")
 	}
 	return false
+}
+
+func (c *Conversation) AwaitsReply() bool {
+	human := -1
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		if it := c.Items[i]; it.Kind == User && !Automated(it.Text) {
+			human = i
+			break
+		}
+	}
+	var last *Item
+	for _, it := range c.Items[human+1:] {
+		if it.Kind == User {
+			break
+		}
+		if it.Kind == Assistant && strings.TrimSpace(it.Text) != "" {
+			last = it
+		}
+	}
+	if last == nil || last.Streaming {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimRight(strings.TrimSpace(last.Text), "*_ "), "?")
 }
 
 func (c *Conversation) MarkPlanText() []*Item {

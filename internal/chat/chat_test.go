@@ -327,3 +327,19 @@ func TestMonitorIsNotWork(t *testing.T) {
 		t.Fatalf("a Monitor is listed but is not work: bg=%d working=%d", c.Background(), c.Working())
 	}
 }
+
+func TestPeerMessagesDontAnswerTheQuestion(t *testing.T) {
+	c := New()
+	c.AddUser("build it")
+	c.add(&Item{Kind: Assistant, Text: "Built. **Should I ship 1.1?**"})
+	c.AddUser("<cross-session-message from=\"x\">lock released</cross-session-message>")
+	c.add(&Item{Kind: Assistant, Text: "Noted, thanks."})
+	if !c.AwaitsReply() {
+		t.Fatal("a peer message and Claude's reply to it don't answer the user's question")
+	}
+	c.AddUser("yes ship it")
+	c.add(&Item{Kind: Assistant, Text: "Shipping."})
+	if c.AwaitsReply() {
+		t.Fatal("the user's own reply does")
+	}
+}

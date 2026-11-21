@@ -208,6 +208,9 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 		}
 	}
 	for _, id := range d.tabs {
+		if d.staleTab(id) {
+			continue
+		}
 		if _, ok := group[id]; !ok {
 			group[id] = "Open"
 			ids = append(ids, id)
@@ -692,6 +695,7 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		if conv != nil && !s.loaded && !s.running() && !s.loading {
 			s.conv, s.loaded, s.loadedMod = conv, true, mod
+			d.noteWindow(s)
 			if conv.Cwd != "" {
 				s.cwd = conv.Cwd
 			}

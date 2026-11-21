@@ -314,6 +314,8 @@ type desk struct {
 	ac            *autocorrector
 	acKnown       map[string]*wordSet
 	hintPrev      map[*canvas.Text]string
+	windows       map[string]int
+	prunedTabs    bool
 	sideAnim      *fyne.Animation
 	animate       bool
 	root          *fyne.Container
@@ -1275,6 +1277,7 @@ func (d *desk) open(id string) {
 					conv.AddError("Could not read transcript: " + err.Error())
 				}
 				s.conv = conv
+				d.noteWindow(s)
 				s.loaded = true
 				s.loadedMod = mod
 				s.limitSeen = ""
@@ -1427,6 +1430,9 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
 	items = append(items, d.planGate(s, ev, items)...)
+	if ev.Type == "result" || ev.Type == "assistant" {
+		d.noteWindow(s)
+	}
 	if ev.Type == "result" {
 		d.kmemAfterTurn(s)
 		d.checkAutoHandoff(s)
@@ -1625,6 +1631,7 @@ func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
 			delete(d.terms, s.id)
 			if conv != nil {
 				s.conv = conv
+				d.noteWindow(s)
 				s.loaded = true
 				s.loadedMod = mod
 				if d.current == s {
@@ -1964,6 +1971,10 @@ func (d *desk) refresh() {
 				d.infos[infos[k].ID] = infos[k]
 			}
 			d.linkKmem(infos)
+			if !d.prunedTabs {
+				d.prunedTabs = true
+				d.pruneStaleTabs()
+			}
 		}
 		d.terms = terms
 		for id, s := range d.sessions {

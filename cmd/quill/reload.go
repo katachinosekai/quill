@@ -338,6 +338,7 @@ func (d *desk) applyRestore(st *restoreState) {
 		if info, ok := d.infos[hs.ID]; ok {
 			if conv, err := transcript.Load(info.Path); err == nil && conv != nil {
 				s.conv, s.loaded, s.loadedMod = conv, true, info.ModTime
+				d.noteWindow(s)
 				if conv.Cwd != "" {
 					s.cwd = conv.Cwd
 				}
