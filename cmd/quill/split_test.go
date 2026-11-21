@@ -87,9 +87,15 @@ func TestTabsAndBookmarks(t *testing.T) {
 		if h.d.current != a {
 			t.Fatal("closing the active tab switches to a neighbour")
 		}
+		h.d.setPlacement(b.id, placeInactive)
 		h.d.rebuildRows()
-		if len(h.d.groups) == 0 || len(h.d.bookBar.Objects) != 2*len(h.d.groups) {
-			t.Fatal("each folder gets a bookmark button")
+		if len(h.d.groups) < 2 || h.d.groups[0].key != placeActive || len(h.d.bookBar.Objects) != 2*(len(h.d.groups)-1) {
+			t.Fatal("each folder except Active gets a bookmark button")
+		}
+		for _, o := range h.d.bookBar.Objects {
+			if c, ok := o.(*tabChip); ok && strings.Contains(chipText(c), "Active") {
+				t.Fatal("Landscape's chips row has no Active chip: those sessions are the tabs")
+			}
 		}
 		h.d.folderMenu2(h.d.groups[0], fyne.NewPos(10, 10))
 		if len(h.w.Canvas().Overlays().List()) == 0 {
@@ -2566,4 +2572,22 @@ func TestKmemRestartStaysInBackground(t *testing.T) {
 		}
 	})
 	h.eventually("first reply clears the restart mark", func() bool { return ns.status() != stRestart && !ns.conv.Busy })
+}
+
+func chipText(c *tabChip) string {
+	var walk func(o fyne.CanvasObject) string
+	walk = func(o fyne.CanvasObject) string {
+		switch x := o.(type) {
+		case *canvas.Text:
+			return x.Text
+		case *fyne.Container:
+			out := ""
+			for _, k := range x.Objects {
+				out += walk(k)
+			}
+			return out
+		}
+		return ""
+	}
+	return walk(c.content)
 }

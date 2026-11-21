@@ -352,8 +352,15 @@ func (d *desk) syncBookmarks() {
 	if d.bookBar == nil {
 		return
 	}
+	// The chips row only shows in Landscape, where the open sessions are the
+	// tabs right below it, so the Active folder gets no chip (user 2026-11-21).
+	var chips []bookGroup
 	sig := ""
 	for _, g := range d.groups {
+		if g.key == placeActive {
+			continue
+		}
+		chips = append(chips, g)
 		sig += fmt.Sprintf("|%s:%s:%d", g.key, g.title, len(g.ids))
 	}
 	if sig == d.bookSig {
@@ -361,7 +368,7 @@ func (d *desk) syncBookmarks() {
 	}
 	d.bookSig = sig
 	var objs []fyne.CanvasObject
-	for _, g := range d.groups {
+	for _, g := range chips {
 		g := g
 		icon := widget.NewIcon(theme.FolderIcon())
 		label := canvas.NewText(fmt.Sprintf("%s (%d)", g.title, len(g.ids)), colText)
