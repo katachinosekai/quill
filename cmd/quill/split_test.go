@@ -965,3 +965,57 @@ func TestLocalSessionNeedsOllama(t *testing.T) {
 		t.Fatal("reachability check")
 	}
 }
+
+func TestTabsGlowLikeSidebar(t *testing.T) {
+	h := newHarness(t)
+	var a, b, c, e *deskSession
+	h.ui(func() {
+		a = h.d.createSession(h.proj, "default", "default")
+		b = h.d.createSession(h.proj, "default", "default")
+		c = h.d.createSession(h.proj, "default", "default")
+		e = h.d.createSession(h.proj, "default", "default")
+		for _, s := range []*deskSession{a, b, c} {
+			h.d.sendTo(s, "hi")
+		}
+	})
+	h.eventually("all three idle", func() bool {
+		return a.status() == stIdle && b.status() == stIdle && c.status() == stIdle
+	})
+	h.ui(func() {
+		h.d.open(a.id)
+		check := func(s *deskSession, want status, glows bool) {
+			h.d.tabSig = ""
+			h.d.syncTabs()
+			if got := s.status(); got != want {
+				t.Fatalf("fixture: status %v, want %v", got, want)
+			}
+			g, on := h.d.glowBoxes[h.d.tabChips[s.id].glow]
+			if !glows {
+				if on {
+					t.Errorf("%v tab should not glow, has %+v", want, g)
+				}
+				return
+			}
+			if !on || g.base != want.color() || g.strength != glowStrength(want) || g.pulse != (glowStrength(want) >= 1) {
+				t.Errorf("%v tab should glow like its sidebar row, got %+v on=%v", want, g, on)
+			}
+		}
+		b.conv.AddPlan()
+		check(b, stWaiting, true)
+		check(c, stIdle, true)
+		c.conv.Busy = true
+		check(c, stRunning, false)
+		c.conv.Busy = false
+		e.failed = "boom"
+		check(e, stError, true)
+		a.conv.AddPlan()
+		check(a, stWaiting, false)
+		chip := h.d.tabChips[b.id]
+		h.d.closeTab(b.id)
+		h.d.tabSig = ""
+		h.d.syncTabs()
+		if _, on := h.d.glowBoxes[chip.glow]; on {
+			t.Fatal("a closed tab's glow is removed")
+		}
+	})
+}
