@@ -449,7 +449,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		return l
 	}
 	_ = roBtn
-	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow)
+	d.sizesCard = d.sizePanel()
+	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
+	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes)
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), rulesBtn, widget.NewSeparator(), heading("Phone"), d.buildPhoneRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
@@ -1005,10 +1007,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
 	toolbar := windowCentered(d.inputWidth, d.sidebarWidth, d.viewToolbar())
 	d.toolbarBox = toolbar
-	d.sizesCard = d.sizePanel()
-	cornerCard := container.New(layout.NewGridWrapLayout(fyne.NewSize(300, d.sizesCard.MinSize().Height)), d.sizesCard)
-	corner := container.NewVBox(layout.NewSpacer(), container.NewHBox(layout.NewSpacer(), cornerCard))
-	bottom := container.NewPadded(container.New(cornerLayout{}, container.NewVBox(toolbar, d.bottomBox), corner))
+	bottom := container.NewPadded(container.NewVBox(toolbar, d.bottomBox))
 	d.chatDropHL = canvas.NewRectangle(fade(colAccent, 0.10))
 	d.chatDropHL.CornerRadius = 14
 	d.chatDropHL.StrokeColor = colAccent

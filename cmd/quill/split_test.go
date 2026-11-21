@@ -2392,3 +2392,36 @@ func TestNoStaleQueueRowsAcrossViews(t *testing.T) {
 		}
 	})
 }
+
+func TestSizeSlidersInSettings(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		inMain := false
+		deepWalk(h.d.mainPane, func(o fyne.CanvasObject) {
+			inMain = inMain || o == h.d.sizesCard
+		})
+		if inMain {
+			t.Fatal("the sliders card no longer sits in the main window's corner")
+		}
+		h.d.showSettings()
+		var sliders []*widget.Slider
+		labels := map[string]bool{}
+		deepWalk(h.w.Canvas().Overlays().Top(), func(o fyne.CanvasObject) {
+			if s, ok := o.(*widget.Slider); ok {
+				sliders = append(sliders, s)
+			}
+			if c, ok := o.(*canvas.Text); ok {
+				labels[c.Text] = true
+			}
+		})
+		if len(sliders) != 2 || !labels["Chat width"] || !labels["Message box"] {
+			t.Fatalf("Settings → General holds both sliders: %d %v", len(sliders), labels)
+		}
+		before := h.d.chatShare()
+		sliders[0].SetValue(float64(minChatShare))
+		if h.d.chatShare() == before && before != minChatShare {
+			t.Fatal("moving the chat width slider still resizes the chat")
+		}
+		h.d.closeSettings()
+	})
+}

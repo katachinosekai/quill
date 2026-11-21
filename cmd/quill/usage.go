@@ -346,16 +346,3 @@ func (d *desk) sizePanel() fyne.CanvasObject {
 	r.CornerRadius = 12
 	return container.NewStack(r, container.New(layout.NewCustomPaddedLayout(2, 2, 6, 6), body))
 }
-
-type cornerLayout struct{}
-
-func (cornerLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
-	return objs[0].MinSize()
-}
-
-func (cornerLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
-	for _, o := range objs {
-		o.Move(fyne.NewPos(0, 0))
-		o.Resize(size)
-	}
-}
