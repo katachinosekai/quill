@@ -79,7 +79,7 @@ func TestPhoneAPIReadSide(t *testing.T) {
 		t.Fatalf("POST without key: %d %v", code, m)
 	}
 	code, hello, _ := a.do("POST", "/phone/hello", "hello-key-0000000001", map[string]string{"name": "Test Pixel", "app": "1.0"})
-	if code != 200 || hello["phoneId"] != q.Get("i") || hello["control"] != false || hello["boot"] == "" {
+	if code != 200 || hello["phoneId"] != q.Get("i") || hello["control"] != false || hello["boot"] == "" || hello["quill"] != version {
 		t.Fatalf("hello: %d %v", code, hello)
 	}
 	if code, again, hdr := a.do("POST", "/phone/hello", "hello-key-0000000001", map[string]string{"name": "Test Pixel", "app": "1.0"}); code != 200 || hdr.Get("Idempotent-Replay") != "true" || again["phoneId"] != hello["phoneId"] {

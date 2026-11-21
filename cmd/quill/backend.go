@@ -342,7 +342,7 @@ func (c *tasksChip) Tapped(*fyne.PointEvent) {
 }
 
 func (c *tasksChip) MinSize() fyne.Size {
-	return fyne.NewSize(60, c.BaseWidget.MinSize().Height)
+	return fyne.NewSize(c.natural(), c.BaseWidget.MinSize().Height)
 }
 
 func (c *tasksChip) Text() string { return c.label.Text }
@@ -350,21 +350,6 @@ func (c *tasksChip) Text() string { return c.label.Text }
 func (c *tasksChip) natural() float32 {
 	text := fyne.MeasureText(c.label.Text, theme.TextSize(), c.label.TextStyle).Width
 	return text + 2*theme.InnerPadding() + 16 + 2*theme.Padding()
-}
-
-type snugCenter struct{}
-
-func (snugCenter) MinSize(objs []fyne.CanvasObject) fyne.Size {
-	return objs[0].MinSize()
-}
-
-func (snugCenter) Layout(objs []fyne.CanvasObject, size fyne.Size) {
-	w := size.Width
-	if c, ok := objs[0].(*tasksChip); ok {
-		w = min(c.natural(), size.Width)
-	}
-	objs[0].Move(fyne.NewPos((size.Width-w)/2, 0))
-	objs[0].Resize(fyne.NewSize(w, size.Height))
 }
 
 func (c *tasksChip) Resize(s fyne.Size) {

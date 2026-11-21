@@ -1815,13 +1815,21 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 		if w := h.d.tasksBtn.Size().Width; w > h.d.tasksBtn.natural()+1 || w < 60 {
 			t.Fatalf("the tasks box is as wide as its text, not the row: %v (natural %v)", w, h.d.tasksBtn.natural())
 		}
-		snugCenter{}.Layout([]fyne.CanvasObject{h.d.tasksBtn}, fyne.NewSize(600, 36))
-		if w := h.d.tasksBtn.Size().Width; h.d.tasksBtn.Position().X != (600-w)/2 || w >= 600 {
-			t.Fatal("and it sits centred in a wide slot")
+		var row *fyne.Container
+		deepWalk(h.d.mainPane, func(o fyne.CanvasObject) {
+			if c, ok := o.(*fyne.Container); ok {
+				for i, x := range c.Objects {
+					if x == fyne.CanvasObject(h.d.tasksBtn) && i > 0 && c.Objects[i-1] == fyne.CanvasObject(h.d.stt.langBtn) {
+						row = c
+					}
+				}
+			}
+		})
+		if row == nil {
+			t.Fatal("the tasks box sits right after Voice in the options row")
 		}
-		snugCenter{}.Layout([]fyne.CanvasObject{h.d.tasksBtn}, fyne.NewSize(30, 36))
-		if h.d.tasksBtn.Size().Width != 30 || h.d.tasksBtn.Position().X != 0 {
-			t.Fatal("and shrinks to a narrow slot")
+		if h.d.tasksBtn.Position().X <= h.d.stt.langBtn.Position().X {
+			t.Fatal("to its right")
 		}
 		h.d.rewindTo(s, user, true)
 	})

@@ -471,7 +471,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
 	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("Typing"), d.autocorrectSettings())
-	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), rulesBtn, widget.NewSeparator(), heading("Phone"), d.buildPhoneRow())
+	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), rulesBtn, widget.NewSeparator(), heading("Devices"), d.buildPhoneRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
 	openSettings.Alignment = widget.ButtonAlignLeading
@@ -1024,7 +1024,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	closeAll := widget.NewButtonWithIcon("Collapse chips", theme.MenuDropUpIcon(), func() { d.setAllChips(false) })
 	closeAll.Importance = widget.MediumImportance
 	d.chipBtns = [2]*widget.Button{openAll, closeAll}
-	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, boxed(d.modelSel), boxed(d.modeSel), d.stt.langBtn), container.NewHBox(openAll, closeAll), container.NewPadded(container.New(snugCenter{}, d.tasksBtn)))
+	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, boxed(d.modelSel), boxed(d.modeSel), d.stt.langBtn, d.tasksBtn), container.NewHBox(openAll, closeAll))
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))

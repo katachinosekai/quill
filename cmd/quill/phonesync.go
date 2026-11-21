@@ -292,7 +292,7 @@ func (d *desk) setPhones(list []folders.Phone) {
 }
 
 func (d *desk) beginPairing() {
-	ph, key := folders.NewPhone("New phone", time.Now())
+	ph, key := folders.NewPhone("New device", time.Now())
 	d.setPhones(append(d.phones(), ph))
 	d.phone().pairing = &pendingPair{id: ph.ID, key: key}
 }
@@ -356,7 +356,7 @@ func (d *desk) updatePhoneList() {
 		}
 		ph := ph
 		revoke := widget.NewButton("Revoke", func() {
-			dialog.ShowConfirm("Revoke phone?", "\""+ph.Name+"\" loses access at once. Pair it again to bring it back.", func(ok bool) {
+			dialog.ShowConfirm("Revoke device?", "\""+ph.Name+"\" loses access at once. Pair it again to bring it back.", func(ok bool) {
 				if ok {
 					d.revokePhone(ph.ID)
 				}
@@ -366,7 +366,7 @@ func (d *desk) updatePhoneList() {
 		rows = append(rows, container.NewBorder(nil, nil, nil, revoke, widget.NewLabel(ph.Name+" · "+seen)))
 	}
 	if len(rows) == 0 {
-		rows = append(rows, mutedText("No paired phones", fontMeta))
+		rows = append(rows, mutedText("No paired devices", fontMeta))
 	}
 	p.list.Objects = rows
 	p.list.Refresh()
@@ -399,7 +399,7 @@ func (d *desk) pairDialog() {
 		linkText.SetText(link)
 	}
 	show()
-	help := widget.NewLabel("In Quill for Android: ⚙ → Scan pairing QR code, then point it at this code. Or copy the link and use \"Paste pairing link\" in the app's settings. Folders update while the phone is on the same network as this computer.")
+	help := widget.NewLabel("In Quill Android: ⚙ → Scan pairing QR code, then point it at this code. Or copy the link and use \"Paste pairing link\" in the app's settings. The device reaches this computer on the same network, or anywhere over Tailscale.")
 	help.Wrapping = fyne.TextWrapWord
 	copyBtn := widget.NewButton("Copy pairing link", func() {
 		d.app.Clipboard().SetContent(link)
@@ -417,7 +417,7 @@ func (d *desk) pairDialog() {
 		d.updatePhoneRow()
 	})
 	body := container.NewVBox(container.NewCenter(img), help, container.NewGridWithColumns(2, copyBtn, showBtn), stop, linkText)
-	dlg := dialog.NewCustom("Pair phone", "Close", body, d.win)
+	dlg := dialog.NewCustom("Pair device", "Close", body, d.win)
 	dlg.Resize(fyne.NewSize(460, 600))
 	dlg.SetOnClosed(func() {
 		d.endPairing()
@@ -444,7 +444,7 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	p.status = widget.NewLabel("")
 	p.status.Wrapping = fyne.TextWrapWord
 	p.status.TextStyle.Italic = true
-	pairBtn := widget.NewButton("Pair phone...", d.pairDialog)
+	pairBtn := widget.NewButton("Pair a device...", d.pairDialog)
 	pairBtn.Importance = widget.LowImportance
 	pairBtn.Alignment = widget.ButtonAlignLeading
 	d.phoneFileBtn = widget.NewButton("", d.chooseFolderFile)
@@ -456,16 +456,16 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	})
 	d.phoneFileOff.Importance = widget.LowImportance
 	d.updatePhoneRow()
-	notifyChk := widget.NewCheck("Send notifications to paired phones", func(on bool) {
+	notifyChk := widget.NewCheck("Send notifications to paired devices", func(on bool) {
 		d.app.Preferences().SetBool("phoneNotify", on)
 		if p.server != nil {
 			p.server.SetEvents(on)
 		}
 	})
 	notifyChk.Checked = d.app.Preferences().BoolWithFallback("phoneNotify", true)
-	controlChk := widget.NewCheck("Let paired phones control sessions", func(on bool) { d.app.Preferences().SetBool("phoneControl", on) })
+	controlChk := widget.NewCheck("Let paired devices control sessions", func(on bool) { d.app.Preferences().SetBool("phoneControl", on) })
 	controlChk.Checked = d.app.Preferences().Bool("phoneControl")
-	head := mutedText("Phone", fontMeta)
+	head := mutedText("Devices", fontMeta)
 	p.list = container.NewVBox()
 	d.updatePhoneList()
 	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), notifyChk, controlChk, p.status)
@@ -486,7 +486,7 @@ func (d *desk) updatePhoneRow() {
 }
 
 func (d *desk) phoneButton() fyne.CanvasObject {
-	b := widget.NewButtonWithIcon("Phone", theme.ComputerIcon(), d.pairDialog)
+	b := widget.NewButtonWithIcon("Devices", theme.ComputerIcon(), d.pairDialog)
 	b.Importance = widget.LowImportance
 	return b
 }

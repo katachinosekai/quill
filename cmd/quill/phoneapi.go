@@ -153,7 +153,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		}
 		ctl = a.control(phone)
 	})
-	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot})
+	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version})
 }
 
 type apiSession struct {

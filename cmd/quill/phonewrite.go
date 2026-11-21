@@ -59,7 +59,7 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 	var fail *apiErr
 	a.ui(func() {
 		if !a.control(phone) {
-			fail = &apiErr{http.StatusForbidden, "control_off", "Let paired phones control sessions is off"}
+			fail = &apiErr{http.StatusForbidden, "control_off", "Let paired devices control sessions is off"}
 			return
 		}
 		switch {

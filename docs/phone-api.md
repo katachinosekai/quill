@@ -225,7 +225,7 @@ Assistant items with a choice card add:
 
 First call after pairing and after each app start. Body: `{"name": "Pixel 8", "app": "0.9.4"}`. Sets the phone's display name in Quill's phone list and its last-seen time.
 
-Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f..."}`. `control` says whether writes are allowed for this phone right now. Needs an Idempotency-Key like every POST, but is allowed while control is off.
+Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15"}`. `control` says whether writes are allowed for this phone right now. `quill` is the Quill Desktop version (`"dev"` in local builds). Needs an Idempotency-Key like every POST, but is allowed while control is off.
 
 ### GET /phone/sessions
 
