@@ -79,9 +79,64 @@ func (o Options) Args() []string {
 
 const LocalPrefix = "ollama:"
 
+// ServerPrefix marks a model on another Anthropic-compatible server for
+// open-weight models (llama.cpp, vLLM, LM Studio, LiteLLM, ...):
+// "local:<server name>/<model>".
+const ServerPrefix = "local:"
+
+// LocalServer is one such server, set from Quill's settings.
+type LocalServer struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	Key  string `json:"key,omitempty"`
+}
+
+var localServers atomic.Pointer[map[string]LocalServer]
+
+// SetLocalServers replaces the known local servers.
+func SetLocalServers(list []LocalServer) {
+	m := map[string]LocalServer{}
+	for _, s := range list {
+		m[s.Name] = s
+	}
+	localServers.Store(&m)
+}
+
+func serverOf(model string) (LocalServer, string, bool) {
+	rest, ok := strings.CutPrefix(model, ServerPrefix)
+	if !ok {
+		return LocalServer{}, "", false
+	}
+	name, m, ok := strings.Cut(rest, "/")
+	if !ok || m == "" {
+		return LocalServer{}, "", false
+	}
+	if p := localServers.Load(); p != nil {
+		if s, ok := (*p)[name]; ok {
+			return s, m, true
+		}
+	}
+	return LocalServer{Name: name}, m, true
+}
+
+// LocalModel is the model name the local server knows ("" for Claude models).
 func LocalModel(model string) string {
 	if strings.HasPrefix(model, LocalPrefix) {
 		return strings.TrimPrefix(model, LocalPrefix)
+	}
+	if _, m, ok := serverOf(model); ok {
+		return m
+	}
+	return ""
+}
+
+// LocalBaseURL is where a local model's server answers ("" for Claude).
+func LocalBaseURL(model string) string {
+	if strings.HasPrefix(model, LocalPrefix) {
+		return OllamaHost()
+	}
+	if s, _, ok := serverOf(model); ok {
+		return strings.TrimRight(s.URL, "/")
 	}
 	return ""
 }
@@ -117,9 +172,16 @@ func LocalEnv(model string) []string {
 	if LocalModel(model) == "" {
 		return nil
 	}
+	token := "ollama"
+	if s, _, ok := serverOf(model); ok {
+		token = s.Key
+		if token == "" {
+			token = "local"
+		}
+	}
 	return []string{
-		"ANTHROPIC_BASE_URL=" + OllamaHost(),
-		"ANTHROPIC_AUTH_TOKEN=ollama",
+		"ANTHROPIC_BASE_URL=" + LocalBaseURL(model),
+		"ANTHROPIC_AUTH_TOKEN=" + token,
 		"ANTHROPIC_API_KEY=",
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL=" + LocalModel(model),
 		"ANTHROPIC_SMALL_FAST_MODEL=" + LocalModel(model),

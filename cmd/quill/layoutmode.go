@@ -113,6 +113,7 @@ func (d *desk) showSettings() {
 	d.loadPolicyRow()
 	tabs := container.NewAppTabs(
 		container.NewTabItem("General", container.NewVScroll(d.setGeneral)),
+		container.NewTabItem("Setup", d.setupPane()),
 		container.NewTabItem("Sessions", container.NewVScroll(d.setSessions)),
 		container.NewTabItem("Permissions", d.permissionsPane(d.settingsCwd())),
 		container.NewTabItem("Tools", d.toolsPane()),

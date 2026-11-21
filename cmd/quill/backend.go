@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2/widget"
@@ -29,7 +30,7 @@ const (
 
 var (
 	claudeModels  = modelChoices
-	localFallback = []string{"ollama:qwen3.8:27b-80k", "ollama:qwen3-coder:30b-48k"}
+	localFallback = []string{"ollama:qwen3:8b", "ollama:gpt-oss:20b"}
 	localModes    = []string{"default", "acceptEdits", "plan"}
 )
 
@@ -129,6 +130,7 @@ func fetchOllamaModels(host string) []localInfo {
 
 func (d *desk) refreshLocalModels() {
 	if d.localBusy {
+		d.localAgain = true // settings changed meanwhile: list again afterwards
 		return
 	}
 	d.localBusy = true
@@ -136,8 +138,14 @@ func (d *desk) refreshLocalModels() {
 	if fetch == nil {
 		fetch = fetchOllamaModels
 	}
+	fetchSrv := d.fetchServer
+	if fetchSrv == nil {
+		fetchSrv = fetchServerModels
+	}
+	servers := d.localServers()
 	go func() {
 		infos := fetch(session.OllamaHost())
+		infos = append(infos, serverModelInfos(servers, fetchSrv)...)
 		d.do(func() {
 			d.localBusy = false
 			d.localModels = nil
@@ -150,6 +158,10 @@ func (d *desk) refreshLocalModels() {
 			d.updateChrome()
 			for _, p := range d.panes {
 				d.syncPaneControls(p)
+			}
+			if d.localAgain {
+				d.localAgain = false
+				d.refreshLocalModels()
 			}
 		})
 	}()
@@ -174,7 +186,7 @@ func (d *desk) localEnv(model string) []string {
 }
 
 func (d *desk) warnInsecureOllama(s *deskSession) {
-	host := session.OllamaHost()
+	host := session.LocalBaseURL(s.model)
 	if !isLocal(s.model) || d.warnedOllama || !session.OllamaInsecure(host) {
 		return
 	}
@@ -287,6 +299,12 @@ func (d *desk) checkOllama(model string) error {
 	ping := d.pingLocal
 	if ping == nil {
 		ping = ollamaReachable
+	}
+	if strings.HasPrefix(model, session.ServerPrefix) {
+		if host := session.LocalBaseURL(model); host == "" || !ping(host) {
+			return fmt.Errorf("the local server for %s isn't answering at %s. Start it, fix it under Settings → Setup → Local models, or switch this session to Online", session.LocalModel(model), firstNonEmpty(host, "(no address)"))
+		}
+		return nil
 	}
 	if host := session.OllamaHost(); !ping(host) {
 		return fmt.Errorf("Ollama isn't running at %s (GameMode stops it while a game runs). Start it or switch this session to Online", host)

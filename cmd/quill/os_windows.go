@@ -30,3 +30,8 @@ func dieWithParent(cmd *exec.Cmd) {}
 var terminalCmd = func(kmemPath string) *exec.Cmd {
 	return exec.Command("cmd", "/c", "start", "kmem: empty the recycle bin", "cmd", "/k", kmemPath, "trash", "empty")
 }
+
+// openTerminal runs a PowerShell script in a new visible console window.
+var openTerminal = func(title, script string) (*exec.Cmd, error) {
+	return exec.Command("cmd", "/c", "start", title, "powershell", "-NoProfile", "-NoExit", "-Command", script), nil
+}

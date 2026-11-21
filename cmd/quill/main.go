@@ -121,6 +121,7 @@ func runWindowWith(claudeBin, sock string) int {
 	}()
 	d.watchFocus()
 	d.startNotifier()
+	d.setupAtStart()
 	d.keeper = newKeeperClient()
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1280, 860))

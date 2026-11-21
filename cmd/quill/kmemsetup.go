@@ -245,32 +245,37 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 		}
 		btn.Show()
 	}
-	btn.OnTapped = func() {
-		home, _ := os.UserHomeDir()
-		bundled := bundledKmemDir()
-		steps := widget.NewLabel("Quill will:\n" +
-			"• copy kmem and kmem-guard to ~/.local/bin\n" +
-			"• add two hooks to ~/.claude/settings.json (a backup is made first; your other hooks stay):\n" +
-			"    SessionStart: kmem brief\n" +
-			"    PreToolUse (Bash, Agent, Task, Write, Edit): kmem-guard\n" +
-			"kmem keeps its store in ~/.local/share/kmem and needs python3. Settings for paths and backups go in ~/.config/kmem/config.json (optional).")
-		steps.Wrapping = fyne.TextWrapWord
-		dlg := dialog.NewCustomConfirm("Set up kmem", "Set up", "Cancel", container.NewVScroll(steps), func(ok bool) {
-			if !ok {
-				return
-			}
-			done, err := setupKmem(home, bundled, time.Now())
-			msg := strings.Join(done, "\n")
-			if err != nil {
-				msg = strings.TrimSpace(msg + "\nStopped: " + err.Error())
-			}
-			d.kmemVer.reset()
-			refresh()
-			dialog.ShowInformation("kmem setup", msg, d.win)
-		}, d.win)
-		dlg.Resize(fyne.NewSize(560, 320))
-		dlg.Show()
-	}
+	btn.OnTapped = func() { d.kmemSetupDialog(refresh) }
 	refresh()
 	return container.NewVBox(status, btn, d.memoryModeRadio(nil))
+}
+
+// kmemSetupDialog copies the bundled kmem and adds its hooks (after asking).
+func (d *desk) kmemSetupDialog(after func()) {
+	home, _ := os.UserHomeDir()
+	bundled := bundledKmemDir()
+	steps := widget.NewLabel("Quill will:\n" +
+		"• copy kmem and kmem-guard to ~/.local/bin\n" +
+		"• add two hooks to ~/.claude/settings.json (a backup is made first; your other hooks stay):\n" +
+		"    SessionStart: kmem brief\n" +
+		"    PreToolUse (Bash, Agent, Task, Write, Edit): kmem-guard\n" +
+		"kmem keeps its store in ~/.local/share/kmem and needs python3. Settings for paths and backups go in ~/.config/kmem/config.json (optional).")
+	steps.Wrapping = fyne.TextWrapWord
+	dlg := dialog.NewCustomConfirm("Set up kmem", "Set up", "Cancel", container.NewVScroll(steps), func(ok bool) {
+		if !ok {
+			return
+		}
+		done, err := setupKmem(home, bundled, time.Now())
+		msg := strings.Join(done, "\n")
+		if err != nil {
+			msg = strings.TrimSpace(msg + "\nStopped: " + err.Error())
+		}
+		d.kmemVer.reset()
+		if after != nil {
+			after()
+		}
+		dialog.ShowInformation("kmem setup", msg, d.win)
+	}, d.win)
+	dlg.Resize(fyne.NewSize(560, 320))
+	dlg.Show()
 }

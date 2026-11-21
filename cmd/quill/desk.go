@@ -201,6 +201,8 @@ type desk struct {
 	localModels   []string
 	localBusy     bool
 	fetchLocal    func(host string) []localInfo
+	fetchServer   func(localServerConf) []string
+	localAgain    bool
 	after         func(time.Duration, func())
 	toolbarRow    *fyne.Container
 	chipBtns      [2]*widget.Button
@@ -386,6 +388,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		doWait:        fyne.DoAndWait,
 	}
 	d.pcLock = newPCLock()
+	d.applyLocalServers()
 	d.pcNote = map[string]string{}
 	d.loadOrg()
 	d.loadRules()

@@ -878,7 +878,7 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		if !reflect.DeepEqual(h.d.modelSel.Options, localFallback) || contains(h.d.modeSel.Options, "auto") {
 			t.Fatalf("Local shows only local models (fallback list) and no auto mode: %v %v", h.d.modelSel.Options, h.d.modeSel.Options)
 		}
-		if _, meta, _ := h.d.rowText(s.id); !strings.Contains(meta, "local qwen3.8:27b-80k") || !strings.Contains(h.d.subtitle.Text, "Local: qwen3.8:27b-80k") {
+		if _, meta, _ := h.d.rowText(s.id); !strings.Contains(meta, "local qwen3:8b") || !strings.Contains(h.d.subtitle.Text, "Local: qwen3:8b") {
 			t.Fatalf("a local session is marked in the sidebar and header: %q / %q", meta, h.d.subtitle.Text)
 		}
 		if h.d.app.Preferences().String("newModel") != localFallback[0] {
@@ -902,9 +902,9 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		if n.mode != "default" {
 			t.Fatal("a new local session never starts in auto mode")
 		}
-		h.d.localModels = []string{"ollama:llama9:8b", "ollama:qwen3.8:27b-80k"}
-		if h.d.defaultLocal() != "ollama:qwen3.8:27b-80k" {
-			t.Fatal("Local prefers the known Qwen tag over whatever Ollama lists first")
+		h.d.localModels = []string{"ollama:llama9:8b", "ollama:gpt-oss:20b"}
+		if h.d.defaultLocal() != "ollama:gpt-oss:20b" {
+			t.Fatal("Local prefers a suggested model over whatever Ollama lists first")
 		}
 		h.d.localWindows["ollama:qwen3.8:27b-80k"] = 81920
 		if env := strings.Join(h.d.localEnv("ollama:qwen3.8:27b-80k"), " "); env != "CLAUDE_CODE_MAX_CONTEXT_TOKENS=81920 CLAUDE_CODE_AUTO_COMPACT_WINDOW=81920" {
@@ -1834,7 +1834,7 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 		for _, it := range tabs.Items {
 			names = append(names, it.Text)
 		}
-		if strings.Join(names, ",") != "General,Sessions,Permissions,Tools,Memory" {
+		if strings.Join(names, ",") != "General,Setup,Sessions,Permissions,Tools,Memory" {
 			t.Fatalf("settings tabs: %v", names)
 		}
 		h.d.closeSettings()
