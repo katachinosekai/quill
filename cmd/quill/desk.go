@@ -307,6 +307,7 @@ type desk struct {
 	swapping      bool
 	restore       *restoreState
 	cmdList       []protocol.Command
+	agentList     []protocol.Agent
 	pending       []*chat.Item
 	pendingSeen   map[*chat.Item]bool
 	pendingChrome bool
@@ -1350,7 +1351,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		return err
 	}
 	kmemMem := d.kmemMemory()
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, Prompt: sessionPrompt(kmemMem),
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: sessionPrompt(kmemMem),
 		Env: append(append(d.localEnv(s.model), checkpointEnv), sessionMemoryEnv(kmemMem)...)}
 	d.warnInsecureOllama(s)
 	if s.persisted {

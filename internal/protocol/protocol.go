@@ -458,6 +458,29 @@ func ParseCommands(raw json.RawMessage) []Command {
 	return out
 }
 
+// Agent is one subagent Claude Code offers (initialize reply "agents").
+type Agent struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Model       string `json:"model"`
+}
+
+func ParseAgents(raw json.RawMessage) []Agent {
+	var body struct {
+		Agents []Agent `json:"agents"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return nil
+	}
+	var out []Agent
+	for _, a := range body.Agents {
+		if a.Name != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 type RateWindow struct {
 	Utilization float64 `json:"utilization"`
 	ResetsAt    int64   `json:"resetsAt"`

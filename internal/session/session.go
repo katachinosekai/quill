@@ -157,6 +157,7 @@ type Process struct {
 	busy     atomic.Bool
 	closed   atomic.Bool
 	commands atomic.Pointer[[]protocol.Command]
+	agents   atomic.Pointer[[]protocol.Agent]
 }
 
 var ErrExited = errors.New("session: process has exited")
@@ -385,6 +386,9 @@ func (p *Process) handleLine(line []byte) {
 			if cmds := protocol.ParseCommands(ev.Response.Response); len(cmds) > 0 {
 				p.commands.Store(&cmds)
 			}
+			if ags := protocol.ParseAgents(ev.Response.Response); len(ags) > 0 {
+				p.agents.Store(&ags)
+			}
 		}
 		if ev.Response != nil {
 			p.mu.Lock()
@@ -437,6 +441,15 @@ func (p *Process) Commands() []protocol.Command {
 	}
 	return nil
 }
+
+// Agents: the subagents this session's Claude Code offers (nil until known).
+func (p *Process) Agents() []protocol.Agent {
+	if a := p.agents.Load(); a != nil {
+		return *a
+	}
+	return nil
+}
+
 func (p *Process) Done() <-chan struct{} { return p.done }
 func (p *Process) Busy() bool            { return p.busy.Load() }
 
@@ -594,6 +607,12 @@ func (p *Process) Stop(grace time.Duration) error {
 }
 
 func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, error) {
+	cmds, _, err := FetchInit(bin, cwd, timeout)
+	return cmds, err
+}
+
+// FetchInit asks a short-lived claude for its slash commands and agents.
+func FetchInit(bin, cwd string, timeout time.Duration) ([]protocol.Command, []protocol.Agent, error) {
 	if bin == "" {
 		bin = "claude"
 	}
@@ -606,14 +625,14 @@ func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, 
 	cmd.Cancel = func() error { terminateGroup(cmd.Process.Pid, true); return nil }
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() {
 		stdin.Close()
@@ -621,7 +640,7 @@ func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, 
 		_ = cmd.Wait()
 	}()
 	if _, err := stdin.Write(protocol.Initialize("cmds")); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 1<<20), 64<<20)
@@ -630,10 +649,10 @@ func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, 
 		if err != nil || ev.Type != "control_response" || ev.Response == nil || ev.Response.RequestID != "cmds" {
 			continue
 		}
-		return protocol.ParseCommands(ev.Response.Response), nil
+		return protocol.ParseCommands(ev.Response.Response), protocol.ParseAgents(ev.Response.Response), nil
 	}
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	}
-	return nil, errors.New("no command list from claude")
+	return nil, nil, errors.New("no command list from claude")
 }

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 
 	"github.com/katachinosekai/quill/internal/account"
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 	"github.com/katachinosekai/quill/internal/session"
 	"github.com/katachinosekai/quill/internal/transcript"
 )
@@ -635,6 +637,10 @@ func (d *desk) workspacePane(cwd string) fyne.CanvasObject {
 			for _, dir := range s.addDirs {
 				dirs = append(dirs, workDir{scope: "This session", dir: dir})
 			}
+			p := d.projectOf(s.id)
+			for _, dir := range d.org.Dirs[p] {
+				dirs = append(dirs, workDir{scope: "Project “" + p + "” (Quill)", file: "quill:" + p, dir: dir})
+			}
 		}
 		if len(dirs) == 0 {
 			box.Add(widget.NewLabel("No extra working folders. Claude works in " + tildePath(cwd) + "."))
@@ -645,7 +651,12 @@ func (d *desk) workspacePane(cwd string) fyne.CanvasObject {
 			l.Truncation = fyne.TextTruncateEllipsis
 			rm := widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), func() {
 				var err error
-				if w.file == "" {
+				if p, ok := strings.CutPrefix(w.file, "quill:"); ok {
+					d.setProjectDir(p, w.dir, false)
+					if s := d.current; s != nil {
+						d.restartOnNext(s, "Removed "+tildePath(w.dir)+" from project “"+p+"”.")
+					}
+				} else if w.file == "" {
 					if s := d.current; s != nil {
 						s.addDirs = removeString(s.addDirs, w.dir)
 						d.restartOnNext(s, "Removed "+tildePath(w.dir)+" from this session's working folders.")
@@ -665,26 +676,14 @@ func (d *desk) workspacePane(cwd string) fyne.CanvasObject {
 	}
 	fill()
 	add := widget.NewButtonWithIcon("Add folder...", theme.FolderNewIcon(), func() {
+		s := d.current
+		if s == nil {
+			return
+		}
 		dialog.ShowFolderOpen(func(u fyne.ListableURI, err error) {
-			if err != nil || u == nil {
-				return
+			if err == nil && u != nil {
+				d.addDirWhere(s, u.Path(), fill)
 			}
-			dir := u.Path()
-			where := widget.NewSelect(append([]string{"This session only"}, settingsScopes...), nil)
-			where.SetSelected("This session only")
-			dialog.ShowForm("Add "+tildePath(dir), "Add", "Cancel", []*widget.FormItem{widget.NewFormItem("Remember in", where)}, func(ok bool) {
-				if !ok {
-					return
-				}
-				if where.Selected == "This session only" {
-					if s := d.current; s != nil {
-						d.addDir(s, dir)
-					}
-				} else if err := setWorkspaceDir(scopeFile(cwd, where.Selected), dir, true); err != nil {
-					dialog.ShowError(err, d.win)
-				}
-				fill()
-			}, d.win)
 		}, d.win)
 	})
 	add.Importance = widget.MediumImportance
@@ -761,25 +760,8 @@ func agentFiles(cwd string) []agentFile {
 	return out
 }
 
-func (d *desk) agentsPane(cwd string) fyne.CanvasObject {
-	agents := agentFiles(cwd)
-	box := container.NewVBox()
-	if len(agents) == 0 {
-		box.Add(widget.NewLabel("No subagents in ~/.claude/agents or .claude/agents of this folder."))
-	}
-	for _, a := range agents {
-		a := a
-		l := widget.NewLabel(a.name + " · " + oneLine(a.desc, 120))
-		l.Truncation = fyne.TextTruncateEllipsis
-		open := widget.NewButtonWithIcon("Open", theme.DocumentIcon(), func() { d.openPath(a.path) })
-		open.Importance = widget.LowImportance
-		box.Add(container.NewBorder(nil, nil, nil, open, l))
-	}
-	return box
-}
-
 func (d *desk) cmdAgents(s *deskSession) {
-	dlg := dialog.NewCustom("Subagents", "Close", container.NewVScroll(d.agentsPane(s.cwd)), d.win)
+	dlg := dialog.NewCustom("Subagents", "Close", container.NewVScroll(d.agentsPane(s, s.cwd)), d.win)
 	dlg.Resize(fyne.NewSize(760, 420))
 	dlg.Show()
 }
@@ -810,9 +792,50 @@ func (d *desk) cmdAddDir(s *deskSession, arg string) {
 	}
 	dialog.ShowFolderOpen(func(u fyne.ListableURI, err error) {
 		if err == nil && u != nil {
-			d.addDir(s, u.Path())
+			d.addDirWhere(s, u.Path(), nil)
 		}
 	}, d.win)
+}
+
+// addDirWhere asks where to remember a new working folder: this session,
+// every session of its Quill project (the kmem project in the sidebar), or
+// Claude Code's Local/Project/User settings.
+func (d *desk) addDirWhere(s *deskSession, dir string, done func()) {
+	project := d.projectOf(s.id)
+	optSession := "This session only"
+	optProject := "Every session of project “" + project + "” (Quill)"
+	where := widget.NewSelect(append([]string{optSession, optProject}, settingsScopes...), nil)
+	where.SetSelected(optSession)
+	dlg := dialog.NewForm("Add "+tildePath(dir), "Add", "Cancel", []*widget.FormItem{
+		widget.NewFormItem("Remember for", where),
+		widget.NewFormItem("", caption("Project folders go to every session Quill starts for that project (new ones, forks, restarts); settings folders to every Claude Code session that reads that file.")),
+	}, func(ok bool) {
+		if !ok {
+			return
+		}
+		switch where.Selected {
+		case optSession:
+			d.addDir(s, dir)
+		case optProject:
+			if contains(d.org.Dirs[project], dir) {
+				d.notify(s, tildePath(dir)+" is already a folder of project “"+project+"”.")
+				break
+			}
+			d.setProjectDir(project, dir, true)
+			d.restartOnNext(s, "Added "+tildePath(dir)+" for every session of project “"+project+"”.")
+		default:
+			if err := setWorkspaceDir(scopeFile(s.cwd, where.Selected), dir, true); err != nil {
+				dialog.ShowError(err, d.win)
+				return
+			}
+			d.restartOnNext(s, "Added "+tildePath(dir)+" to Claude Code's "+strings.Fields(where.Selected)[0]+" settings.")
+		}
+		if done != nil {
+			done()
+		}
+	}, d.win)
+	dlg.Resize(fyne.NewSize(640, 300))
+	dlg.Show()
 }
 
 // chrome
@@ -915,11 +938,58 @@ func (d *desk) cmdTasks(s *deskSession) {
 // mcp
 
 type mcpServer struct {
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Error     string `json:"error"`
-	Transport string `json:"transport"`
-	Scope     string `json:"scope"`
+	Name      string    `json:"name"`
+	Status    string    `json:"status"`
+	Error     string    `json:"error"`
+	Transport string    `json:"transport"`
+	Scope     string    `json:"scope"`
+	Tools     []mcpTool `json:"tools"`
+}
+
+type mcpTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Annotations struct {
+		ReadOnly    *bool `json:"readOnly"`
+		Destructive *bool `json:"destructive"`
+	} `json:"annotations"`
+}
+
+// mcpToolsDialog lists a server's tools, and whether Quill's plan-first lets
+// each run without a plan.
+func (d *desk) mcpToolsDialog(sv mcpServer) {
+	var rows []fyne.CanvasObject
+	if len(sv.Tools) == 0 {
+		rows = append(rows, widget.NewLabel("Claude Code didn't list tools for "+sv.Name+" (not connected, or the list was too large to send)."))
+	}
+	extra := d.readOnlyExtra()
+	for _, t := range sv.Tools {
+		wire := "mcp__" + sv.Name + "__" + t.Name
+		if strings.HasPrefix(t.Name, "mcp__") {
+			wire = t.Name
+		}
+		var tags []string
+		if r := t.Annotations.ReadOnly; r != nil && *r {
+			tags = append(tags, "read-only")
+		}
+		if x := t.Annotations.Destructive; x != nil && *x {
+			tags = append(tags, "destructive")
+		}
+		if d.planFirst {
+			if readOnlyRequest(&protocol.ControlRequest{ToolName: wire, Input: json.RawMessage(`{}`)}, extra) {
+				tags = append(tags, "runs without a plan")
+			} else {
+				tags = append(tags, "needs a plan (plan-first)")
+			}
+		}
+		name := boldLabel(t.Name)
+		info := caption(strings.Join(append(tags, oneLine(t.Description, 200)), " · "))
+		info.Wrapping = fyne.TextWrapWord
+		rows = append(rows, container.NewVBox(name, info), widget.NewSeparator())
+	}
+	dlg := dialog.NewCustom(sv.Name+" tools ("+strconv.Itoa(len(sv.Tools))+")", "Close", container.NewVScroll(container.NewVBox(rows...)), d.win)
+	dlg.Resize(fyne.NewSize(720, 480))
+	dlg.Show()
 }
 
 func parseMCP(raw json.RawMessage) []mcpServer {
@@ -991,6 +1061,16 @@ func (d *desk) mcpPane(s *deskSession) *fyne.Container {
 					if sv.Status == "needs-auth" {
 						btns.Add(widget.NewButtonWithIcon("Sign in", theme.LoginIcon(), func() {
 							act(map[string]any{"subtype": "mcp_authenticate", "serverName": sv.Name}, "")
+						}))
+					}
+					btns.Add(widget.NewButtonWithIcon("Tools", theme.ListIcon(), func() { d.mcpToolsDialog(sv) }))
+					if sv.Transport == "http" || sv.Transport == "sse" {
+						btns.Add(widget.NewButtonWithIcon("Clear sign-in", theme.LogoutIcon(), func() {
+							dialog.ShowConfirm("Clear "+sv.Name+"'s sign-in?", "Claude Code forgets the saved sign-in (OAuth tokens) for this server; it asks you to sign in again when needed.", func(ok bool) {
+								if ok {
+									act(map[string]any{"subtype": "mcp_clear_auth", "serverName": sv.Name}, "Cleared the sign-in for "+sv.Name+".")
+								}
+							}, d.win)
 						}))
 					}
 					if sv.Status != "disabled" {

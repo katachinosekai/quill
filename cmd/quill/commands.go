@@ -45,11 +45,11 @@ func (r *tapRow) Tapped(*fyne.PointEvent)             { r.onTap() }
 
 func (d *desk) fetchCommands() {
 	home, _ := os.UserHomeDir()
-	cmds, err := session.FetchCommands(d.cfg.ClaudeBin, home, 30*time.Second)
+	cmds, agents, err := session.FetchInit(d.cfg.ClaudeBin, home, 30*time.Second)
 	if err != nil || len(cmds) == 0 {
 		return
 	}
-	d.do(func() { d.cmdList = cmds })
+	d.do(func() { d.cmdList, d.agentList = cmds, agents })
 }
 
 func (d *desk) commandsFor(s *deskSession) []protocol.Command {

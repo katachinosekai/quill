@@ -105,11 +105,8 @@ func (d *desk) toolsPane() fyne.CanvasObject {
 	if d.current != nil {
 		mcp = d.mcpPane(d.current)
 	}
-	hooks := widget.NewLabel(hooksText(d.settingsCwd()))
-	hooks.TextStyle = fyne.TextStyle{Monospace: true}
-	hooks.Wrapping = fyne.TextWrapBreak
 	return container.NewVScroll(container.NewVBox(heading("MCP servers"), mcp, widget.NewSeparator(),
-		heading("Subagents"), d.agentsPane(d.settingsCwd()), widget.NewSeparator(), heading("Hooks"), hooks))
+		heading("Subagents"), d.agentsPane(d.current, d.settingsCwd()), widget.NewSeparator(), heading("Hooks"), d.hooksPane(d.settingsCwd())))
 }
 
 func (d *desk) showSettings() {

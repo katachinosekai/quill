@@ -131,8 +131,40 @@ func (d *desk) renameProject(from, to string) {
 	if v, ok := d.folderOpen[projectPrefix+from]; ok {
 		d.folderOpen[projectPrefix+to] = v
 	}
+	if dirs := d.org.Dirs[from]; len(dirs) > 0 {
+		d.org.Dirs[to] = append(d.org.Dirs[to], dirs...)
+		delete(d.org.Dirs, from)
+	}
 	d.saveOrg()
 	d.rebuildRows()
+}
+
+// sessionDirs: the session's own /add-dir folders plus its project's.
+func (d *desk) sessionDirs(s *deskSession) []string {
+	out := append([]string(nil), s.addDirs...)
+	for _, dir := range d.org.Dirs[d.projectOf(s.id)] {
+		if !contains(out, dir) {
+			out = append(out, dir)
+		}
+	}
+	return out
+}
+
+// setProjectDir adds or removes an extra folder for every session of a project.
+func (d *desk) setProjectDir(project, dir string, add bool) {
+	if d.org.Dirs == nil {
+		d.org.Dirs = map[string][]string{}
+	}
+	list := removeString(d.org.Dirs[project], dir)
+	if add {
+		list = append(list, dir)
+	}
+	if len(list) == 0 {
+		delete(d.org.Dirs, project)
+	} else {
+		d.org.Dirs[project] = list
+	}
+	d.saveOrg()
 }
 
 func (d *desk) projectNames() []string {

@@ -169,7 +169,7 @@ func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
 		case "memory":
 			d.cmdMemory(s)
 		case "hooks":
-			d.textDialog("Hooks", hooksText(s.cwd))
+			d.cmdHooks(s)
 		case "agents":
 			d.cmdAgents(s)
 		case "add-dir":

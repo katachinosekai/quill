@@ -39,6 +39,9 @@ type sideOrg struct {
 	Ended   map[string]bool    `json:"ended,omitempty"`
 	// Projects: kmem name (or session id) -> project shown in the sidebar.
 	Projects map[string]string `json:"projects,omitempty"`
+	// Dirs: project -> extra working folders every session of it gets
+	// (/add-dir "every session of this project", user 2026-11-21).
+	Dirs map[string][]string `json:"dirs,omitempty"`
 }
 
 func (d *desk) loadOrg() {
