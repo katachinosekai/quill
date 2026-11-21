@@ -37,14 +37,15 @@ type writeBody struct {
 	Model     string              `json:"model"`
 	Mode      string              `json:"mode"`
 	Title     *string             `json:"title"`
-	Place     *string             `json:"place"`
+	Project   *string             `json:"project"`
 	Old       bool                `json:"old"`
 }
 
 func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, parts []string) {
 	known := path == "usage/resume" || path == "sessions/new" ||
 		len(parts) == 3 && parts[0] == "session" && (slices.Contains([]string{"send", "answer", "interrupt"}, parts[2]) || slices.Contains(menuActions, parts[2])) ||
-		len(parts) == 4 && parts[0] == "session" && parts[2] == "queue" && (parts[3] == "delete" || parts[3] == "send-now")
+		len(parts) == 4 && parts[0] == "session" && parts[2] == "queue" && (parts[3] == "delete" || parts[3] == "send-now") ||
+		len(parts) == 3 && parts[0] == "handoffs" && (parts[2] == "resume" || parts[2] == "delete")
 	if !known {
 		folders.WriteError(w, http.StatusNotFound, "not_found", "unknown path")
 		return
@@ -75,6 +76,8 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 			out = map[string]any{"usage": a.usage()}
 		case path == "sessions/new":
 			out, fail = a.newSession(in)
+		case parts[0] == "handoffs":
+			out, fail = a.handoffAction(parts[1], parts[2])
 		default:
 			s := a.d.sessions[parts[1]]
 			if s == nil {

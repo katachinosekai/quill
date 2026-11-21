@@ -118,7 +118,8 @@ Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new ra
   "title": "Rename greeting",
   "folder": "/home/user/Projects/demo",
   "folderName": "demo",
-  "group": "Active",
+  "group": "Quill",
+  "project": "Quill",
   "status": "idle",
   "busy": false,
   "kmem": "quill",
@@ -145,7 +146,8 @@ Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new ra
 - `epoch` changes whenever the item list is renumbered (rewind, fork into this tab, history reload, transcript branch pruning). `rev` grows on every change to any item or to the queue of this session. Both are per session.
 - `focused`: the session shown in the desktop's current view.
 - `tokens`: the session's total tokens from its transcript (refreshed about every 5 s; a growth arrives as a `session` change).
-- Since 2026-11-21, for the session menu (all optional, left out when false/empty): `renamed: true` when the title was set by hand (offer "Restore original name"); `place`: the explicit placement (`active`, `inactive`, `archive`, `auto`, `folder:<id>`), left out for Automatic placement; `ended: true` when the session was ended with its kmem handoff saved (resume starts fresh from the handoff).
+- `project` (since 2026-11-21): the kmem project the session is grouped under. `group` holds the same value, so older phones group by project too. Quill Desktop has no folders any more (no Active, Inactive, Archive, Created by Claude or custom folders).
+- `renamed: true` (optional) when the title was set by hand: offer "Restore original name".
 
 ### Item
 
@@ -250,16 +252,16 @@ Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "qu
   },
   "models": {"online": ["opus", "sonnet", "haiku"], "local": ["qwen3:14b"]},
   "modes": {"online": ["default", "acceptEdits", "plan", "auto"], "local": ["default", "acceptEdits", "plan"]},
-  "places": [{"id": "1795000000000000000", "name": "Work"}],
-  "actions": ["rename", "resume", "end", "delete", "place"],
+  "projects": ["Quill", "Zomboid"],
+  "actions": ["rename", "resume", "end", "delete", "project"],
   "sessions": []
 }
 ```
 
-- `sessions`: Session objects, in sidebar order: the open tabs plus the sidebar's active and inactive groups, as on the desktop.
+- `sessions`: Session objects for the LIVE sessions only (open tabs and running Quill sessions), in sidebar order: grouped by project, projects A-Z. Ended sessions are kmem handoffs (`/phone/handoffs`).
 - `boot` changes when Quill restarts; the phone then drops all cached state.
 - `cursor` is the stream position to pass to `/phone/stream` next.
-- `places`: the custom sidebar folders, for "Move to folder". `actions`: the session-menu endpoints this Quill Desktop supports; older builds leave it out, so the phone shows only the options listed.
+- `projects`: the project names in the sidebar, for the "Project" picker (the user may also type a new one). `actions`: the session-menu endpoints this Quill Desktop supports; older builds leave it out, so the phone shows only the options listed.
 - `usage.fiveHour` / `usage.week` are left out when unknown. `usage.credits` is the same text as Quill Desktop's usage panel ("not reported" when the plan reports none); `todayTokens` / `weekTokens` are the token sums of all sessions for today and the last 7 days.
 
 ### GET /phone/folders
@@ -313,8 +315,7 @@ Returns at once when something changed after `cursor`, otherwise after `wait` se
     {"type": "removed", "id": "77aa..."},
     {"type": "order", "ids": ["3f2a...", "77aa..."]},
     {"type": "usage", "usage": {}},
-    {"type": "control", "control": false},
-    {"type": "places", "places": [{"id": "1795000000000000000", "name": "Work"}]}
+    {"type": "control", "control": false}
   ]
 }
 ```
@@ -355,15 +356,22 @@ Body `{}`. Same as Escape / Stop on the desktop. Response `{"v": 1, "wasBusy": t
 
 Body: `{"index": 0, "text": "also check the tests"}`. `text` must equal the entry at `index` (`409 stale` otherwise). Response: `{"v": 1, "queue": [...]}`.
 
-### Session menu: POST /phone/session/{id}/rename, /resume, /end, /delete, /place
+### Session menu: POST /phone/session/{id}/rename, /project, /resume, /end, /delete
 
-The desktop's right-click session menu (since 2026-11-21). A tab, its Claude session and its kmem name are one identity called the session, so there is no separate kmem action: rename renames the kmem name too, and the phone shows `kmem` read-only.
+The desktop's right-click session menu (revised 2026-11-21). A tab, its Claude session and its kmem name are one identity called the session, so there is no separate kmem action: rename renames the kmem name too, and the phone shows `kmem` read-only. There are no folders: `/place` and `places` are gone (`404`).
 
 - `rename` `{"title": "New name"}` (1-200 characters after trimming; `400` when longer or missing). `{"title": ""}` = Restore original name. Response `{"v": 1, "session": {...}}`.
-- `resume` `{}`: as Resume on the desktop. An `ended` session starts a fresh session from its kmem handoff (the old conversation stays in Inactive), and the response holds the NEW session; `{"old": true}` continues the old conversation instead. Otherwise the session's Claude process is started and it gets a tab (the desktop view doesn't switch). Already running: no-op. `409 blocked` while it is open in a terminal or being taken over. Response `{"v": 1, "session": {...}}`.
-- `end` `{}`: as End session: the session saves its kmem handoff and moves to Inactive (trivial or stopped sessions just move). Response `{"v": 1, "saving": true}` while the save is pending; the session row updates through the stream.
+- `project` `{"project": "Zomboid"}` puts the session under that project (stored per kmem name); `""` = automatic (kmem's label for the name, else the first word of the title). Response `{"v": 1, "session": {...}}`.
+- `resume` `{}` ("Start" on the desktop, for a live session whose Claude process isn't running): starts it. An ended session that still has a saved handoff starts fresh from it and the response holds the NEW session; `{"old": true}` continues the old conversation instead. Already running: no-op. `409 blocked` while a terminal holds it or it is being taken over. Response `{"v": 1, "session": {...}}`.
+- `end` `{}`: as End session: the session saves its kmem handoff, closes and leaves the list (it shows up in `/phone/handoffs`). Response `{"v": 1, "saving": true}` while the save is pending.
 - `delete` `{}`: as Delete session: the conversation is removed from disk and its kmem handoff goes to the kmem recycle bin. The phone confirms first. `409 blocked` when a terminal holds it. Response `{"v": 1, "removed": "<id>"}`.
-- `place` `{"place": "active" | "inactive" | "archive" | "auto" | "folder:<id>" | ""}`: `auto` = Created by Claude, `""` = Automatic placement, `<id>` from `places` (`404` for an unknown folder, `400` for anything else). Moving a running session to `inactive` or `archive` ends it with a save, as on the desktop. Response `{"v": 1, "place": "...", "saving": false}`.
+
+### POST /phone/handoffs/{name}/resume and /delete
+
+- `resume` `{}`: as Resume in Quill Desktop's kmem panel: opens the live session that holds the name, else starts a fresh session from the handoff (through its ended session when Quill still knows it, keeping folder, model and mode; else in the home folder). Response `{"v": 1, "session": {...}}`.
+- `delete` `{}`: moves every fact of the handoff to the kmem recycle bin (the phone confirms first). `409 blocked` while a live session holds the name (end or delete that session instead). Response `{"v": 1, "removed": "<name>"}`.
+- `404` for an unknown handoff, `409 blocked` when kmem isn't available.
+- The recycle bin itself is not on the phone: restoring and emptying it happen only in Quill Desktop's kmem panel, and emptying (kmem's final purge) only in a terminal where kmem asks the user to type the confirmation.
 
 ### POST /phone/usage/resume
 
