@@ -141,3 +141,19 @@ func TestRateLimitEvent(t *testing.T) {
 		t.Fatalf("%+v", ev.RateLimit)
 	}
 }
+
+func TestLastContextUsesTheCurrentModel(t *testing.T) {
+	ev := &Event{ModelUsage: map[string]ModelUsage{"claude-haiku-5-5": {ContextWindow: 1000000}, "qwen3.8:27b-80k": {ContextWindow: 81920}}}
+	if _, w := ev.LastContext("qwen3.8:27b-80k"); w != 81920 {
+		t.Fatalf("after a switch to Qwen the Qwen window counts: %d", w)
+	}
+	if _, w := ev.LastContext("", "ollama:qwen3.8:27b-80k"); w != 81920 {
+		t.Fatalf("the ollama: prefix is ignored and an empty preference skipped: %d", w)
+	}
+	if _, w := ev.LastContext("claude-haiku-5-5"); w != 1000000 {
+		t.Fatalf("and the Claude window after switching back: %d", w)
+	}
+	if _, w := ev.LastContext("unknown"); w != 1000000 {
+		t.Fatalf("unknown model: largest window: %d", w)
+	}
+}

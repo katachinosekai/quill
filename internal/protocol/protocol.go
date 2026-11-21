@@ -192,7 +192,7 @@ func (e *Event) IsSubagent() bool {
 	return e.ParentToolUseID != nil && *e.ParentToolUseID != ""
 }
 
-func (e *Event) LastContext() (used, window int) {
+func (e *Event) LastContext(model ...string) (used, window int) {
 	if e.Usage != nil {
 		var it struct {
 			Usage struct {
@@ -206,6 +206,15 @@ func (e *Event) LastContext() (used, window int) {
 	for _, mu := range e.ModelUsage {
 		if mu.ContextWindow > window {
 			window = mu.ContextWindow
+		}
+	}
+	for _, m := range model {
+		m = strings.TrimPrefix(m, "ollama:")
+		if m == "" {
+			continue
+		}
+		if mu, ok := e.ModelUsage[m]; ok && mu.ContextWindow > 0 {
+			return used, mu.ContextWindow
 		}
 	}
 	return used, window
