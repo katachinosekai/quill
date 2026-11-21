@@ -516,6 +516,7 @@ func (d *desk) showDropdownWith(dd *dropdown) func() {
 		}
 	})
 	c.Overlays().Add(dd)
+	d.escClose(dd, dd.close)
 	dd.Resize(c.Size())
 	return dd.close
 }

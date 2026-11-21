@@ -61,6 +61,7 @@ func NewEntryDialog(title, message string, onConfirm func(string), parent fyne.W
 		}
 
 		i.entry.Text = ""
+		delete(shownDialogs, i.win)
 		i.win.Hide() // Close directly without executing the callback. This is the callback.
 	}, parent)
 

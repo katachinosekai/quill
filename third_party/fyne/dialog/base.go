@@ -83,6 +83,27 @@ func (d *dialog) Show() {
 		d.win.Resize(d.desiredSize)
 	}
 	d.win.Show()
+	shownDialogs[d.win] = d
+}
+
+var shownDialogs = map[*widget.PopUp]*dialog{}
+
+// DismissOverlay hides the dialog shown as overlay o like its dismiss button
+// would (the callback gets false); dialogs without a dismiss button stay open.
+// It reports whether o was a shown dialog.
+func DismissOverlay(o fyne.CanvasObject) bool {
+	p, ok := widget.OverlayContent(o).(*widget.PopUp)
+	if !ok {
+		return false
+	}
+	d, ok := shownDialogs[p]
+	if !ok {
+		return false
+	}
+	if d.dismiss != nil {
+		d.Hide()
+	}
+	return true
 }
 
 func (d *dialog) Refresh() {
@@ -123,6 +144,7 @@ func (d *dialog) SetOnClosed(closed func()) {
 }
 
 func (d *dialog) hideWithResponse(resp bool) {
+	delete(shownDialogs, d.win)
 	d.win.Hide()
 	if d.callback != nil {
 		d.callback(resp)

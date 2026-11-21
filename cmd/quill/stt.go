@@ -406,7 +406,8 @@ func (sp *speech) setup(lang string) {
 }
 
 func (d *desk) pickLanguage(current string, onPick func(code string)) {
-	search := widget.NewEntry()
+	search := &escEntry{}
+	search.ExtendBaseWidget(search)
 	search.SetPlaceHolder("Search languages")
 	shown := languages
 	list := widget.NewList(
@@ -460,7 +461,9 @@ func (d *desk) pickLanguage(current string, onPick func(code string)) {
 	list.OnSelected = nil
 	selectCurrent()
 	list.OnSelected = sel
+	search.onEsc = pop.Hide
 	pop.Show()
+	d.escClose(pop, pop.Hide)
 	d.win.Canvas().Focus(search)
 }
 

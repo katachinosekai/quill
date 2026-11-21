@@ -91,3 +91,72 @@ diff -urN a/widget/entry_offset.go b/widget/entry_offset.go
 +	e.syncSelectable()
 +	e.Refresh()
 +}
+diff --git a/dialog/base.go b/dialog/base.go
+index a12de0f..e234ebd 100644
+--- a/dialog/base.go
++++ b/dialog/base.go
+@@ -83,6 +83,27 @@ func (d *dialog) Show() {
+ 		d.win.Resize(d.desiredSize)
+ 	}
+ 	d.win.Show()
++	shownDialogs[d.win] = d
++}
++
++var shownDialogs = map[*widget.PopUp]*dialog{}
++
++// DismissOverlay hides the dialog shown as overlay o like its dismiss button
++// would (the callback gets false); dialogs without a dismiss button stay open.
++// It reports whether o was a shown dialog.
++func DismissOverlay(o fyne.CanvasObject) bool {
++	p, ok := widget.OverlayContent(o).(*widget.PopUp)
++	if !ok {
++		return false
++	}
++	d, ok := shownDialogs[p]
++	if !ok {
++		return false
++	}
++	if d.dismiss != nil {
++		d.Hide()
++	}
++	return true
+ }
+ 
+ func (d *dialog) Refresh() {
+@@ -123,6 +144,7 @@ func (d *dialog) SetOnClosed(closed func()) {
+ }
+ 
+ func (d *dialog) hideWithResponse(resp bool) {
++	delete(shownDialogs, d.win)
+ 	d.win.Hide()
+ 	if d.callback != nil {
+ 		d.callback(resp)
+diff --git a/dialog/entry.go b/dialog/entry.go
+index 3f5c542..f6c7cd5 100644
+--- a/dialog/entry.go
++++ b/dialog/entry.go
+@@ -61,6 +61,7 @@ func NewEntryDialog(title, message string, onConfirm func(string), parent fyne.W
+ 		}
+ 
+ 		i.entry.Text = ""
++		delete(shownDialogs, i.win)
+ 		i.win.Hide() // Close directly without executing the callback. This is the callback.
+ 	}, parent)
+ 
+diff --git a/widget/popup.go b/widget/popup.go
+index 45623e3..4cd6e3f 100644
+--- a/widget/popup.go
++++ b/widget/popup.go
+@@ -234,3 +234,12 @@ func withRelativePosition(rel fyne.Position, to fyne.CanvasObject, f func(positi
+ 	pos := d.AbsolutePositionForObject(to).Add(rel)
+ 	f(pos)
+ }
++
++// OverlayContent returns what an overlay from Canvas.Overlays() shows: the
++// PopUp or PopUpMenu inside a pop-up overlay, otherwise o itself.
++func OverlayContent(o fyne.CanvasObject) fyne.CanvasObject {
++	if oc, ok := o.(*widget.OverlayContainer); ok && oc.Content != nil {
++		return oc.Content
++	}
++	return o
++}

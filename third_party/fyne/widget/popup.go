@@ -234,3 +234,12 @@ func withRelativePosition(rel fyne.Position, to fyne.CanvasObject, f func(positi
 	pos := d.AbsolutePositionForObject(to).Add(rel)
 	f(pos)
 }
+
+// OverlayContent returns what an overlay from Canvas.Overlays() shows: the
+// PopUp or PopUpMenu inside a pop-up overlay, otherwise o itself.
+func OverlayContent(o fyne.CanvasObject) fyne.CanvasObject {
+	if oc, ok := o.(*widget.OverlayContainer); ok && oc.Content != nil {
+		return oc.Content
+	}
+	return o
+}

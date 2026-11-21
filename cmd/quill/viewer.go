@@ -113,6 +113,7 @@ func (d *desk) showLightbox(content fyne.CanvasObject, onClose func()) func() {
 	})
 	d.lightboxClose = closeFn
 	c.Overlays().Add(lb)
+	d.escClose(lb, closeFn)
 	lb.Resize(c.Size())
 	return closeFn
 }

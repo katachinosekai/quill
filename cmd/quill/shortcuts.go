@@ -80,6 +80,9 @@ func (d *desk) setupShortcuts() {
 }
 
 func (d *desk) escape(s *deskSession) bool {
+	if d.escapeOverlay() {
+		return true
+	}
 	for _, v := range d.allViews() {
 		if v.sel != nil && v.sel.has {
 			d.clearSelections()
