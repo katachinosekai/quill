@@ -113,6 +113,7 @@ func (d *desk) setRateLimit(r *protocol.RateLimit) {
 	}
 	d.usage.update()
 	d.clearLimitIfAllowed()
+	d.checkUsagePause()
 }
 
 func creditsText(r *protocol.RateLimit) string {

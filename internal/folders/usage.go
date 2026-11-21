@@ -26,6 +26,7 @@ type SessionMeta struct {
 	Tokens     int64  `json:"tokens"`
 	Context    int    `json:"context"`
 	ContextMax int    `json:"contextMax"`
+	Kmem       string `json:"kmem,omitempty"`
 }
 
 type Usage struct {

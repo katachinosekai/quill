@@ -39,6 +39,13 @@ type restoreState struct {
 	Queues  map[string][]string `json:"queues,omitempty"`
 	Meta    map[string]sessMeta `json:"meta,omitempty"`
 	Drafts  map[string]string   `json:"drafts,omitempty"`
+	Paused  *pauseState         `json:"paused,omitempty"`
+}
+
+type pauseState struct {
+	Until int64    `json:"until"`
+	IDs   []string `json:"ids"`
+	Text  string   `json:"text"`
 }
 
 type binWatch struct {
@@ -155,6 +162,9 @@ func (d *desk) trySwap() {
 	}
 	d.saveQueues(&st)
 	d.saveSessions(&st)
+	if d.usagePaused {
+		st.Paused = &pauseState{Until: d.pauseUntil.Unix(), IDs: d.pausedIDs, Text: d.pauseText.Text}
+	}
 	if d.current != nil && d.current.persisted {
 		st.Session = d.current.id
 	}
@@ -313,6 +323,10 @@ func takeRestore() *restoreState {
 
 func (d *desk) applyRestore(st *restoreState) {
 	d.restoreSessions(st)
+	if p := st.Paused; p != nil {
+		d.usagePaused, d.pauseUntil, d.pausedIDs = true, time.Unix(p.Until, 0), p.IDs
+		d.showPauseBanner(p.Text)
+	}
 	for _, hs := range st.Handed {
 		hs.Handle.FromExec = true
 		s := d.session(hs.ID)

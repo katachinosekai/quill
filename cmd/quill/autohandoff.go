@@ -110,7 +110,7 @@ func (d *desk) safePoint(s *deskSession) bool {
 }
 
 func (d *desk) checkAutoHandoff(s *deskSession) {
-	if !d.kmemAvailable() {
+	if !d.kmemAvailable() || d.usagePaused {
 		return
 	}
 	p := d.handoffPolicy()
@@ -170,7 +170,7 @@ func (d *desk) scheduleCold(s *deskSession, p handoffPolicy) {
 }
 
 func (d *desk) coldRotate(s *deskSession, stamp time.Time, ttl time.Duration) {
-	if s.coldStamp != stamp || s.rotateNo || !d.safePoint(s) {
+	if s.coldStamp != stamp || s.rotateNo || d.usagePaused || !d.safePoint(s) {
 		return
 	}
 	p := d.handoffPolicy()

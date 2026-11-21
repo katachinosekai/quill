@@ -2138,3 +2138,86 @@ func TestStartFailureKeepsRewindAndCancelsKmemRestart(t *testing.T) {
 		}
 	})
 }
+
+func TestLiveUsageAndPause(t *testing.T) {
+	raw := json.RawMessage(`{"subscription_type":"max","rate_limits":{"five_hour":{"utilization":6,"resets_at":"2026-11-21T13:20:00.469099+00:00"},"seven_day":{"utilization":41,"resets_at":"2026-11-26T14:00:00.469118+00:00"},"seven_day_opus":null}}`)
+	w, ok := parseUsageWindows(raw)
+	if !ok || w["five_hour"].Utilization != 0.06 || w["seven_day"].Utilization != 0.41 || w["five_hour"].ResetsAt != time.Date(2026, 11, 21, 13, 20, 0, 0, time.UTC).Unix() {
+		t.Fatalf("get_usage reply: %+v", w)
+	}
+	h := newHarness(t)
+	var busy, idle *deskSession
+	h.ui(func() {
+		busy = h.d.createSession(h.proj, "default", "default")
+		idle = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(busy, "hi")
+		h.d.sendTo(idle, "hi")
+	})
+	h.eventually("idle", func() bool { return !busy.conv.Busy && !idle.conv.Busy && busy.running() && idle.running() })
+	h.ui(func() {
+		h.d.org.Kmem[editsID] = "launcher"
+		h.d.phoneSync = &phoneSync{rc: map[string]string{"rc-1": editsID}}
+		if m := h.d.phoneUsage().Meta["rc-1"]; m.Kmem != "launcher" {
+			t.Fatalf("the phone feed carries each session's kmem name: %+v", m)
+		}
+		h.d.phoneSync = nil
+		h.d.org.Kmem[idle.id] = "quill"
+		h.d.rate = &protocol.RateLimit{OverageStatus: "allowed"}
+		h.d.applyUsageWindows(map[string]protocol.RateWindow{"five_hour": {Utilization: 0.5, ResetsAt: time.Now().Add(time.Hour).Unix()}})
+		if h.d.usagePaused || h.d.rate.OverageStatus != "allowed" {
+			t.Fatal("polled windows merge into the stored usage; 50% doesn't pause")
+		}
+		busy.conv.Busy = true
+		idle.queue = []string{"later"}
+		reset := time.Now().Add(40 * time.Minute)
+		h.d.applyUsageWindows(map[string]protocol.RateWindow{"five_hour": {Utilization: 0.96, ResetsAt: reset.Unix()}})
+		if !h.d.usagePaused || !h.d.pauseBanner.Visible() || !reflect.DeepEqual(h.d.pausedIDs, []string{busy.id}) {
+			t.Fatalf("96%% pauses: banner shown, working sessions asked to stop: %v", h.d.pausedIDs)
+		}
+		var asked bool
+		for _, it := range busy.conv.Items {
+			asked = asked || it.Kind == chat.User && strings.Contains(it.Text, "usage is at 96%")
+		}
+		if !asked {
+			t.Fatal("the working session got the pause message")
+		}
+		h.d.flushQueue(idle)
+		if len(idle.queue) != 1 {
+			t.Fatal("queued messages wait while paused")
+		}
+		var st restoreState
+		h.d.saveQueues(&st)
+		h.d.saveSessions(&st)
+		if h.d.usagePaused {
+			st.Paused = &pauseState{Until: h.d.pauseUntil.Unix(), IDs: h.d.pausedIDs, Text: h.d.pauseText.Text}
+		}
+		if st.Paused == nil || st.Paused.Until != reset.Unix() {
+			t.Fatal("the pause survives a live update")
+		}
+		busy.conv.Busy = false
+		h.d.resumeFromPause()
+		if h.d.usagePaused || h.d.pauseBanner.Visible() || len(idle.queue) != 0 {
+			t.Fatal("resume lifts the pause and sends held queues")
+		}
+		var resumed bool
+		for _, it := range busy.conv.Items {
+			resumed = resumed || it.Kind == chat.User && it.Text == resumeMessage
+		}
+		if !resumed {
+			t.Fatal("paused sessions are told to continue")
+		}
+		h.d.cmdCost(idle)
+		h.d.cmdContext(idle)
+		h.d.cmdStatus(idle)
+		var notes []string
+		for _, it := range idle.conv.Items {
+			if it.Kind == chat.Notice {
+				notes = append(notes, it.Text)
+			}
+		}
+		all := strings.Join(notes, "\n")
+		if !strings.Contains(all, "This session: $") || !strings.Contains(all, "kmem: quill") || !strings.Contains(all, "5-hour window") {
+			t.Fatalf("/cost, /context, /status answer at once: %s", all)
+		}
+	})
+}

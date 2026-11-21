@@ -34,6 +34,10 @@ var localCommands = []protocol.Command{
 	{Name: "agents", Description: "List the configured subagents (handled by Quill)"},
 	{Name: "add-dir", Description: "Give this session another working folder (handled by Quill)", ArgumentHint: "[folder]"},
 	{Name: "rewind", Description: "Go back to an earlier message, optionally undoing file changes (handled by Quill)"},
+	{Name: "usage", Description: "Plan usage now, even mid-turn (handled by Quill)"},
+	{Name: "cost", Description: "This session's cost and turns (handled by Quill)"},
+	{Name: "context", Description: "This session's context use (handled by Quill)"},
+	{Name: "status", Description: "This session's model, mode, folder and state (handled by Quill)"},
 }
 
 func (d *desk) runLocalCommand(text string) bool {
@@ -73,7 +77,7 @@ func (d *desk) runLocalCommand(text string) bool {
 		}
 		d.setModel(s, arg)
 		note("Model set to " + arg + ".")
-	case "mcp", "chrome", "tasks", "permissions", "fork", "branch", "copy", "export", "diff", "memory", "hooks", "agents", "add-dir", "rewind":
+	case "mcp", "chrome", "tasks", "permissions", "fork", "branch", "copy", "export", "diff", "memory", "hooks", "agents", "add-dir", "rewind", "usage", "cost", "context", "status":
 		if s == nil {
 			return false
 		}
@@ -104,6 +108,14 @@ func (d *desk) runLocalCommand(text string) bool {
 			d.cmdAddDir(s, arg)
 		case "rewind":
 			d.cmdRewind(s)
+		case "usage":
+			d.cmdUsage(s)
+		case "cost":
+			d.cmdCost(s)
+		case "context":
+			d.cmdContext(s)
+		case "status":
+			d.cmdStatus(s)
 		}
 	case "exit", "quit":
 		if s == nil {

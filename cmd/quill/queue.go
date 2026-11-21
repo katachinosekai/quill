@@ -33,7 +33,7 @@ func (d *desk) clearInputFor(s *deskSession, text string) {
 }
 
 func (d *desk) flushQueue(s *deskSession) {
-	if len(s.queue) == 0 || !s.running() {
+	if len(s.queue) == 0 || !s.running() || d.usagePaused {
 		return
 	}
 	text := strings.Join(s.queue, "\n\n")

@@ -51,7 +51,7 @@ func (d *desk) phoneUsage() folders.Usage {
 				continue
 			}
 			_, _, st := d.rowText(id)
-			m := folders.SessionMeta{Status: phoneStatus[st], Msgs: info.Messages, Tokens: int64(info.Usage.Total())}
+			m := folders.SessionMeta{Status: phoneStatus[st], Msgs: info.Messages, Tokens: int64(info.Usage.Total()), Kmem: d.org.Kmem[id]}
 			if !info.Last.IsZero() {
 				m.Last = info.Last.UnixMilli()
 			}

@@ -167,6 +167,11 @@ type desk struct {
 	localBusy    bool
 	fetchLocal   func(host string) []localInfo
 	after        func(time.Duration, func())
+	usagePaused  bool
+	pauseUntil   time.Time
+	pausedIDs    []string
+	pauseBanner  *fyne.Container
+	pauseText    *widget.Label
 	controlFn    func(s *deskSession, req map[string]any) (json.RawMessage, error)
 	pingLocal    func(host string) bool
 	localWindows map[string]int
@@ -442,7 +447,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	}
 	_ = roBtn
 	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow)
-	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), rulesBtn, widget.NewSeparator(), heading("Phone"), d.buildPhoneRow())
+	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), rulesBtn, widget.NewSeparator(), heading("Phone"), d.buildPhoneRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
 	openSettings.Alignment = widget.ButtonAlignLeading
@@ -934,7 +939,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.tabRow = d.buildTabs()
 	d.usage = newUsagePanel(d)
 	d.usageRow = d.usage.buildStrip()
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
@@ -1935,6 +1940,7 @@ func (d *desk) watch(ctx context.Context) {
 	d.do(d.reopenLastTab)
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
+	go d.usageLoop(ctx)
 	go d.watchUpdates(ctx)
 	go d.chat.followGuard(ctx)
 	go d.fetchCommands()
