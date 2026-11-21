@@ -85,6 +85,7 @@ type deskSession struct {
 	clearAfterTurn bool
 	terminal       *live.Process
 	planWait       bool
+	releaseTasks   []string // kmem task releases Quill asked for after a rewind (allowed for that turn)
 	runAll         bool
 	runAllNext     bool
 	queue          []string
@@ -2365,7 +2366,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			return nil
 		}
-		if s.runAll || d.kmemSaveAllowed(s, it.Request) || d.kmemResumeAllowed(s, it.Request) {
+		if s.runAll || d.kmemSaveAllowed(s, it.Request) || d.kmemResumeAllowed(s, it.Request) || kmemReleaseAllowed(s, it.Request) {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}
@@ -2405,6 +2406,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		}
 	case ev.Type == "result":
 		s.inTurn = false
+		s.releaseTasks = nil
 		if s.restoreMode != "" {
 			mode := s.restoreMode
 			s.restoreMode = ""

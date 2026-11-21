@@ -116,7 +116,7 @@ func (d *desk) showSettings() {
 		container.NewTabItem("Sessions", container.NewVScroll(d.setSessions)),
 		container.NewTabItem("Permissions", d.permissionsPane(d.settingsCwd())),
 		container.NewTabItem("Tools", d.toolsPane()),
-		container.NewTabItem("Memory", container.NewVScroll(d.memoryPane(d.settingsCwd()))),
+		container.NewTabItem("Memory", container.NewVScroll(d.memoryPane(d.current, d.settingsCwd()))),
 	)
 	d.settingsDlg = dialog.NewCustom("Settings", "Close", tabs, d.win)
 	d.settingsDlg.SetOnClosed(func() { d.settingsDlg = nil })

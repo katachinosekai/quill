@@ -39,6 +39,7 @@ type kmemSave struct {
 	prompt string
 	end    bool
 	place  string
+	keep   bool // save only (from /export): the session goes on
 }
 
 var handoffLine = regexp.MustCompile(`^(\S+)\s+\d+ items?, saved (\S+)`)
@@ -303,6 +304,19 @@ func (d *desk) relaunchViaKmem(id, name string) {
 
 var kmemSaveExtra = [][]string{{"kmem"}, {"pzlock", "status"}}
 
+// kmemReleaseAllowed lets through exactly the `kmem task release <id>` calls
+// Quill asked for after a rewind, during that turn.
+func kmemReleaseAllowed(s *deskSession, r *protocol.ControlRequest) bool {
+	if len(s.releaseTasks) == 0 {
+		return false
+	}
+	var extra [][]string
+	for _, id := range s.releaseTasks {
+		extra = append(extra, []string{"kmem", "task", "release", id})
+	}
+	return readOnlyRequest(r, extra)
+}
+
 func (d *desk) kmemSaveAllowed(s *deskSession, r *protocol.ControlRequest) bool {
 	if s.kmemSave == nil {
 		return false
@@ -378,10 +392,18 @@ func (d *desk) kmemAfterTurn(s *deskSession) {
 				if ks.end {
 					what = "end"
 				}
+				if ks.keep {
+					d.notify(s, fmt.Sprintf("The kmem handoff “%s” wasn't saved by this session.", ks.name))
+					return
+				}
 				d.notify(s, fmt.Sprintf("The kmem handoff “%s” wasn't saved by this session, so the %s was cancelled and nothing was stopped or deleted. Try again once it can save.", ks.name, what))
 				return
 			}
 			s.kmemSave = nil
+			if ks.keep {
+				d.notify(s, fmt.Sprintf("Saved the kmem handoff “%s”; a new session can continue from it (New session → resume from kmem).", ks.name))
+				return
+			}
 			if ks.end {
 				d.finishKmemEnd(s, ks.name, ks.place)
 				return
@@ -408,6 +430,24 @@ func kmemEndMessage(name string) string {
 		"Save your kmem handoff now: run `kmem handoff save %s` with --pointer and --state lines for everything the next session needs; run it again even if you saved it recently, Quill checks the save time. "+
 		"It refuses until your claims, shared lock turn, background jobs and uncommitted files are recorded, so record or release those first. "+
 		"Don't start other work. Reply with one line once it is saved.", name)
+}
+
+// saveHandoffNow asks the session to save its kmem handoff and go on (/export
+// "Save as kmem handoff").
+func (d *desk) saveHandoffNow(s *deskSession) {
+	name := d.org.Kmem[s.id]
+	if name == "" || !d.kmemAvailable() || !s.running() || s.kmemSave != nil {
+		return
+	}
+	spare := 0
+	if s.inTurn {
+		spare = 1
+	}
+	s.kmemSave = &kmemSave{name: name, asked: time.Now().Add(-2 * time.Second), spare: spare, keep: true}
+	d.notify(s, fmt.Sprintf("Asked this session to save its kmem handoff “%s”.", name))
+	d.sendTo(s, fmt.Sprintf("Save your kmem handoff now: run `kmem handoff save %s` with --pointer and --state lines for everything a new session would need to continue this work "+
+		"(it refuses until your claims, shared lock turn, background jobs and uncommitted files are recorded, so record or release those first). "+
+		"Then reply with one line and wait; this session goes on afterwards.", name))
 }
 
 func (d *desk) endAndSave(id string) {

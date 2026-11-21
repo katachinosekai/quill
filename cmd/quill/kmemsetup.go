@@ -272,5 +272,5 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 		dlg.Show()
 	}
 	refresh()
-	return container.NewVBox(status, btn, d.memoryModeCheck())
+	return container.NewVBox(status, btn, d.memoryModeRadio(nil))
 }

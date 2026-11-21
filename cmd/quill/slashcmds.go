@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -126,9 +128,15 @@ func (d *desk) cmdCopy(s *deskSession) {
 
 // export
 
-func exportMarkdown(title string, c *chat.Conversation) string {
+func exportMarkdown(title string, c *chat.Conversation, meta ...string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n", title)
+	for _, m := range meta {
+		fmt.Fprintf(&b, "- %s\n", m)
+	}
+	if len(meta) > 0 {
+		b.WriteString("\n")
+	}
 	for _, it := range c.Items {
 		switch it.Kind {
 		case chat.User:
@@ -157,9 +165,20 @@ func safeName(s string) string {
 	return s
 }
 
+// exportMeta: who and where, for the export's header (kmem name, project,
+// folder, date).
+func (d *desk) exportMeta(s *deskSession) []string {
+	var meta []string
+	if k := d.org.Kmem[s.id]; k != "" {
+		meta = append(meta, "kmem: "+k)
+	}
+	meta = append(meta, "Project: "+d.projectOf(s.id), "Folder: "+tildePath(s.cwd), "Exported: "+time.Now().Format("2006-01-02 15:04"))
+	return meta
+}
+
 func (d *desk) cmdExport(s *deskSession, arg string) {
 	title, _, _ := d.rowText(s.id)
-	text := exportMarkdown(title, s.conv)
+	text := exportMarkdown(title, s.conv, d.exportMeta(s)...)
 	write := func(path string) {
 		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 			d.notify(s, "Export failed: "+err.Error())
@@ -184,7 +203,7 @@ func (d *desk) cmdExport(s *deskSession, arg string) {
 			w.Close()
 			write(path)
 		}, d.win)
-		dlg.SetFileName(safeName(title) + ".md")
+		dlg.SetFileName(safeName(firstNonEmpty(d.org.Kmem[s.id], title)) + ".md")
 		if l, err := storage.ListerForURI(storage.NewFileURI(s.cwd)); err == nil {
 			dlg.SetLocation(l)
 		}
@@ -198,7 +217,17 @@ func (d *desk) cmdExport(s *deskSession, arg string) {
 	})
 	saveBtn := widget.NewButtonWithIcon("Save to file...", theme.DocumentSaveIcon(), func() { choose.Hide(); save() })
 	copyBtn.Importance = widget.HighImportance
-	choose = dialog.NewCustom("Export conversation", "Cancel", container.NewVBox(caption("The conversation as Markdown: your messages, Claude's replies and one line per tool call."), container.NewHBox(copyBtn, saveBtn)), d.win)
+	btns := container.NewHBox(copyBtn, saveBtn)
+	objs := []fyne.CanvasObject{caption("The conversation as Markdown: your messages, Claude's replies and one line per tool call, with its kmem name, project and folder on top.")}
+	if name := d.org.Kmem[s.id]; name != "" && d.kmemAvailable() {
+		ho := widget.NewButtonWithIcon("Save as kmem handoff “"+name+"”", theme.HistoryIcon(), func() { choose.Hide(); d.saveHandoffNow(s) })
+		if !s.running() || s.kmemSave != nil {
+			ho.Disable()
+		}
+		btns.Add(ho)
+		objs = append(objs, caption("A kmem handoff lets a new session continue this work (New session → resume from kmem); the session saves it itself and goes on."))
+	}
+	choose = dialog.NewCustom("Export conversation", "Cancel", container.NewVBox(append(objs[:1], append([]fyne.CanvasObject{btns}, objs[1:]...)...)...), d.win)
 	choose.Show()
 }
 
@@ -260,17 +289,57 @@ func memoryFiles(cwd string) []string {
 	}
 }
 
-func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
+// memoryPane (/memory and Settings → Memory), fitted to Quill and kmem
+// (user 2026-11-21): the memory Quill sessions use comes first; with kmem,
+// Claude's auto memory is off in Quill sessions, so its switch and MEMORY.md
+// are shown as belonging to terminal sessions only.
+func (d *desk) memoryPane(s *deskSession, cwd string) fyne.CanvasObject {
 	box := container.NewVBox()
 	var fill func()
 	fill = func() {
 		box.Objects = nil
-		box.Add(d.kmemMemoryRow())
+		kmemMode := d.kmemMemory()
+		box.Add(d.memoryModeRadio(fill))
 		box.Add(widget.NewSeparator())
+		if d.kmemAvailable() {
+			box.Add(d.kmemMemoryRow())
+			var btns []fyne.CanvasObject
+			if s != nil {
+				if name := d.org.Kmem[s.id]; name != "" {
+					btns = append(btns, widget.NewButtonWithIcon("Handoff “"+name+"”", theme.HistoryIcon(), func() {
+						text := d.kmemHandoffText(name)
+						if strings.TrimSpace(text) == "" {
+							text = "No handoff saved for “" + name + "” yet."
+						}
+						d.textDialog("kmem handoff "+name, text)
+					}))
+				}
+			}
+			if rf := kmemRulesFile(); rf != "" {
+				btns = append(btns, widget.NewButtonWithIcon("Shared rules", theme.DocumentIcon(), func() {
+					b, err := os.ReadFile(rf)
+					if err != nil {
+						dialog.ShowError(err, d.win)
+						return
+					}
+					d.textDialog("kmem shared rules", string(b))
+				}))
+			}
+			if len(btns) > 0 {
+				box.Add(container.NewHBox(btns...))
+			}
+			box.Add(widget.NewSeparator())
+		}
+		if kmemMode {
+			box.Add(boldLabel("Terminal sessions (not Quill sessions)"))
+			box.Add(caption("Quill sessions use kmem and run with Claude Code's auto memory off. The switch and MEMORY.md below only matter for Claude Code run in a terminal."))
+		}
 		box.Add(d.autoMemoryRow(cwd))
 		box.Add(widget.NewSeparator())
+		box.Add(boldLabel("Instruction files (CLAUDE.md)"))
 		for i, f := range memoryFiles(cwd) {
 			f := f
+			autoMem := i == len(memoryFiles(cwd))-1
 			_, err := os.Stat(f)
 			exists := err == nil
 			name := widget.NewLabel(memoryNames[i])
@@ -279,22 +348,30 @@ func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
 			if !exists {
 				path += "  ·  not created yet"
 			}
+			if autoMem && kmemMode {
+				path += "  ·  not used by Quill sessions (they use kmem)"
+			}
 			sub := widget.NewLabel(path)
 			sub.SizeName = theme.SizeNameCaptionText
 			sub.Wrapping = fyne.TextWrapBreak
-			var btn *widget.Button
+			var btn fyne.CanvasObject
 			if exists {
-				btn = widget.NewButtonWithIcon("Open", theme.DocumentIcon(), func() { d.openPath(f) })
-			} else {
-				btn = widget.NewButtonWithIcon("Create", theme.ContentAddIcon(), func() {
+				b := widget.NewButtonWithIcon("Open", theme.DocumentIcon(), func() { d.openPath(f) })
+				b.Importance = widget.MediumImportance
+				btn = b
+			} else if !(autoMem && kmemMode) {
+				b := widget.NewButtonWithIcon("Create", theme.ContentAddIcon(), func() {
 					_ = os.MkdirAll(filepath.Dir(f), 0o755)
 					if err := os.WriteFile(f, []byte("# Notes for Claude\n"), 0o644); err == nil {
 						d.openPath(f)
 						fill()
 					}
 				})
+				b.Importance = widget.MediumImportance
+				btn = b
+			} else {
+				btn = layout.NewSpacer()
 			}
-			btn.Importance = widget.MediumImportance
 			text := container.New(&tightVBox{}, name, sub)
 			box.Add(container.NewBorder(nil, nil, nil, container.NewCenter(btn), text))
 			box.Add(widget.NewSeparator())
@@ -337,7 +414,7 @@ func (d *desk) autoMemoryRow(cwd string) fyne.CanvasObject {
 }
 
 func (d *desk) cmdMemory(s *deskSession) {
-	dlg := dialog.NewCustom("Memory files", "Close", container.NewVScroll(d.memoryPane(s.cwd)), d.win)
+	dlg := dialog.NewCustom("Memory files", "Close", container.NewVScroll(d.memoryPane(s, s.cwd)), d.win)
 	dlg.Resize(fyne.NewSize(720, 460))
 	dlg.Show()
 }
@@ -562,7 +639,14 @@ func (d *desk) permissionsPane(cwd string) fyne.CanvasObject {
 		}
 		for _, r := range rules {
 			r := r
-			l := widget.NewLabel(fmt.Sprintf("%s · %s · %s", r.kind, r.scope, r.rule))
+			text := fmt.Sprintf("%s · %s · %s", r.kind, r.scope, r.rule)
+			if r.kind == "allow" {
+				text += "  ·  runs without asking or a plan"
+			}
+			if touchesKmemData(r.rule) && r.kind != "deny" {
+				text = "⚠ " + text + "  ·  changes kmem's data directly"
+			}
+			l := widget.NewLabel(text)
 			l.Truncation = fyne.TextTruncateEllipsis
 			rm := widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), func() {
 				if err := removeRule(r); err != nil {
@@ -585,8 +669,37 @@ func (d *desk) permissionsPane(cwd string) fyne.CanvasObject {
 	ro.Alignment = widget.ButtonAlignLeading
 	add := widget.NewButtonWithIcon("Add rule...", theme.ContentAddIcon(), func() { d.addRuleDialog(cwd, fill) })
 	add.Importance = widget.MediumImportance
-	rules := container.NewBorder(container.NewHBox(add), container.NewVBox(note, ro), nil, nil, container.NewVScroll(box))
-	return container.NewAppTabs(container.NewTabItem("Rules", rules), container.NewTabItem("Workspace", d.workspacePane(cwd)))
+	rules := container.NewBorder(container.NewHBox(add), note, nil, nil, container.NewVScroll(box))
+	return container.NewAppTabs(container.NewTabItem("Rules", rules), container.NewTabItem("Plan-first", d.planFirstPane(ro)),
+		container.NewTabItem("Workspace", d.workspacePane(cwd)))
+}
+
+// planFirstPane: what runs without a plan round when Plan first is on.
+func (d *desk) planFirstPane(ro *widget.Button) fyne.CanvasObject {
+	state := "Plan first is off: Claude Code's own permission prompts apply."
+	if d.planFirst {
+		state = "Plan first is on: anything that isn't read-only waits for an approved plan, except tools your allow rules let through."
+	}
+	head := widget.NewLabel(state)
+	head.Wrapping = fyne.TextWrapWord
+	km := widget.NewLabel("kmem's read-only commands always run without a plan:\n" + strings.ReplaceAll(builtinReadOnly, "\n", ", ") +
+		"\nDuring a kmem handoff save Quill asked for, the session may also run its kmem writes.")
+	km.Wrapping = fyne.TextWrapWord
+	extra := strings.TrimSpace(d.app.Preferences().String("extraReadOnly"))
+	if extra == "" {
+		extra = "(none)"
+	}
+	mine := widget.NewLabel("Your own read-only commands: " + strings.ReplaceAll(extra, "\n", ", "))
+	mine.Wrapping = fyne.TextWrapWord
+	return container.NewVScroll(container.NewVBox(head, widget.NewSeparator(), km, widget.NewSeparator(), mine, container.NewHBox(ro)))
+}
+
+// kmemDataRe: rules reaching kmem's store or live files directly; kmem's data
+// must only change through kmem itself (shared rule 18).
+var kmemDataRe = regexp.MustCompile(`(?i)share/kmem|kmem\.db|sqlite3?\b.*kmem|\.kmem`)
+
+func touchesKmemData(rule string) bool {
+	return kmemDataRe.MatchString(rule) && !strings.HasPrefix(strings.TrimSpace(rule), "Read(")
 }
 
 var settingsScopes = []string{"Local (this folder, only you)", "Project (this folder, shared in the repo)", "User (all folders)"}
@@ -608,9 +721,26 @@ func (d *desk) addRuleDialog(cwd string, done func()) {
 	rule.SetPlaceHolder("Bash(npm test *)   or   Read(./docs/**)   or   WebFetch(domain:example.com)")
 	where := widget.NewSelect(settingsScopes, nil)
 	where.SetSelected(settingsScopes[0])
+	warn := widget.NewLabel("")
+	warn.Wrapping = fyne.TextWrapWord
+	warn.Importance = widget.WarningImportance
+	update := func() {
+		var w []string
+		if kind.Selected == "allow" {
+			w = append(w, "Allowed tools run without asking you and without a plan: Claude Code allows them before Quill's plan-first sees them.")
+		}
+		if kind.Selected != "deny" && touchesKmemData(rule.Text) {
+			w = append(w, "This reaches kmem's data directly; kmem's data must only change through the kmem command (shared rule 18).")
+		}
+		warn.SetText(strings.Join(w, "\n"))
+	}
+	kind.OnChanged = func(string) { update() }
+	rule.OnChanged = func(string) { update() }
+	update()
 	dlg := dialog.NewForm("Add permission rule", "Add", "Cancel", []*widget.FormItem{
 		widget.NewFormItem("Kind", kind), widget.NewFormItem("Rule", rule), widget.NewFormItem("Save in", where),
 		widget.NewFormItem("", caption("Tool(pattern), as in Claude Code's /permissions. Deny wins over ask, ask over allow.")),
+		widget.NewFormItem("", warn),
 	}, func(ok bool) {
 		if !ok {
 			return
@@ -644,6 +774,18 @@ func (d *desk) workspacePane(cwd string) fyne.CanvasObject {
 		}
 		if len(dirs) == 0 {
 			box.Add(widget.NewLabel("No extra working folders. Claude works in " + tildePath(cwd) + "."))
+		}
+		if pd := kmemProjectsDir(); pd != "" && d.current != nil && !strings.HasPrefix(cwd+"/", strings.TrimSuffix(pd, "/")+"/") {
+			has := false
+			for _, w := range dirs {
+				has = has || w.dir == pd
+			}
+			if !has {
+				s := d.current
+				sugg := widget.NewButtonWithIcon("Add kmem's Projects folder "+tildePath(pd)+"...", theme.FolderNewIcon(), func() { d.addDirWhere(s, pd, fill) })
+				sugg.Importance = widget.LowImportance
+				box.Add(container.NewVBox(caption("This session works outside kmem's projects folder:"), container.NewHBox(sugg)))
+			}
 		}
 		for _, w := range dirs {
 			w := w
@@ -1156,7 +1298,100 @@ func (d *desk) rewindCode(s *deskSession, u *chat.Item) {
 	d.rewindMode(s, u, true, true)
 }
 
+// kmemWriteRe finds kmem commands that change kmem (they stay when the chat
+// that ran them is rewound).
+var kmemWriteRe = regexp.MustCompile(`\bkmem\b(?:\s+--as\s+(?:"[^"]*"|\S+))?\s+(add|retire|trash|handoff\s+save|task\s+(?:add|claim|done|release))\b[^\n;&|]*`)
+var kmemClaimRe = regexp.MustCompile(`\btask\s+claim\s+(\S+)`)
+
+// kmemWrites lists the kmem writes in Bash calls among items, and the task
+// ids those calls claimed (and didn't finish or release).
+func kmemWrites(items []*chat.Item) (writes, claims []string) {
+	open := map[string]bool{}
+	var order []string
+	for _, it := range items {
+		if it.Kind != chat.Tool || it.ToolName != "Bash" {
+			continue
+		}
+		var in struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(it.Input, &in) != nil {
+			continue
+		}
+		for _, m := range kmemWriteRe.FindAllString(in.Command, -1) {
+			writes = append(writes, strings.TrimSpace(m))
+			if c := kmemClaimRe.FindStringSubmatch(m); c != nil {
+				if !open[c[1]] {
+					order = append(order, c[1])
+				}
+				open[c[1]] = true
+			}
+			for _, verb := range []string{"done", "release"} {
+				if c := regexp.MustCompile(`\btask\s+` + verb + `\s+(\S+)`).FindStringSubmatch(m); c != nil {
+					open[c[1]] = false
+				}
+			}
+		}
+	}
+	for _, id := range order {
+		if open[id] {
+			claims = append(claims, id)
+		}
+	}
+	return writes, claims
+}
+
+// rewindMode: before cutting the chat, kmem writes in the part that goes
+// away are listed (they stay in kmem) and claimed tasks can be released
+// (user 2026-11-21).
 func (d *desk) rewindMode(s *deskSession, u *chat.Item, files, keepChat bool) {
+	if keepChat {
+		d.rewindGo(s, u, files, keepChat, nil)
+		return
+	}
+	idx := -1
+	for i, it := range s.conv.Items {
+		if it == u {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		d.rewindGo(s, u, files, keepChat, nil)
+		return
+	}
+	writes, claims := kmemWrites(s.conv.Items[idx:])
+	if len(writes) == 0 {
+		d.rewindGo(s, u, files, keepChat, nil)
+		return
+	}
+	shown := writes
+	if len(shown) > 8 {
+		shown = append(append([]string{}, shown[:8]...), fmt.Sprintf("… and %d more", len(writes)-8))
+	}
+	msg := widget.NewLabel("The part you rewind ran these kmem commands. kmem keeps them: its history is never undone.\n\n" + strings.Join(shown, "\n"))
+	msg.Wrapping = fyne.TextWrapWord
+	objs := []fyne.CanvasObject{msg}
+	release := widget.NewCheck("", nil)
+	if len(claims) > 0 {
+		release.SetText("Ask this session to release task " + strings.Join(claims, ", ") + " after the rewind")
+		release.Checked = true
+		objs = append(objs, release)
+	}
+	c := dialog.NewCustomConfirm("Rewind past kmem changes?", "Rewind", "Cancel", container.NewVBox(objs...), func(ok bool) {
+		if !ok {
+			return
+		}
+		var rel []string
+		if len(claims) > 0 && release.Checked {
+			rel = claims
+		}
+		d.rewindGo(s, u, files, keepChat, rel)
+	}, d.win)
+	c.Resize(fyne.NewSize(640, 360))
+	c.Show()
+}
+
+func (d *desk) rewindGo(s *deskSession, u *chat.Item, files, keepChat bool, releaseTasks []string) {
 	if s.running() && s.conv.Busy {
 		d.notify(s, "Wait for the current turn to finish before rewinding.")
 		return
@@ -1194,6 +1429,13 @@ func (d *desk) rewindMode(s *deskSession, u *chat.Item, files, keepChat bool) {
 		s.conv.Items = append([]*chat.Item(nil), s.conv.Items[:idx]...)
 		s.conv.Busy = false
 		s.resumeAt = prev
+		// An approval given in the rewound part ends with it.
+		s.runAll, s.runAllNext, s.planWait = false, false, false
+		if len(releaseTasks) > 0 {
+			s.releaseTasks = releaseTasks
+			defer d.sendTo(s, "The conversation was rewound past your kmem task claim(s). Release them now, since that work was undone: "+
+				"run `kmem task release "+strings.Join(releaseTasks, "`, `kmem task release ")+"` (they're yours, so the release is allowed), then reply with one line.")
+		}
 		if v := d.viewFor(s); v != nil {
 			v.cache = map[*deskSession]*sessView{}
 			v.s = nil

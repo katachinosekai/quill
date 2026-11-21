@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -52,16 +54,66 @@ func sessionMemoryEnv(kmem bool) []string {
 	return nil
 }
 
-func (d *desk) memoryModeCheck() *widget.Check {
-	chk := widget.NewCheck("Use kmem as memory for Quill sessions (turns off Claude's auto memory in them; Konsole sessions are not changed). Applies to sessions started or resumed after this.", func(on bool) {
-		if on {
+// memoryModeRadio: which memory Quill sessions use (the same setting as the
+// checkbox under Settings → General → Memory (kmem)).
+func (d *desk) memoryModeRadio(changed func()) fyne.CanvasObject {
+	optKmem := "kmem (shared memory: handoffs, tasks, rules)"
+	optClaude := "Claude's auto memory (MEMORY.md per folder)"
+	r := widget.NewRadioGroup([]string{optKmem, optClaude}, nil)
+	if d.kmemMemory() {
+		r.SetSelected(optKmem)
+	} else {
+		r.SetSelected(optClaude)
+	}
+	r.OnChanged = func(v string) {
+		switch v {
+		case optKmem:
 			d.app.Preferences().SetString(memoryModeKey, memoryModeKmem)
-		} else {
+		case optClaude:
 			d.app.Preferences().SetString(memoryModeKey, memoryModeClaude)
+		default:
+			return
 		}
-	})
-	chk.Checked = d.kmemMemory()
-	return chk
+		if changed != nil {
+			changed()
+		}
+	}
+	if !d.kmemAvailable() {
+		r.Disable()
+	}
+	return container.NewVBox(boldLabel("Memory for Quill sessions"), r,
+		caption("Applies to Quill sessions started or resumed after a change."))
+}
+
+// kmemRulesFile: the shared rules file from kmem's config ("" if unknown).
+func kmemRulesFile() string {
+	b, err := os.ReadFile(kmemCfgPath())
+	if err != nil {
+		return ""
+	}
+	var c struct {
+		RulesFile   string `json:"rules_file"`
+		ProjectsDir string `json:"projects_dir"`
+	}
+	if json.Unmarshal(b, &c) != nil {
+		return ""
+	}
+	return expandHome(c.RulesFile)
+}
+
+// kmemProjectsDir: kmem's projects_dir ("" if unknown).
+func kmemProjectsDir() string {
+	b, err := os.ReadFile(kmemCfgPath())
+	if err != nil {
+		return ""
+	}
+	var c struct {
+		ProjectsDir string `json:"projects_dir"`
+	}
+	if json.Unmarshal(b, &c) != nil {
+		return ""
+	}
+	return expandHome(c.ProjectsDir)
 }
 
 func (d *desk) kmemMemoryRow() fyne.CanvasObject {
