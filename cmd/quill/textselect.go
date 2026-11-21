@@ -47,6 +47,67 @@ func (l *selLayer) Dragged(e *fyne.DragEvent) {
 	}
 	l.to = e.Position
 	l.has = true
+	l.autoScroll()
+	l.Refresh()
+}
+
+const edgeScroll = 28
+
+func (l *selLayer) autoScroll() {
+	if l.v == nil || l.v.scroll == nil {
+		return
+	}
+	sc := l.v.scroll
+	view := sc.Size().Height
+	content := sc.Content.MinSize().Height
+	y := l.Position().Y + l.to.Y - sc.Offset.Y
+	off := sc.Offset.Y
+	switch {
+	case y < edgeScroll:
+		off = max(0, off-edgeScroll)
+	case y > view-edgeScroll:
+		off = min(max(0, content-view), off+edgeScroll)
+	default:
+		return
+	}
+	if off != sc.Offset.Y {
+		sc.Offset.Y = off
+		sc.Refresh()
+	}
+}
+
+func (l *selLayer) selectWordAt(abs fyne.Position) {
+	runs := collectRuns(l.content())
+	if len(runs) == 0 {
+		return
+	}
+	p := abs.Subtract(fyne.CurrentApp().Driver().AbsolutePositionForObject(l))
+	pt := hitRun(runs, p)
+	if pt.run < 0 {
+		return
+	}
+	r := runs[pt.run]
+	c := min(pt.char, len([]rune(r.t.Text)))
+	ws, we := wordStart(r, c), wordEnd(r, c)
+	if we <= ws {
+		return
+	}
+	y := r.pos.Y + r.t.Size().Height/2
+	l.from = fyne.NewPos(charX(r, ws)+0.1, y)
+	l.to = fyne.NewPos(charX(r, we)-0.1, y)
+	l.has, l.dragging = true, false
+	l.Refresh()
+}
+
+func (l *selLayer) selectAll() {
+	runs := collectRuns(l.content())
+	if len(runs) == 0 {
+		return
+	}
+	first, last := runs[0], runs[len(runs)-1]
+	l.from = fyne.NewPos(textStart(first), first.pos.Y+first.t.Size().Height/2)
+	l.to = fyne.NewPos(runEnd(last)+1, last.pos.Y+last.t.Size().Height/2)
+	l.has, l.dragging = true, false
 	l.Refresh()
 }
 

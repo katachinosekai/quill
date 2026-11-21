@@ -111,6 +111,7 @@ func (d *desk) newPane() *pane {
 	p.input.SetPlaceHolder(p.input.hint)
 	p.input.onShortcut = d.handleShortcut
 	p.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(p.input, p.view.s, k) }
+	p.input.onFocus = d.clearSelections
 	sendBtn := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.sendFromPane(p, p.input.Text) })
 	sendBtn.Importance = widget.HighImportance
 	p.stop = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {

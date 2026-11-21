@@ -1815,3 +1815,100 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 		}
 	})
 }
+
+func TestKmemSafetyAndSelectionClicks(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy })
+	h.ui(func() {
+		if !h.d.safePoint(s) {
+			t.Fatal("an idle session is a safe point")
+		}
+		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgz","name":"Bash","input":{"command":"./test.sh","run_in_background":true}}]`)}})
+		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgz","content":"Command running in background with ID: tz1abcdef. Output is being written to: /tmp/o"}]`)}})
+		if h.d.safePoint(s) {
+			last := s.conv.Items[len(s.conv.Items)-1]
+			t.Fatalf("never rotate a session while its background tasks run (bg=%d last=%+v)", s.conv.Background(), last)
+		}
+		old := h.d.session(editsID)
+		h.d.org.Kmem[editsID] = "quill"
+		ns, err := h.d.forkSession(old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ns.forkOf != "quill" || h.d.org.Kmem[ns.id] != "" {
+			t.Fatal("a fork of a kmem session is not linked to that kmem name")
+		}
+		h.d.sendTo(ns, "go on")
+		var first string
+		for _, it := range ns.conv.Items {
+			if it.Kind == chat.User {
+				first = it.Text
+			}
+		}
+		if !strings.Contains(first, `fork of the session with kmem name "quill"`) || !strings.HasSuffix(first, "go on") || ns.forkOf != "" {
+			t.Fatalf("the fork's first message tells Claude not to use the original's kmem identity: %q", first)
+		}
+	})
+	h.ui(func() {
+		s2 := h.d.createSession(h.proj, "default", "default")
+		s2.conv.Items = append(s2.conv.Items,
+			&chat.Item{Seq: 801, Kind: chat.User, Text: "my own words"},
+			&chat.Item{Seq: 802, Kind: chat.Assistant, Text: "Alpha beta gamma"})
+		h.d.open(s2.id)
+		h.d.chat.relayoutInner()
+		var userLabel *widget.Label
+		deepWalk(h.d.chat.render(s2.conv.Items[0], &itemView{}), func(o fyne.CanvasObject) {
+			if l, ok := o.(*widget.Label); ok && l.Text == "my own words" {
+				userLabel = l
+			}
+		})
+		if userLabel == nil || userLabel.Selectable {
+			t.Fatal("user bubbles leave selection and right-click to Quill's own layer and menu")
+		}
+	})
+	var runs []textRun
+	h.eventually("laid out", func() bool { runs = collectRuns(h.d.chat.box); return len(runs) >= 2 })
+	h.ui(func() {
+		sel := h.d.chat.sel
+		var alpha textRun
+		for _, r := range runs {
+			if strings.Contains(r.t.Text, "beta") {
+				alpha = r
+			}
+		}
+		abs := fyne.CurrentApp().Driver().AbsolutePositionForObject(sel)
+		i := strings.Index(alpha.t.Text, "beta") + 1
+		sel.selectWordAt(abs.Add(fyne.NewPos(charX(alpha, i), alpha.pos.Y+alpha.t.Size().Height/2)))
+		if got := sel.text(); got != "beta" {
+			t.Fatalf("double-click selects the word: %q", got)
+		}
+		var mm *msgMenu
+		deepWalk(h.d.chat.box, func(o fyne.CanvasObject) {
+			if m, ok := o.(*msgMenu); ok && mm == nil {
+				mm = m
+			}
+		})
+		mm.Tapped(&fyne.PointEvent{})
+		if sel.has {
+			t.Fatal("a click on a message clears the selection")
+		}
+		sel.selectAll()
+		if got := sel.text(); !strings.Contains(got, "my own words") || !strings.Contains(got, "Alpha beta gamma") {
+			t.Fatalf("Ctrl+A selects the whole chat: %q", got)
+		}
+		h.d.input.FocusGained()
+		if sel.has {
+			t.Fatal("focusing the message box clears the selection")
+		}
+		sel.selectAll()
+		newBgTap(h.d.clearSelections).Tapped(&fyne.PointEvent{})
+		if sel.has {
+			t.Fatal("a click on empty space clears the selection")
+		}
+	})
+}

@@ -105,7 +105,7 @@ func contextPct(s *deskSession) int {
 }
 
 func (d *desk) safePoint(s *deskSession) bool {
-	return s.running() && !s.conv.Busy && len(s.queue) == 0 && s.kmemSave == nil && !s.compacting &&
+	return s.running() && !s.conv.Busy && len(s.queue) == 0 && s.kmemSave == nil && !s.compacting && s.conv.Background() == 0 &&
 		len(s.conv.PendingPermissions()) == 0 && !s.conv.AsksApproval() && !s.stopping
 }
 

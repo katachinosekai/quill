@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"fyne.io/fyne/v2/canvas"
+	"image/color"
 	"net/url"
 	"os"
 	"os/exec"
@@ -696,6 +698,10 @@ func (d *desk) forkSession(s *deskSession) (*deskSession, error) {
 		ns.conv, ns.loaded = conv, true
 	}
 	d.sessions[id] = ns
+	if k := d.org.Kmem[s.id]; k != "" {
+		ns.forkOf = k
+		d.org.Kmem[id] = ""
+	}
 	d.org.Titles[id] = title + " (fork)"
 	if place := d.placement(s.id); strings.HasPrefix(place, folderPrefix) {
 		d.org.Place[id] = place
@@ -859,14 +865,49 @@ func (d *desk) cmdRewind(s *deskSession) {
 
 type msgMenu struct {
 	widget.BaseWidget
-	content fyne.CanvasObject
-	onMenu  func(fyne.Position)
+	content  fyne.CanvasObject
+	onMenu   func(fyne.Position)
+	onTap    func()
+	onDouble func(fyne.Position)
 }
 
 func newMsgMenu(content fyne.CanvasObject, onMenu func(fyne.Position)) *msgMenu {
 	m := &msgMenu{content: content, onMenu: onMenu}
 	m.ExtendBaseWidget(m)
 	return m
+}
+
+func (m *msgMenu) Tapped(*fyne.PointEvent) {
+	if m.onTap != nil {
+		m.onTap()
+	}
+}
+
+func (m *msgMenu) DoubleTapped(e *fyne.PointEvent) {
+	if m.onDouble != nil {
+		m.onDouble(e.AbsolutePosition)
+	}
+}
+
+type bgTap struct {
+	widget.BaseWidget
+	onTap func()
+}
+
+func newBgTap(onTap func()) *bgTap {
+	b := &bgTap{onTap: onTap}
+	b.ExtendBaseWidget(b)
+	return b
+}
+
+func (b *bgTap) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(canvas.NewRectangle(color.Transparent))
+}
+
+func (b *bgTap) Tapped(*fyne.PointEvent) {
+	if b.onTap != nil {
+		b.onTap()
+	}
 }
 
 func (m *msgMenu) CreateRenderer() fyne.WidgetRenderer {
@@ -964,4 +1005,8 @@ func (d *desk) sessionToolsItem(id string) *fyne.MenuItem {
 		fyne.NewMenuItem("Add working folder...", run(func(s *deskSession) { d.cmdAddDir(s, "") })),
 	)
 	return tools
+}
+
+func forkIntro(kmemName string) string {
+	return fmt.Sprintf("(Quill: this session is a fork of the session with kmem name %q. Don't use that kmem name, its handoff or its task claims; that session still owns them. If this fork needs kmem, ask me for a new name.)\n\n", kmemName)
 }
