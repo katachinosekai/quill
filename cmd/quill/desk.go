@@ -31,7 +31,7 @@ import (
 	"github.com/katachinosekai/quill/internal/updater"
 )
 
-var modelChoices = []string{"default", "fable", "opus", "sonnet", "haiku", "ollama:qwen3.8:27b-80k", "ollama:qwen3-coder:30b-48k"}
+var modelChoices = []string{"default", "fable", "opus", "sonnet", "haiku"}
 var modeChoices = []string{"default", "acceptEdits", "plan", "auto"}
 
 type status int
@@ -93,6 +93,7 @@ type deskSession struct {
 	kmemNew     bool
 	rotateAsk   int
 	rotateTried int
+	lastClaude  string
 	limitSeen   string
 	compacting  bool
 	takeover    bool
@@ -143,29 +144,33 @@ type sideRow struct {
 }
 
 type desk struct {
-	nameClose  func()
-	limitMsg   string
-	notifier   *notifier
-	notifySink func(sid, title, body string)
-	foreground bool
-	compactor  func(ctx context.Context, model, text string) (string, error)
-	kmemRun    func(prog string, args ...string) (string, error)
-	kmemOff    bool
-	policy     handoffPolicy
-	policyAt   time.Time
-	policyBusy bool
-	app        fyne.App
-	win        fyne.Window
-	cfg        config
-	scanner    *transcript.Scanner
-	finder     *live.Finder
-	center     bool
-	sessions   map[string]*deskSession
-	infos      map[string]transcript.Info
-	order      []transcript.Info
-	terms      map[string]live.Process
-	current    *deskSession
-	ownPIDs    sync.Map
+	nameClose   func()
+	limitMsg    string
+	notifier    *notifier
+	notifySink  func(sid, title, body string)
+	foreground  bool
+	compactor   func(ctx context.Context, model, text string) (string, error)
+	kmemRun     func(prog string, args ...string) (string, error)
+	kmemOff     bool
+	policy      handoffPolicy
+	policyAt    time.Time
+	policyBusy  bool
+	localModels []string
+	localBusy   bool
+	fetchLocal  func(host string) []string
+	backendSel  *widget.RadioGroup
+	app         fyne.App
+	win         fyne.Window
+	cfg         config
+	scanner     *transcript.Scanner
+	finder      *live.Finder
+	center      bool
+	sessions    map[string]*deskSession
+	infos       map[string]transcript.Info
+	order       []transcript.Info
+	terms       map[string]live.Process
+	current     *deskSession
+	ownPIDs     sync.Map
 
 	rows           []sideRow
 	list           *widget.List
@@ -589,6 +594,11 @@ func (d *desk) rowText(id string) (string, string, status) {
 	if k := d.org.Kmem[id]; k != "" {
 		meta += "  ·  kmem " + k
 	}
+	if s != nil {
+		if m := session.LocalModel(s.model); m != "" {
+			meta += "  ·  local " + m
+		}
+	}
 	return title, meta, st
 }
 
@@ -911,6 +921,16 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.app.Preferences().SetString("newMode", v)
 		d.setMode(d.current, v)
 	})
+	d.backendSel = widget.NewRadioGroup([]string{backendOnline, backendLocal}, func(v string) {
+		if d.suppress || d.current == nil || v == "" {
+			return
+		}
+		d.setBackend(d.current, v)
+		d.updateChrome()
+	})
+	d.backendSel.Horizontal = true
+	d.backendSel.Required = true
+	d.refreshLocalModels()
 	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands", fontMeta)
 	d.stats = mutedText("", fontMeta)
 	d.stopBtn = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
@@ -926,7 +946,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	openAll.Importance = widget.LowImportance
 	closeAll := widget.NewButtonWithIcon("Collapse chips", theme.MenuDropUpIcon(), func() { d.setAllChips(false) })
 	closeAll.Importance = widget.LowImportance
-	controls := container.NewHBox(d.modelSel, d.modeSel, d.stt.langBtn, layout.NewSpacer(), openAll, closeAll)
+	controls := container.NewHBox(d.backendSel, d.modelSel, d.modeSel, d.stt.langBtn, layout.NewSpacer(), openAll, closeAll)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
@@ -974,6 +994,7 @@ func (d *desk) updateChrome() {
 		d.stopBtn.Disable()
 		d.modelSel.Disable()
 		d.modeSel.Disable()
+		d.backendSel.Disable()
 		setText(d.stats, "")
 		return
 	}
@@ -982,6 +1003,9 @@ func (d *desk) updateChrome() {
 	sub := tildePath(s.cwd)
 	if st != stNone {
 		sub += "  ·  " + st.String()
+	}
+	if m := session.LocalModel(s.model); m != "" {
+		sub += "  ·  Local: " + m
 	}
 	if d.subtitle.Text != sub {
 		setText(d.subtitle, sub)
@@ -1005,6 +1029,7 @@ func (d *desk) updateChrome() {
 		d.sendBtn.Enable()
 		d.modelSel.Enable()
 		d.modeSel.Enable()
+		d.backendSel.Enable()
 		d.rcStatus.Hide()
 	} else {
 		d.note.Hide()
@@ -1012,6 +1037,7 @@ func (d *desk) updateChrome() {
 		d.sendBtn.Enable()
 		d.modelSel.Enable()
 		d.modeSel.Enable()
+		d.backendSel.Enable()
 		rcText, rcCol := "Remote Control off", color.Color(colMuted)
 		if s.rcOn {
 			rcText, rcCol = "● Remote Control on", colIdle
@@ -1035,6 +1061,11 @@ func (d *desk) updateChrome() {
 		d.input.setSuggestion("")
 	} else {
 		d.input.setSuggestion(s.conv.Suggestion)
+	}
+	setOptions(d.modelSel, d.modelOptions(s))
+	setOptions(d.modeSel, modeOptions(s))
+	if d.backendSel.Selected != backendOf(s.model) {
+		d.backendSel.SetSelected(backendOf(s.model))
 	}
 	if d.modelSel.Selected != s.model {
 		d.modelSel.SetSelected(s.model)
@@ -1221,6 +1252,9 @@ func (d *desk) createSession(cwd, model, mode string) *deskSession {
 		ids = ids[len(ids)-2000:]
 	}
 	d.app.Preferences().SetStringList("createdSessions", ids)
+	if isLocal(model) && !contains(localModes, mode) {
+		mode = "default"
+	}
 	s := &deskSession{id: id, cwd: cwd, model: model, mode: mode, conv: chat.New(), loaded: true, created: time.Now()}
 	d.sessions[id] = s
 	d.current = s
@@ -1646,6 +1680,7 @@ func (d *desk) setModel(s *deskSession, model string) {
 		return
 	}
 	s.model = model
+	d.localModeGuard(s)
 	if !s.running() {
 		return
 	}

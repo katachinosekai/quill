@@ -64,16 +64,19 @@ func LocalModel(model string) string {
 	return ""
 }
 
+func OllamaHost() string {
+	if host := os.Getenv("QUILL_OLLAMA_URL"); host != "" {
+		return host
+	}
+	return "http://localhost:11434"
+}
+
 func LocalEnv(model string) []string {
 	if LocalModel(model) == "" {
 		return nil
 	}
-	host := os.Getenv("QUILL_OLLAMA_URL")
-	if host == "" {
-		host = "http://localhost:11434"
-	}
 	return []string{
-		"ANTHROPIC_BASE_URL=" + host,
+		"ANTHROPIC_BASE_URL=" + OllamaHost(),
 		"ANTHROPIC_AUTH_TOKEN=ollama",
 		"ANTHROPIC_API_KEY=",
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL=" + LocalModel(model),
