@@ -2195,6 +2195,7 @@ func (d *desk) setCenter(on bool) {
 	d.app.Preferences().SetBool("centerText", on)
 	for _, v := range d.allViews() {
 		v.cache = map[*deskSession]*sessView{}
+		v.qcards = nil
 		v.order = nil
 		if s := v.s; s != nil {
 			v.s = nil

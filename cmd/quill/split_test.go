@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
@@ -908,4 +909,40 @@ func TestSuggestionSurvivesReload(t *testing.T) {
 	if busy.conv.Suggestion != "" {
 		t.Fatal("a session that is already busy again gets no stale suggestion")
 	}
+}
+
+func TestApprovalCardsFollowCentering(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		h.d.chat.show(s)
+		s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, Text: "Plan:\n1. build", InPlan: true})
+		plan := s.conv.AddPlan()
+		done := &chat.Item{Kind: chat.Permission, ToolName: "Bash", PermState: chat.PermAllowed}
+		ask := &chat.Item{Kind: chat.Permission, ToolName: "AskUserQuestion", PermState: chat.PermPending, Input: []byte(`{"questions":[{"question":"Which one?","header":"Pick","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`)}
+		blocked := &chat.Item{Kind: chat.Tool, ToolName: "Bash", ResultError: true, Input: []byte(`{"command":"rm x"}`), Result: "denied by the Claude Code auto mode classifier. Reason: [Destructive]"}
+		check := func(center bool) {
+			h.d.setCenter(center)
+			want := fyne.TextAlignLeading
+			if center {
+				want = fyne.TextAlignCenter
+			}
+			for _, o := range []fyne.CanvasObject{h.d.chat.render(plan, &itemView{}), h.d.chat.render(done, &itemView{}), h.d.chat.render(ask, &itemView{}), h.d.chat.blockedCard(blocked)} {
+				walk(o, func(c fyne.CanvasObject) {
+					switch x := c.(type) {
+					case *widget.Label:
+						if x.Text != "" && x.Alignment != want {
+							t.Errorf("center=%v: label %q is aligned %v", center, x.Text, x.Alignment)
+						}
+					case *canvas.Text:
+						if x.Text != "" && x.Alignment != want {
+							t.Errorf("center=%v: text %q is aligned %v", center, x.Text, x.Alignment)
+						}
+					}
+				})
+			}
+		}
+		check(true)
+		check(false)
+	})
 }

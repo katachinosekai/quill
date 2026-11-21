@@ -200,7 +200,7 @@ func (v *chatView) renderRotate(it *chat.Item) fyne.CanvasObject {
 		case chat.PermCancelled:
 			state = "No longer needed"
 		}
-		parts = append(parts, mutedText(state, fontBody))
+		parts = append(parts, v.muted(state, fontBody))
 		border = color.NRGBA{0x44, 0x44, 0x40, 0xff}
 	}
 	r := canvas.NewRectangle(colCard)
