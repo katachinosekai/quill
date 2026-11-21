@@ -1,0 +1,382 @@
+# Quill phone control API, version 1
+
+The Android app uses this API to show and drive Quill desktop sessions. It runs on Quill's existing phone server: HTTPS with a self-signed certificate that the phone pins (fingerprint `fp` from the pairing link), on the port from the pairing link. It sits next to the existing `/folders.json`, `/events` and `/usage.json` endpoints, which keep working unchanged.
+
+Status of this document: agreed shape (kmem fe1c74f). Any change after the first commit goes to the Android session before it is committed.
+
+## Conventions
+
+- Requests and responses are JSON, UTF-8, `Content-Type: application/json`. Responses carry `Cache-Control: no-store`.
+- Every request sends `X-Quill-Key: <phone key>` (see Pairing). A missing, unknown or revoked key gets `403 forbidden` on every endpoint.
+- Every successful response object has `"v": 1`. New fields can appear in any response without a version bump; the phone ignores fields it doesn't know and treats unknown enum values as the closest neutral case (unknown status = `idle`, unknown item kind = `notice`, unknown request state = `cancelled`).
+- Times are Unix milliseconds (`...Ms`). Optional fields are left out rather than sent as `null`.
+- Text fields hold Markdown the way Quill shows it; the phone renders it.
+- Request bodies are capped at 64 KiB (`413 too_large`).
+- Writes are limited to 10 per second per phone (`429 rate_limited` with `Retry-After` seconds).
+
+### Errors
+
+Any non-2xx response has this body:
+
+```json
+{"v": 1, "error": {"code": "not_found", "message": "no session abc"}}
+```
+
+| HTTP | code | meaning |
+|---|---|---|
+| 400 | `bad_request` | malformed JSON, missing field, bad value |
+| 400 | `idempotency_key_missing` | a POST without `Idempotency-Key` |
+| 403 | `forbidden` | missing, unknown or revoked key |
+| 403 | `control_off` | a write while "Let paired phones control sessions" is off, or off for this phone |
+| 404 | `not_found` | unknown path, session, request or queue entry |
+| 409 | `stale` | the target changed: the request is no longer pending, the queue entry text no longer matches |
+| 409 | `in_progress` | the same Idempotency-Key is still being handled |
+| 409 | `not_running` | the session has no running Claude process and the action needs one (interrupt) |
+| 409 | `blocked` | Quill refused the send the same way the desktop box would (session loading, taking over, held by a terminal) |
+| 413 | `too_large` | body over 64 KiB, or `text` over 32 KiB |
+| 422 | `idempotency_mismatch` | Idempotency-Key reused with a different method, path or body |
+| 429 | `rate_limited` | too many writes; see `Retry-After` |
+| 503 | `not_ready` | Quill is still starting |
+
+The `message` is for logs; the phone keys off `code`.
+
+### Idempotency-Key
+
+Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new random value per user action, reused only for retries of that same action.
+
+- The server remembers, per phone, each key with a hash of method + path + body and the final response (status and body) for 24 hours, at most 500 keys per phone (oldest dropped first).
+- A retry with the same key and the same request gets the stored response again, with header `Idempotent-Replay: true`. The action is not done twice.
+- Same key, different method/path/body: `422 idempotency_mismatch`.
+- Same key while the first request is still being handled: `409 in_progress`; retry after a short wait.
+- Error responses are stored too, except `429`, `503` and `409 in_progress`, which may be retried with the same key.
+- The store lives in memory. After a Quill restart (`boot` changes) old keys are forgotten; the phone must not retry a write across a boot change without checking the session first.
+
+## Enums
+
+### Session status (`status`)
+
+| value | meaning (desktop sidebar text) |
+|---|---|
+| `running` | Claude is working ("running") |
+| `waiting` | a permission, question, plan or rotate card waits for the user ("waiting for you") |
+| `idle` | process running, turn finished ("idle") |
+| `error` | the process failed ("error"); `error` field has the reason |
+| `terminal` | the session is open in a terminal Claude, not in Quill ("open in a terminal") |
+| `stopped` | no process (closed tab kept in the sidebar, or not started yet) |
+
+### Item kinds (`kind`)
+
+| value | Quill item | notes |
+|---|---|---|
+| `user` | User | a message the user sent (from any device) |
+| `assistant` | Assistant | Claude's text; may carry `choices` |
+| `thinking` | Thinking | Claude's thinking text, shown collapsed |
+| `tool` | Tool | a tool call with `tool` and maybe `diff` |
+| `permission` | Permission | a tool approval request; `request` set |
+| `question` | Permission with tool AskUserQuestion | `request.questions` set |
+| `plan` | Plan | a plan to approve; `request` set |
+| `rotate` | Rotate | auto-handoff card ("context is getting full, rotate?") |
+| `notice` | Notice | Quill's own information line |
+| `error` | Error | an error line |
+
+### Request state (`request.state`)
+
+| value | meaning |
+|---|---|
+| `pending` | waiting for an answer; the only state that accepts `answer` |
+| `allowed` | allowed once |
+| `allowedAlways` | allowed and a rule was saved |
+| `denied` | denied (or plan rejected, question dismissed) |
+| `cancelled` | the turn ended or a newer message replaced it |
+| `autoAllowed` | allowed by the mode or a read-only check, never asked |
+| `planAsked` | held by plan-first until a plan is approved |
+| `retryAllowed` | allowed through Approve-and-retry |
+| `ruleAllowed` | allowed by a saved rule |
+
+### Answer actions (`action`)
+
+| value | valid for | extra fields |
+|---|---|---|
+| `allow` | `permission` | |
+| `allowAlways` | `permission` with `request.canAllowAlways` | |
+| `deny` | `permission`, `question` | `text`: optional reason sent to Claude |
+| `approvePlan` | `plan` | |
+| `rejectPlan` | `plan` | `text`: optional feedback sent to Claude |
+| `answer` | `question` | `answers` (see below) |
+| `choice` | `assistant` item with open `choices` | `index` |
+| `rotate` | `rotate` | |
+| `dismiss` | `rotate` | |
+
+## Objects
+
+### Session
+
+```json
+{
+  "id": "3f2a...",
+  "title": "Rename greeting",
+  "folder": "/home/user/Projects/demo",
+  "folderName": "demo",
+  "group": "Active",
+  "status": "idle",
+  "busy": false,
+  "kmem": "quill",
+  "model": "opus",
+  "mode": "default",
+  "backend": "online",
+  "context": {"used": 81234, "max": 200000},
+  "pending": {"permissions": 0, "questions": 1, "plans": 0},
+  "queue": 2,
+  "background": 1,
+  "epoch": 4,
+  "rev": 1932,
+  "updatedMs": 1795000000000,
+  "focused": true
+}
+```
+
+- `kmem` is left out when the session has no kmem name. `error` (string) appears only with status `error`.
+- `backend`: `online` (Claude models) or `local` (Ollama models).
+- `mode`: one of the `modes` lists from `/phone/sessions` (today `default`, `acceptEdits`, `plan`, `auto`; Local only `default`, `acceptEdits`, `plan`).
+- `context.max` is 0 when not known yet.
+- `queue`: number of queued messages; `background`: running background tasks.
+- `epoch` changes whenever the item list is renumbered (rewind, fork into this tab, history reload, transcript branch pruning). `rev` grows on every change to any item or to the queue of this session. Both are per session.
+- `focused`: the session shown in the desktop's current view.
+
+### Item
+
+```json
+{
+  "seq": 812,
+  "rev": 1930,
+  "kind": "tool",
+  "text": "",
+  "streaming": false,
+  "inPlan": false,
+  "tool": {
+    "name": "Edit",
+    "id": "toolu_01...",
+    "summary": "Edit main.go",
+    "done": true,
+    "isError": false,
+    "result": "The file main.go has been updated.",
+    "resultTruncated": false
+  },
+  "diff": {
+    "path": "/home/user/Projects/demo/main.go",
+    "lines": [{"op": "-", "text": "hi"}, {"op": "+", "text": "hello"}],
+    "truncated": false
+  }
+}
+```
+
+- `seq`: position in the conversation, unique and increasing within an epoch.
+- `rev`: the session `rev` at this item's last change.
+- `text`: for `user`, `assistant`, `thinking`, `plan`, `notice`, `error`, `rotate`.
+- `streaming`: the text is still arriving.
+- `inPlan`: part of a plan-mode turn.
+- `tool`: only for `tool` items. `result` is cut to 2 KiB (`resultTruncated` true when cut). `done` is false while the tool runs.
+- `diff`: only for edit tools. `op` is `"+"`, `"-"` or `" "`. At most 400 lines (`truncated` when cut).
+- No raw tool input is sent; `summary` is the one-line description the desktop shows.
+
+Assistant items with a choice card add:
+
+```json
+"choices": ["Take the split next", "Finish the queue fix first"],
+"choicesOpen": true
+```
+
+`choicesOpen` is true only while the desktop would still accept a click (the latest message, unanswered).
+
+### Request (on `permission`, `question`, `plan`, `rotate` items)
+
+```json
+"request": {
+  "id": "req_01...",
+  "state": "pending",
+  "tool": "Bash",
+  "detail": "rm -rf build/",
+  "canAllowAlways": true
+}
+```
+
+- `id`: the request id used by `answer`. Plan cards raised by an assistant question (no Claude request behind them) and rotate cards have `id` `"seq:<seq>"`.
+- `detail`: what is being asked (command, file path, URL), cut to 2 KiB.
+- `question` items carry `questions` instead of `detail`:
+
+```json
+"questions": [
+  {"question": "Which layout?", "header": "Layout", "multiSelect": false,
+   "options": [{"label": "Tabs", "description": "One tab per session"}, {"label": "Split", "description": ""}]}
+]
+```
+
+- `plan` items: the plan text is the item `text`; `request.steps` is the number of numbered steps (0 when none).
+
+### Queue entry
+
+```json
+{"index": 0, "text": "also check the tests"}
+```
+
+## Endpoints
+
+### POST /phone/hello
+
+First call after pairing and after each app start. Body: `{"name": "Pixel 8", "app": "0.9.4"}`. Sets the phone's display name in Quill's phone list and its last-seen time.
+
+Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f..."}`. `control` says whether writes are allowed for this phone right now. Needs an Idempotency-Key like every POST, but is allowed while control is off.
+
+### GET /phone/sessions
+
+```json
+{
+  "v": 1,
+  "boot": "9f0c...",
+  "cursor": 5521,
+  "control": true,
+  "usage": {
+    "paused": false,
+    "pausedUntilMs": 0,
+    "fiveHour": {"pct": 41, "resetsAtMs": 1795003600000},
+    "week": {"pct": 12, "resetsAtMs": 1795400000000}
+  },
+  "models": {"online": ["opus", "sonnet", "haiku"], "local": ["qwen3:14b"]},
+  "modes": {"online": ["default", "acceptEdits", "plan", "auto"], "local": ["default", "acceptEdits", "plan"]},
+  "sessions": []
+}
+```
+
+- `sessions`: Session objects, in sidebar order: the open tabs plus the sidebar's active and inactive groups, as on the desktop.
+- `boot` changes when Quill restarts; the phone then drops all cached state.
+- `cursor` is the stream position to pass to `/phone/stream` next.
+- `usage.fiveHour` / `usage.week` are left out when unknown.
+
+### GET /phone/folders
+
+`{"v": 1, "folders": [{"path": "/home/user/Projects/demo", "name": "demo"}]}`: the folders Quill knows (sidebar groups and recent folders). New sessions can only be started in one of these.
+
+### GET /phone/session/{id}/items
+
+Query:
+
+| param | meaning |
+|---|---|
+| (none) | the latest window: the last `limit` items |
+| `epoch` + `since` | changes after rev `since` in epoch `epoch` |
+| `before` | `limit` items with `seq < before` (paging back) |
+| `limit` | default 200, max 500 |
+
+Response:
+
+```json
+{
+  "v": 1,
+  "id": "3f2a...",
+  "epoch": 4,
+  "rev": 1932,
+  "reset": false,
+  "hasMore": true,
+  "items": [],
+  "queue": []
+}
+```
+
+- `items`: Item objects, ascending `seq`. `queue`: the full current queue (Queue entries).
+- With `epoch` + `since`: `items` holds every item whose `rev > since`, whole. When `epoch` is not the current one, or `since` is older than the server can answer, the response is the latest window with `reset: true`; the phone replaces its list.
+- `hasMore`: older items exist before the first one returned.
+
+### GET /phone/stream
+
+Long poll. Query: `cursor` (from `/phone/sessions` or the last stream reply), `wait` seconds (default 25, max 25).
+
+Returns at once when something changed after `cursor`, otherwise after `wait` seconds with no changes.
+
+```json
+{
+  "v": 1,
+  "boot": "9f0c...",
+  "cursor": 5530,
+  "reset": false,
+  "changes": [
+    {"type": "session", "session": {}},
+    {"type": "removed", "id": "77aa..."},
+    {"type": "order", "ids": ["3f2a...", "77aa..."]},
+    {"type": "usage", "usage": {}},
+    {"type": "control", "control": false}
+  ]
+}
+```
+
+- A `session` change carries the whole Session object; its `epoch`/`rev` tell the phone whether to fetch items (only for the session on screen; others just update their row). `usage` is shaped as in `/phone/sessions`.
+- `reset: true` (cursor too old, or a different `boot`): the phone refetches `/phone/sessions`.
+- At most one stream per phone; a second one ends the first with an empty reply. Revoking a phone ends its stream with `403`.
+
+### POST /phone/session/{id}/send
+
+Body: `{"text": "run the tests"}` (1 byte to 32 KiB after trimming).
+
+Runs exactly as typing into that session's desktop message box and pressing Enter: local slash commands are answered by Quill, a busy session queues the text, the usage pause prefixes its note, plan-first approval words count, a stopped session is started.
+
+Response: `{"v": 1, "queued": false}`, or `{"v": 1, "queued": true, "queue": [...]}` with the full queue.
+
+### POST /phone/session/{id}/answer
+
+Body, one of:
+
+```json
+{"requestId": "req_01...", "action": "allow"}
+{"requestId": "req_02...", "action": "answer", "answers": {"Which layout?": ["Split"]}}
+{"requestId": "seq:640", "action": "approvePlan"}
+{"seq": 902, "action": "choice", "index": 1}
+```
+
+- `answers`: question text -> chosen labels. A label not among the options is sent as the free-text "Other" answer. Every question of the request must be answered.
+- `choice` uses the assistant item's `seq` and the option `index`.
+
+Response: `{"v": 1, "item": {...}}` with the updated Item. `409 stale` when the request is not pending any more (answered on the desktop or another phone).
+
+### POST /phone/session/{id}/interrupt
+
+Body `{}`. Same as Escape / Stop on the desktop. Response `{"v": 1, "wasBusy": true}`. `409 not_running` without a process.
+
+### POST /phone/session/{id}/queue/delete and /queue/send-now
+
+Body: `{"index": 0, "text": "also check the tests"}`. `text` must equal the entry at `index` (`409 stale` otherwise). Response: `{"v": 1, "queue": [...]}`.
+
+### POST /phone/usage/resume
+
+Body `{}`. Same as "Resume now" on the pause banner. Response `{"v": 1, "usage": {...}}`.
+
+### POST /phone/sessions/new
+
+Body: `{"folder": "/home/user/Projects/demo", "backend": "online", "model": "opus", "mode": "default"}`. `folder` must be one of `/phone/folders`. Response: `{"v": 1, "session": {...}}`.
+
+## Control setting
+
+Reads work for every paired phone, as today. Writes (every POST except `/phone/hello`) need both:
+
+- the desktop setting "Let paired phones control sessions" (Settings → Sessions → Phone), off by default;
+- the phone's own control switch in the phone list (on by default once the global setting is on).
+
+Otherwise: `403 control_off`. When either changes, streams get a `control` change.
+
+## Pairing and per-phone keys
+
+Each phone has its own key (before this, every phone shared the `phoneKey` preference):
+
+- Quill keeps a phone list: id (8 hex chars), name, SHA-256 of the key, created, last seen, control switch. A request's key is hashed and compared in constant time against the list.
+- "Pair phone" creates a new entry with a fresh 32-byte key (base64url, 43 chars) and shows the link. An entry that never made a request is deleted when the pairing dialog closes.
+- Migration: an existing `phoneKey` becomes one entry named "Paired phone (before per-phone keys)", so phones paired earlier keep working until revoked.
+- Revoke deletes the entry: its key gets `403 forbidden` at once and its open long polls end.
+- `/folders.json`, `/events` and `/usage.json` accept any listed key.
+
+Pairing link (same scheme, two new params):
+
+```
+quillpair://pair?h=192.168.1.20,100.101.2.3,desk.tailnet-name.ts.net&p=43117&k=<key>&fp=<sha256 hex>&n=desk&i=a1b2c3d4&v=2&f=quill-folders.json&g=<gist>
+```
+
+- `i`: phone id. `v=2`: per-phone key, and the phone API is available once the desktop has it. Links without `v` are the old shared-key kind.
+- `h`: hosts in the order to try: LAN private addresses first, then Tailscale addresses (100.64.0.0/10), then the Tailscale MagicDNS name when Tailscale is running. The server listens on all interfaces, so the tailnet address works with no extra setup; the pinned certificate covers every host.
+- The phone tries the hosts in order (2 s connect timeout each) and starts with the one that worked last.
