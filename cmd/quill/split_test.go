@@ -1198,6 +1198,24 @@ func TestChatTextSelection(t *testing.T) {
 		if got := h.d.chat.sel.text(); got != "gamma\nSecond bold line" {
 			t.Fatalf("a drag across messages keeps the source text, bold included: %q", got)
 		}
+		mid := func(r textRun, sub string, n int) fyne.Position {
+			i := len([]rune(r.t.Text[:strings.Index(r.t.Text, sub)])) + n
+			return fyne.NewPos(charX(r, i), r.pos.Y+r.t.Size().Height/2)
+		}
+		drag(fyne.NewPos(0, alpha.pos.Y+3), mid(alpha, "beta", 2))
+		if got := h.d.chat.sel.text(); got != "Alpha beta" {
+			t.Fatalf("a sloppy drag from the margin into the middle of a word selects whole words: %q", got)
+		}
+		drag(mid(alpha, "Alpha", 1), mid(alpha, "Alpha", 3))
+		if got := h.d.chat.sel.text(); got != "lp" {
+			t.Fatalf("inside one word the selection stays exact: %q", got)
+		}
+		sec := find("Second")
+		drag(fyne.NewPos(charX(sec, 0)+2, sec.pos.Y-4), fyne.NewPos(9999, line.pos.Y+line.t.Size().Height/2))
+		if got := h.d.chat.sel.text(); got != "Second bold line" {
+			t.Fatalf("starting just above a line and ending past its right edge selects that whole line: %q", got)
+		}
+		drag(at(alpha, "gamma", false), at(line, "line", true))
 		if !h.d.copySelection() || h.d.app.Clipboard().Content() != "gamma\nSecond bold line" || h.d.chat.sel.has {
 			t.Fatal("Ctrl+C copies the selection and clears it")
 		}
@@ -1231,6 +1249,11 @@ func TestStreamingMarkdownAndPlanCard(t *testing.T) {
 	plan := c.AddPlan()
 	if got := planQuestion(c, plan); got != "Approve 1–6, and should auto-handoff also rotate when the cache has gone cold?" {
 		t.Fatalf("the plan card asks Claude's own question: %q", got)
+	}
+	c3 := chat.New()
+	c3.Items = append(c3.Items, &chat.Item{Kind: chat.Assistant, Text: "1. Login\n2. Token\n\n**Approve?** Once you do, I'll start the login and send you the link right away."})
+	if got := planQuestion(c3, c3.AddPlan()); got != "Approve? Once you do, I'll start the login and send you the link right away." {
+		t.Fatalf("a question at the start of the last line is shown with its whole line: %q", got)
 	}
 	c2 := chat.New()
 	c2.Items = append(c2.Items, &chat.Item{Kind: chat.Assistant, Text: "Plan:\n1. build\n2. test"})

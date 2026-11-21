@@ -1678,7 +1678,7 @@ func planQuestion(c *chat.Conversation, plan *chat.Item) string {
 	last := strings.TrimSpace(text[strings.LastIndex(text, "\n")+1:])
 	last = strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(last), "#>*-_ "))
 	last = strings.TrimRight(last, "*_ ")
-	if strings.HasSuffix(last, "?") && len(last) <= 300 {
+	if strings.Contains(last, "?") && len(last) <= 300 {
 		return last
 	}
 	return "Approve this plan?"
