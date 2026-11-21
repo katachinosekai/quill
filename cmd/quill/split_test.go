@@ -841,9 +841,33 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		if h.d.backendBtn.Text != backendOnline || contains(h.d.modelSel.Options, localFallback[0]) || !contains(h.d.modeSel.Options, "auto") {
 			t.Fatalf("Online shows only Claude models and every mode: %v %v", h.d.modelSel.Options, h.d.modeSel.Options)
 		}
-		test.Tap(h.d.backendBtn)
+		pick := func(prefix string) {
+			t.Helper()
+			for _, it := range h.d.backendItems(s, h.d.updateChrome) {
+				if strings.HasPrefix(it.Label, prefix) {
+					it.Action()
+					return
+				}
+			}
+			t.Fatalf("no %q in the button's menu", prefix)
+		}
+		checked := func() (out []string) {
+			for _, it := range h.d.backendItems(s, func() {}) {
+				if it.Checked {
+					out = append(out, strings.Fields(it.Label)[0])
+				}
+			}
+			return
+		}
+		if !reflect.DeepEqual(checked(), []string{"Online"}) {
+			t.Fatalf("the menu ticks Online: %v", checked())
+		}
+		pick(backendLocal)
 		if h.d.backendBtn.Text != backendLocal || h.d.backendBtn.Importance != widget.WarningImportance {
 			t.Fatal("the button flips to Local and stands out")
+		}
+		if !reflect.DeepEqual(checked(), []string{"Local"}) {
+			t.Fatalf("the menu ticks Local: %v", checked())
 		}
 		if s.model != localFallback[0] || s.mode != "default" {
 			t.Fatalf("Local picks the first local model and leaves auto mode: %q %q", s.model, s.mode)
@@ -860,10 +884,17 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		if h.d.app.Preferences().String("newModel") != localFallback[0] {
 			t.Fatal("new sessions remember the choice")
 		}
-		test.Tap(h.d.backendBtn)
+		pick(backendOnline)
 		if h.d.backendBtn.Text != backendOnline {
-			t.Fatal("clicking again flips back to Online")
+			t.Fatal("Online in the menu goes back to Online")
 		}
+		s.rcOn = true
+		h.d.updateChrome()
+		if h.d.backendBtn.Text != "Online · Remote" || !reflect.DeepEqual(checked(), []string{"Online", "Remote"}) {
+			t.Fatalf("Remote Control shows on the button and in the menu: %q %v", h.d.backendBtn.Text, checked())
+		}
+		s.rcOn = false
+		h.d.updateChrome()
 		if s.model != "opus" || backendOf(s.model) != backendOnline {
 			t.Fatalf("Online goes back to the last Claude model: %q", s.model)
 		}

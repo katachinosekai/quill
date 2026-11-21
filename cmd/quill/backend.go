@@ -44,17 +44,15 @@ func backendOf(model string) string {
 	return backendOnline
 }
 
-func otherBackend(model string) string {
-	if isLocal(model) {
-		return backendOnline
-	}
-	return backendLocal
-}
+const backendRemote = "Remote"
 
-func setBackendButton(b *widget.Button, model string) {
+func setBackendButton(b *widget.Button, s *deskSession) {
 	text, imp := backendOnline, widget.MediumImportance
-	if isLocal(model) {
+	if isLocal(s.model) {
 		text, imp = backendLocal, widget.WarningImportance
+	}
+	if s.rcOn {
+		text += " · " + backendRemote
 	}
 	if b.Text != text || b.Importance != imp {
 		b.Importance = imp
@@ -399,4 +397,45 @@ func relayoutTree(o fyne.CanvasObject) {
 		relayoutTree(x)
 	}
 	canvas.Refresh(c)
+}
+
+// backendItems is the menu of the Online/Local button under the message box:
+// where the model runs (Online = Claude, Local = Ollama) and Remote, which
+// turns Claude Code's Remote Control on or off for the session (control it
+// from claude.ai or the Claude app; it works with either backend).
+func (d *desk) backendItems(s *deskSession, after func()) []*fyne.MenuItem {
+	pick := func(backend string) *fyne.MenuItem {
+		label := backend + " (Claude models)"
+		if backend == backendLocal {
+			label = backend + " (Ollama on this PC)"
+		}
+		it := fyne.NewMenuItem(label, func() {
+			d.setBackend(s, backend)
+			after()
+		})
+		it.Checked = backendOf(s.model) == backend
+		return it
+	}
+	remote := fyne.NewMenuItem(backendRemote+" (Remote Control through claude.ai)", func() {
+		d.setRemoteControl(s, !s.rcOn)
+		after()
+	})
+	remote.Checked = s.rcOn
+	return []*fyne.MenuItem{pick(backendOnline), pick(backendLocal), fyne.NewMenuItemSeparator(), remote}
+}
+
+func (d *desk) showBackendMenu(s *deskSession, b *widget.Button, after func()) {
+	if s == nil {
+		return
+	}
+	if s.remote != nil {
+		d.notify(s, "This session runs on another PC; change Online, Local and Remote in Quill Desktop there.")
+		return
+	}
+	c := fyne.CurrentApp().Driver().CanvasForObject(b)
+	if c == nil {
+		return
+	}
+	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(b)
+	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", d.backendItems(s, after)...), c, pos.Add(fyne.NewPos(0, b.Size().Height)))
 }

@@ -946,11 +946,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.setMode(d.current, v)
 	})
 	d.backendBtn = widget.NewButton(backendOnline, func() {
-		if d.current == nil {
-			return
-		}
-		d.setBackend(d.current, otherBackend(d.current.model))
-		d.updateChrome()
+		d.showBackendMenu(d.current, d.backendBtn, d.updateChrome)
 	})
 	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands", fontMeta)
 	d.stats = mutedText("", fontMeta)
@@ -1084,7 +1080,7 @@ func (d *desk) updateChrome() {
 	}
 	setOptions(d.modelSel, d.modelOptions(s))
 	setOptions(d.modeSel, modeOptions(s))
-	setBackendButton(d.backendBtn, s.model)
+	setBackendButton(d.backendBtn, s)
 	if d.modelSel.Selected != s.model {
 		d.modelSel.SetSelected(s.model)
 	}

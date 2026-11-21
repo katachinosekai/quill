@@ -148,8 +148,7 @@ func (d *desk) newPane() *pane {
 	p.backend = widget.NewButton(backendOnline, func() {
 		if p.view.s != nil {
 			d.focusPane(p)
-			d.setBackend(p.view.s, otherBackend(p.view.s.model))
-			d.syncPaneControls(p)
+			d.showBackendMenu(p.view.s, p.backend, func() { d.syncPaneControls(p) })
 		}
 	})
 	openAll := widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
@@ -696,7 +695,7 @@ func (d *desk) syncPaneControls(p *pane) {
 	}
 	setOptions(p.model, d.modelOptions(s))
 	setOptions(p.mode, modeOptions(s))
-	setBackendButton(p.backend, s.model)
+	setBackendButton(p.backend, s)
 	if p.model.Selected != s.model {
 		p.model.SetSelected(s.model)
 	}
