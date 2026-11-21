@@ -1664,7 +1664,10 @@ func TestRewind(t *testing.T) {
 		mu.Lock()
 		reqs = append(reqs, req)
 		mu.Unlock()
-		return json.RawMessage(`{"filesChanged":["a.go","b.go"]}`), nil
+		if req["dry_run"] == true {
+			return json.RawMessage(`{"canRewind":true,"filesChanged":["/w/a.go","/w/b.go"],"insertions":3,"deletions":7}`), nil
+		}
+		return json.RawMessage(`{"canRewind":true,"skippedLinks":0}`), nil
 	}
 	var s *deskSession
 	h.ui(func() {
@@ -1683,6 +1686,23 @@ func TestRewind(t *testing.T) {
 		h.d.open(s.id)
 		h.d.rewindTo(s, u2, true)
 	})
+	var confirm *widget.Button
+	h.eventually("confirm dialog", func() bool {
+		for _, o := range h.w.Canvas().Overlays().List() {
+			deepWalk(o, func(x fyne.CanvasObject) {
+				if b, ok := x.(*widget.Button); ok && b.Text == "Restore files" {
+					confirm = b
+				}
+			})
+		}
+		return confirm != nil
+	})
+	h.ui(func() {
+		if s.resumeAt != "" {
+			t.Fatal("nothing changes before the restore is confirmed")
+		}
+		test.Tap(confirm)
+	})
 	h.eventually("rewound", func() bool { return s.resumeAt == "A1" })
 	h.ui(func() {
 		var last *chat.Item
@@ -1695,10 +1715,17 @@ func TestRewind(t *testing.T) {
 			t.Fatalf("the conversation is cut before that message and its text is back in the box: %+v", last)
 		}
 		mu.Lock()
-		if len(reqs) != 1 || reqs[0]["subtype"] != "rewind_files" || reqs[0]["user_message_id"] != "U2" {
-			t.Fatalf("files are rewound to that message: %v", reqs)
+		if len(reqs) != 2 || reqs[0]["dry_run"] != true || reqs[1]["dry_run"] != nil || reqs[1]["user_message_id"] != "U2" {
+			t.Fatalf("a dry run, then the real rewind of that message's files: %v", reqs)
 		}
 		mu.Unlock()
+		found := false
+		for _, it := range s.conv.Items {
+			found = found || it.Kind == chat.Notice && strings.Contains(it.Text, "Restored 2 files to how they were at that message (+3 −7)")
+		}
+		if !found {
+			t.Fatal("the note reports the file count from the dry run")
+		}
 		h.d.sendTo(s, "second, rewritten")
 	})
 	h.eventually("resumed at A1", func() bool { return strings.Contains(h.args(), "--resume-session-at A1") })

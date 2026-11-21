@@ -763,24 +763,68 @@ func (d *desk) rewindTo(s *deskSession, u *chat.Item, files bool) {
 		finish("")
 		return
 	}
+	type filesReply struct {
+		CanRewind    *bool    `json:"canRewind"`
+		Error        string   `json:"error"`
+		FilesChanged []string `json:"filesChanged"`
+		Insertions   int      `json:"insertions"`
+		Deletions    int      `json:"deletions"`
+	}
+	apply := func(preview filesReply) {
+		go func() {
+			raw, err := d.control(s, map[string]any{"subtype": "rewind_files", "user_message_id": u.UUID})
+			var r filesReply
+			_ = json.Unmarshal(raw, &r)
+			d.do(func() {
+				if err == nil && r.CanRewind != nil && !*r.CanRewind {
+					err = fmt.Errorf("%s", firstNonEmpty(r.Error, "Claude Code couldn't restore them"))
+				}
+				if err != nil {
+					d.notify(s, "Files were not rewound ("+err.Error()+"); the conversation was left as it was.")
+					return
+				}
+				finish(fmt.Sprintf("Restored %s to how they were at that message (+%d −%d). ", plural(len(preview.FilesChanged), "file"), preview.Insertions, preview.Deletions))
+			})
+		}()
+	}
 	go func() {
-		raw, err := d.control(s, map[string]any{"subtype": "rewind_files", "user_message_id": u.UUID})
+		raw, err := d.control(s, map[string]any{"subtype": "rewind_files", "user_message_id": u.UUID, "dry_run": true})
+		var p filesReply
+		_ = json.Unmarshal(raw, &p)
 		d.do(func() {
 			if err != nil {
 				d.notify(s, "Files were not rewound ("+err.Error()+"); the conversation was left as it was.")
 				return
 			}
-			var r struct {
-				CanRewind *bool `json:"canRewind"`
+			if p.CanRewind != nil && !*p.CanRewind || len(p.FilesChanged) == 0 {
+				finish("There were no file changes to undo since that message. ")
+				return
 			}
-			_ = json.Unmarshal(raw, &r)
-			note := "Restored the files to how they were at that message. "
-			if r.CanRewind != nil && !*r.CanRewind {
-				note = "There were no file changes to undo since that message. "
+			var names []string
+			for i, f := range p.FilesChanged {
+				if i == 10 {
+					names = append(names, fmt.Sprintf("… and %d more", len(p.FilesChanged)-10))
+					break
+				}
+				names = append(names, tildePath(f))
 			}
-			finish(note)
+			msg := fmt.Sprintf("Restore %s (+%d −%d) to how they were before “%s”, and rewind the conversation?\n\n%s", plural(len(p.FilesChanged), "file"), p.Insertions, p.Deletions, oneLine(u.Text, 60), strings.Join(names, "\n"))
+			dlg := dialog.NewConfirm("Rewind files?", msg, func(ok bool) {
+				if ok {
+					apply(p)
+				}
+			}, d.win)
+			dlg.SetConfirmText("Restore files")
+			dlg.Show()
 		})
 	}()
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func (d *desk) cmdRewind(s *deskSession) {
