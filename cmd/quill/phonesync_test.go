@@ -33,6 +33,7 @@ func TestPhoneSyncFileAndServer(t *testing.T) {
 		h.d.app.Preferences().SetString("phoneDir", out)
 		h.d.rememberRC(editsID, "https://claude.ai/code/session_01EditsAAA")
 		h.d.rememberRC(editsID, "https://claude.ai/code?environment=")
+		h.d.open(editsID)
 	})
 	found := func() bool {
 		ok := false
@@ -64,8 +65,8 @@ func TestPhoneSyncFileAndServer(t *testing.T) {
 		t.Fatalf("file: %+v", f)
 	}
 	before := f.UpdatedMs
-	h.ui(func() { h.d.setPlacement(editsID, placeArchive) })
-	h.eventually("moved", func() bool { return readFile().Sessions["session_01EditsAAA"] == "Archive" })
+	h.ui(func() { h.d.setProject(editsID, "Moved") })
+	h.eventually("moved", func() bool { return readFile().Sessions["session_01EditsAAA"] == "Moved" })
 	if readFile().UpdatedMs < before {
 		t.Fatal("updatedMs must not go backwards")
 	}
@@ -105,7 +106,7 @@ func TestPhoneSyncFileAndServer(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	var served folders.File
-	if resp.StatusCode != 200 || json.Unmarshal(body, &served) != nil || served.Sessions["session_01EditsAAA"] != "Archive" {
+	if resp.StatusCode != 200 || json.Unmarshal(body, &served) != nil || served.Sessions["session_01EditsAAA"] != "Moved" {
 		t.Fatalf("served %d %s", resp.StatusCode, body)
 	}
 

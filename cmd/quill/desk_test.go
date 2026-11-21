@@ -214,22 +214,16 @@ func TestSidebarAndTerminalSession(t *testing.T) {
 		if len(h.d.order) != 2 {
 			t.Fatalf("order %+v", h.d.order)
 		}
-		auto := folderRow(h.d.rows, "auto")
-		if auto == nil || auto.count != 1 || auto.open || hasRow(h.d.rows, smokeID) || !hasRow(h.d.rows, editsID) {
-			t.Fatalf("rows %+v", h.d.rows)
+		if hasRow(h.d.rows, smokeID) || hasRow(h.d.rows, editsID) {
+			t.Fatalf("the sidebar lists live sessions only, not every transcript: %+v", h.d.rows)
 		}
-		h.d.toggleFolder("auto")
-		if !hasRow(h.d.rows, smokeID) {
-			t.Fatal("folder should open")
+		h.d.open(editsID)
+		if !hasRow(h.d.rows, editsID) || hasRow(h.d.rows, smokeID) {
+			t.Fatalf("an opened session is live and listed: %+v", h.d.rows)
 		}
-		h.d.toggleFolder("auto")
-		h.d.created[smokeID] = true
-		h.d.rebuildRows()
-		if folderRow(h.d.rows, "auto") != nil || !hasRow(h.d.rows, smokeID) {
-			t.Fatal("sessions made in Quill stay in the main tree")
+		if p := folderRow(h.d.rows, projectPrefix+h.d.projectOf(editsID)); p == nil || p.count != 1 || !p.open {
+			t.Fatalf("live sessions sit under their project: %+v", h.d.rows)
 		}
-		delete(h.d.created, smokeID)
-		h.d.rebuildRows()
 		if _, meta, st := h.d.rowText(smokeID); st != stTerminal || !strings.Contains(meta, "open in a terminal") {
 			t.Fatalf("terminal row %q %v", meta, st)
 		}
@@ -602,53 +596,6 @@ func TestRemoteControlNamesAreStableTitles(t *testing.T) {
 	})
 }
 
-func TestInactiveAndArchiveFolders(t *testing.T) {
-	h := newHarness(t)
-	h.ui(func() {
-		if f := folderRow(h.d.rows, "inactive"); f == nil || !f.open || !hasRow(h.d.rows, editsID) {
-			t.Fatalf("recent idle sessions sit in an open Inactive folder: %+v", h.d.rows)
-		}
-		for i, info := range h.d.order {
-			if info.ID == editsID {
-				info.Last = time.Now().Add(-30 * 24 * time.Hour)
-				h.d.order[i] = info
-				h.d.infos[editsID] = info
-			}
-		}
-		h.d.rebuildRows()
-		if folderRow(h.d.rows, "archive") != nil {
-			t.Fatal("sessions must not drop to Archive on every refresh")
-		}
-		h.d.resortNow()
-		if f := folderRow(h.d.rows, "archive"); f == nil || f.open || hasRow(h.d.rows, editsID) {
-			t.Fatalf("old sessions go to a closed Archive folder: %+v", h.d.rows)
-		}
-		h.d.toggleFolder("archive")
-		saved := h.d.folderOpen
-		h.d.folderOpen = nil
-		h.d.loadSortState()
-		if !h.d.folderOpen["archive"] || len(saved) == 0 {
-			t.Fatal("folder open state should survive a restart")
-		}
-		if h.d.sorted.Place[editsID] != placeArchive {
-			t.Fatal("sorting should be remembered across restarts")
-		}
-		if !hasRow(h.d.rows, editsID) {
-			t.Fatal("archive should open")
-		}
-		h.d.toggleFolder("archive")
-		h.d.search.SetText("proj")
-		if !hasRow(h.d.rows, editsID) {
-			t.Fatal("search shows archived sessions")
-		}
-		h.d.search.SetText("")
-		h.d.open(editsID)
-		if !hasRow(h.d.rows, editsID) || folderRow(h.d.rows, "archive") != nil {
-			t.Fatal("the open session is active")
-		}
-	})
-}
-
 func folderRow(rows []sideRow, key string) *sideRow {
 	for i := range rows {
 		if rows[i].header != "" && rows[i].key == key {
@@ -699,7 +646,7 @@ func TestTypingContinuesWithCommandList(t *testing.T) {
 	})
 }
 
-func TestSidebarOrganisation(t *testing.T) {
+func TestSidebarProjects(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
 		h.d.org.Titles[editsID] = "My rename"
@@ -707,40 +654,64 @@ func TestSidebarOrganisation(t *testing.T) {
 		if title, _, _ := h.d.rowText(editsID); title != "My rename" {
 			t.Fatalf("rename: %q", title)
 		}
-		h.d.setPlacement(editsID, placeArchive)
-		if f := folderRow(h.d.rows, "archive"); f == nil || f.count != 1 {
-			t.Fatalf("set archive: %+v", h.d.rows)
+		h.d.open(editsID)
+		other := h.d.createSession(h.proj, "default", "default")
+		if h.d.projectOf(editsID) != "My" {
+			t.Fatalf("without kmem config the project is the title's first word: %q", h.d.projectOf(editsID))
 		}
-		h.d.org.Folders = append(h.d.org.Folders, orgFolder{ID: "x", Name: "Work"})
-		h.d.saveOrg()
-		if f := folderRow(h.d.rows, "f:x"); f == nil || f.count != 0 || f.header != "Work" {
-			t.Fatalf("empty custom folder should show: %+v", h.d.rows)
+		h.d.setProject(editsID, "Zomboid")
+		if f := folderRow(h.d.rows, "p:Zomboid"); f == nil || f.count != 1 || f.header != "Zomboid" {
+			t.Fatalf("project header: %+v", h.d.rows)
 		}
-		h.d.dropOn(editsID, *folderRow(h.d.rows, "f:x"))
-		if f := folderRow(h.d.rows, "f:x"); f == nil || f.count != 1 || !hasRow(h.d.rows, editsID) {
-			t.Fatalf("drop into folder: %+v", h.d.rows)
+		h.d.dropOn(other.id, *folderRow(h.d.rows, "p:Zomboid"))
+		if f := folderRow(h.d.rows, "p:Zomboid"); f == nil || f.count != 2 {
+			t.Fatalf("drop onto a project header moves the session there: %+v", h.d.rows)
 		}
-		h.d.created[smokeID] = true
-		h.d.rebuildRows()
-		var target sideRow
-		for _, r := range h.d.rows {
-			if r.id == editsID {
-				target = r
-			}
+		h.d.renameProject("Zomboid", "PZ")
+		if f := folderRow(h.d.rows, "p:PZ"); f == nil || f.count != 2 || folderRow(h.d.rows, "p:Zomboid") != nil {
+			t.Fatalf("rename project moves its sessions: %+v", h.d.rows)
 		}
-		h.d.dropOn(smokeID, target)
-		if f := folderRow(h.d.rows, "f:x"); f == nil || f.count != 2 {
-			t.Fatalf("drop onto a session joins its folder: %+v", h.d.rows)
+		h.d.org.Kmem[editsID] = "edits"
+		h.d.setProject(editsID, "Quill")
+		if h.d.org.Projects["edits"] != "Quill" {
+			t.Fatal("the project belongs to the kmem name (one identity)")
 		}
-		h.d.org.Names["inactive"] = "Later"
-		h.d.setPlacement(smokeID, placeInactive)
-		if f := folderRow(h.d.rows, "inactive"); f == nil || f.header != "Later" {
-			t.Fatalf("renamed built-in folder: %+v", h.d.rows)
-		}
-		h.d.setPlacement(editsID, "")
+		h.d.setProject(other.id, "")
 		h.d.loadOrg()
-		if h.d.org.Titles[editsID] != "My rename" || h.d.org.Place[smokeID] != placeInactive {
-			t.Fatal("organisation should persist in preferences")
+		if h.d.org.Titles[editsID] != "My rename" || h.d.org.Projects["edits"] != "Quill" {
+			t.Fatal("projects persist in preferences")
+		}
+		h.d.closeTab(editsID)
+		if hasRow(h.d.rows, editsID) {
+			t.Fatal("closing the tab takes the session out of the sidebar")
+		}
+	})
+}
+
+func TestProjectFromKmemConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.json")
+	os.WriteFile(cfg, []byte(`{"sessions": {"quill": {"as": "Quill", "topic": "Quill desktop app"}, "pz": {"topic": "kmem and pzlock upkeep", "project": "Upkeep"}}}`), 0o600)
+	old := kmemCfgPath
+	kmemCfgPath = func() string { return cfg }
+	kmemCfgMu.Lock()
+	kmemCfgSess = nil
+	kmemCfgMu.Unlock()
+	defer func() {
+		kmemCfgPath = old
+		kmemCfgMu.Lock()
+		kmemCfgSess = nil
+		kmemCfgMu.Unlock()
+	}()
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.org.Kmem["a"] = "quill"
+		h.d.org.Kmem["b"] = "pz"
+		if p := h.d.projectOf("a"); p != "Quill" {
+			t.Fatalf("first word of the kmem topic: %q", p)
+		}
+		if p := h.d.projectOf("b"); p != "Upkeep" {
+			t.Fatalf("kmem's project label wins over the topic: %q", p)
 		}
 	})
 }
@@ -757,14 +728,16 @@ func TestResumeAndEndSession(t *testing.T) {
 
 func TestSidebarDragAndMenus(t *testing.T) {
 	h := newHarness(t)
-	var item, folder *sideItem
+	var item, header *sideItem
+	var other *deskSession
 	h.ui(func() {
-		h.d.org.Folders = append(h.d.org.Folders, orgFolder{ID: "y", Name: "Drop here"})
-		h.d.saveOrg()
+		h.d.open(editsID)
+		other = h.d.createSession(h.proj, "default", "default")
+		h.d.setProject(other.id, "Drop here")
 		h.d.list.Refresh()
 	})
 	h.eventually("rows rendered", func() bool {
-		item, folder = nil, nil
+		item, header = nil, nil
 		for _, it := range h.d.sideItems {
 			r, ok := it.row()
 			if !ok || !it.Visible() {
@@ -773,26 +746,48 @@ func TestSidebarDragAndMenus(t *testing.T) {
 			if r.id == editsID {
 				item = it
 			}
-			if r.key == "f:y" {
-				folder = it
+			if r.key == "p:Drop here" {
+				header = it
 			}
 		}
-		return item != nil && folder != nil
+		return item != nil && header != nil
 	})
 	h.ui(func() {
+		labels := func(items []*fyne.MenuItem) string {
+			var out []string
+			for _, m := range items {
+				out = append(out, m.Label)
+			}
+			return strings.Join(out, "|")
+		}
+		sm := labels(h.d.sessionMenuItems(editsID))
+		for _, gone := range []string{"Set active", "Set inactive", "Set archive", "Move to folder", "kmem name...", "Automatic placement"} {
+			if strings.Contains(sm, gone) {
+				t.Fatalf("the session menu has no folder or kmem-name items: %s", sm)
+			}
+		}
+		for _, want := range []string{"Rename...", "Project...", "End session", "Delete session..."} {
+			if !strings.Contains(sm, want) {
+				t.Fatalf("the session menu has %q: %s", want, sm)
+			}
+		}
+		pm := labels(h.d.projectMenuItems(sideRow{key: "p:Drop here", header: "Drop here"}))
+		if !strings.Contains(pm, "End all...") || !strings.Contains(pm, "kmem...") || strings.Contains(pm, "New folder") {
+			t.Fatalf("project menu: %s", pm)
+		}
 		test.TapSecondary(item)
-		test.TapSecondary(folder)
+		test.TapSecondary(header)
 		for _, o := range h.w.Canvas().Overlays().List() {
 			h.w.Canvas().Overlays().Remove(o)
 		}
-		at := fyne.CurrentApp().Driver().AbsolutePositionForObject(folder).Add(fyne.NewPos(20, 5))
+		at := fyne.CurrentApp().Driver().AbsolutePositionForObject(header).Add(fyne.NewPos(20, 5))
 		item.Dragged(&fyne.DragEvent{PointEvent: fyne.PointEvent{AbsolutePosition: at}, Dragged: fyne.Delta{DY: 1}})
-		if !folder.hl.Visible() {
+		if !header.hl.Visible() {
 			t.Fatal("drop target should be highlighted")
 		}
 		item.DragEnd()
-		if h.d.org.Place[editsID] != "f:y" || folder.hl.Visible() {
-			t.Fatalf("drag should move the session: %q", h.d.org.Place[editsID])
+		if h.d.projectOf(editsID) != "Drop here" {
+			t.Fatalf("dragging onto a project header moves the session: %q", h.d.projectOf(editsID))
 		}
 	})
 }
@@ -1010,31 +1005,6 @@ func TestCenteredListsBecomeParagraphs(t *testing.T) {
 	}
 }
 
-func TestFlatSessionsUnderMainFolders(t *testing.T) {
-	h := newHarness(t)
-	h.ui(func() {
-		for _, r := range h.d.rows {
-			if r.header != "" && r.depth > 0 {
-				t.Fatalf("no project subfolders by default: %+v", h.d.rows)
-			}
-		}
-		if !hasRow(h.d.rows, editsID) {
-			t.Fatal("sessions should still be listed")
-		}
-		h.d.groupProjects = true
-		h.d.rebuildRows()
-		sub := false
-		for _, r := range h.d.rows {
-			if r.header != "" && r.depth > 0 {
-				sub = true
-			}
-		}
-		if !sub {
-			t.Fatal("grouping by project should bring the subfolders back")
-		}
-	})
-}
-
 func TestPlanFirstApproval(t *testing.T) {
 	h := newHarness(t)
 	var s *deskSession
@@ -1160,8 +1130,8 @@ func TestNewSessionInstant(t *testing.T) {
 		if h.d.placement(b.id) != "" {
 			t.Fatal("new session must follow the sorting rules, not be pinned")
 		}
-		if h.d.rows[0].key != placeActive || h.d.rows[0].count < 1 {
-			t.Fatalf("new session should sort into Active: %+v", h.d.rows[0])
+		if !hasRow(h.d.rows, a.id) || !hasRow(h.d.rows, b.id) {
+			t.Fatalf("new sessions are live and listed at once: %+v", h.d.rows)
 		}
 	})
 }
@@ -1544,41 +1514,6 @@ func TestAsksApprovalShowsPlanCard(t *testing.T) {
 	if c.AsksApproval() {
 		t.Fatal("an ordinary question is not a plan")
 	}
-}
-
-func TestActiveOrderStaysFixed(t *testing.T) {
-	h := newHarness(t)
-	h.ui(func() {
-		a := h.d.createSession(h.proj, "default", "default")
-		b := h.d.createSession(h.proj, "default", "default")
-		c := h.d.createSession(h.proj, "default", "default")
-		h.d.rebuildRows()
-		order := func() []string {
-			var ids []string
-			for _, r := range h.d.rows {
-				if r.parent == "a" && r.id != "" {
-					ids = append(ids, r.id)
-				}
-			}
-			return ids
-		}
-		before := order()
-		if len(before) < 3 {
-			t.Fatalf("three active sessions: %v", before)
-		}
-		a.created, b.created, c.created = time.Now().Add(time.Minute), time.Now().Add(2*time.Minute), time.Now().Add(3*time.Minute)
-		h.d.rebuildRows()
-		after := order()
-		for i := range before {
-			if before[i] != after[i] {
-				t.Fatalf("activity must not reorder Active: %v -> %v", before, after)
-			}
-		}
-		h.d.setRules(sortRules{ActiveMinutes: 30, ArchiveDays: 7, ClaudeFolder: true, RecentActive: true})
-		if got := order(); got[0] != c.id {
-			t.Fatalf("with the option off, most recent comes first: %v", got)
-		}
-	})
 }
 
 func TestPlanApprovalSymptoms(t *testing.T) {

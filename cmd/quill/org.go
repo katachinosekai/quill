@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -36,6 +37,8 @@ type sideOrg struct {
 	RC      map[string]rcTitle `json:"rc,omitempty"`
 	Kmem    map[string]string  `json:"kmem,omitempty"`
 	Ended   map[string]bool    `json:"ended,omitempty"`
+	// Projects: kmem name (or session id) -> project shown in the sidebar.
+	Projects map[string]string `json:"projects,omitempty"`
 }
 
 func (d *desk) loadOrg() {
@@ -135,118 +138,101 @@ func (d *desk) askName(title, current string, onOK func(string)) {
 }
 
 func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem) {
+	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", d.sessionMenuItems(id)...), d.win.Canvas(), at)
+}
+
+// sessionMenuItems: one session = one tab = one kmem name (user 2026-11-21).
+// No folders or placements; ended sessions are resumed from the kmem panel.
+func (d *desk) sessionMenuItems(id string) []*fyne.MenuItem {
 	title, _, _ := d.rowText(id)
-	move := func(place string) func() { return func() { d.placeSession(id, place) } }
-	var moveItems []*fyne.MenuItem
-	for _, f := range d.org.Folders {
-		moveItems = append(moveItems, fyne.NewMenuItem(f.Name, move(folderPrefix+f.ID)))
-	}
-	if len(moveItems) > 0 {
-		moveItems = append(moveItems, fyne.NewMenuItemSeparator())
-	}
-	moveItems = append(moveItems, fyne.NewMenuItem("New folder...", func() {
-		d.newFolder(func(fid string) { d.setPlacement(id, folderPrefix+fid) })
-	}))
-	toFolder := fyne.NewMenuItem("Move to folder", nil)
-	toFolder.ChildMenu = fyne.NewMenu("", moveItems...)
 	items := []*fyne.MenuItem{
 		fyne.NewMenuItem("Rename...", func() {
 			d.askName("Rename session", title, func(name string) { d.renameSession(id, name) })
 		}),
-		fyne.NewMenuItem("Open", func() { d.open(id) }),
-		fyne.NewMenuItem("Resume", func() { d.resumeSession(id) }),
-		fyne.NewMenuItem("Open in split view", func() { d.openInSplit(id) }),
-		fyne.NewMenuItem("End session", func() { d.closeTab(id); d.endWithSave(id, placeInactive) }),
-		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
-		d.sessionToolsItem(id),
-		fyne.NewMenuItem("Delete session...", func() { d.askDelete(id) }),
-		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Set active", move(placeActive)),
-		fyne.NewMenuItem("Set inactive", move(placeInactive)),
-		fyne.NewMenuItem("Set archive", move(placeArchive)),
-		fyne.NewMenuItem("Set Created by Claude", move(placeAuto)),
-		toFolder,
-	}
-	if d.org.Place[id] != "" {
-		items = append(items, fyne.NewMenuItem("Automatic placement", move("")))
 	}
 	if _, ok := d.org.Titles[id]; ok {
 		items = append(items, fyne.NewMenuItem("Restore original name", func() { d.restoreTitle(id) }))
 	}
-	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", items...), d.win.Canvas(), at)
+	items = append(items,
+		fyne.NewMenuItem("Project...", func() { d.askProject(id) }),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Open", func() { d.open(id) }),
+		fyne.NewMenuItem("Open in split view", func() { d.openInSplit(id) }),
+	)
+	if s := d.sessions[id]; s == nil || !s.running() {
+		items = append(items, fyne.NewMenuItem("Start", func() { d.resumeSession(id) }))
+	}
+	items = append(items,
+		d.sessionToolsItem(id),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
+		fyne.NewMenuItem("End session", func() { d.closeTab(id); d.endWithSave(id, placeInactive) }),
+		fyne.NewMenuItem("Delete session...", func() { d.askDelete(id) }),
+	)
+	return items
+}
+
+func (d *desk) askProject(id string) {
+	e := widget.NewSelectEntry(d.projectNames())
+	e.SetText(d.projectOf(id))
+	note := widget.NewLabel("Pick a project or type a new one. Empty = automatic (from kmem, else the session's name).")
+	note.Wrapping = fyne.TextWrapWord
+	note.SizeName = theme.SizeNameCaptionText
+	dlg := dialog.NewForm("Project", "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Project", e), widget.NewFormItem("", note)}, func(ok bool) {
+		if ok {
+			d.setProject(id, e.Text)
+		}
+	}, d.win)
+	dlg.Resize(fyne.NewSize(440, 220))
+	dlg.Show()
 }
 
 func (d *desk) folderMenu(r sideRow, at fyne.Position) {
+	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", d.projectMenuItems(r)...), d.win.Canvas(), at)
+}
+
+func (d *desk) projectMenuItems(r sideRow) []*fyne.MenuItem {
+	name := strings.TrimPrefix(r.key, projectPrefix)
 	items := []*fyne.MenuItem{
-		fyne.NewMenuItem("Rename...", func() {
-			d.askName("Rename folder", d.folderTitle(r.key, r.header), func(name string) {
-				if strings.HasPrefix(r.key, folderPrefix) {
-					fid := strings.TrimPrefix(r.key, folderPrefix)
-					for i := range d.org.Folders {
-						if d.org.Folders[i].ID == fid {
-							d.org.Folders[i].Name = name
-						}
-					}
-				} else {
-					d.org.Names[r.key] = name
-				}
-				d.saveOrg()
-			})
-		}),
-		fyne.NewMenuItem("New folder...", func() { d.newFolder(nil) }),
 		fyne.NewMenuItem("Open all in tabs", func() { d.openAllInTabs(r.key) }),
-		fyne.NewMenuItem("Open in split view", func() { d.openAllInSplit(r.key) }),
-		fyne.NewMenuItem("Delete empty sessions", func() { d.deleteEmptySessions() }),
-		fyne.NewMenuItem("Format Rules...", d.rulesDialog),
+		fyne.NewMenuItem("Open all in split view", func() { d.openAllInSplit(r.key) }),
+		fyne.NewMenuItem("Rename project...", func() {
+			d.askName("Rename project", name, func(to string) { d.renameProject(name, to) })
+		}),
+		fyne.NewMenuItem("End all...", func() { d.askEndProject(r.key, name) }),
 		fyne.NewMenuItemSeparator(),
-	}
-	if ra := d.resumeAllMenuItem(r.key); ra != nil {
-		items = append([]*fyne.MenuItem{ra, fyne.NewMenuItemSeparator()}, items...)
+		fyne.NewMenuItem("kmem...", d.showKmemPanel),
 	}
 	if d.layoutMode() == layoutVertical {
 		items = append(items,
-			fyne.NewMenuItem("Expand all folders", func() { d.setAllFolders(true) }),
-			fyne.NewMenuItem("Collapse all folders", func() { d.setAllFolders(false) }),
+			fyne.NewMenuItem("Expand all projects", func() { d.setAllFolders(true) }),
+			fyne.NewMenuItem("Collapse all projects", func() { d.setAllFolders(false) }),
 			fyne.NewMenuItem("Switch to horizontal tabs", func() { d.setLayoutMode(layoutHorizontal) }))
 	} else {
 		items = append(items, fyne.NewMenuItem("Switch to vertical sidebar", func() { d.setLayoutMode(layoutVertical) }))
 	}
-	group := fyne.NewMenuItem("Group by project", func() {
-		d.groupProjects = !d.groupProjects
-		d.app.Preferences().SetBool("groupByProject", d.groupProjects)
-		d.rebuildRows()
-	})
-	group.Checked = d.groupProjects
-	items = append(items, group)
-	if _, ok := d.org.Names[r.key]; ok {
-		items = append(items, fyne.NewMenuItem("Restore original name", func() {
-			delete(d.org.Names, r.key)
-			d.saveOrg()
-		}))
+	return items
+}
+
+func (d *desk) askEndProject(key, name string) {
+	var ids []string
+	for _, g := range d.groups {
+		if g.key == key {
+			ids = append(ids, g.ids...)
+		}
 	}
-	if strings.HasPrefix(r.key, folderPrefix) {
-		fid := strings.TrimPrefix(r.key, folderPrefix)
-		items = append(items, fyne.NewMenuItemSeparator(), fyne.NewMenuItem("Delete folder", func() {
-			dialog.ShowConfirm("Delete folder?", "Its sessions go back to automatic placement. Nothing is deleted from disk.", func(ok bool) {
-				if !ok {
-					return
-				}
-				for i, f := range d.org.Folders {
-					if f.ID == fid {
-						d.org.Folders = append(d.org.Folders[:i], d.org.Folders[i+1:]...)
-						break
-					}
-				}
-				for sid, p := range d.org.Place {
-					if p == folderPrefix+fid {
-						delete(d.org.Place, sid)
-					}
-				}
-				d.saveOrg()
-			}, d.win)
-		}))
+	if len(ids) == 0 {
+		return
 	}
-	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", items...), d.win.Canvas(), at)
+	dialog.ShowConfirm("End all in “"+name+"”?", fmt.Sprintf("%d session(s) save their kmem handoffs and close. Resume them later from the kmem panel.", len(ids)), func(ok bool) {
+		if !ok {
+			return
+		}
+		for _, id := range ids {
+			d.closeTab(id)
+			d.endWithSave(id, placeInactive)
+		}
+	}, d.win)
 }
 
 func (d *desk) resumeSession(id string) {
@@ -293,6 +279,14 @@ func (d *desk) endSession(id string) {
 }
 
 func (d *desk) dropOn(id string, target sideRow) {
+	switch {
+	case target.id != "" && target.id != id && strings.HasPrefix(target.parent, projectPrefix):
+		d.setProject(id, d.projectOf(target.id))
+		return
+	case strings.HasPrefix(target.key, projectPrefix):
+		d.setProject(id, strings.TrimPrefix(target.key, projectPrefix))
+		return
+	}
 	switch {
 	case target.id != "":
 		if target.id == id {

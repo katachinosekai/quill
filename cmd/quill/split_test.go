@@ -87,15 +87,13 @@ func TestTabsAndBookmarks(t *testing.T) {
 		if h.d.current != a {
 			t.Fatal("closing the active tab switches to a neighbour")
 		}
-		h.d.setPlacement(b.id, placeInactive)
-		h.d.rebuildRows()
-		if len(h.d.groups) < 2 || h.d.groups[0].key != placeActive || len(h.d.bookBar.Objects) != 2*(len(h.d.groups)-1) {
-			t.Fatal("each folder except Active gets a bookmark button")
+		c := h.d.createSession(h.proj, "default", "default")
+		h.d.setProject(c.id, "Other")
+		if len(h.d.groups) < 2 || len(h.d.bookBar.Objects) != 2*len(h.d.groups) {
+			t.Fatalf("each project gets a chip (kept for the folder menus): %+v %d", h.d.groups, len(h.d.bookBar.Objects))
 		}
-		for _, o := range h.d.bookBar.Objects {
-			if c, ok := o.(*tabChip); ok && strings.Contains(chipText(c), "Active") {
-				t.Fatal("Landscape's chips row has no Active chip: those sessions are the tabs")
-			}
+		if h.d.bookRow.Visible() {
+			t.Fatal("Landscape shows no chips row: the tabs are the live sessions")
 		}
 		h.d.folderMenu2(h.d.groups[0], fyne.NewPos(10, 10))
 		if len(h.w.Canvas().Overlays().List()) == 0 {

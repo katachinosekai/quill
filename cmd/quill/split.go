@@ -624,9 +624,7 @@ func (d *desk) autoSplitSync() {
 	defer func() { d.autoSyncing = false }()
 	var want []string
 	for _, g := range d.groups {
-		if g.key == placeActive {
-			want = g.ids
-		}
+		want = append(want, g.ids...)
 	}
 	if len(want) > maxPanes {
 		want = want[:maxPanes]

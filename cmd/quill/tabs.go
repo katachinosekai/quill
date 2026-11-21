@@ -37,6 +37,11 @@ func (d *desk) saveTabs() {
 	if b, err := json.Marshal(d.tabs); err == nil {
 		d.app.Preferences().SetString("tabs", string(b))
 	}
+	// The sidebar shows live sessions only, so opening or closing a tab
+	// changes it.
+	if d.list != nil && d.search != nil && d.listTheme != nil {
+		d.rebuildRows()
+	}
 }
 
 func (d *desk) addTab(id string) {

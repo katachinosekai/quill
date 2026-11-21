@@ -1,0 +1,189 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+)
+
+// The sidebar lists only live sessions (open tabs and running Quill
+// sessions), grouped by kmem project (user 2026-11-21). Ended sessions live
+// on as kmem handoffs in the kmem panel. A session's project is keyed by its
+// kmem name, because a tab, its Claude session and its kmem name are one
+// identity.
+
+const projectPrefix = "p:"
+
+type kmemSessionCfg struct {
+	As      string `json:"as"`
+	Topic   string `json:"topic"`
+	Project string `json:"project"`
+}
+
+var (
+	kmemCfgMu   sync.Mutex
+	kmemCfgAt   time.Time
+	kmemCfgSess map[string]kmemSessionCfg
+	kmemCfgPath = func() string { return filepath.Join(homeDir(), ".config", "kmem", "config.json") }
+)
+
+// kmemSessions reads the "sessions" labels from kmem's config (read-only,
+// cached for a minute).
+func kmemSessions() map[string]kmemSessionCfg {
+	kmemCfgMu.Lock()
+	defer kmemCfgMu.Unlock()
+	if kmemCfgSess != nil && time.Since(kmemCfgAt) < time.Minute {
+		return kmemCfgSess
+	}
+	kmemCfgAt = time.Now()
+	kmemCfgSess = map[string]kmemSessionCfg{}
+	if b, err := os.ReadFile(kmemCfgPath()); err == nil {
+		var c struct {
+			Sessions map[string]kmemSessionCfg `json:"sessions"`
+		}
+		if json.Unmarshal(b, &c) == nil && c.Sessions != nil {
+			kmemCfgSess = c.Sessions
+		}
+	}
+	return kmemCfgSess
+}
+
+func firstWord(s string) string {
+	f := strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	for _, w := range f {
+		if strings.Trim(w, "0123456789") == "" {
+			continue
+		}
+		r := []rune(w)
+		if len(r) > 1 && strings.ToLower(w) == w {
+			r[0] = unicode.ToUpper(r[0])
+		}
+		return string(r)
+	}
+	return ""
+}
+
+func (d *desk) projectKeyFor(id string) string {
+	if k := d.org.Kmem[id]; k != "" {
+		return k
+	}
+	return id
+}
+
+// projectOf: the project set in Quill, else kmem's config ("project", then
+// the first word of "topic"), else the first word of the session's title.
+func (d *desk) projectOf(id string) string {
+	if p := d.org.Projects[d.projectKeyFor(id)]; p != "" {
+		return p
+	}
+	if c, ok := kmemSessions()[d.org.Kmem[id]]; ok {
+		if c.Project != "" {
+			return c.Project
+		}
+		if w := firstWord(c.Topic); w != "" {
+			return w
+		}
+	}
+	title, _, _ := d.rowText(id)
+	if w := firstWord(title); w != "" && !strings.EqualFold(w, "New") {
+		return w
+	}
+	return "Sessions"
+}
+
+func (d *desk) setProject(id, project string) {
+	project = strings.TrimSpace(project)
+	if d.org.Projects == nil {
+		d.org.Projects = map[string]string{}
+	}
+	if project == "" {
+		delete(d.org.Projects, d.projectKeyFor(id))
+	} else {
+		d.org.Projects[d.projectKeyFor(id)] = project
+	}
+	d.saveOrg()
+	d.rebuildRows()
+}
+
+func (d *desk) renameProject(from, to string) {
+	to = strings.TrimSpace(to)
+	if to == "" || to == from {
+		return
+	}
+	for _, g := range d.groups {
+		if g.key == projectPrefix+from {
+			for _, id := range g.ids {
+				if d.org.Projects == nil {
+					d.org.Projects = map[string]string{}
+				}
+				d.org.Projects[d.projectKeyFor(id)] = to
+			}
+		}
+	}
+	if v, ok := d.folderOpen[projectPrefix+from]; ok {
+		d.folderOpen[projectPrefix+to] = v
+	}
+	d.saveOrg()
+	d.rebuildRows()
+}
+
+func (d *desk) projectNames() []string {
+	var out []string
+	for _, g := range d.groups {
+		if strings.HasPrefix(g.key, projectPrefix) {
+			out = append(out, g.title)
+		}
+	}
+	return out
+}
+
+// liveSession: open in a tab, or a running Quill session (not one held by a
+// terminal elsewhere).
+func (d *desk) liveSession(id string) bool {
+	for _, t := range d.tabs {
+		if t == id && !d.staleTab(id) {
+			return true
+		}
+	}
+	s := d.sessions[id]
+	return s != nil && s.running() && s.terminal == nil
+}
+
+type projectGroup struct {
+	name    string
+	entries []sideEntry
+}
+
+func (d *desk) projectGroups(entries []sideEntry) []projectGroup {
+	tabPos := map[string]int{}
+	for i, t := range d.tabs {
+		tabPos[t] = i
+	}
+	by := map[string][]sideEntry{}
+	for _, e := range entries {
+		p := d.projectOf(e.id)
+		by[p] = append(by[p], e)
+	}
+	var out []projectGroup
+	for name, es := range by {
+		sort.SliceStable(es, func(i, j int) bool {
+			pi, iok := tabPos[es[i].id]
+			pj, jok := tabPos[es[j].id]
+			if iok != jok {
+				return iok
+			}
+			if iok {
+				return pi < pj
+			}
+			return es[i].last.After(es[j].last)
+		})
+		out = append(out, projectGroup{name, es})
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].name) < strings.ToLower(out[j].name) })
+	return out
+}

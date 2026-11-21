@@ -274,6 +274,7 @@ type desk struct {
 	setGeneral    *fyne.Container
 	setSessions   *fyne.Container
 	policyUI      *policyRow
+	kmemPanelNow  *kmemPanel
 	settingsDlg   dialog.Dialog
 	tasksBtn      *tasksChip
 	phoneSync     *phoneSync
@@ -281,6 +282,7 @@ type desk struct {
 	phoneFileOff  *widget.Button
 	settingsSlot  *fyne.Container
 	settingsBtn   *widget.Button
+	kmemBtn       *widget.Button
 	layoutBtn     *widget.Button
 	viewMenu      *widget.PopUpMenu
 	viewItems     []*fyne.MenuItem
@@ -481,11 +483,14 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
 	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
-	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), rulesBtn, widget.NewSeparator(), heading("Devices"), d.buildPhoneRow())
+	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
 	openSettings.Alignment = widget.ButtonAlignLeading
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), openSettings, legend)
+	openKmem := widget.NewButtonWithIcon("kmem", theme.StorageIcon(), d.showKmemPanel)
+	openKmem.Importance = widget.LowImportance
+	openKmem.Alignment = widget.ButtonAlignLeading
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), openSettings, openKmem, legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -729,141 +734,52 @@ func tildePath(p string) string {
 
 func (d *desk) rebuildRows() {
 	q := strings.ToLower(strings.TrimSpace(d.search.Text))
+	seen := map[string]bool{}
 	var entries []sideEntry
+	add := func(id, cwd string, last time.Time) {
+		if seen[id] || !d.liveSession(id) {
+			return
+		}
+		seen[id] = true
+		if q != "" && !d.matches(id, cwd, q) {
+			return
+		}
+		entries = append(entries, sideEntry{id, cwd, last})
+	}
 	for _, s := range d.sessions {
 		if _, ok := d.infos[s.id]; !ok {
-			entries = append(entries, sideEntry{s.id, s.cwd, s.created})
+			add(s.id, s.cwd, s.created)
 		}
 	}
 	for _, info := range d.order {
-		entries = append(entries, sideEntry{info.ID, info.Cwd, info.Last})
+		add(info.ID, info.Cwd, info.Last)
 	}
-	var active, idle, old, auto []sideEntry
-	custom := map[string][]sideEntry{}
-	demote := d.demoteDue()
-	if q == "" {
-		d.rowPlace = make(map[string]string, len(entries))
-	}
-	put := func(list *[]sideEntry, key string, e sideEntry) {
-		*list = append(*list, e)
-		if q == "" {
-			d.rowPlace[e.id] = key
-		}
-	}
-	for _, e := range entries {
-		if q != "" && !d.matches(e.id, e.cwd, q) {
-			continue
-		}
-		p := d.placement(e.id)
-		switch {
-		case strings.HasPrefix(p, folderPrefix):
-			es := custom[p]
-			put(&es, p, e)
-			custom[p] = es
-		case p == placeActive:
-			put(&active, placeActive, e)
-		case p == placeInactive:
-			put(&idle, placeInactive, e)
-		case p == placeArchive:
-			put(&old, placeArchive, e)
-		case p == placeAuto:
-			put(&auto, placeAuto, e)
-		case d.rules.ClaudeFolder && d.isAuto(e.id):
-			put(&auto, placeAuto, e)
-		case q != "":
-			active = append(active, e)
-		default:
-			switch d.stickyPlace(e, demote) {
-			case placeActive:
-				put(&active, placeActive, e)
-			case placeArchive:
-				put(&old, placeArchive, e)
-			default:
-				put(&idle, placeInactive, e)
-			}
-		}
-	}
+	groups := d.projectGroups(entries)
 	if q == "" {
 		d.syncRCNames()
-	}
-	if demote && q == "" {
-		d.sorted.At = time.Now().Unix()
-		d.sortDirty = true
-	}
-	if d.sortDirty {
-		d.sortDirty = false
-		d.saveSortState()
-	}
-	fixed := q == "" && !d.rules.RecentActive
-	if fixed {
-		active = d.fixedActive(active)
-		if d.sortDirty {
-			d.sortDirty = false
-			d.saveSortState()
-		}
-	}
-	if q == "" {
+		d.rowPlace = make(map[string]string, len(entries))
 		d.groups = d.groups[:0]
-		addGroup := func(key, title string, es []sideEntry) {
-			if len(es) == 0 {
-				return
+		for _, g := range groups {
+			bg := bookGroup{key: projectPrefix + g.name, title: g.name}
+			for _, e := range g.entries {
+				bg.ids = append(bg.ids, e.id)
+				d.rowPlace[e.id] = bg.key
 			}
-			g := bookGroup{key: key, title: title}
-			if !(fixed && key == placeActive) {
-				es = sortRecent(es)
-			}
-			for _, e := range es {
-				g.ids = append(g.ids, e.id)
-			}
-			d.groups = append(d.groups, g)
+			d.groups = append(d.groups, bg)
 		}
-		addGroup(placeActive, d.folderTitle(placeActive, "Active"), active)
-		for _, f := range d.sortedFolders(custom) {
-			addGroup(folderPrefix+f.ID, f.Name, custom[folderPrefix+f.ID])
-		}
-		addGroup("inactive", d.folderTitle("inactive", "Inactive"), idle)
-		addGroup("archive", d.folderTitle("archive", "Archive"), old)
-		addGroup("auto", d.folderTitle("auto", "Created by Claude"), auto)
 		d.syncBookmarks()
 		d.syncTabs()
 		d.phoneChanged()
 	}
 	var rows []sideRow
-	if len(active) > 0 {
-		open := q != "" || d.isOpen(placeActive)
-		rows = append(rows, sideRow{header: d.folderTitle(placeActive, "Active"), key: placeActive, count: len(active), open: open})
-		if open {
-			if fixed && !d.groupProjects {
-				for _, e := range active {
-					rows = append(rows, sideRow{id: e.id, depth: 1, parent: "a"})
-				}
-			} else {
-				rows = append(rows, d.projectRows(active, 1, "a:", q != "")...)
-			}
-		}
-	}
-	for _, f := range d.sortedFolders(custom) {
-		key := folderPrefix + f.ID
-		es := custom[key]
+	for _, g := range groups {
+		key := projectPrefix + g.name
 		open := q != "" || d.isOpen(key)
-		rows = append(rows, sideRow{header: f.Name, key: key, count: len(es), open: open})
+		rows = append(rows, sideRow{header: g.name, key: key, count: len(g.entries), open: open})
 		if open {
-			for _, e := range sortRecent(es) {
+			for _, e := range g.entries {
 				rows = append(rows, sideRow{id: e.id, depth: 1, parent: key})
 			}
-		}
-	}
-	for _, g := range []struct {
-		key, title string
-		es         []sideEntry
-	}{{"inactive", "Inactive", idle}, {"archive", "Archive", old}, {"auto", "Created by Claude", auto}} {
-		if len(g.es) == 0 {
-			continue
-		}
-		open := q != "" || d.isOpen(g.key)
-		rows = append(rows, sideRow{header: d.folderTitle(g.key, g.title), key: g.key, count: len(g.es), open: open})
-		if open {
-			rows = append(rows, d.projectRows(g.es, 1, g.key+":", q != "")...)
 		}
 	}
 	d.rows = rows
@@ -871,7 +787,7 @@ func (d *desk) rebuildRows() {
 	d.list.UnselectAll()
 	for i, r := range rows {
 		switch {
-		case r.header != "" && r.depth == 0 && !strings.HasPrefix(r.key, "a:"):
+		case r.header != "" && r.depth == 0:
 			d.list.SetItemHeight(i, 34)
 		case r.header != "":
 			d.list.SetItemHeight(i, 26)
