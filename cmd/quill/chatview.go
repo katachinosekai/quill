@@ -74,6 +74,7 @@ type chatView struct {
 	steps         bool
 	cache         map[*deskSession]*sessView
 	order         []*deskSession
+	sel           *selLayer
 }
 
 type sessView struct {
@@ -99,7 +100,8 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 	v := &chatView{d: d, views: map[int]*itemView{}}
 	v.box = chatBox()
 	v.cache = map[*deskSession]*sessView{}
-	v.inner = container.New(shownPad{10, 10, 14, 14}, v.box)
+	v.sel = newSelLayer(v)
+	v.inner = container.New(shownPad{10, 10, 14, 14}, v.box, v.sel)
 	v.live = widget.NewLabel(" ")
 	v.live.TextStyle.Italic = true
 	v.live.Truncation = fyne.TextTruncateEllipsis
@@ -173,6 +175,9 @@ func (v *chatView) forget(s *deskSession) {
 
 func (v *chatView) setBox(b *fyne.Container) {
 	v.box = b
+	if v.sel != nil {
+		v.sel.clear()
+	}
 	keep := map[fyne.CanvasObject]bool{b: true}
 	for _, sv := range v.cache {
 		keep[sv.box] = true
@@ -194,6 +199,9 @@ func (v *chatView) setBox(b *fyne.Container) {
 	if !found {
 		objs = append(objs, b)
 		b.Show()
+	}
+	if v.sel != nil {
+		objs = append(objs, v.sel)
 	}
 	v.inner.Objects = objs
 	v.relayoutInner()

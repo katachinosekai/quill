@@ -39,7 +39,30 @@ func isNewTab(s fyne.Shortcut) bool {
 	return ok && c.KeyName == fyne.KeyT && c.Modifier == fyne.KeyModifierShortcutDefault
 }
 
+func (d *desk) copySelection() bool {
+	for _, v := range d.allViews() {
+		if v.sel != nil && v.sel.copy() {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *desk) clearSelections() {
+	for _, v := range d.allViews() {
+		if v.sel != nil {
+			v.sel.clear()
+		}
+	}
+}
+
 func (d *desk) setupShortcuts() {
+	d.win.Canvas().AddShortcut(&fyne.ShortcutCopy{}, func(fyne.Shortcut) { d.copySelection() })
+	d.win.Canvas().SetOnTypedKey(func(k *fyne.KeyEvent) {
+		if k.Name == fyne.KeyEscape {
+			d.clearSelections()
+		}
+	})
 	d.win.Canvas().AddShortcut(newTabShortcut, func(fyne.Shortcut) { d.newSessionDialog() })
 	for i, k := range tabKeys {
 		n := i + 1
