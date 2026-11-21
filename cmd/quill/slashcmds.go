@@ -40,6 +40,7 @@ func (d *desk) restartOnNext(s *deskSession, msg string) bool {
 	}
 	p := s.proc
 	s.proc = nil
+	s.inTurn, s.planWait = false, false
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	d.unkeepSession(s.id)
 	go func() { _ = p.Stop(5 * time.Second) }()
@@ -51,14 +52,23 @@ func (d *desk) control(s *deskSession, req map[string]any) (json.RawMessage, err
 	if d.controlFn != nil {
 		return d.controlFn(s, req)
 	}
-	if !s.running() {
-		if err := d.ensureProcess(s); err != nil {
-			return nil, err
+	var p *session.Process
+	var err error
+	d.doWait(func() {
+		if !s.running() {
+			err = d.ensureProcess(s)
 		}
+		p = s.proc
+	})
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, fmt.Errorf("the session has no Claude process")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return s.proc.Control(ctx, req)
+	return p.Control(ctx, req)
 }
 
 func (d *desk) textDialog(title, text string) {
@@ -355,11 +365,19 @@ func removeRule(r permRule) error {
 	if err != nil {
 		return err
 	}
-	tmp := r.file + ".quill-tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+	target := r.file
+	if real, err := filepath.EvalSymlinks(r.file); err == nil {
+		target = real
+	}
+	mode := os.FileMode(0o600)
+	if st, err := os.Stat(target); err == nil {
+		mode = st.Mode().Perm()
+	}
+	tmp := target + ".quill-tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), mode); err != nil {
 		return err
 	}
-	return os.Rename(tmp, r.file)
+	return os.Rename(tmp, target)
 }
 
 func (d *desk) permissionsPane(cwd string) fyne.CanvasObject {
@@ -690,6 +708,9 @@ func (d *desk) mcpPane(s *deskSession) *fyne.Container {
 // fork
 
 func (d *desk) forkSession(s *deskSession) (*deskSession, error) {
+	if s.running() && s.conv.Busy {
+		return nil, fmt.Errorf("wait for the current turn to finish")
+	}
 	info, ok := d.infos[s.id]
 	if !ok || info.Path == "" {
 		return nil, fmt.Errorf("this session has nothing saved to fork yet")
@@ -758,6 +779,10 @@ func (d *desk) rewindTo(s *deskSession, u *chat.Item, files bool) {
 		}
 	}
 	finish := func(note string) {
+		if s.running() && s.conv.Busy {
+			d.notify(s, "A turn started in the meantime; nothing was rewound.")
+			return
+		}
 		text := u.Text
 		if prev == "" {
 			title, _, _ := d.rowText(s.id)

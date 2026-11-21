@@ -1342,8 +1342,6 @@ func (d *desk) ensureProcess(s *deskSession) error {
 	s.failed = ""
 	s.stopping = false
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
-	s.conv.ClearBackground()
-	s.resumeAt = ""
 	p, err := session.Start(opts, func(ev *protocol.Event) {
 		d.do(func() { d.handleEvent(s, ev) })
 	})
@@ -1351,6 +1349,8 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		s.failed = err.Error()
 		return err
 	}
+	s.conv.ClearBackground()
+	s.resumeAt = ""
 	d.adopt(s, p)
 	d.autoRemote(s)
 	return nil
@@ -1458,6 +1458,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 		}
 	}
 	s.conv.Busy = false
+	s.inTurn, s.planWait = false, false
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
 		msg := "Claude process exited: " + err.Error()
@@ -1763,6 +1764,7 @@ func (d *desk) setModel(s *deskSession, model string) {
 	p := s.proc
 	if switchBackend {
 		s.proc = nil
+		s.inTurn, s.planWait = false, false
 		s.rcOn, s.rcURL, s.rcName = false, "", ""
 		d.unkeepSession(s.id)
 		go func() { _ = p.Stop(5 * time.Second) }()
@@ -2446,7 +2448,13 @@ func coversPlan(s *deskSession, text string) bool {
 }
 
 func approvesPlan(s *deskSession, text string) bool {
-	return approves(text) || isStepList(text) && coversPlan(s, text)
+	if text == planGoMessage {
+		return true
+	}
+	if approves(text) {
+		return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
+	}
+	return isStepList(text) && coversPlan(s, text)
 }
 
 func isRetry(text string) bool {

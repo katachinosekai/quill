@@ -273,3 +273,21 @@ func TestBackgroundLaunchTextInsideOutputIsNotATask(t *testing.T) {
 		t.Fatalf("real launches still count: %+v", c.BackgroundTasks())
 	}
 }
+
+func TestTaskEndsWhenItsOutputReportsDone(t *testing.T) {
+	c := New()
+	tool := func(id, name, input, result string) {
+		c.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"` + id + `","name":"` + name + `","input":` + input + `}]`)}})
+		b, _ := json.Marshal(result)
+		c.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"` + id + `","content":` + string(b) + `}]`)}})
+	}
+	tool("b1", "Bash", `{"command":"./t.sh","run_in_background":true}`, "Command running in background with ID: taskabc12. Output is being written to: /tmp/o")
+	tool("o1", "TaskOutput", `{"task_id":"taskabc12","block":false}`, "<status>running</status>\npartial output")
+	if c.Background() != 1 {
+		t.Fatal("a running status keeps the task")
+	}
+	tool("o2", "TaskOutput", `{"task_id":"taskabc12","block":true}`, "<retrieval_status>success</retrieval_status>\n<status>completed</status>\n<exit_code>0</exit_code>")
+	if c.Background() != 0 {
+		t.Fatal("reading a finished task's output ends it even without a notification")
+	}
+}

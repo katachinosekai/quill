@@ -660,11 +660,12 @@ func ShortPath(p, cwd string) string {
 }
 
 var (
-	bgShell     = regexp.MustCompile(`^\s*(?:Command running in background with ID:\s*|Command did not complete within[^\n]*?moved to the background \(ID:\s*)([A-Za-z0-9_-]{4,})`)
-	bgAnyID     = regexp.MustCompile(`(?i)\b(?:task ?id|agentId|ID)[:=]?\s*([A-Za-z0-9_-]{6,})`)
-	notifyID    = regexp.MustCompile(`<task-id>\s*([^<\s]+)\s*</task-id>`)
-	notifyState = regexp.MustCompile(`<status>\s*([a-z_]+)\s*</status>`)
-	taskDone    = map[string]bool{"completed": true, "failed": true, "killed": true, "stopped": true, "cancelled": true, "canceled": true, "timeout": true, "timed_out": true, "error": true}
+	bgShell      = regexp.MustCompile(`^\s*(?:Command running in background with ID:\s*|Command did not complete within[^\n]*?moved to the background \(ID:\s*)([A-Za-z0-9_-]{4,})`)
+	bgAnyID      = regexp.MustCompile(`(?i)\b(?:task ?id|agentId|ID)[:=]?\s*([A-Za-z0-9_-]{6,})`)
+	notifyID     = regexp.MustCompile(`<task-id>\s*([^<\s]+)\s*</task-id>`)
+	notifyState  = regexp.MustCompile(`<status>\s*([a-z_]+)\s*</status>`)
+	outputStatus = regexp.MustCompile(`(?i)(?:<status>|\bstatus\W{0,3})\s*(completed|failed|killed|stopped|cancelled|canceled|timeout|timed_out|error)\b`)
+	taskDone     = map[string]bool{"completed": true, "failed": true, "killed": true, "stopped": true, "cancelled": true, "canceled": true, "timeout": true, "timed_out": true, "error": true}
 )
 
 func (c *Conversation) trackTask(it *Item) {
@@ -675,6 +676,7 @@ func (c *Conversation) trackTask(it *Item) {
 		Background  bool   `json:"run_in_background"`
 		TaskID      string `json:"task_id"`
 		ShellID     string `json:"shell_id"`
+		BashID      string `json:"bash_id"`
 		Command     string `json:"command"`
 		Description string `json:"description"`
 		Prompt      string `json:"prompt"`
@@ -700,8 +702,15 @@ func (c *Conversation) trackTask(it *Item) {
 			}
 		}
 	case "TaskStop", "KillShell", "KillBash":
-		for _, k := range []string{in.TaskID, in.ShellID} {
+		for _, k := range []string{in.TaskID, in.ShellID, in.BashID} {
 			delete(c.bgTasks, k)
+		}
+		return
+	case "TaskOutput", "BashOutput":
+		if m := outputStatus.FindStringSubmatch(it.Result); m != nil && taskDone[strings.ToLower(m[1])] {
+			for _, k := range []string{in.TaskID, in.ShellID, in.BashID} {
+				delete(c.bgTasks, k)
+			}
 		}
 		return
 	}

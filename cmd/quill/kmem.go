@@ -282,6 +282,10 @@ func (d *desk) relaunchViaKmem(id, name string) {
 	old.kmemSave = &kmemSave{name: name, asked: time.Now().Add(-2 * time.Second), spare: spare}
 	d.notify(old, fmt.Sprintf("Restarting from kmem: waiting for this session to save its handoff “%s”.", name))
 	d.sendTo(old, kmemSaveMessage(name))
+	if !old.running() {
+		old.kmemSave = nil
+		d.notify(old, "The restart was cancelled: this session's Claude process could not start, so it couldn't save its handoff.")
+	}
 }
 
 func (d *desk) kmemSaveAllowed(s *deskSession, r *protocol.ControlRequest) bool {

@@ -43,6 +43,7 @@ var (
 	assignName     = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=`)
 	sedPrintRange  = regexp.MustCompile(`^(\d+|\$)?(,(\d+|\$))?p$`)
 	awkPrintRedir  = regexp.MustCompile(`printf?\b[^;{}]*>`)
+	awkSystem      = regexp.MustCompile(`\bsystem\s*\(`)
 	readOnlyBinDir = []string{"/usr/bin/", "/bin/", "/usr/local/bin/", "/usr/sbin/", "~/.local/bin/"}
 )
 
@@ -442,7 +443,10 @@ func readOnlySegment(seg []shWord, extra [][]string) bool {
 		return len(args) > 0 && readOnlyGit[args[0]] && readOnlyGitArgs(args[0], args[1:])
 	case "sort", "tree":
 		for _, a := range args {
-			if strings.HasPrefix(a, "-o") || strings.HasPrefix(a, "--output") || strings.HasPrefix(a, "--compress-program") {
+			if strings.HasPrefix(a, "--output") || strings.HasPrefix(a, "--compress-program") {
+				return false
+			}
+			if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.ContainsRune(a, 'o') {
 				return false
 			}
 		}
@@ -461,7 +465,7 @@ func readOnlySegment(seg []shWord, extra [][]string) bool {
 	case "uniq":
 		files := 0
 		for _, a := range args {
-			if !strings.HasPrefix(a, "-") {
+			if a == "-" || !strings.HasPrefix(a, "-") {
 				files++
 			}
 		}
@@ -475,7 +479,7 @@ func readOnlySegment(seg []shWord, extra [][]string) bool {
 			case strings.HasPrefix(a, "-F") || strings.HasPrefix(a, "-v"):
 			case strings.HasPrefix(a, "-"):
 				return false
-			case strings.Contains(a, "system(") || strings.Contains(a, "|") || awkPrintRedir.MatchString(a):
+			case awkSystem.MatchString(a) || strings.Contains(a, "|") || awkPrintRedir.MatchString(a) || strings.Contains(a, "@load") || strings.Contains(a, "@include") || strings.Contains(a, "inplace"):
 				return false
 			}
 		}

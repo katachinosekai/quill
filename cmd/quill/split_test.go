@@ -2101,3 +2101,40 @@ func TestDragPassThroughAndChoiceRefresh(t *testing.T) {
 		}
 	})
 }
+
+func TestReadOnlyHoles(t *testing.T) {
+	for c, want := range map[string]bool{
+		"sort -no /home/u/.bashrc in.txt":  false,
+		"sort -rn data.txt":                true,
+		"tree -ao out":                     false,
+		"cat x | uniq - /tmp/target":       false,
+		"cat x | uniq -c":                  true,
+		`awk 'BEGIN{system ("rm -rf x")}'`: false,
+		`awk '@load "inplace"; {print}' f`: false,
+		`awk '{print $1}' f`:               true,
+	} {
+		if readOnlyCommand(c, nil) != want {
+			t.Errorf("readOnlyCommand(%q) = %v", c, !want)
+		}
+	}
+}
+
+func TestStartFailureKeepsRewindAndCancelsKmemRestart(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.cfg.ClaudeBin = "/nonexistent/claude"
+		s := h.d.createSession(h.proj, "default", "default")
+		s.resumeAt = "A1"
+		if err := h.d.ensureProcess(s); err == nil {
+			t.Fatal("start should fail")
+		}
+		if s.resumeAt != "A1" {
+			t.Fatal("a failed start keeps the rewind point for the next try")
+		}
+		h.d.org.Kmem[s.id] = "quill"
+		h.d.relaunchViaKmem(s.id, "quill")
+		if s.kmemSave != nil {
+			t.Fatal("a kmem restart whose save request can't be sent is cancelled, not left waiting forever")
+		}
+	})
+}

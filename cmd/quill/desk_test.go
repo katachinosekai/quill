@@ -1271,8 +1271,14 @@ func TestTypedApproval(t *testing.T) {
 			t.Fatal("a new request from any channel ends the approval")
 		}
 		h.d.planGate(s, &protocol.Event{Type: "user"}, []*chat.Item{{Kind: chat.User, Text: "yes"}})
-		if !s.runAll {
-			t.Fatal("yes typed on another device (Remote Control) approves too")
+		if s.runAll {
+			t.Fatal("a plain yes with no plan card or approval question open approves nothing")
+		}
+		s.inTurn = false
+		remote := s.conv.AddPlan()
+		h.d.planGate(s, &protocol.Event{Type: "user"}, []*chat.Item{{Kind: chat.User, Text: "yes"}})
+		if !s.runAll || remote.PermState != chat.PermAllowed {
+			t.Fatal("yes typed on another device (Remote Control) approves an open plan card too")
 		}
 		s.runAll = false
 		s.conv.Busy = true
