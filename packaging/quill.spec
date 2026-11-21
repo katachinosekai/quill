@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.15
+Version:        0.1.16
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -70,6 +70,14 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.16-1
+- Settings → Setup: what Quill Desktop needs, with one button each: Claude Code (Anthropic's installer, after asking), sign-in, kmem, python3 and hunspell (through your package manager, after asking), device password and local models; shown at first start when something required is missing
+- Open-weight models: Local models window with Ollama status, suggested tool-capable models to pull with progress and larger-context copies, and other local servers with an Anthropic-compatible API (llama.cpp, vLLM, LM Studio, LiteLLM) whose models appear under Local
+- Plan card for closing "Should I …?" proposals; questions that name options keep their buttons
+- Phone API: each session's prompt suggestion (for Quill for Android)
+- Windows: a zip with quill.exe, licences and a README; built without local paths; kmem isn't available on Windows yet
+- Release signing covers the Windows files
+- Bundles Quill for Android 0.9.14
 * Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.15-1
 - Sidebar lists live sessions grouped by kmem project; one identity for tab, session and kmem name; kmem panel with handoffs, tasks, memory and recycle bin; Auto-handoff settings row
 - kmem is the default memory for Quill sessions; Quill bundles kmem 1.4.0 and updates an older installed kmem when it starts
