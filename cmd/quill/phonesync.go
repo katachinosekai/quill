@@ -346,7 +346,7 @@ func (d *desk) pairDialog() {
 		linkText.SetText(link)
 	}
 	show()
-	help := widget.NewLabel("Scan with your phone's camera and open the link in Quill for Android, or copy the link and use \"Paste pairing link\" in the app's settings. Folders update while the phone is on the same network as this computer.")
+	help := widget.NewLabel("In Quill for Android: ⚙ → Scan pairing QR code, then point it at this code. Or copy the link and use \"Paste pairing link\" in the app's settings. Folders update while the phone is on the same network as this computer.")
 	help.Wrapping = fyne.TextWrapWord
 	copyBtn := widget.NewButton("Copy pairing link", func() {
 		d.app.Clipboard().SetContent(link)
