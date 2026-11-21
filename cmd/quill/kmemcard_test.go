@@ -71,9 +71,10 @@ func TestNewTabKmemCard(t *testing.T) {
 		}
 		return false
 	})
+	var r *deskSession
 	h.ui(func() {
 		h.d.newSessionDialog()
-		r := h.d.current
+		r = h.d.current
 		h.d.pickResume(r, "quill")
 		if h.d.org.Titles[r.id] != "quill" || h.d.org.Kmem[r.id] != "quill" {
 			t.Fatal("resume adopts the handoff's name")
@@ -91,6 +92,24 @@ func TestNewTabKmemCard(t *testing.T) {
 	for _, c := range calls {
 		if strings.Contains(c, "handoff rename") {
 			t.Fatal("an unsaved handoff only changes the link; no kmem rename")
+		}
+	}
+	mu.Unlock()
+	// A saved handoff is renamed in kmem too; from then on Quill asks for saves
+	// under the new name (kmem 1.6.0 refuses `handoff save OLD` after a rename).
+	h.ui(func() { h.d.renameKmem(r.id, "quill", "quill-2") })
+	h.eventually("saved handoff renamed", func() bool { return h.d.org.Kmem[r.id] == "quill-2" })
+	mu.Lock()
+	renamed := false
+	for _, c := range calls {
+		renamed = renamed || c == "kmem handoff rename quill quill-2"
+	}
+	if !renamed {
+		t.Fatalf("a saved handoff is renamed in kmem: %v", calls)
+	}
+	for _, m := range []string{kmemSaveMessage(h.d.org.Kmem[r.id]), kmemEndMessage(h.d.org.Kmem[r.id])} {
+		if !strings.Contains(m, "kmem handoff save quill-2") || strings.Contains(m, "save quill ") {
+			t.Fatalf("saves use the current name: %q", m)
 		}
 	}
 }
