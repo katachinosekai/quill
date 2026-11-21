@@ -116,6 +116,12 @@ func (c *Conversation) AddPlan() *Item {
 	return c.add(&Item{Kind: Plan, PermState: PermPending})
 }
 
+// approvalAsk: a closing question that asks to go ahead with a plan
+// ("Approve this plan?", "Go ahead with steps 1–3?", "Okay to run this?",
+// "Shall I proceed?"; user 2026-11-21 after PZ Launcher's missed cards). An
+// ordinary question ("Anything else?", "Should I add X?") is not one.
+var approvalAsk = regexp.MustCompile(`(?i)\bapprov|\bgo ahead\b|\bproceed\b|\b(?:okay|ok) to\b|\brun (?:this|it|these|them)\b|\bcarry (?:it|this|them) out\b|\bsteps? \d`)
+
 func (c *Conversation) AsksApproval() bool {
 	for i := len(c.Items) - 1; i >= 0; i-- {
 		it := c.Items[i]
@@ -127,7 +133,7 @@ func (c *Conversation) AsksApproval() bool {
 		}
 		t := strings.TrimRight(strings.TrimSpace(it.Text), "*_ ")
 		last := t[strings.LastIndex(t, "\n")+1:]
-		return strings.HasSuffix(t, "?") && strings.Contains(strings.ToLower(last), "approve")
+		return strings.HasSuffix(t, "?") && approvalAsk.MatchString(last)
 	}
 	return false
 }

@@ -1514,6 +1514,29 @@ func TestAsksApprovalShowsPlanCard(t *testing.T) {
 	if c.AsksApproval() {
 		t.Fatal("an ordinary question is not a plan")
 	}
+	for text, want := range map[string]bool{
+		"1. render\n2. commit\n\n**Go ahead with steps 1–3?**":                   true,
+		"Plan.\n\n**Okay to run this?**":                                         true,
+		"Plan.\n\n**Shall I proceed?**":                                          true,
+		"**Pick C1 or C2. Do you approve steps 1–6 to put it in the launcher?**": true,
+		"**Should I add a Settings row for this?**":                              false,
+		"Which size do you want, 48 or 64?":                                      false,
+	} {
+		c.AddUser("x")
+		c.Items = append(c.Items, &chat.Item{Kind: chat.Assistant, Text: text})
+		if c.AsksApproval() != want {
+			t.Errorf("AsksApproval(%q) = %v, want %v", text, !want, want)
+		}
+	}
+	for text, want := range map[string]bool{
+		"C1, go ahead": true, "option B - approved": true, "2: yes": true, "c2, approve": true,
+		"64, hand-touch the pixels": false, "C1, but wait": false, "C1": false,
+		"yes, add the settings row": true, "go ahead, also inform quill 2 agent that this did not have a card": false,
+	} {
+		if isApproval(text) != want {
+			t.Errorf("isApproval(%q) = %v, want %v", text, !want, want)
+		}
+	}
 }
 
 func TestPlanApprovalSymptoms(t *testing.T) {

@@ -2488,7 +2488,17 @@ var strongApproval = []string{"yes approve", "yes, approve", "yes i approve", "y
 
 var strongStop = []string{"but", "don't", "dont", "do not", "not ", "wait", "instead", "hold", "stop", "except", "cancel", "skip", "don’t"}
 
+// choicePrefix: a short pick in front of an approval ("C1, go ahead",
+// "option B - approved", "2: yes"); the rest decides (user 2026-11-21).
+var choicePrefix = regexp.MustCompile(`(?i)^\s*(?:option |choice |pick )?[a-z]?\d{0,3}[a-z]?\s*[,;:–—-]\s*(.+)$`)
+
 func isApproval(text string) bool {
+	if m := choicePrefix.FindStringSubmatch(text); m != nil && strings.TrimSpace(m[1]) != "" && len(text)-len(m[1]) <= 14 && strings.TrimSpace(text[:len(text)-len(m[1])]) != "" {
+		head := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(text[:len(text)-len(m[1])]), ",;:–—-"))
+		if head != "" && !approvalWords[strings.ToLower(head)] {
+			return isApproval(m[1])
+		}
+	}
 	t := strings.ToLower(strings.TrimSpace(text))
 	t = strings.TrimRight(t, ".! ")
 	if t == "" || len(t) > 2000 {
