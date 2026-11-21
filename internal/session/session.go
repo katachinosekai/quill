@@ -44,13 +44,42 @@ func (o Options) Args() []string {
 	} else if o.SessionID != "" {
 		args = append(args, "--session-id", o.SessionID)
 	}
-	if o.Model != "" && o.Model != "default" {
+	if m := LocalModel(o.Model); m != "" {
+		args = append(args, "--model", m)
+	} else if o.Model != "" && o.Model != "default" {
 		args = append(args, "--model", o.Model)
 	}
 	if o.Mode != "" && o.Mode != "default" {
 		args = append(args, "--permission-mode", o.Mode)
 	}
 	return append(args, o.ExtraArgs...)
+}
+
+const LocalPrefix = "ollama:"
+
+func LocalModel(model string) string {
+	if strings.HasPrefix(model, LocalPrefix) {
+		return strings.TrimPrefix(model, LocalPrefix)
+	}
+	return ""
+}
+
+func LocalEnv(model string) []string {
+	if LocalModel(model) == "" {
+		return nil
+	}
+	host := os.Getenv("QUILL_OLLAMA_URL")
+	if host == "" {
+		host = "http://localhost:11434"
+	}
+	return []string{
+		"ANTHROPIC_BASE_URL=" + host,
+		"ANTHROPIC_AUTH_TOKEN=ollama",
+		"ANTHROPIC_API_KEY=",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL=" + LocalModel(model),
+		"ANTHROPIC_SMALL_FAST_MODEL=" + LocalModel(model),
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+	}
 }
 
 func NewUUID() string {
@@ -93,7 +122,7 @@ func Start(opts Options, onEvent func(*protocol.Event)) (*Process, error) {
 	}
 	cmd := exec.Command(bin, opts.Args()...)
 	cmd.Dir = opts.Cwd
-	cmd.Env = append(os.Environ(), opts.Env...)
+	cmd.Env = append(append(os.Environ(), LocalEnv(opts.Model)...), opts.Env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	inR, inW, err := os.Pipe()
 	if err != nil {
@@ -456,6 +485,9 @@ func (p *Process) SetMode(ctx context.Context, mode string) error {
 }
 
 func (p *Process) SetModel(ctx context.Context, model string) error {
+	if m := LocalModel(model); m != "" {
+		model = m
+	}
 	_, err := p.Request(ctx, func(id string) []byte { return protocol.SetModel(id, model) })
 	return err
 }

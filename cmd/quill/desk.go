@@ -31,7 +31,7 @@ import (
 	"github.com/katachinosekai/quill/internal/updater"
 )
 
-var modelChoices = []string{"default", "fable", "opus", "sonnet", "haiku"}
+var modelChoices = []string{"default", "fable", "opus", "sonnet", "haiku", "ollama:qwen3.8:27b-80k", "ollama:qwen3-coder:30b-48k"}
 var modeChoices = []string{"default", "acceptEdits", "plan", "auto"}
 
 type status int
@@ -1640,11 +1640,23 @@ func (d *desk) answerQuestions(s *deskSession, it *chat.Item, answers map[string
 }
 
 func (d *desk) setModel(s *deskSession, model string) {
+	switchBackend := (session.LocalModel(s.model) == "") != (session.LocalModel(model) == "")
+	if switchBackend && s.running() && s.conv.Busy {
+		d.notify(s, "Wait for the current turn to finish before switching between Claude and a local model.")
+		return
+	}
 	s.model = model
 	if !s.running() {
 		return
 	}
 	p := s.proc
+	if switchBackend {
+		s.proc = nil
+		d.unkeepSession(s.id)
+		go func() { _ = p.Stop(5 * time.Second) }()
+		d.notify(s, "Model set to "+model+". The session restarts on the next message.")
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
