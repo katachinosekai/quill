@@ -4,6 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
+	"image/color"
 	"io"
 	"net"
 	"net/http"
@@ -286,4 +291,78 @@ func (d *desk) checkOllama(model string) error {
 		return fmt.Errorf("Ollama isn't running at %s (GameMode stops it while a game runs). Start it or switch this session to Online", host)
 	}
 	return nil
+}
+
+type boxedTheme struct{ deskTheme }
+
+func (t boxedTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
+	if n == theme.ColorNameInputBackground {
+		return t.deskTheme.Color(theme.ColorNameButton, v)
+	}
+	return t.deskTheme.Color(n, v)
+}
+
+func boxed(o fyne.CanvasObject) fyne.CanvasObject {
+	return container.NewThemeOverride(o, boxedTheme{})
+}
+
+func newTasksButton(session func() *deskSession, open func(*deskSession)) *widget.Button {
+	b := widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
+		if s := session(); s != nil {
+			open(s)
+		}
+	})
+	b.Importance = widget.MediumImportance
+	b.Hide()
+	return b
+}
+
+func tasksLabel(s *deskSession) string {
+	if s == nil || !s.running() {
+		return ""
+	}
+	tasks := s.conv.BackgroundTasks()
+	if len(tasks) == 0 {
+		return ""
+	}
+	what := tasks[0].What
+	if what == "" {
+		what = tasks[0].Tool
+	}
+	label := oneLine(what, 40)
+	if n := len(tasks) - 1; n > 0 {
+		label += fmt.Sprintf(" +%d more", n)
+	}
+	return label
+}
+
+func syncTasksButton(b *widget.Button, s *deskSession) bool {
+	if b == nil {
+		return false
+	}
+	was := b.Visible()
+	label := tasksLabel(s)
+	if label == "" {
+		b.Hide()
+		return was
+	}
+	if b.Text != label {
+		b.SetText(label)
+	}
+	b.Show()
+	return !was
+}
+
+func relayoutTree(o fyne.CanvasObject) {
+	c, ok := o.(*fyne.Container)
+	if !ok {
+		return
+	}
+	if c.Layout != nil {
+		c.Layout.Layout(c.Objects, c.Size())
+	}
+	for _, x := range c.Objects {
+		relayoutTree(x)
+	}
+	canvas.Refresh(c)
 }

@@ -1799,8 +1799,8 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgx","name":"Bash","input":{"command":"./test.sh","run_in_background":true}}]`)}})
 		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgx","content":"Command running in background with ID: tsk1. Output is being written to: /tmp/o"}]`)}})
 		h.d.updateChrome()
-		if !h.d.tasksBtn.Visible() || h.d.tasksBtn.Text != "Background tasks: 1" {
-			t.Fatalf("the header shows a background-tasks button while tasks run: %q %v", h.d.tasksBtn.Text, h.d.tasksBtn.Visible())
+		if !h.d.tasksBtn.Visible() || h.d.tasksBtn.Text != "./test.sh" {
+			t.Fatalf("the message bar shows this session's background task: %q %v", h.d.tasksBtn.Text, h.d.tasksBtn.Visible())
 		}
 		h.d.rewindTo(s, user, true)
 	})
@@ -1909,6 +1909,31 @@ func TestKmemSafetyAndSelectionClicks(t *testing.T) {
 		newBgTap(h.d.clearSelections).Tapped(&fyne.PointEvent{})
 		if sel.has {
 			t.Fatal("a click on empty space clears the selection")
+		}
+	})
+}
+
+func TestOneViewButton(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		for i := 0; i < 3; i++ {
+			s := h.d.createSession(h.proj, "default", "default")
+			h.d.open(s.id)
+		}
+		var seen []string
+		for i := 0; i < 4; i++ {
+			seen = append(seen, h.d.viewBtn.Text)
+			test.Tap(h.d.viewBtn)
+		}
+		seen = append(seen, h.d.viewBtn.Text)
+		if strings.Join(seen, ",") != "Single,Split 2,Split 3,Auto split,Single" {
+			t.Fatalf("one button cycles the views: %v", seen)
+		}
+		if h.d.autoChk.Checked {
+			t.Fatal("leaving Auto split turns it off")
+		}
+		if h.d.split() {
+			t.Fatal("and goes back to a single view")
 		}
 	})
 }
