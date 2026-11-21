@@ -68,8 +68,8 @@ func TestWindowsKmemLive(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), `"platform": "windows"`) && !strings.Contains(string(out), `"platform":"windows"`) {
 		t.Fatalf("kmem runs on Windows through Python: %v %s", err, out)
 	}
-	if kmemScriptVersion(filepath.Join(home, ".local", "bin", "kmem")) != "1.5.0" {
-		t.Fatal("bundled 1.5.0 installed")
+	if v := kmemScriptVersion(filepath.Join(home, ".local", "bin", "kmem")); v != bundledKmemVersion(os.Getenv("QUILL_KMEM_LIVE")) {
+		t.Fatalf("the bundled kmem is installed: %s", v)
 	}
 	t.Logf("kmem version: %s", strings.TrimSpace(string(out)))
 }
