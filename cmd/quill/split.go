@@ -695,7 +695,9 @@ func (d *desk) syncPaneControls(p *pane) {
 	}
 	setOptions(p.model, d.modelOptions(s))
 	setOptions(p.mode, modeOptions(s))
-	setBackendButton(p.backend, s)
+	if setBackendButton(p.backend, s) && d.mainPane != nil {
+		relayoutTree(d.mainPane)
+	}
 	if p.model.Selected != s.model {
 		p.model.SetSelected(s.model)
 	}

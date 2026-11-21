@@ -46,18 +46,21 @@ func backendOf(model string) string {
 
 const backendRemote = "Remote"
 
-func setBackendButton(b *widget.Button, s *deskSession) {
+// setBackendButton reports whether the text changed (callers re-lay out).
+// Remote Control shows in the header and as the ticked Remote in the menu,
+// not on the button: a wider button pushes Voice out of the row.
+func setBackendButton(b *widget.Button, s *deskSession) bool {
 	text, imp := backendOnline, widget.MediumImportance
 	if isLocal(s.model) {
 		text, imp = backendLocal, widget.WarningImportance
 	}
-	if s.rcOn {
-		text += " · " + backendRemote
-	}
 	if b.Text != text || b.Importance != imp {
+		grew := b.Text != text
 		b.Importance = imp
 		b.SetText(text)
+		return grew
 	}
+	return false
 }
 
 type localInfo struct {
@@ -436,6 +439,12 @@ func (d *desk) showBackendMenu(s *deskSession, b *widget.Button, after func()) {
 	if c == nil {
 		return
 	}
+	// The button sits at the bottom of the window: open the menu above it.
 	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(b)
-	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", d.backendItems(s, after)...), c, pos.Add(fyne.NewPos(0, b.Size().Height)))
+	m := widget.NewPopUpMenu(fyne.NewMenu("", d.backendItems(s, after)...), c)
+	y := pos.Y - m.MinSize().Height
+	if y < 0 {
+		y = pos.Y + b.Size().Height
+	}
+	m.ShowAtPosition(fyne.NewPos(pos.X, y))
 }

@@ -890,8 +890,8 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		}
 		s.rcOn = true
 		h.d.updateChrome()
-		if h.d.backendBtn.Text != "Online · Remote" || !reflect.DeepEqual(checked(), []string{"Online", "Remote"}) {
-			t.Fatalf("Remote Control shows on the button and in the menu: %q %v", h.d.backendBtn.Text, checked())
+		if h.d.backendBtn.Text != backendOnline || !reflect.DeepEqual(checked(), []string{"Online", "Remote"}) || h.d.rcStatus.Text != "● Remote Control on" {
+			t.Fatalf("Remote Control is ticked in the menu and shown in the header; the button stays narrow: %q %v", h.d.backendBtn.Text, checked())
 		}
 		s.rcOn = false
 		h.d.updateChrome()

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/katachinosekai/quill/internal/protocol"
 )
@@ -46,4 +49,22 @@ func TestClaudeCommandsAdaptedToQuill(t *testing.T) {
 			t.Fatal("phones may rename with a name and use /rc; a bare /rename (a desktop dialog) is blocked")
 		}
 	})
+}
+
+func TestBackendMenuShot(t *testing.T) {
+	if os.Getenv("DESK_SHOTS") == "" {
+		t.Skip("set DESK_SHOTS=1 to render the Online/Local/Remote menu to .shots/backend-menu.png")
+	}
+	dir, _ := filepath.Abs(filepath.Join("..", "..", ".shots"))
+	os.MkdirAll(dir, 0o755)
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "opus", "default")
+		h.d.open(s.id)
+		s.rcOn = true
+		h.d.updateChrome()
+		h.d.showBackendMenu(s, h.d.backendBtn, h.d.updateChrome)
+	})
+	time.Sleep(300 * time.Millisecond)
+	h.ui(func() { shot(t, h.w, dir, "backend-menu.png") })
 }

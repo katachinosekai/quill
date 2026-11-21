@@ -1080,7 +1080,9 @@ func (d *desk) updateChrome() {
 	}
 	setOptions(d.modelSel, d.modelOptions(s))
 	setOptions(d.modeSel, modeOptions(s))
-	setBackendButton(d.backendBtn, s)
+	if setBackendButton(d.backendBtn, s) && d.mainPane != nil {
+		relayoutTree(d.mainPane)
+	}
 	if d.modelSel.Selected != s.model {
 		d.modelSel.SetSelected(s.model)
 	}
