@@ -104,8 +104,9 @@ type remoteSess struct {
 	// fetchN numbers item fetches as they start; applied is the newest one
 	// shown, so a slower, older answer can't overwrite a newer window.
 	fetchN, applied int
-	healed          time.Time // last self-heal reload (see blankStuck)
-	reloading       bool      // a Reload click's fetch is running (remotereload.go)
+	healed          time.Time    // last self-heal reload (see blankStuck)
+	healedSeq       map[int]bool // blank items already healed once; one that stays empty is really empty
+	reloading       bool         // a Reload click's fetch is running (remotereload.go)
 }
 
 // remoteHealEvery: at most one self-heal reload per session in this time.
@@ -115,13 +116,17 @@ var remoteHealEvery = 10 * time.Second
 // more, or still "streaming" while the session isn't running. That is a reply
 // whose text never reached us (the connection dropped mid-stream); one full
 // reload brings it back (same rule as Quill Android).
-func blankStuck(c *chat.Conversation, status string) bool {
+// Each blank item gets one heal: some are really empty on the other PC (a
+// reply that was only tool calls), and those must not reload the chat again
+// and again. Returns the seqs to heal (nil = none).
+func blankStuck(c *chat.Conversation, status string, healed map[int]bool) []int {
+	var out []int
 	for _, it := range c.Items {
-		if (it.Kind == chat.User || it.Kind == chat.Assistant) && strings.TrimSpace(it.Text) == "" && (!it.Streaming || status != "running") {
-			return true
+		if (it.Kind == chat.User || it.Kind == chat.Assistant) && strings.TrimSpace(it.Text) == "" && (!it.Streaming || status != "running") && !healed[it.Seq] {
+			out = append(out, it.Seq)
 		}
 	}
-	return false
+	return out
 }
 
 type remoteLink struct {
@@ -721,8 +726,14 @@ func (l *remoteLink) fetchWindow(s *deskSession, heal bool) {
 				v.show(s)
 			}
 			l.d.updateChrome()
-			if !heal && blankStuck(conv, r.status) && time.Since(r.healed) >= remoteHealEvery {
+			if r.healedSeq == nil {
+				r.healedSeq = map[int]bool{}
+			}
+			if seqs := blankStuck(conv, r.status, r.healedSeq); !heal && len(seqs) > 0 && time.Since(r.healed) >= remoteHealEvery {
 				r.healed = time.Now()
+				for _, q := range seqs {
+					r.healedSeq[q] = true
+				}
 				l.fetchWindow(s, true)
 			}
 		})

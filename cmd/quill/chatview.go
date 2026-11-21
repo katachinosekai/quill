@@ -617,9 +617,27 @@ func (v *chatView) viewFor(it *chat.Item) *itemView {
 	return iv
 }
 
+// blankItem: a finished item with nothing to show (an empty reply, user
+// message, thought, notice or error). It takes no row and no padding; the
+// chat box's VBox skips hidden objects.
+func blankItem(it *chat.Item) bool {
+	switch it.Kind {
+	case chat.User, chat.Assistant, chat.Thinking, chat.Notice, chat.Error:
+		return !it.Streaming && strings.TrimSpace(it.Text) == ""
+	}
+	return false
+}
+
 func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 	iv.sig = itemSig(it)
-	if it.Kind == chat.Assistant && it.Streaming {
+	if !blankItem(it) && !iv.holder.Visible() {
+		iv.holder.Show()
+	}
+	if blankItem(it) {
+		iv.stream = nil
+		iv.holder.Objects = nil
+		iv.holder.Hide()
+	} else if it.Kind == chat.Assistant && it.Streaming {
 		if iv.stream == nil {
 			iv.stream = widget.NewLabel(it.Text)
 			iv.stream.Wrapping = fyne.TextWrapWord
