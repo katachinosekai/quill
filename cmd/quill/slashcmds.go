@@ -22,6 +22,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/quill/internal/account"
 	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/session"
 	"github.com/katachinosekai/quill/internal/transcript"
@@ -553,20 +554,42 @@ func (d *desk) cmdChrome(s *deskSession, arg string) {
 		d.setChrome(s, false)
 		return
 	}
-	state := "default (your Claude Code setting)"
+	defOn := account.ChromeDefault()
+	onOff := func(on bool) string {
+		if on {
+			return "on"
+		}
+		return "off"
+	}
+	state := onOff(defOn) + " (Enabled by default)"
 	switch s.chrome {
-	case "on":
-		state = "on"
-	case "off":
-		state = "off"
+	case "on", "off":
+		state = s.chrome
 	}
 	var dlg dialog.Dialog
 	on := widget.NewButtonWithIcon("Turn on", theme.ConfirmIcon(), func() { dlg.Hide(); d.setChrome(s, true) })
 	off := widget.NewButtonWithIcon("Turn off", theme.CancelIcon(), func() { dlg.Hide(); d.setChrome(s, false) })
 	msg := widget.NewLabel("Claude in Chrome for this session: " + state + ".\nIt lets Claude use your Chrome through the Claude extension. Changing it restarts the session's Claude process on your next message.")
 	msg.Wrapping = fyne.TextWrapWord
-	dlg = dialog.NewCustom("Claude in Chrome", "Close", container.NewVBox(msg, container.NewHBox(on, off)), d.win)
-	dlg.Resize(fyne.NewSize(520, 220))
+	defChk := widget.NewCheck("Enabled by default", nil)
+	defChk.Checked = defOn
+	reverting := false
+	defChk.OnChanged = func(v bool) {
+		if reverting {
+			return
+		}
+		if err := account.SetChromeDefault(v); err != nil {
+			reverting = true
+			defChk.SetChecked(!v)
+			reverting = false
+			dialog.ShowError(err, d.win)
+		}
+	}
+	defHint := widget.NewLabel("Claude Code's own setting (also in its /config): new sessions, and sessions without their own on/off, connect Chrome when they start.")
+	defHint.Wrapping = fyne.TextWrapWord
+	defHint.Importance = widget.LowImportance
+	dlg = dialog.NewCustom("Claude in Chrome", "Close", container.NewVBox(msg, container.NewHBox(on, off), widget.NewSeparator(), defChk, defHint), d.win)
+	dlg.Resize(fyne.NewSize(520, 300))
 	dlg.Show()
 }
 

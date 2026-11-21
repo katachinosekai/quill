@@ -458,8 +458,6 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		}
 	})
 	rcLocalChk.Checked = d.rcForLocal()
-	chromeChk := widget.NewCheck("Claude in Chrome for new sessions", func(on bool) { d.app.Preferences().SetBool("chromeNew", on) })
-	chromeChk.Checked = d.app.Preferences().Bool("chromeNew")
 	planChk := widget.NewCheck("Plan first, then approve all", func(on bool) {
 		d.planFirst = on
 		d.app.Preferences().SetBool("planFirst", on)
@@ -490,7 +488,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
 	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
-	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
+	d.setSessions = container.NewVBox(rcChk, rcLocalChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
 	openSettings.Alignment = widget.ButtonAlignLeading
@@ -1310,9 +1308,6 @@ func (d *desk) addSession(cwd, model, mode string, show bool) *deskSession {
 		mode = "default"
 	}
 	s := &deskSession{id: id, cwd: cwd, model: model, mode: mode, conv: chat.New(), loaded: true, created: time.Now()}
-	if d.app.Preferences().Bool("chromeNew") {
-		s.chrome = "on"
-	}
 	d.sessions[id] = s
 	if !show {
 		d.rebuildRows()
