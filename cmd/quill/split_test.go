@@ -1019,3 +1019,109 @@ func TestTabsGlowLikeSidebar(t *testing.T) {
 		}
 	})
 }
+
+func TestQueueSurvivesReload(t *testing.T) {
+	h := newHarness(t)
+	var busy, idle *deskSession
+	h.ui(func() {
+		busy = h.d.createSession(h.proj, "default", "default")
+		idle = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(busy, "hi")
+		h.d.sendTo(idle, "hi")
+	})
+	h.eventually("both idle", func() bool { return busy.status() == stIdle && idle.status() == stIdle })
+	h.ui(func() {
+		busy.queue = []string{"first", "second"}
+		idle.queue = []string{"later"}
+		var st restoreState
+		h.d.saveQueues(&st)
+		b, _ := json.Marshal(st)
+		var back restoreState
+		json.Unmarshal(b, &back)
+		busy.queue, idle.queue = nil, nil
+		busy.conv.Busy = true
+		h.d.restoreQueues(&back)
+		if !reflect.DeepEqual(busy.queue, []string{"first", "second"}) {
+			t.Fatalf("a busy session gets its queue back in order: %v", busy.queue)
+		}
+		if len(idle.queue) != 0 {
+			t.Fatal("an idle session sends its restored queue right away")
+		}
+		last := idle.conv.Items[len(idle.conv.Items)-1]
+		if last.Kind != chat.User || last.Text != "later" {
+			t.Fatalf("the queued text was sent: %+v", last)
+		}
+		busy.conv.Busy = false
+	})
+}
+
+func TestReloadKeepsSessionState(t *testing.T) {
+	h := newHarness(t)
+	release := make(chan struct{})
+	h.d.compactor = func(context.Context, string, string) (string, error) {
+		<-release
+		return "Goal: resumed brief", nil
+	}
+	var fresh, ns *deskSession
+	var st restoreState
+	h.ui(func() {
+		old := h.d.session(editsID)
+		if old == nil {
+			t.Fatal("fixture session missing")
+		}
+		old.model, old.mode = "ollama:qwen3.8:27b-80k", "plan"
+		old.restoreMode, old.retryCmd, old.retryDest = "auto", "rm x", "session"
+		old.retryRules = []protocol.Rule{{Tool: "Bash", Content: "rm *"}}
+		old.kmemNew, old.rotateAsk, old.rotateTried, old.lastClaude = true, 2, 80, "opus"
+		old.kmemSave = &kmemSave{name: "quill", asked: time.Now().Truncate(time.Second), spare: 1}
+		fresh = h.d.createSession(h.proj, "sonnet", "acceptEdits")
+		ns = h.d.createSession(h.proj, "haiku", "default")
+		h.d.strip.keepDraft(fresh.id, "an improvement idea")
+		h.d.strip.keepDraft(editsID, "another idea")
+		h.d.compactInto(ns, editsID, "", "Edits", chat.New())
+		h.d.saveSessions(&st)
+	})
+	close(release)
+	h.eventually("first compaction done", func() bool { return !ns.compacting })
+	h.ui(func() {
+		b, _ := json.Marshal(st)
+		var back restoreState
+		json.Unmarshal(b, &back)
+		if back.Meta[ns.id].CompactFrom != editsID {
+			t.Fatalf("an interrupted compaction is saved: %+v", back.Meta[ns.id])
+		}
+		ns.conv = chat.New()
+		for id, s := range h.d.sessions {
+			if !s.running() {
+				delete(h.d.sessions, id)
+			}
+		}
+		h.d.strip.drafts = nil
+		h.d.compactor = func(context.Context, string, string) (string, error) { return "Goal: resumed brief", nil }
+		h.d.restoreSessions(&back)
+		old := h.d.session(editsID)
+		if old.model != "ollama:qwen3.8:27b-80k" || old.mode != "plan" || old.restoreMode != "auto" || old.retryCmd != "rm x" || len(old.retryRules) != 1 || old.retryDest != "session" {
+			t.Fatalf("a stopped session keeps its model, mode and retry state: %+v", old)
+		}
+		if !old.kmemNew || old.rotateAsk != 2 || old.rotateTried != 80 || old.lastClaude != "opus" || old.kmemSave == nil || old.kmemSave.name != "quill" || old.kmemSave.spare != 1 {
+			t.Fatalf("kmem and rotate state survive: %+v", old)
+		}
+		f := h.d.sessions[fresh.id]
+		if f == nil || f.model != "sonnet" || f.mode != "acceptEdits" || f.cwd != h.proj {
+			t.Fatalf("a new tab with nothing sent yet comes back: %+v", f)
+		}
+		if h.d.strip.draft(fresh.id) != "an improvement idea" || h.d.strip.draft(editsID) != "another idea" {
+			t.Fatal("drafts typed into other tabs survive")
+		}
+		ns = h.d.sessions[ns.id]
+		h.d.resumeInterrupted(&back)
+	})
+	h.eventually("the interrupted compaction is re-run and handed over", func() bool {
+		for _, it := range ns.conv.Items {
+			if it.Kind == chat.User && strings.Contains(it.Text, "resumed brief") {
+				return true
+			}
+		}
+		return false
+	})
+}

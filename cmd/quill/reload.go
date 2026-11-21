@@ -24,18 +24,21 @@ const (
 )
 
 type restoreState struct {
-	Session string          `json:"session"`
-	Draft   string          `json:"draft"`
-	Width   float32         `json:"width"`
-	Height  float32         `json:"height"`
-	ScrollY float32         `json:"scrollY"`
-	Hidden  bool            `json:"hidden"`
-	Max     bool            `json:"maximized"`
-	Split   *splitState     `json:"split,omitempty"`
-	X       int             `json:"x"`
-	Y       int             `json:"y"`
-	Running []string        `json:"running"`
-	Handed  []handedSession `json:"handed"`
+	Session string              `json:"session"`
+	Draft   string              `json:"draft"`
+	Width   float32             `json:"width"`
+	Height  float32             `json:"height"`
+	ScrollY float32             `json:"scrollY"`
+	Hidden  bool                `json:"hidden"`
+	Max     bool                `json:"maximized"`
+	Split   *splitState         `json:"split,omitempty"`
+	X       int                 `json:"x"`
+	Y       int                 `json:"y"`
+	Running []string            `json:"running"`
+	Handed  []handedSession     `json:"handed"`
+	Queues  map[string][]string `json:"queues,omitempty"`
+	Meta    map[string]sessMeta `json:"meta,omitempty"`
+	Drafts  map[string]string   `json:"drafts,omitempty"`
 }
 
 type binWatch struct {
@@ -142,6 +145,8 @@ func (d *desk) trySwap() {
 	d.stopMedia()
 	d.flushUI()
 	st := restoreState{Draft: d.input.Text, Hidden: d.hidden}
+	d.saveQueues(&st)
+	d.saveSessions(&st)
 	if d.current != nil && d.current.persisted {
 		st.Session = d.current.id
 	}
@@ -249,6 +254,32 @@ func (hs handedSession) restorePending(s *deskSession) {
 	}
 }
 
+func (d *desk) saveQueues(st *restoreState) {
+	for id, s := range d.sessions {
+		if len(s.queue) == 0 {
+			continue
+		}
+		if st.Queues == nil {
+			st.Queues = map[string][]string{}
+		}
+		st.Queues[id] = append([]string(nil), s.queue...)
+	}
+}
+
+func (d *desk) restoreQueues(st *restoreState) {
+	for id, q := range st.Queues {
+		s := d.session(id)
+		if s == nil || len(q) == 0 {
+			continue
+		}
+		s.queue = append(append([]string(nil), q...), s.queue...)
+		d.syncQueue(s)
+		if s.running() && !s.conv.Busy {
+			d.flushQueue(s)
+		}
+	}
+}
+
 func takeRestore() *restoreState {
 	path := os.Getenv(restoreEnv)
 	if path == "" {
@@ -268,6 +299,7 @@ func takeRestore() *restoreState {
 }
 
 func (d *desk) applyRestore(st *restoreState) {
+	d.restoreSessions(st)
 	for _, hs := range st.Handed {
 		hs.Handle.FromExec = true
 		s := d.session(hs.ID)
@@ -295,7 +327,9 @@ func (d *desk) applyRestore(st *restoreState) {
 			}
 		}
 	}
-	if len(st.Running) > 0 || len(st.Handed) > 0 {
+	d.restoreQueues(st)
+	d.resumeInterrupted(st)
+	if len(st.Running) > 0 || len(st.Handed) > 0 || len(st.Meta) > 0 {
 		d.refreshSidebar()
 	}
 	if st.Draft != "" {
