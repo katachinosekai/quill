@@ -164,6 +164,7 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 		fyne.NewMenuItem("End session", func() { d.endSession(id) }),
 		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
 		fyne.NewMenuItem("kmem name...", func() { d.askKmemName(id) }),
+		d.sessionToolsItem(id),
 		fyne.NewMenuItem("Delete session...", func() { d.askDelete(id) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Set active", move(placeActive)),

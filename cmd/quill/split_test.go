@@ -164,7 +164,7 @@ func TestLayoutModes(t *testing.T) {
 		if len(h.w.Canvas().Overlays().List()) == 0 {
 			t.Fatal("settings open from the header in horizontal mode")
 		}
-		h.d.settingsPop.Hide()
+		h.d.closeSettings()
 		h.d.setLayoutMode(layoutVertical)
 		if h.d.sideOff || h.d.tabRow.Visible() || h.d.bookRow.Visible() || len(h.d.settingsSlot.Objects) != 1 {
 			t.Fatal("vertical: sidebar with settings, no tab or folder bar")
@@ -1278,6 +1278,8 @@ func TestStreamingMarkdownAndPlanCard(t *testing.T) {
 					found = found || strings.Contains(y.String(), "Plan:")
 				case *container.ThemeOverride:
 					look(y.Content)
+				case *msgMenu:
+					look(y.content)
 				}
 			})
 		}
@@ -1703,6 +1705,86 @@ func TestRewind(t *testing.T) {
 	h.ui(func() {
 		if s.resumeAt != "" {
 			t.Fatal("the resume point is used once")
+		}
+	})
+}
+
+func TestUIPassMenusSettingsTasks(t *testing.T) {
+	h := newHarness(t)
+	h.d.controlFn = func(_ *deskSession, req map[string]any) (json.RawMessage, error) {
+		if req["subtype"] == "rewind_files" {
+			return json.RawMessage(`{"canRewind":false,"skippedLinks":0}`), nil
+		}
+		return json.RawMessage(`{"mcpServers":[]}`), nil
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy && s.persisted })
+	h.ui(func() {
+		user := &chat.Item{Kind: chat.User, Text: "redo me", UUID: "U9"}
+		reply := &chat.Item{Kind: chat.Assistant, Text: "answer", UUID: "A9"}
+		s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, Text: "before", UUID: "A8"}, user, reply)
+		h.d.open(s.id)
+		labels := func(items []*fyne.MenuItem) string {
+			var out []string
+			for _, m := range items {
+				if !m.IsSeparator {
+					out = append(out, m.Label)
+				}
+			}
+			return strings.Join(out, ",")
+		}
+		if got := labels(h.d.messageMenuItems(s, user)); got != "Copy message,Rewind to here,Rewind to here and undo file changes,Fork from here" {
+			t.Fatalf("user message menu: %s", got)
+		}
+		if got := labels(h.d.messageMenuItems(s, reply)); got != "Copy message,Fork from here" {
+			t.Fatalf("reply menu: %s", got)
+		}
+		if _, ok := h.d.chat.render(reply, &itemView{}).(*msgMenu); !ok {
+			t.Fatal("messages are wrapped so a right-click opens the menu")
+		}
+		tools := h.d.sessionToolsItem(s.id)
+		if got := labels(tools.ChildMenu.Items); got != "Rewind...,Fork,Export...,Show changes (git diff),Background tasks,MCP servers,Claude in Chrome...,Add working folder..." {
+			t.Fatalf("session tools: %s", got)
+		}
+		before := len(h.w.Canvas().Overlays().List())
+		h.d.showSettings()
+		if len(h.w.Canvas().Overlays().List()) != before+1 || h.d.settingsDlg == nil {
+			t.Fatal("Settings opens as one window")
+		}
+		var tabs *container.AppTabs
+		deepWalk(h.w.Canvas().Overlays().Top(), func(o fyne.CanvasObject) {
+			if a, ok := o.(*container.AppTabs); ok {
+				tabs = a
+			}
+		})
+		var names []string
+		for _, it := range tabs.Items {
+			names = append(names, it.Text)
+		}
+		if strings.Join(names, ",") != "General,Sessions,Permissions,Tools,Memory" {
+			t.Fatalf("settings tabs: %v", names)
+		}
+		h.d.closeSettings()
+		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgx","name":"Bash","input":{"command":"./test.sh","run_in_background":true}}]`)}})
+		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgx","content":"Command running in background with ID: tsk1. Output is being written to: /tmp/o"}]`)}})
+		h.d.updateChrome()
+		if !h.d.tasksBtn.Visible() || h.d.tasksBtn.Text != "Background tasks: 1" {
+			t.Fatalf("the header shows a background-tasks button while tasks run: %q %v", h.d.tasksBtn.Text, h.d.tasksBtn.Visible())
+		}
+		h.d.rewindTo(s, user, true)
+	})
+	h.eventually("rewound", func() bool { return s.resumeAt == "A8" })
+	h.ui(func() {
+		found := false
+		for _, it := range s.conv.Items {
+			found = found || it.Kind == chat.Notice && strings.Contains(it.Text, "no file changes to undo")
+		}
+		if !found {
+			t.Fatal("canRewind:false is reported as nothing to undo, and the conversation still rewinds")
 		}
 	})
 }

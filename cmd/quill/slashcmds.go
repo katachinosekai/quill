@@ -231,29 +231,39 @@ func memoryFiles(cwd string) []string {
 	}
 }
 
-func (d *desk) cmdMemory(s *deskSession) {
-	var rows []fyne.CanvasObject
-	for _, f := range memoryFiles(s.cwd) {
-		f := f
-		_, err := os.Stat(f)
-		exists := err == nil
-		l := widget.NewLabel(tildePath(f))
-		l.Truncation = fyne.TextTruncateEllipsis
-		var btn *widget.Button
-		if exists {
-			btn = widget.NewButtonWithIcon("Open", theme.DocumentIcon(), func() { d.openPath(f) })
-		} else {
-			btn = widget.NewButtonWithIcon("Create", theme.ContentAddIcon(), func() {
-				_ = os.MkdirAll(filepath.Dir(f), 0o755)
-				if err := os.WriteFile(f, []byte("# Notes for Claude\n"), 0o644); err == nil {
-					d.openPath(f)
-				}
-			})
-			l.Importance = widget.LowImportance
+func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
+	box := container.NewVBox()
+	var fill func()
+	fill = func() {
+		box.Objects = nil
+		for _, f := range memoryFiles(cwd) {
+			f := f
+			_, err := os.Stat(f)
+			l := widget.NewLabel(tildePath(f))
+			l.Truncation = fyne.TextTruncateEllipsis
+			var btn *widget.Button
+			if err == nil {
+				btn = widget.NewButtonWithIcon("Open", theme.DocumentIcon(), func() { d.openPath(f) })
+			} else {
+				btn = widget.NewButtonWithIcon("Create", theme.ContentAddIcon(), func() {
+					_ = os.MkdirAll(filepath.Dir(f), 0o755)
+					if err := os.WriteFile(f, []byte("# Notes for Claude\n"), 0o644); err == nil {
+						d.openPath(f)
+						fill()
+					}
+				})
+				l.Importance = widget.LowImportance
+			}
+			box.Add(container.NewBorder(nil, nil, nil, btn, l))
 		}
-		rows = append(rows, container.NewBorder(nil, nil, nil, btn, l))
+		box.Refresh()
 	}
-	dlg := dialog.NewCustom("Memory files", "Close", container.NewVBox(rows...), d.win)
+	fill()
+	return box
+}
+
+func (d *desk) cmdMemory(s *deskSession) {
+	dlg := dialog.NewCustom("Memory files", "Close", d.memoryPane(s.cwd), d.win)
 	dlg.Resize(fyne.NewSize(700, 320))
 	dlg.Show()
 }
@@ -338,13 +348,12 @@ func removeRule(r permRule) error {
 	return os.Rename(tmp, r.file)
 }
 
-func (d *desk) cmdPermissions(s *deskSession) {
-	var dlg dialog.Dialog
+func (d *desk) permissionsPane(cwd string) fyne.CanvasObject {
 	box := container.NewVBox()
 	var fill func()
 	fill = func() {
 		box.Objects = nil
-		rules := permissionRules(s.cwd)
+		rules := permissionRules(cwd)
 		if len(rules) == 0 {
 			box.Add(widget.NewLabel("No allow, ask or deny rules in your user, project or local settings."))
 		}
@@ -365,10 +374,17 @@ func (d *desk) cmdPermissions(s *deskSession) {
 		box.Refresh()
 	}
 	fill()
-	note := widget.NewLabel("Rules from ~/.claude/settings.json (User), .claude/settings.json (Project) and .claude/settings.local.json (Local). Add rules with \"Always allow...\" on a blocked command.")
+	note := widget.NewLabel("Rules from ~/.claude/settings.json (User), .claude/settings.json (Project) and .claude/settings.local.json (Local) of " + tildePath(cwd) + ". Add rules with \"Always allow...\" on a blocked command.")
 	note.Wrapping = fyne.TextWrapWord
 	note.SizeName = theme.SizeNameCaptionText
-	dlg = dialog.NewCustom("Permissions", "Close", container.NewBorder(nil, note, nil, nil, container.NewVScroll(box)), d.win)
+	ro := widget.NewButtonWithIcon("Read-only commands (run without a plan)...", theme.SettingsIcon(), d.readOnlyDialog)
+	ro.Importance = widget.LowImportance
+	ro.Alignment = widget.ButtonAlignLeading
+	return container.NewBorder(nil, container.NewVBox(note, ro), nil, nil, container.NewVScroll(box))
+}
+
+func (d *desk) cmdPermissions(s *deskSession) {
+	dlg := dialog.NewCustom("Permissions", "Close", d.permissionsPane(s.cwd), d.win)
 	dlg.Resize(fyne.NewSize(760, 480))
 	dlg.Show()
 }
@@ -425,11 +441,11 @@ func agentFiles(cwd string) []agentFile {
 	return out
 }
 
-func (d *desk) cmdAgents(s *deskSession) {
-	agents := agentFiles(s.cwd)
-	var rows []fyne.CanvasObject
+func (d *desk) agentsPane(cwd string) fyne.CanvasObject {
+	agents := agentFiles(cwd)
+	box := container.NewVBox()
 	if len(agents) == 0 {
-		rows = append(rows, widget.NewLabel("No subagents in ~/.claude/agents or .claude/agents of this folder."))
+		box.Add(widget.NewLabel("No subagents in ~/.claude/agents or .claude/agents of this folder."))
 	}
 	for _, a := range agents {
 		a := a
@@ -437,9 +453,13 @@ func (d *desk) cmdAgents(s *deskSession) {
 		l.Truncation = fyne.TextTruncateEllipsis
 		open := widget.NewButtonWithIcon("Open", theme.DocumentIcon(), func() { d.openPath(a.path) })
 		open.Importance = widget.LowImportance
-		rows = append(rows, container.NewBorder(nil, nil, nil, open, l))
+		box.Add(container.NewBorder(nil, nil, nil, open, l))
 	}
-	dlg := dialog.NewCustom("Subagents", "Close", container.NewVScroll(container.NewVBox(rows...)), d.win)
+	return box
+}
+
+func (d *desk) cmdAgents(s *deskSession) {
+	dlg := dialog.NewCustom("Subagents", "Close", container.NewVScroll(d.agentsPane(s.cwd)), d.win)
 	dlg.Resize(fyne.NewSize(760, 420))
 	dlg.Show()
 }
@@ -569,10 +589,13 @@ func parseMCP(raw json.RawMessage) []mcpServer {
 }
 
 func (d *desk) cmdMCP(s *deskSession) {
-	box := container.NewVBox(widget.NewLabel("Asking Claude Code for its MCP servers..."))
-	dlg := dialog.NewCustom("MCP servers", "Close", container.NewVScroll(box), d.win)
+	dlg := dialog.NewCustom("MCP servers", "Close", container.NewVScroll(d.mcpPane(s)), d.win)
 	dlg.Resize(fyne.NewSize(780, 440))
 	dlg.Show()
+}
+
+func (d *desk) mcpPane(s *deskSession) *fyne.Container {
+	box := container.NewVBox(widget.NewLabel("Asking Claude Code for its MCP servers..."))
 	var load func()
 	act := func(req map[string]any, done string) {
 		go func() {
@@ -647,6 +670,7 @@ func (d *desk) cmdMCP(s *deskSession) {
 		}()
 	}
 	load()
+	return box
 }
 
 // fork
@@ -747,12 +771,12 @@ func (d *desk) rewindTo(s *deskSession, u *chat.Item, files bool) {
 				return
 			}
 			var r struct {
-				Changed []string `json:"filesChanged"`
+				CanRewind *bool `json:"canRewind"`
 			}
 			_ = json.Unmarshal(raw, &r)
 			note := "Restored the files to how they were at that message. "
-			if len(r.Changed) > 0 {
-				note = fmt.Sprintf("Restored %s to how they were at that message. ", plural(len(r.Changed), "file"))
+			if r.CanRewind != nil && !*r.CanRewind {
+				note = "There were no file changes to undo since that message. "
 			}
 			finish(note)
 		})
@@ -785,4 +809,115 @@ func (d *desk) cmdRewind(s *deskSession) {
 	dlg = dialog.NewCustom("Rewind to before…", "Cancel", container.NewBorder(nil, note, nil, nil, container.NewVScroll(container.NewVBox(rows...))), d.win)
 	dlg.Resize(fyne.NewSize(820, 480))
 	dlg.Show()
+}
+
+// message menu, fork from here
+
+type msgMenu struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+	onMenu  func(fyne.Position)
+}
+
+func newMsgMenu(content fyne.CanvasObject, onMenu func(fyne.Position)) *msgMenu {
+	m := &msgMenu{content: content, onMenu: onMenu}
+	m.ExtendBaseWidget(m)
+	return m
+}
+
+func (m *msgMenu) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(m.content)
+}
+
+func (m *msgMenu) TappedSecondary(e *fyne.PointEvent) {
+	if m.onMenu != nil {
+		m.onMenu(e.AbsolutePosition)
+	}
+}
+
+func (d *desk) messageMenuItems(s *deskSession, it *chat.Item) []*fyne.MenuItem {
+	var items []*fyne.MenuItem
+	for _, v := range d.allViews() {
+		if v.s == s && v.sel != nil && v.sel.text() != "" {
+			sel := v.sel
+			items = append(items, fyne.NewMenuItem("Copy selection", func() { sel.copy() }))
+		}
+	}
+	items = append(items, fyne.NewMenuItem("Copy message", func() {
+		d.app.Clipboard().SetContent(it.Text)
+		d.notify(s, "Copied the message.")
+	}))
+	if it.UUID != "" {
+		items = append(items, fyne.NewMenuItemSeparator())
+		if it.Kind == chat.User {
+			items = append(items,
+				fyne.NewMenuItem("Rewind to here", func() { d.rewindTo(s, it, false) }),
+				fyne.NewMenuItem("Rewind to here and undo file changes", func() { d.rewindTo(s, it, true) }))
+		}
+		items = append(items, fyne.NewMenuItem("Fork from here", func() { d.forkFrom(s, it) }))
+	}
+	return items
+}
+
+func (d *desk) messageMenu(s *deskSession, it *chat.Item, at fyne.Position) {
+	if s == nil {
+		return
+	}
+	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", d.messageMenuItems(s, it)...), d.win.Canvas(), at)
+}
+
+func (d *desk) forkFrom(s *deskSession, it *chat.Item) {
+	ns, err := d.forkSession(s)
+	if err != nil {
+		d.notify(s, "Could not fork: "+err.Error())
+		return
+	}
+	var match *chat.Item
+	idx := -1
+	for i, x := range ns.conv.Items {
+		if x.UUID == it.UUID && x.Kind == it.Kind {
+			match, idx = x, i
+		}
+	}
+	d.open(ns.id)
+	if match == nil {
+		d.notify(ns, "Forked the whole session (that message wasn't found in the copy).")
+		return
+	}
+	if match.Kind == chat.User {
+		d.rewindTo(ns, match, false)
+		return
+	}
+	ns.conv.Items = append([]*chat.Item(nil), ns.conv.Items[:idx+1]...)
+	ns.resumeAt = match.UUID
+	if v := d.viewFor(ns); v != nil {
+		v.cache = map[*deskSession]*sessView{}
+		v.s = nil
+		v.show(ns)
+	}
+	d.notify(ns, "Forked from this message; the original session is unchanged.")
+}
+
+func (d *desk) sessionToolsItem(id string) *fyne.MenuItem {
+	run := func(f func(s *deskSession)) func() {
+		return func() {
+			if s := d.session(id); s != nil {
+				f(s)
+			}
+		}
+	}
+	tools := fyne.NewMenuItem("Session tools", nil)
+	tools.ChildMenu = fyne.NewMenu("",
+		fyne.NewMenuItem("Rewind...", run(d.cmdRewind)),
+		fyne.NewMenuItem("Fork", run(d.cmdFork)),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Export...", run(func(s *deskSession) { d.cmdExport(s, "") })),
+		fyne.NewMenuItem("Show changes (git diff)", run(d.cmdDiff)),
+		fyne.NewMenuItem("Background tasks", run(d.cmdTasks)),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("MCP servers", run(d.cmdMCP)),
+		fyne.NewMenuItem("Claude in Chrome...", run(func(s *deskSession) { d.cmdChrome(s, "") })),
+		fyne.NewMenuItem("Add working folder...", run(func(s *deskSession) { d.cmdAddDir(s, "") })),
+	)
+	return tools
 }
