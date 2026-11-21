@@ -174,6 +174,9 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 		fyne.NewMenuItem("Set Created by Claude", move(placeAuto)),
 		toFolder,
 	}
+	if d.org.Kmem[id] != "" && d.kmemAvailable() {
+		items = append(items[:5], append([]*fyne.MenuItem{fyne.NewMenuItem("End and save to kmem", func() { d.endAndSave(id) })}, items[5:]...)...)
+	}
 	if d.org.Place[id] != "" {
 		items = append(items, fyne.NewMenuItem("Automatic placement", move("")))
 	}

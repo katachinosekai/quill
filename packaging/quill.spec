@@ -4,11 +4,12 @@ Name:           quill
 Version:        0.1.14
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
-License:        MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
+License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
 URL:            https://github.com/katachinosekai/quill
 Source0:        %{name}-%{version}.tar.gz
 ExclusiveArch:  x86_64
 
+Requires:       python3
 Recommends:     hunspell
 Recommends:     hunspell-en-US
 BuildRequires:  golang >= 1.26
@@ -50,18 +51,23 @@ install -Dm755 packaging/quill.sh %{buildroot}%{_bindir}/quill
 install -Dm644 packaging/io.github.katachinosekai.quill.desktop %{buildroot}%{_datadir}/applications/io.github.katachinosekai.quill.desktop
 install -Dm644 cmd/quill/Icon.png %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/io.github.katachinosekai.quill.png
 install -Dm644 cmd/quill/icon.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
+install -Dm755 third_party/kmem/kmem %{buildroot}%{_datadir}/quill/kmem/kmem
+install -Dm755 third_party/kmem/kmem-guard %{buildroot}%{_datadir}/quill/kmem/kmem-guard
+install -Dm644 third_party/kmem/VERSION %{buildroot}%{_datadir}/quill/kmem/VERSION
+install -Dm644 third_party/kmem/NOTICE %{buildroot}%{_datadir}/quill/kmem/NOTICE
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinosekai.quill.desktop
 
 %files
-%license LICENSE THIRD_PARTY_LICENSES.txt
+%license LICENSE NOTICE THIRD_PARTY_LICENSES.txt
 %doc README.md
 %{_bindir}/quill
 %{_libexecdir}/quill/
 %{_datadir}/applications/io.github.katachinosekai.quill.desktop
 %{_datadir}/icons/hicolor/256x256/apps/io.github.katachinosekai.quill.png
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
+%{_datadir}/quill/
 
 %changelog
 * Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.14-1

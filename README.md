@@ -68,4 +68,4 @@ go build -tags wayland ./cmd/quill       # or without the tag for X11
 
 ## License
 
-MIT. Bundled components keep their own licenses (MIT, BSD, ISC, Apache 2.0, public domain); the full texts are in [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt), which the packages install as a license file.
+Quill Desktop is free software: copyright (C) 2026 katachinosekai, licensed under the GNU General Public License, version 3 or (at your option) any later version ([LICENSE](LICENSE)). Releases up to 0.1.14 were published under the MIT license and stay available under it. Bundled components keep their own licenses (MIT, BSD, ISC, Apache 2.0, public domain); the full texts are in [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt), which the packages install as a license file.

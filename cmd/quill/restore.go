@@ -35,6 +35,7 @@ type savedKmem struct {
 	Name  string    `json:"name"`
 	Asked time.Time `json:"asked"`
 	Spare int       `json:"spare"`
+	End   bool      `json:"end,omitempty"`
 }
 
 func (d *desk) saveSessions(st *restoreState) {
@@ -44,7 +45,7 @@ func (d *desk) saveSessions(st *restoreState) {
 			RetryCmd: s.retryCmd, RetryRules: s.retryRules, RetryDest: s.retryDest, CompactFrom: s.compactFrom, RotateNo: s.rotateNo,
 			Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, ForkOf: s.forkOf}
 		if ks := s.kmemSave; ks != nil {
-			m.KmemSave = &savedKmem{Name: ks.name, Asked: ks.asked, Spare: ks.spare}
+			m.KmemSave = &savedKmem{Name: ks.name, Asked: ks.asked, Spare: ks.spare, End: ks.end}
 		}
 		if st.Meta == nil {
 			st.Meta = map[string]sessMeta{}
@@ -85,7 +86,7 @@ func (d *desk) restoreSessions(st *restoreState) {
 		s.compactFrom, s.rotateNo = m.CompactFrom, m.RotateNo
 		s.chrome, s.addDirs, s.resumeAt, s.forkOf = m.Chrome, m.AddDirs, m.ResumeAt, m.ForkOf
 		if k := m.KmemSave; k != nil {
-			s.kmemSave = &kmemSave{name: k.Name, asked: k.Asked, spare: k.Spare}
+			s.kmemSave = &kmemSave{name: k.Name, asked: k.Asked, spare: k.Spare, end: k.End}
 		}
 	}
 	for id, text := range st.Drafts {

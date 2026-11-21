@@ -126,11 +126,24 @@ func newHarness(t *testing.T) *harness {
 		var running []*deskSession
 		h.ui(func() { running = h.d.runningSessions() })
 		h.d.stopAll(running)
-		h.eventuallyFor("exits handled", 30*time.Second, func() bool {
-			n := 0
-			h.d.ownPIDs.Range(func(any, any) bool { n++; return true })
-			return n == 0
-		})
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			var left []string
+			h.d.ownPIDs.Range(func(k, v any) bool { left = append(left, fmt.Sprint(k, "=", v)); return true })
+			if len(left) == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				var ids []string
+				h.ui(func() {
+					for id, s := range h.d.sessions {
+						ids = append(ids, fmt.Sprintf("%s running=%v stopping=%v", id, s.running(), s.stopping))
+					}
+				})
+				h.t.Fatalf("exits not handled: pids %v; sessions %v", left, ids)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 	})
 	h.d.refresh()
 	return h

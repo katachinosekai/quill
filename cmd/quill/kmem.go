@@ -37,6 +37,7 @@ type kmemSave struct {
 	asked  time.Time
 	spare  int
 	prompt string
+	end    bool
 }
 
 var handoffLine = regexp.MustCompile(`^(\S+)\s+\d+ items?, saved (\S+)`)
@@ -81,8 +82,7 @@ func (d *desk) kmemAvailable() bool {
 	if d.kmemRun != nil {
 		return true
 	}
-	_, err := exec.LookPath("kmem")
-	return err == nil
+	return kmemBin() != ""
 }
 
 func (d *desk) runKmem(prog string, args ...string) (string, error) {
@@ -91,6 +91,11 @@ func (d *desk) runKmem(prog string, args ...string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), kmemTimeout)
 	defer cancel()
+	if prog == "kmem" {
+		if p := kmemBin(); p != "" {
+			prog = p
+		}
+	}
 	cmd := exec.CommandContext(ctx, prog, args...)
 	if home, err := os.UserHomeDir(); err == nil {
 		cmd.Dir = home
@@ -333,10 +338,18 @@ func (d *desk) kmemAfterTurn(s *deskSession) {
 					return
 				}
 				s.kmemSave = nil
-				d.notify(s, fmt.Sprintf("The kmem handoff “%s” wasn't saved by this session, so the restart was cancelled and nothing was deleted. Restart again once it can save.", ks.name))
+				what := "restart"
+				if ks.end {
+					what = "end"
+				}
+				d.notify(s, fmt.Sprintf("The kmem handoff “%s” wasn't saved by this session, so the %s was cancelled and nothing was stopped or deleted. Try again once it can save.", ks.name, what))
 				return
 			}
 			s.kmemSave = nil
+			if ks.end {
+				d.finishKmemEnd(s, ks.name)
+				return
+			}
 			d.finishKmemRelaunch(s, ks.name, prompt)
 		})
 	}()
@@ -352,6 +365,45 @@ func (d *desk) finishKmemRelaunch(old *deskSession, name, prompt string) {
 	d.notify(ns, fmt.Sprintf("Resuming from kmem handoff “%s”; the previous session was deleted.", name))
 	d.sendTo(ns, prompt)
 	d.deleteSession(old.id)
+}
+
+func kmemEndMessage(name string) string {
+	return fmt.Sprintf("Quill is ending this session; it will be stopped and archived once its kmem handoff is saved. "+
+		"Save your kmem handoff now: run `kmem handoff save %s` with --pointer and --state lines for everything the next session needs; run it again even if you saved it recently, Quill checks the save time. "+
+		"It refuses until your claims, shared lock turn, background jobs and uncommitted files are recorded, so record or release those first. "+
+		"Don't start other work. Reply with one line once it is saved.", name)
+}
+
+func (d *desk) endAndSave(id string) {
+	s := d.session(id)
+	name := d.org.Kmem[id]
+	if s == nil {
+		return
+	}
+	if name == "" || !d.kmemAvailable() || !s.running() {
+		d.endSession(id)
+		return
+	}
+	spare := 0
+	if s.inTurn {
+		spare = 1
+	}
+	s.kmemSave = &kmemSave{name: name, asked: time.Now().Add(-2 * time.Second), spare: spare, end: true}
+	d.notify(s, fmt.Sprintf("Ending: waiting for this session to save its kmem handoff “%s”; it is stopped and archived after that.", name))
+	d.sendTo(s, kmemEndMessage(name))
+}
+
+func (d *desk) finishKmemEnd(s *deskSession, name string) {
+	d.notify(s, fmt.Sprintf("Saved kmem handoff “%s”; this session is stopped and moved to Archive (nothing deleted).", name))
+	if s.running() {
+		p := s.proc
+		s.stopping = true
+		go func() { _ = p.Stop(5 * time.Second) }()
+	}
+	d.org.Place[s.id] = placeArchive
+	d.saveOrg()
+	d.closeTab(s.id)
+	d.refreshSidebar()
 }
 
 func hasPendingPlan(s *deskSession) bool {
