@@ -122,7 +122,7 @@ func (s *deskSession) status() status {
 	if len(s.conv.PendingPermissions()) > 0 {
 		return stWaiting
 	}
-	if s.conv.Busy || s.proc.Busy() {
+	if s.conv.Busy || s.proc.Busy() || s.conv.Background() > 0 {
 		return stRunning
 	}
 	return stIdle
@@ -1305,6 +1305,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 	s.failed = ""
 	s.stopping = false
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
+	s.conv.ClearBackground()
 	p, err := session.Start(opts, func(ev *protocol.Event) {
 		d.do(func() { d.handleEvent(s, ev) })
 	})
