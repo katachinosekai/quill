@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.17
+Version:        0.1.18
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -70,6 +70,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.18-1
+- kmem 1.5.3 bundled: kmem-guard also checks commands from Claude Code's PowerShell tool (what Claude Code uses on Windows); the kmem-guard hook's matcher gets PowerShell, existing hooks are updated when Quill Desktop updates an older kmem (settings backed up first), and reads hook input sent as UTF-8 with a BOM or as UTF-16
+- Other PCs: scrolling, clicks and any key keep the connection active
+- Bundles Quill for Android 0.9.15
 * Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.17-1
 - kmem 1.5.1 bundled, now also on Windows: the Windows zip carries kmem, Setup sets it up (and offers Python 3 through winget when it's missing), hooks run through Python
 - quill --resume NAME opens one kmem session (the live one, or a fresh one from its handoff) in the running Quill Desktop
