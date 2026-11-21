@@ -26,6 +26,7 @@ const (
 	apiResultMax  = 2 << 10
 	apiDiffMax    = 400
 	apiStreamWait = 25
+	apiTextMax    = 32 << 10
 )
 
 type phoneAPI struct {
@@ -39,6 +40,7 @@ type phoneAPI struct {
 	wake    chan struct{}
 	live    time.Time
 	streams map[string]chan struct{}
+	stop    chan struct{}
 
 	tracks   map[string]*itemTrack
 	lastSess map[string]string
@@ -55,7 +57,7 @@ type apiChange struct {
 func newPhoneAPI(d *desk, s *folders.Server) *phoneAPI {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
-	a := &phoneAPI{d: d, server: s, boot: hex.EncodeToString(b), next: 1, wake: make(chan struct{}), streams: map[string]chan struct{}{},
+	a := &phoneAPI{d: d, server: s, boot: hex.EncodeToString(b), next: 1, wake: make(chan struct{}), stop: make(chan struct{}), streams: map[string]chan struct{}{},
 		tracks: map[string]*itemTrack{}, lastSess: map[string]string{}, lastCtl: map[string]bool{}}
 	go a.loop()
 	return a
@@ -64,9 +66,11 @@ func newPhoneAPI(d *desk, s *folders.Server) *phoneAPI {
 func (a *phoneAPI) loop() {
 	t := time.NewTicker(apiScanEvery)
 	defer t.Stop()
-	for range t.C {
-		if p := a.d.phoneSync; p == nil || p.server != a.server {
+	for {
+		select {
+		case <-a.stop:
 			return
+		case <-t.C:
 		}
 		a.mu.Lock()
 		live := time.Since(a.live) < apiLiveFor
@@ -75,6 +79,10 @@ func (a *phoneAPI) loop() {
 			a.d.do(a.scan)
 		}
 	}
+}
+
+func (a *phoneAPI) close() {
+	close(a.stop)
 }
 
 func (a *phoneAPI) touch() {
@@ -98,6 +106,8 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.stream(w, r)
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "items":
 		a.items(w, r, parts[1])
+	case r.Method == http.MethodPost:
+		a.write(w, r, path, parts)
 	default:
 		folders.WriteError(w, http.StatusNotFound, "not_found", "unknown path")
 	}

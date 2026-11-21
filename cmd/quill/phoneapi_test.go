@@ -187,3 +187,112 @@ func TestPhoneAPIReadSide(t *testing.T) {
 		t.Fatal("revoke did not end the stream")
 	}
 }
+
+func TestPhoneAPIWrites(t *testing.T) {
+	t.Setenv("QUILL_PHONE_DIR", filepath.Join(t.TempDir(), "phone"))
+	h := newHarness(t)
+	var link string
+	h.ui(func() {
+		h.d.app.Preferences().SetInt("phonePort", 0)
+		if err := h.d.startPhoneServer(); err != nil {
+			t.Fatal(err)
+		}
+		link = h.d.pairLink()
+		h.d.open(editsID)
+	})
+	defer h.ui(h.d.stopPhone)
+	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
+	u, _ := url.Parse(link)
+	q := u.Query()
+	a := &apiClient{t: t, base: "https://127.0.0.1:" + q.Get("p"), key: q.Get("k"),
+		c: &http.Client{Timeout: 40 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}}
+	n := 0
+	key := func() string {
+		n++
+		time.Sleep(110 * time.Millisecond)
+		return "write-key-" + strconv.Itoa(1000000+n)
+	}
+	base := "/phone/session/" + editsID
+
+	if code, m, _ := a.do("POST", base+"/send", key(), map[string]string{"text": "hi"}); code != 403 || errCode(m) != "control_off" {
+		t.Fatalf("writes need the control setting: %d %v", code, m)
+	}
+	h.ui(func() { h.d.app.Preferences().SetBool("phoneControl", true) })
+
+	sendKey := key()
+	if code, m, _ := a.do("POST", base+"/send", sendKey, map[string]string{"text": "write"}); code != 200 || m["queued"] != false {
+		t.Fatalf("send: %d %v", code, m)
+	}
+	s := h.d.sessions[editsID]
+	var reqID string
+	h.eventually("permission from the phone's message", func() bool {
+		for _, it := range s.conv.PendingPermissions() {
+			reqID = it.RequestID
+		}
+		return reqID != ""
+	})
+	if code, _, hdr := a.do("POST", base+"/send", sendKey, map[string]string{"text": "write"}); code != 200 || hdr.Get("Idempotent-Replay") != "true" {
+		t.Fatal("a retried send is replayed, not sent again")
+	}
+	users := 0
+	h.ui(func() {
+		for _, it := range s.conv.Items {
+			if it.Kind == 0 && it.Text == "write" {
+				users++
+			}
+		}
+	})
+	if users != 1 {
+		t.Fatalf("the message went out once: %d", users)
+	}
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]string{"requestId": reqID, "action": "rejectPlan"}); code != 400 || errCode(m) != "bad_request" {
+		t.Fatalf("wrong action for the item: %d %v", code, m)
+	}
+	code, m, _ := a.do("POST", base+"/answer", key(), map[string]string{"requestId": reqID, "action": "allow"})
+	item, _ := m["item"].(map[string]any)
+	req, _ := item["request"].(map[string]any)
+	if code != 200 || req["state"] != "allowed" {
+		t.Fatalf("allow: %d %v", code, m)
+	}
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]string{"requestId": reqID, "action": "deny"}); code != 409 || errCode(m) != "stale" {
+		t.Fatalf("answered already: %d %v", code, m)
+	}
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]string{"requestId": "nope", "action": "allow"}); code != 404 {
+		t.Fatalf("unknown request: %d %v", code, m)
+	}
+
+	h.ui(func() { s.queue = []string{"first", "second"} })
+	if code, m, _ := a.do("POST", base+"/queue/delete", key(), map[string]any{"index": 0, "text": "other"}); code != 409 || errCode(m) != "stale" {
+		t.Fatalf("queue text must match: %d %v", code, m)
+	}
+	if code, m, _ := a.do("POST", base+"/queue/delete", key(), map[string]any{"index": 0, "text": "first"}); code != 200 || len(m["queue"].([]any)) != 1 {
+		t.Fatalf("queue delete: %d %v", code, m)
+	}
+	h.ui(func() {
+		if len(s.queue) != 1 || s.queue[0] != "second" {
+			t.Fatalf("queue after delete: %v", s.queue)
+		}
+		s.queue = nil
+	})
+
+	var folder string
+	h.ui(func() { folder = s.cwd })
+	if code, m, _ := a.do("POST", "/phone/sessions/new", key(), map[string]string{"folder": "/nowhere"}); code != 400 {
+		t.Fatalf("unknown folder: %d %v", code, m)
+	}
+	code, m, _ = a.do("POST", "/phone/sessions/new", key(), map[string]string{"folder": folder, "backend": "online", "mode": "plan"})
+	ns, _ := m["session"].(map[string]any)
+	if code != 200 || ns["mode"] != "plan" || ns["folder"] != folder {
+		t.Fatalf("new session: %d %v", code, m)
+	}
+	if code, m, _ := a.do("POST", "/phone/session/"+ns["id"].(string)+"/interrupt", key(), map[string]any{}); code != 409 || errCode(m) != "not_running" {
+		t.Fatalf("interrupt without a process: %d %v", code, m)
+	}
+	if code, m, _ := a.do("POST", "/phone/usage/resume", key(), map[string]any{}); code != 200 || m["usage"] == nil {
+		t.Fatalf("resume: %d %v", code, m)
+	}
+	h.ui(func() { h.d.app.Preferences().SetBool("phoneControl", false) })
+	if code, m, _ := a.do("POST", "/phone/usage/resume", key(), map[string]any{}); code != 403 || errCode(m) != "control_off" {
+		t.Fatalf("turning control off stops writes: %d %v", code, m)
+	}
+}

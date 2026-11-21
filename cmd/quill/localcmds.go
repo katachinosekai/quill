@@ -41,12 +41,15 @@ var localCommands = []protocol.Command{
 }
 
 func (d *desk) runLocalCommand(text string) bool {
+	return d.runLocalCommandFor(d.current, text)
+}
+
+func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
 	if !strings.HasPrefix(text, "/") {
 		return false
 	}
 	name, arg, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
 	arg = strings.TrimSpace(arg)
-	s := d.current
 	note := func(msg string) {
 		if s != nil {
 			d.chatFor(s, []*chat.Item{s.conv.AddNotice(msg)})

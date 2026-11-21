@@ -36,6 +36,7 @@ type phoneSync struct {
 	dirty   *time.Timer
 	status  *widget.Label
 	pairing *pendingPair
+	api     *phoneAPI
 	list    *fyne.Container
 }
 
@@ -200,7 +201,8 @@ func (d *desk) startPhoneServer() error {
 	s.SetEvents(prefs.BoolWithFallback("phoneNotify", true))
 	s.SetUsageSource(d.phoneUsageJSON)
 	s.SetSeen(func(id string) { d.do(func() { d.phoneSeen(id) }) })
-	s.SetAPI(newPhoneAPI(d, s))
+	p.api = newPhoneAPI(d, s)
+	s.SetAPI(p.api)
 	p.server, p.fp = s, fp
 	d.publishPhone(true)
 	return nil
@@ -221,6 +223,10 @@ func (d *desk) stopPhone() {
 	if p := d.phoneSync; p != nil && p.server != nil {
 		p.server.Close()
 		p.server = nil
+		if p.api != nil {
+			p.api.close()
+			p.api = nil
+		}
 	}
 }
 
