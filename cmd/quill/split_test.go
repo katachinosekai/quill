@@ -946,3 +946,22 @@ func TestApprovalCardsFollowCentering(t *testing.T) {
 		check(false)
 	})
 }
+
+func TestLocalSessionNeedsOllama(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		h.d.pingLocal = func(string) bool { return false }
+		s = h.d.createSession(h.proj, "ollama:qwen3.8:27b-80k", "default")
+		h.d.sendTo(s, "hi")
+		if s.running() || !strings.Contains(s.failed, "Ollama isn't running") {
+			t.Fatalf("a local session with Ollama down fails fast with a clear message: %q", s.failed)
+		}
+		h.d.pingLocal = func(string) bool { return true }
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("local session starts once Ollama is up", func() bool { return s.running() })
+	if ollamaReachable("http://127.0.0.1:1") || ollamaReachable("not a url") {
+		t.Fatal("reachability check")
+	}
+}

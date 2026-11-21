@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"time"
@@ -249,4 +251,39 @@ func (d *desk) localModeGuard(s *deskSession) {
 		d.setMode(s, "default")
 		d.notify(s, "Permission mode changed from "+old+" to default: Claude Code's "+old+" mode doesn't work with local models.")
 	}
+}
+
+func ollamaReachable(host string) bool {
+	u, err := url.Parse(host)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	addr := u.Host
+	if u.Port() == "" {
+		port := "80"
+		if u.Scheme == "https" {
+			port = "443"
+		}
+		addr = net.JoinHostPort(u.Hostname(), port)
+	}
+	c, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
+}
+
+func (d *desk) checkOllama(model string) error {
+	if !isLocal(model) {
+		return nil
+	}
+	ping := d.pingLocal
+	if ping == nil {
+		ping = ollamaReachable
+	}
+	if host := session.OllamaHost(); !ping(host) {
+		return fmt.Errorf("Ollama isn't running at %s (GameMode stops it while a game runs). Start it or switch this session to Online", host)
+	}
+	return nil
 }

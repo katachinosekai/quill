@@ -158,6 +158,7 @@ type desk struct {
 	localModels  []string
 	localBusy    bool
 	fetchLocal   func(host string) []localInfo
+	pingLocal    func(host string) bool
 	localWindows map[string]int
 	warnedOllama bool
 	backendBtn   *widget.Button
@@ -1288,6 +1289,10 @@ func (d *desk) ensureProcess(s *deskSession) error {
 	}
 	if s.terminal != nil {
 		return fmt.Errorf("this session is open in a terminal")
+	}
+	if err := d.checkOllama(s.model); err != nil {
+		s.failed = err.Error()
+		return err
 	}
 	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Env: d.localEnv(s.model)}
 	d.warnInsecureOllama(s)

@@ -110,6 +110,7 @@ func newHarness(t *testing.T) *harness {
 	h.d.planFirst = false
 	h.d.kmemOff = true
 	h.d.fetchLocal = func(string) []localInfo { return nil }
+	h.d.pingLocal = func(string) bool { return true }
 	h.d.compactor = func(context.Context, string, string) (string, error) { return "Goal: test brief", nil }
 	h.d.do = func(f func()) {
 		uiMu.Lock()
