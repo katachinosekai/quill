@@ -144,33 +144,35 @@ type sideRow struct {
 }
 
 type desk struct {
-	nameClose   func()
-	limitMsg    string
-	notifier    *notifier
-	notifySink  func(sid, title, body string)
-	foreground  bool
-	compactor   func(ctx context.Context, model, text string) (string, error)
-	kmemRun     func(prog string, args ...string) (string, error)
-	kmemOff     bool
-	policy      handoffPolicy
-	policyAt    time.Time
-	policyBusy  bool
-	localModels []string
-	localBusy   bool
-	fetchLocal  func(host string) []string
-	backendBtn  *widget.Button
-	app         fyne.App
-	win         fyne.Window
-	cfg         config
-	scanner     *transcript.Scanner
-	finder      *live.Finder
-	center      bool
-	sessions    map[string]*deskSession
-	infos       map[string]transcript.Info
-	order       []transcript.Info
-	terms       map[string]live.Process
-	current     *deskSession
-	ownPIDs     sync.Map
+	nameClose    func()
+	limitMsg     string
+	notifier     *notifier
+	notifySink   func(sid, title, body string)
+	foreground   bool
+	compactor    func(ctx context.Context, model, text string) (string, error)
+	kmemRun      func(prog string, args ...string) (string, error)
+	kmemOff      bool
+	policy       handoffPolicy
+	policyAt     time.Time
+	policyBusy   bool
+	localModels  []string
+	localBusy    bool
+	fetchLocal   func(host string) []localInfo
+	localWindows map[string]int
+	warnedOllama bool
+	backendBtn   *widget.Button
+	app          fyne.App
+	win          fyne.Window
+	cfg          config
+	scanner      *transcript.Scanner
+	finder       *live.Finder
+	center       bool
+	sessions     map[string]*deskSession
+	infos        map[string]transcript.Info
+	order        []transcript.Info
+	terms        map[string]live.Process
+	current      *deskSession
+	ownPIDs      sync.Map
 
 	rows           []sideRow
 	list           *widget.List
@@ -298,6 +300,7 @@ type desk struct {
 
 func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 	d := &desk{
+		localWindows:  map[string]int{},
 		app:           a,
 		win:           w,
 		cfg:           cfg,
@@ -381,6 +384,10 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		}
 	})
 	rcChk.Checked = d.autoRC
+	rcLocalChk := widget.NewCheck("Remote Control for local sessions (relayed through claude.ai)", func(on bool) {
+		d.app.Preferences().SetBool("rcLocal", on)
+	})
+	rcLocalChk.Checked = d.rcForLocal()
 	planChk := widget.NewCheck("Plan first, then approve all", func(on bool) {
 		d.planFirst = on
 		d.app.Preferences().SetBool("planFirst", on)
@@ -402,7 +409,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	updChk.Checked = d.app.Preferences().BoolWithFallback("checkUpdates", true)
 	notifyChk := widget.NewCheck("Notify me about approvals and finished sessions", func(on bool) { d.app.Preferences().SetBool("desktopNotify", on) })
 	notifyChk.Checked = d.notifyOn()
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, planChk, chipChk, updChk, notifyChk, rulesBtn, roBtn, alignRow, d.buildPhoneRow(), legend)
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, rcLocalChk, planChk, chipChk, updChk, notifyChk, rulesBtn, roBtn, alignRow, d.buildPhoneRow(), legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -1272,7 +1279,8 @@ func (d *desk) ensureProcess(s *deskSession) error {
 	if s.terminal != nil {
 		return fmt.Errorf("this session is open in a terminal")
 	}
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode}
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Env: d.localEnv(s.model)}
+	d.warnInsecureOllama(s)
 	if s.persisted {
 		opts.Resume = s.id
 	} else {
@@ -1682,6 +1690,7 @@ func (d *desk) setModel(s *deskSession, model string) {
 	p := s.proc
 	if switchBackend {
 		s.proc = nil
+		s.rcOn, s.rcURL, s.rcName = false, "", ""
 		d.unkeepSession(s.id)
 		go func() { _ = p.Stop(5 * time.Second) }()
 		d.notify(s, "Model set to "+model+". The session restarts on the next message.")
@@ -1719,7 +1728,7 @@ func (d *desk) notify(s *deskSession, msg string) {
 }
 
 func (d *desk) autoRemote(s *deskSession) {
-	if !d.autoRC || s.proc == nil {
+	if !d.autoRC || s.proc == nil || isLocal(s.model) && !d.rcForLocal() {
 		return
 	}
 	p := s.proc
