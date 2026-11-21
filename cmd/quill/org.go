@@ -158,7 +158,6 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 		fyne.NewMenuItem("Open in split view", func() { d.openInSplit(id) }),
 		fyne.NewMenuItem("End session", func() { d.closeTab(id); d.endWithSave(id, placeInactive) }),
 		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
-		fyne.NewMenuItem("kmem name...", func() { d.askKmemName(id) }),
 		d.sessionToolsItem(id),
 		fyne.NewMenuItem("Delete session...", func() { d.askDelete(id) }),
 		fyne.NewMenuItemSeparator(),
@@ -172,11 +171,7 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 		items = append(items, fyne.NewMenuItem("Automatic placement", move("")))
 	}
 	if _, ok := d.org.Titles[id]; ok {
-		items = append(items, fyne.NewMenuItem("Restore original name", func() {
-			delete(d.org.Titles, id)
-			d.saveOrg()
-			d.updateChrome()
-		}))
+		items = append(items, fyne.NewMenuItem("Restore original name", func() { d.restoreTitle(id) }))
 	}
 	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", items...), d.win.Canvas(), at)
 }

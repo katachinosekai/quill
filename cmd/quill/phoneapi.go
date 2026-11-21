@@ -47,6 +47,7 @@ type phoneAPI struct {
 	lastSess map[string]string
 	lastIDs  string
 	lastUse  string
+	lastPlc  string
 	lastCtl  map[string]bool
 }
 
@@ -183,6 +184,9 @@ type apiSession struct {
 	UpdatedMs  int64      `json:"updatedMs"`
 	Focused    bool       `json:"focused"`
 	Tokens     int64      `json:"tokens"`
+	Renamed    bool       `json:"renamed,omitempty"`
+	Place      string     `json:"place,omitempty"`
+	Ended      bool       `json:"ended,omitempty"`
 }
 
 type apiContext struct {
@@ -266,6 +270,9 @@ func (a *phoneAPI) session(id, group string) apiSession {
 			out.UpdatedMs = s.created.UnixMilli()
 		}
 	}
+	_, out.Renamed = d.org.Titles[id]
+	out.Place = apiPlaceOf(d.placement(id))
+	out.Ended = d.org.Ended[id]
 	out.FolderName = filepath.Base(out.Folder)
 	return out
 }
@@ -307,6 +314,7 @@ func (a *phoneAPI) sessions(w http.ResponseWriter, phone string) {
 			"v": 1, "boot": a.boot, "cursor": cursor, "usage": a.usage(), "sessions": list, "control": a.control(phone),
 			"models": map[string]any{"online": modelChoices, "local": a.d.localModelList()},
 			"modes":  map[string]any{"online": modeChoices, "local": localModes},
+			"places": a.places(), "actions": menuActions,
 		}
 	})
 	folders.WriteJSON(w, http.StatusOK, body)
@@ -440,6 +448,13 @@ func (a *phoneAPI) scan() {
 	if string(ub) != a.lastUse {
 		a.lastUse = string(ub)
 		changes = append(changes, map[string]any{"type": "usage", "usage": json.RawMessage(ub)})
+	}
+	pb, _ := json.Marshal(a.places())
+	if string(pb) != a.lastPlc {
+		if a.lastPlc != "" {
+			changes = append(changes, map[string]any{"type": "places", "places": json.RawMessage(pb)})
+		}
+		a.lastPlc = string(pb)
 	}
 	for _, p := range d.phones() {
 		c := a.control(p.ID)

@@ -36,11 +36,14 @@ type writeBody struct {
 	Backend   string              `json:"backend"`
 	Model     string              `json:"model"`
 	Mode      string              `json:"mode"`
+	Title     *string             `json:"title"`
+	Place     *string             `json:"place"`
+	Old       bool                `json:"old"`
 }
 
 func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, parts []string) {
 	known := path == "usage/resume" || path == "sessions/new" ||
-		len(parts) == 3 && parts[0] == "session" && slices.Contains([]string{"send", "answer", "interrupt"}, parts[2]) ||
+		len(parts) == 3 && parts[0] == "session" && (slices.Contains([]string{"send", "answer", "interrupt"}, parts[2]) || slices.Contains(menuActions, parts[2])) ||
 		len(parts) == 4 && parts[0] == "session" && parts[2] == "queue" && (parts[3] == "delete" || parts[3] == "send-now")
 	if !known {
 		folders.WriteError(w, http.StatusNotFound, "not_found", "unknown path")
@@ -98,6 +101,8 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 				out = map[string]any{"wasBusy": busy}
 			case "queue":
 				out, fail = a.queueAction(s, parts[3], in)
+			default:
+				out, fail = a.menuAction(s, parts[2], in)
 			}
 		}
 	})

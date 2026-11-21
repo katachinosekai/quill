@@ -183,11 +183,11 @@ func (d *desk) offerResume(id string) bool {
 	return true
 }
 
-func (d *desk) resumeFromHandoff(id string) {
+func (d *desk) resumeFromHandoff(id string) *deskSession {
 	old := d.sessions[id]
 	name := d.org.Kmem[id]
 	if old == nil || name == "" {
-		return
+		return nil
 	}
 	title, _, _ := d.rowText(id)
 	ns := d.createSession(old.cwd, old.model, old.mode)
@@ -203,11 +203,27 @@ func (d *desk) resumeFromHandoff(id string) {
 		p := d.resumePrompt(name)
 		d.do(func() { d.sendResume(ns, name, p) })
 	}()
+	return ns
 }
 
 func (d *desk) renameSession(id, name string) {
 	d.org.Titles[id] = name
+	d.retitled(id)
+}
+
+// restoreTitle drops the custom title. The kmem name follows the restored
+// title, because a tab, its session and its kmem name are one identity.
+func (d *desk) restoreTitle(id string) {
+	if _, ok := d.org.Titles[id]; !ok {
+		return
+	}
+	delete(d.org.Titles, id)
+	d.retitled(id)
+}
+
+func (d *desk) retitled(id string) {
 	d.saveOrg()
+	name, _, _ := d.rowText(id)
 	if old := d.org.Kmem[id]; old != "" && d.kmemAvailable() {
 		next := kmemSlug(name, func(n string) bool { return n != old && d.kmemTaken(nil)(n) })
 		if next != old {
