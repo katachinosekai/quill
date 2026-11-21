@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
 )
 
@@ -243,4 +245,59 @@ func (d *desk) trashHandoff(id string) {
 			_, _ = d.runKmem("kmem", "trash", it.ID, "Quill: session deleted, its handoff "+name+" goes to the recycle bin")
 		}
 	}()
+}
+
+func (d *desk) resumableIn(key string) []string {
+	var out []string
+	for _, g := range d.groups {
+		if g.key != key {
+			continue
+		}
+		for _, id := range g.ids {
+			if !d.org.Ended[id] || d.org.Kmem[id] == "" {
+				continue
+			}
+			s := d.sessions[id]
+			if s != nil && s.running() {
+				continue
+			}
+			if d.handoffOwner(d.org.Kmem[id], &deskSession{id: id}) != nil {
+				continue
+			}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (d *desk) resumeAllMenuItem(key string) *fyne.MenuItem {
+	if !d.kmemAvailable() {
+		return nil
+	}
+	ids := d.resumableIn(key)
+	if len(ids) == 0 {
+		return nil
+	}
+	return fyne.NewMenuItem(fmt.Sprintf("Resume all from handoffs (%d)", len(ids)), func() {
+		var names []string
+		for _, id := range ids {
+			title, _, _ := d.rowText(id)
+			names = append(names, "• "+title+"  (kmem "+d.org.Kmem[id]+")")
+		}
+		dialog.ShowConfirm("Resume all from handoffs?",
+			"Each of these starts a fresh session that resumes from its kmem handoff (same name, folder, model and mode); the old conversations stay here:\n\n"+strings.Join(names, "\n"),
+			func(ok bool) {
+				if ok {
+					d.resumeAll(ids)
+				}
+			}, d.win)
+	})
+}
+
+func (d *desk) resumeAll(ids []string) {
+	for _, id := range ids {
+		if d.org.Ended[id] && d.org.Kmem[id] != "" {
+			d.resumeFromHandoff(id)
+		}
+	}
 }

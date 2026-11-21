@@ -205,6 +205,9 @@ func (d *desk) folderMenu(r sideRow, at fyne.Position) {
 		fyne.NewMenuItem("Format Rules...", d.rulesDialog),
 		fyne.NewMenuItemSeparator(),
 	}
+	if ra := d.resumeAllMenuItem(r.key); ra != nil {
+		items = append([]*fyne.MenuItem{ra, fyne.NewMenuItemSeparator()}, items...)
+	}
 	if d.layoutMode() == layoutVertical {
 		items = append(items,
 			fyne.NewMenuItem("Expand all folders", func() { d.setAllFolders(true) }),

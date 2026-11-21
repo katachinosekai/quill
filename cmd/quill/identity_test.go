@@ -226,3 +226,53 @@ func TestNewSessionsAlwaysGetKmem(t *testing.T) {
 		}
 	}
 }
+
+func TestResumeAllFromHandoffs(t *testing.T) {
+	h, _, _ := identityHarness(t)
+	h.ui(func() {
+		mk := func(name string, ended bool) *deskSession {
+			s := h.d.createSession(h.proj, "default", "default")
+			if name != "" {
+				h.d.org.Kmem[s.id] = name
+			}
+			if ended {
+				h.d.markEnded(s.id)
+			}
+			return s
+		}
+		a, b := mk("alpha-work", true), mk("beta-work", true)
+		noName := mk("", true)
+		h.d.org.Ended[noName.id] = true
+		held := mk("gamma-work", true)
+		holder := mk("", false)
+		h.d.org.Kmem[holder.id] = "gamma-work"
+		h.d.addTab(holder.id)
+		notEnded := mk("delta-work", false)
+		h.d.groups = append(h.d.groups, bookGroup{key: placeInactive, ids: []string{a.id, b.id, noName.id, held.id, notEnded.id}})
+		got := h.d.resumableIn(placeInactive)
+		if len(got) != 2 || got[0] != a.id || got[1] != b.id {
+			t.Fatalf("only ended sessions with a free kmem name are resumable: %v", got)
+		}
+		if it := h.d.resumeAllMenuItem(placeInactive); it == nil || it.Label != "Resume all from handoffs (2)" {
+			t.Fatalf("menu item: %+v", it)
+		}
+		if h.d.resumeAllMenuItem(placeArchive) != nil {
+			t.Fatal("no item when nothing in the folder can be resumed")
+		}
+		h.d.resumeAll(got)
+		for _, s := range []*deskSession{a, b} {
+			if h.d.org.Kmem[s.id] != "" || h.d.org.Ended[s.id] {
+				t.Fatal("the kmem names move to the new sessions")
+			}
+		}
+		moved := 0
+		for _, n := range h.d.org.Kmem {
+			if n == "alpha-work" || n == "beta-work" {
+				moved++
+			}
+		}
+		if moved != 2 {
+			t.Fatalf("two fresh sessions carry the names: %d", moved)
+		}
+	})
+}
