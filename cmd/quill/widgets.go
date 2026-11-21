@@ -76,6 +76,14 @@ type sendEntry struct {
 	onHistory  func(*fyne.KeyEvent) bool
 	hist       *history
 	browsing   bool
+	onFocus    func()
+}
+
+func (e *sendEntry) FocusGained() {
+	if e.onFocus != nil {
+		e.onFocus()
+	}
+	e.Entry.FocusGained()
 }
 
 func (e *sendEntry) TypedShortcut(s fyne.Shortcut) {

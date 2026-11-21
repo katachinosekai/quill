@@ -98,6 +98,7 @@ type deskSession struct {
 	chrome      string
 	addDirs     []string
 	resumeAt    string
+	forkOf      string
 	qedit       *queueEdit
 	coldStamp   time.Time
 	rotateNo    bool
@@ -952,6 +953,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	}
 	d.input.onSendNow = d.sendNow
 	d.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(d.input, d.current, k) }
+	d.input.onFocus = d.clearSelections
 	d.input.hint = "Message Claude"
 	d.input.SetPlaceHolder(d.input.hint)
 	if d.app.Preferences().Bool("centerInput") {
@@ -1595,6 +1597,10 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		if k := d.org.Kmem[s.id]; k != "" {
 			text = kmemIntro(k) + text
 		}
+	}
+	if s.forkOf != "" {
+		text = forkIntro(s.forkOf) + text
+		s.forkOf = ""
 	}
 	if d.planFirst {
 		if approvesPlan(s, text) && text != planGoMessage {

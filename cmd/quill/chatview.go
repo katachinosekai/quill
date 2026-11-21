@@ -611,7 +611,14 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	o := v.renderItem(it, iv)
 	if (it.Kind == chat.User || it.Kind == chat.Assistant) && v.s != nil {
 		s := v.s
-		return newMsgMenu(o, func(at fyne.Position) { v.d.messageMenu(s, it, at) })
+		m := newMsgMenu(o, func(at fyne.Position) { v.d.messageMenu(s, it, at) })
+		m.onTap = v.d.clearSelections
+		m.onDouble = func(at fyne.Position) {
+			if v.sel != nil {
+				v.sel.selectWordAt(at)
+			}
+		}
+		return m
 	}
 	return o
 }
@@ -623,7 +630,6 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 			return bgPad(colBubble, 14, 4, 10, msgText(v.markdown(it.Text)))
 		}
 		l := widget.NewLabel(it.Text)
-		l.Selectable = true
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = v.align()
 		return bgPad(colBubble, 14, 4, 10, msgText(l))

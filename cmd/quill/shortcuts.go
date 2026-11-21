@@ -58,6 +58,11 @@ func (d *desk) clearSelections() {
 
 func (d *desk) setupShortcuts() {
 	d.win.Canvas().AddShortcut(&fyne.ShortcutCopy{}, func(fyne.Shortcut) { d.copySelection() })
+	d.win.Canvas().AddShortcut(&fyne.ShortcutSelectAll{}, func(fyne.Shortcut) {
+		if v := d.viewFor(d.current); v != nil && v.sel != nil {
+			v.sel.selectAll()
+		}
+	})
 	d.win.Canvas().SetOnTypedKey(func(k *fyne.KeyEvent) {
 		if k.Name == fyne.KeyEscape {
 			d.clearSelections()
