@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -85,7 +86,7 @@ type Conversation struct {
 	byTool     map[string]*Item
 	byRequest  map[string]*Item
 	seq        int
-	bgTasks    map[string]bool
+	bgTasks    map[string]BgTask
 	CacheTTL   time.Duration
 }
 
@@ -665,9 +666,12 @@ func (c *Conversation) trackTask(it *Item) {
 		return
 	}
 	var in struct {
-		Background bool   `json:"run_in_background"`
-		TaskID     string `json:"task_id"`
-		ShellID    string `json:"shell_id"`
+		Background  bool   `json:"run_in_background"`
+		TaskID      string `json:"task_id"`
+		ShellID     string `json:"shell_id"`
+		Command     string `json:"command"`
+		Description string `json:"description"`
+		Prompt      string `json:"prompt"`
 	}
 	_ = json.Unmarshal(it.Input, &in)
 	id := ""
@@ -697,9 +701,36 @@ func (c *Conversation) trackTask(it *Item) {
 		return
 	}
 	if c.bgTasks == nil {
-		c.bgTasks = map[string]bool{}
+		c.bgTasks = map[string]BgTask{}
 	}
-	c.bgTasks[id] = true
+	what := in.Description
+	if what == "" {
+		what = in.Command
+	}
+	if what == "" {
+		what = in.Prompt
+	}
+	t := BgTask{ID: id, Tool: it.ToolName, What: strings.TrimSpace(what), seq: len(c.bgTasks)}
+	if m := bgLog.FindStringSubmatch(it.Result); m != nil {
+		t.Log = strings.TrimRight(m[1], ".,")
+	}
+	c.bgTasks[id] = t
+}
+
+type BgTask struct {
+	ID, Tool, What, Log string
+	seq                 int
+}
+
+var bgLog = regexp.MustCompile(`Output is being written to:\s*(\S+)`)
+
+func (c *Conversation) BackgroundTasks() []BgTask {
+	out := make([]BgTask, 0, len(c.bgTasks))
+	for _, t := range c.bgTasks {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].seq < out[j].seq })
+	return out
 }
 
 func (c *Conversation) taskNotification(text string) {

@@ -202,6 +202,9 @@ func TestBackgroundTasksCountAsWork(t *testing.T) {
 	if c.Background() != 2 {
 		t.Fatalf("background shells and timed-out commands count, finished foreground agents and failed calls don't: %d", c.Background())
 	}
+	if ts := c.BackgroundTasks(); ts[0].ID != "b4qamtotj" || ts[0].What != "./run-test.sh" || ts[0].Log != "/tmp/x/b4qamtotj.output" || ts[1].ID != "be90lakpp" {
+		t.Fatalf("tasks keep what they run and their log, in start order: %+v", ts)
+	}
 	notify("b4qamtotj", "running", false)
 	if c.Background() != 2 {
 		t.Fatal("a progress notification doesn't end the task")
