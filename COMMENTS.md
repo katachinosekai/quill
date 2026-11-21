@@ -101,6 +101,8 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## UI notes
 
+- Choice cards (user 2026-11-20): when a finished assistant message's last line is a question offering two options ("A, or B?" / "A or B?", markdown stripped; `parseChoices` splits at the last ", or " / " or " before the "?"), the line is drawn as a card under the rest of the message (`choiceCard`) with one button per option (label capitalised, cut at 60 runes); a click sends the option as the reply (`pickChoice`). Buttons only while that message is the latest and unanswered (a later user or assistant text disables them, `pickChoice` re-checks); no card when a Plan card follows the message.
+
 - Batch of 2026-11-20 (user requests in one message, approved as items 1-9):
   - Background tasks: the CLI delivers `<task-notification>` as an `attachment` record of type `queued_command` (and `queue-operation` lines), not as a user message; `Conversation.Apply` scans every raw event and `transcript.Load` every raw line for notifications (`NoteNotifications`, one per `<task-notification>` block), so finished tests stop counting and a reload doesn't resurrect them. qwen 3 showed "run" while waiting for an answer because of this.
   - Smoother chat: plan text stays in the message where it streamed (no longer hidden and repeated inside the plan card; `InPlan` dropped from `itemSig` so marking it doesn't rebuild the message). Streaming text goes through `closeOpenMarkdown`: an odd number of ``` fences gets a closing fence, an open inline code span a closing backtick, an odd `**` (outside code spans) a closing `**` (a bare trailing `**` is hidden), so formatting is right from the first character instead of flipping when the closing marker arrives.
