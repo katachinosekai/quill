@@ -386,6 +386,16 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	rcChk.Checked = d.autoRC
 	rcLocalChk := widget.NewCheck("Remote Control for local sessions (relayed through claude.ai)", func(on bool) {
 		d.app.Preferences().SetBool("rcLocal", on)
+		for _, s := range d.runningSessions() {
+			if !isLocal(s.model) {
+				continue
+			}
+			if !on && s.rcOn {
+				d.setRemoteControl(s, false)
+			} else if on && !s.rcOn {
+				d.autoRemote(s)
+			}
+		}
 	})
 	rcLocalChk.Checked = d.rcForLocal()
 	planChk := widget.NewCheck("Plan first, then approve all", func(on bool) {
@@ -1751,6 +1761,12 @@ func (d *desk) autoRemote(s *deskSession) {
 }
 
 func (d *desk) setRemoteControl(s *deskSession, on bool) {
+	if on && isLocal(s.model) && !d.rcForLocal() {
+		s.rcOn = false
+		d.notify(s, "Remote Control is off for local sessions. Turn on “Remote Control for local sessions” in settings to use it here.")
+		d.updateChrome()
+		return
+	}
 	if on {
 		if err := d.ensureProcess(s); err != nil {
 			d.notify(s, "Could not start claude: "+err.Error())
