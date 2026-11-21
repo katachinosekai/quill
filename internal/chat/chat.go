@@ -83,6 +83,7 @@ type Conversation struct {
 	byTool     map[string]*Item
 	byRequest  map[string]*Item
 	seq        int
+	bgTasks    map[string]bool
 }
 
 func New() *Conversation {
@@ -335,7 +336,15 @@ func CleanUserText(s string) (string, bool) {
 }
 
 func (c *Conversation) applyUser(ev *protocol.Event) []*Item {
-	if ev.IsMeta || ev.Message == nil {
+	if ev.Message == nil {
+		return nil
+	}
+	for _, b := range ev.Message.Blocks() {
+		if b.Type == "text" {
+			c.taskNotification(b.Text)
+		}
+	}
+	if ev.IsMeta {
 		return nil
 	}
 	var out []*Item
@@ -349,6 +358,7 @@ func (c *Conversation) applyUser(ev *protocol.Event) []*Item {
 			it.Result = protocol.ContentText(b.Content)
 			it.ResultError = b.IsError
 			it.HasResult = true
+			c.trackTask(it)
 			out = append(out, it)
 		case "text":
 			t, ok := CleanUserText(b.Text)
@@ -628,4 +638,74 @@ func ShortPath(p, cwd string) string {
 		}
 	}
 	return p
+}
+
+var (
+	bgShell     = regexp.MustCompile(`(?:running in background with ID|moved to the background \(ID):?\s*([A-Za-z0-9_-]{4,})`)
+	bgAnyID     = regexp.MustCompile(`(?i)\b(?:task ?id|agentId|ID)[:=]?\s*([A-Za-z0-9_-]{6,})`)
+	notifyID    = regexp.MustCompile(`<task-id>\s*([^<\s]+)\s*</task-id>`)
+	notifyState = regexp.MustCompile(`<status>\s*([a-z_]+)\s*</status>`)
+	taskDone    = map[string]bool{"completed": true, "failed": true, "killed": true, "stopped": true, "cancelled": true, "canceled": true, "timeout": true, "timed_out": true, "error": true}
+)
+
+func (c *Conversation) trackTask(it *Item) {
+	if it.ResultError {
+		return
+	}
+	var in struct {
+		Background bool   `json:"run_in_background"`
+		TaskID     string `json:"task_id"`
+		ShellID    string `json:"shell_id"`
+	}
+	_ = json.Unmarshal(it.Input, &in)
+	id := ""
+	switch it.ToolName {
+	case "Bash":
+		if m := bgShell.FindStringSubmatch(it.Result); m != nil {
+			id = m[1]
+		}
+	case "Monitor":
+		if m := bgAnyID.FindStringSubmatch(it.Result); m != nil {
+			id = m[1]
+		}
+	case "Agent", "Task":
+		low := strings.ToLower(it.Result)
+		if in.Background || strings.Contains(low, "background") || strings.Contains(low, "async") {
+			if m := bgAnyID.FindStringSubmatch(it.Result); m != nil {
+				id = m[1]
+			}
+		}
+	case "TaskStop", "KillShell", "KillBash":
+		for _, k := range []string{in.TaskID, in.ShellID} {
+			delete(c.bgTasks, k)
+		}
+		return
+	}
+	if id == "" {
+		return
+	}
+	if c.bgTasks == nil {
+		c.bgTasks = map[string]bool{}
+	}
+	c.bgTasks[id] = true
+}
+
+func (c *Conversation) taskNotification(text string) {
+	if !strings.Contains(text, "<task-notification>") {
+		return
+	}
+	id := notifyID.FindStringSubmatch(text)
+	st := notifyState.FindStringSubmatch(text)
+	if id == nil || st == nil || !taskDone[st[1]] {
+		return
+	}
+	delete(c.bgTasks, id[1])
+}
+
+func (c *Conversation) Background() int {
+	return len(c.bgTasks)
+}
+
+func (c *Conversation) ClearBackground() {
+	c.bgTasks = nil
 }

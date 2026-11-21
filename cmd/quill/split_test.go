@@ -1006,6 +1006,11 @@ func TestTabsGlowLikeSidebar(t *testing.T) {
 		c.conv.Busy = true
 		check(c, stRunning, false)
 		c.conv.Busy = false
+		c.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bg1","name":"Bash","input":{"command":"./test.sh","run_in_background":true}}]`)}})
+		c.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bg1","content":"Command running in background with ID: tst123abc. Output is being written to: /tmp/o"}]`)}})
+		check(c, stRunning, false)
+		c.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"text","text":"<task-notification>\n<task-id>tst123abc</task-id>\n<status>completed</status>\n</task-notification>"}]`)}})
+		check(c, stIdle, true)
 		e.failed = "boom"
 		check(e, stError, true)
 		a.conv.AddPlan()

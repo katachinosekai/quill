@@ -2,6 +2,7 @@ package chat
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -169,5 +170,63 @@ func TestThinkingItems(t *testing.T) {
 	ev(`{"type":"assistant","message":{"id":"m2","role":"assistant","content":[{"type":"thinking","thinking":""}]}}`)
 	if len(c.Items) != 2 || c.Items[0].Streaming || c.Items[1].Kind != Assistant {
 		t.Fatalf("items %+v", c.Items)
+	}
+}
+
+func TestBackgroundTasksCountAsWork(t *testing.T) {
+	c := New()
+	tool := func(id, name, input string) {
+		c.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"` + id + `","name":"` + name + `","input":` + input + `}]`)}})
+	}
+	result := func(id, text string, isErr bool) {
+		e := "false"
+		if isErr {
+			e = "true"
+		}
+		b, _ := json.Marshal(text)
+		c.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"` + id + `","is_error":` + e + `,"content":` + string(b) + `}]`)}})
+	}
+	notify := func(task, status string, meta bool) {
+		text := "<task-notification>\n<task-id>" + task + "</task-id>\n<status>" + status + "</status>\n<summary>x</summary>\n</task-notification>"
+		b, _ := json.Marshal(text)
+		c.Apply(&protocol.Event{Type: "user", IsMeta: meta, Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"text","text":` + string(b) + `}]`)}})
+	}
+	tool("t1", "Bash", `{"command":"./run-test.sh","run_in_background":true}`)
+	result("t1", "Command running in background with ID: b4qamtotj. Output is being written to: /tmp/x/b4qamtotj.output", false)
+	tool("t2", "Bash", `{"command":"go test ./..."}`)
+	result("t2", "Command did not complete within its 300s timeout and was moved to the background (ID: be90lakpp). Output is being written to: /tmp/x", false)
+	tool("t3", "Agent", `{"prompt":"review","description":"review"}`)
+	result("t3", "Review done.\nagentId: a1b2c3d4e5 (use SendMessage to continue)", false)
+	tool("t4", "Bash", `{"command":"sleep 1","run_in_background":true}`)
+	result("t4", "denied", true)
+	if c.Background() != 2 {
+		t.Fatalf("background shells and timed-out commands count, finished foreground agents and failed calls don't: %d", c.Background())
+	}
+	notify("b4qamtotj", "running", false)
+	if c.Background() != 2 {
+		t.Fatal("a progress notification doesn't end the task")
+	}
+	notify("b4qamtotj", "completed", true)
+	if c.Background() != 1 {
+		t.Fatal("a completion notification ends the task, even as a meta message")
+	}
+	for _, it := range c.Items {
+		if it.Kind == User {
+			t.Fatalf("task notifications stay hidden: %q", it.Text)
+		}
+	}
+	tool("t5", "TaskStop", `{"task_id":"be90lakpp"}`)
+	result("t5", "stopped", false)
+	if c.Background() != 0 {
+		t.Fatal("TaskStop ends the task")
+	}
+	tool("t6", "Monitor", `{"command":"tail -f log"}`)
+	result("t6", "Monitor started (task ID: m9x8y7z6)", false)
+	if c.Background() != 1 {
+		t.Fatal("a running Monitor counts")
+	}
+	c.ClearBackground()
+	if c.Background() != 0 {
+		t.Fatal("a new process starts with no background tasks")
 	}
 }
