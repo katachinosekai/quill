@@ -95,6 +95,8 @@ type deskSession struct {
 	rotateTried int
 	lastClaude  string
 	compactFrom string
+	chrome      string
+	addDirs     []string
 	qedit       *queueEdit
 	coldStamp   time.Time
 	rotateNo    bool
@@ -163,6 +165,7 @@ type desk struct {
 	localBusy    bool
 	fetchLocal   func(host string) []localInfo
 	after        func(time.Duration, func())
+	controlFn    func(s *deskSession, req map[string]any) (json.RawMessage, error)
 	pingLocal    func(host string) bool
 	localWindows map[string]int
 	warnedOllama bool
@@ -404,6 +407,8 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		}
 	})
 	rcLocalChk.Checked = d.rcForLocal()
+	chromeChk := widget.NewCheck("Claude in Chrome for new sessions", func(on bool) { d.app.Preferences().SetBool("chromeNew", on) })
+	chromeChk.Checked = d.app.Preferences().Bool("chromeNew")
 	planChk := widget.NewCheck("Plan first, then approve all", func(on bool) {
 		d.planFirst = on
 		d.app.Preferences().SetBool("planFirst", on)
@@ -425,7 +430,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	updChk.Checked = d.app.Preferences().BoolWithFallback("checkUpdates", true)
 	notifyChk := widget.NewCheck("Notify me about approvals and finished sessions", func(on bool) { d.app.Preferences().SetBool("desktopNotify", on) })
 	notifyChk.Checked = d.notifyOn()
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, rcLocalChk, planChk, chipChk, updChk, notifyChk, rulesBtn, roBtn, alignRow, d.buildPhoneRow(), legend)
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), rcChk, rcLocalChk, chromeChk, planChk, chipChk, updChk, notifyChk, rulesBtn, roBtn, alignRow, d.buildPhoneRow(), legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -1277,6 +1282,9 @@ func (d *desk) createSession(cwd, model, mode string) *deskSession {
 		mode = "default"
 	}
 	s := &deskSession{id: id, cwd: cwd, model: model, mode: mode, conv: chat.New(), loaded: true, created: time.Now()}
+	if d.app.Preferences().Bool("chromeNew") {
+		s.chrome = "on"
+	}
 	d.sessions[id] = s
 	d.current = s
 	d.addTab(id)
@@ -1302,7 +1310,8 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		s.failed = err.Error()
 		return err
 	}
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Env: d.localEnv(s.model)}
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: s.addDirs,
+		Env: append(d.localEnv(s.model), checkpointEnv)}
 	d.warnInsecureOllama(s)
 	if s.persisted {
 		opts.Resume = s.id

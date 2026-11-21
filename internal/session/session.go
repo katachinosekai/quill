@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -29,6 +30,9 @@ type Options struct {
 	Mode      string
 	ExtraArgs []string
 	Env       []string
+	Chrome    string
+	AddDirs   []string
+	ResumeAt  string
 }
 
 func (o Options) Args() []string {
@@ -53,6 +57,18 @@ func (o Options) Args() []string {
 	}
 	if o.Mode != "" && o.Mode != "default" {
 		args = append(args, "--permission-mode", o.Mode)
+	}
+	switch o.Chrome {
+	case "on":
+		args = append(args, "--chrome")
+	case "off":
+		args = append(args, "--no-chrome")
+	}
+	for _, dir := range o.AddDirs {
+		args = append(args, "--add-dir", dir)
+	}
+	if o.ResumeAt != "" && o.Resume != "" {
+		args = append(args, "--resume-session-at", o.ResumeAt)
 	}
 	return append(args, o.ExtraArgs...)
 }
@@ -508,6 +524,17 @@ func (p *Process) Interrupt(ctx context.Context) error {
 func (p *Process) SetMode(ctx context.Context, mode string) error {
 	_, err := p.Request(ctx, func(id string) []byte { return protocol.SetPermissionMode(id, mode) })
 	return err
+}
+
+func (p *Process) Control(ctx context.Context, req map[string]any) (json.RawMessage, error) {
+	ev, err := p.Request(ctx, func(id string) []byte { return protocol.ControlRequestLine(id, req) })
+	if err != nil {
+		return nil, err
+	}
+	if ev == nil || ev.Response == nil {
+		return nil, nil
+	}
+	return ev.Response.Response, nil
 }
 
 func (p *Process) SetModel(ctx context.Context, model string) error {

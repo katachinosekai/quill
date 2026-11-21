@@ -413,22 +413,21 @@ func TestSlashCommandMenu(t *testing.T) {
 		s = h.d.createSession(h.proj, "default", "default")
 		h.d.cmdList = []protocol.Command{{Name: "help"}, {Name: "model"}}
 		h.d.input.SetText("/")
-		if !h.d.cmds.visible() || len(h.d.cmds.matches) != len(localCommands)+1 {
+		if !h.d.cmds.visible() || len(h.d.cmds.matches) != min(len(localCommands)+1, maxCmdRows) {
 			t.Fatalf("startup list should show: %+v", h.d.cmds.matches)
 		}
 		h.d.send("hi")
 	})
 	h.eventually("session commands", func() bool { return len(s.proc.Commands()) == 3 })
 	h.ui(func() {
-		h.d.input.SetText("/c")
+		h.d.input.SetText("/co")
 		got := []string{}
 		for _, c := range h.d.cmds.matches {
 			got = append(got, c.Name)
 		}
-		if strings.Join(got, ",") != "clear,code-review,compact" {
+		if strings.Join(got, ",") != "code-review,compact,copy" {
 			t.Fatalf("matches %v", got)
 		}
-		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDown})
 		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyTab})
 		if h.d.input.Text != "/code-review " || h.d.cmds.visible() {
 			t.Fatalf("tab gave %q", h.d.input.Text)

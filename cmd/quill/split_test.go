@@ -8,14 +8,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
@@ -1481,4 +1485,171 @@ func TestChoiceCard(t *testing.T) {
 			t.Fatal("no choice card when a plan card already asks")
 		}
 	})
+}
+
+func TestSlashCommands(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	h := newHarness(t)
+	work := t.TempDir()
+	write := func(p, body string) {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(work, ".claude", "settings.json"), `{"model":"opus","permissions":{"allow":["Bash(ls *)","Bash(kill *)"],"deny":["Bash(rm -rf *)"]},"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"guard"}]}]}}`)
+	write(filepath.Join(work, ".claude", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: Reviews diffs\n---\nBody")
+	rules := permissionRules(work)
+	if len(rules) != 3 || rules[0].scope != "Project" {
+		t.Fatalf("rules from the project settings: %+v", rules)
+	}
+	if err := removeRule(rules[1]); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := readSettings(filepath.Join(work, ".claude", "settings.json"))
+	if m["model"] != "opus" || len(permissionRules(work)) != 2 || strings.Contains(fmt.Sprint(m["permissions"]), "kill") {
+		t.Fatalf("Remove drops just that rule and keeps the rest of the file: %v", m)
+	}
+	if ht := hooksText(work); !strings.Contains(ht, "PreToolUse") || !strings.Contains(ht, "guard") {
+		t.Fatalf("hooks: %s", ht)
+	}
+	if a := agentFiles(work); len(a) != 1 || a[0].name != "reviewer" || a[0].desc != "Reviews diffs" {
+		t.Fatalf("agents: %+v", a)
+	}
+	if mf := memoryFiles(work); mf[4] != filepath.Join(home, ".claude", "projects", transcript.Sanitize(work), "memory", "MEMORY.md") {
+		t.Fatalf("memory files: %v", mf)
+	}
+	git := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", work, "-c", "user.email=t@example.com", "-c", "user.name=t"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	git("init", "-q")
+	write(filepath.Join(work, "a.txt"), "old\n")
+	git("add", "a.txt")
+	git("commit", "-q", "-m", "x")
+	write(filepath.Join(work, "a.txt"), "new\n")
+	if d, err := gitDiff(work); err != nil || !strings.Contains(d, "M a.txt") || !strings.Contains(d, "+new") {
+		t.Fatalf("diff: %v %s", err, d)
+	}
+	if md := exportMarkdown("T", func() *chat.Conversation {
+		c := chat.New()
+		c.AddUser("hello")
+		c.Items = append(c.Items, &chat.Item{Kind: chat.Assistant, Text: "hi **there**"})
+		return c
+	}()); md != "# T\n\n**You:**\n\nhello\n\n**Claude:**\n\nhi **there**\n\n" {
+		t.Fatalf("export: %q", md)
+	}
+	var reqs []string
+	var reqMu sync.Mutex
+	h.d.controlFn = func(s *deskSession, req map[string]any) (json.RawMessage, error) {
+		reqMu.Lock()
+		reqs = append(reqs, fmt.Sprint(req["subtype"], " ", req["serverName"], " ", req["enabled"]))
+		reqMu.Unlock()
+		return json.RawMessage(`{"mcpServers":[{"name":"docs","status":"disabled","scope":"claudeai"},{"name":"gh","status":"needs-auth"}]}`), nil
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, Text: "last answer"})
+		h.d.cmdCopy(s)
+		if h.d.app.Clipboard().Content() != "last answer" {
+			t.Fatal("/copy copies the last reply")
+		}
+		path := filepath.Join(work, "out.md")
+		h.d.cmdExport(s, path)
+		if b, err := os.ReadFile(path); err != nil || !strings.Contains(string(b), "last answer") {
+			t.Fatalf("/export writes the file: %v", err)
+		}
+		h.d.cmdMCP(s)
+	})
+	h.eventually("mcp list", func() bool {
+		found := false
+		for _, o := range h.w.Canvas().Overlays().List() {
+			deepWalk(o, func(x fyne.CanvasObject) {
+				if l, ok := x.(*widget.Label); ok && strings.HasPrefix(l.Text, "gh  ·  needs-auth") {
+					found = true
+				}
+			})
+		}
+		return found
+	})
+	h.ui(func() {
+		var signIn, enable *widget.Button
+		for _, o := range h.w.Canvas().Overlays().List() {
+			deepWalk(o, func(x fyne.CanvasObject) {
+				if b, ok := x.(*widget.Button); ok {
+					switch b.Text {
+					case "Sign in":
+						signIn = b
+					case "Enable":
+						enable = b
+					}
+				}
+			})
+		}
+		if signIn == nil || enable == nil {
+			t.Fatal("needs-auth servers get Sign in, disabled ones Enable")
+		}
+		test.Tap(enable)
+	})
+	h.eventually("toggle sent", func() bool {
+		reqMu.Lock()
+		defer reqMu.Unlock()
+		return len(reqs) >= 3 && strings.HasPrefix(reqs[1], "mcp_toggle docs true")
+	})
+	for _, o := range h.w.Canvas().Overlays().List() {
+		h.ui(func() { h.w.Canvas().Overlays().Remove(o) })
+	}
+	h.ui(func() {
+		h.d.sendTo(s, "start")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy })
+	h.ui(func() {
+		h.d.setChrome(s, true)
+		h.d.addDir(s, work)
+		if s.proc != nil || s.chrome != "on" || len(s.addDirs) != 1 {
+			t.Fatal("chrome and add-dir restart the process on the next message")
+		}
+		h.d.sendTo(s, "again")
+	})
+	h.eventually("restarted with flags", func() bool {
+		a := h.args()
+		return strings.Contains(a, "--chrome") && strings.Contains(a, "--add-dir "+work)
+	})
+	h.ui(func() {
+		before := len(h.w.Canvas().Overlays().List())
+		h.d.cmdTasks(s)
+		h.d.cmdMemory(s)
+		h.d.cmdAgents(s)
+		h.d.cmdPermissions(s)
+		h.d.cmdChrome(s, "")
+		h.d.textDialog("Hooks", hooksText(work))
+		if n := len(h.w.Canvas().Overlays().List()) - before; n != 6 {
+			t.Fatalf("each dialog command opens a dialog: %d", n)
+		}
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+	})
+	h.ui(func() {
+		old := h.d.session(editsID)
+		ns, err := h.d.forkSession(old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(filepath.Join(filepath.Dir(h.d.infos[editsID].Path), ns.id+".jsonl"))
+		if !strings.Contains(string(b), ns.id) || strings.Contains(string(b), editsID) || len(ns.conv.Items) == 0 || !strings.HasSuffix(h.d.org.Titles[ns.id], "(fork)") {
+			t.Fatal("/fork copies the transcript under a new id and opens it with the history")
+		}
+	})
+}
+
+func deepWalk(o fyne.CanvasObject, fn func(fyne.CanvasObject)) {
+	driver.WalkVisibleObjectTree(o, func(x fyne.CanvasObject, _ fyne.Position, _ fyne.Position, _ fyne.Size) bool {
+		fn(x)
+		return false
+	}, nil)
 }

@@ -487,3 +487,15 @@ func TestOllamaHostChecks(t *testing.T) {
 		t.Error("subagents use the local model too")
 	}
 }
+
+func TestStartFlags(t *testing.T) {
+	args := strings.Join(Options{Resume: "id1", Chrome: "on", AddDirs: []string{"/a b", "/c"}, ResumeAt: "uuid-9"}.Args(), " ")
+	for _, want := range []string{"--chrome", "--add-dir /a b", "--add-dir /c", "--resume-session-at uuid-9"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("missing %q in %s", want, args)
+		}
+	}
+	if a := strings.Join(Options{SessionID: "x", Chrome: "off", ResumeAt: "u"}.Args(), " "); !strings.Contains(a, "--no-chrome") || strings.Contains(a, "--resume-session-at") {
+		t.Errorf("no-chrome, and resume-at only with --resume: %s", a)
+	}
+}
