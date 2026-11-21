@@ -21,6 +21,7 @@ const (
 	Error
 	Thinking
 	Plan
+	Rotate
 )
 
 type PermState int
@@ -158,6 +159,10 @@ func (c *Conversation) PlanText(plan *Item) string {
 		break
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func (c *Conversation) AddRotate(text string) *Item {
+	return c.add(&Item{Kind: Rotate, Text: text, PermState: PermPending})
 }
 
 func (c *Conversation) AddNotice(text string) *Item {

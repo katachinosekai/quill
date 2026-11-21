@@ -690,3 +690,94 @@ func TestPlanApprovedPromptsAreHidden(t *testing.T) {
 		}
 	})
 }
+
+func TestAutoHandoffPolicy(t *testing.T) {
+	for out, want := range map[string]handoffPolicy{
+		"soft=40 hard=80 mode=ask": {40, 80, "ask"},
+		"mode=off":                 {50, 75, "off"},
+		"soft=90 hard=80":          defaultPolicy,
+		"usage: kmem handoff ...":  defaultPolicy,
+		"soft=0 hard=75":           defaultPolicy,
+	} {
+		if got, _ := parsePolicy(out); got != want {
+			t.Errorf("parsePolicy(%q) = %+v, want %+v", out, got, want)
+		}
+	}
+}
+
+func TestAutoHandoffAsksThenRotates(t *testing.T) {
+	h := newHarness(t)
+	policy := "soft=50 hard=75 mode=auto"
+	h.d.kmemOff = false
+	h.d.kmemRun = func(prog string, args ...string) (string, error) {
+		if prog == "kmem" && len(args) > 1 && args[1] == "policy" {
+			return policy, nil
+		}
+		return "", errors.New("unexpected")
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hello")
+	})
+	h.eventually("the turn ends", func() bool { return !s.conv.Busy && s.running() })
+	h.eventually("policy loaded", func() bool { h.d.handoffPolicy(); return !h.d.policyAt.IsZero() })
+	cards := func() (n int, pending *chat.Item) {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.Rotate {
+				n++
+				if it.PermState == chat.PermPending {
+					pending = it
+				}
+			}
+		}
+		return
+	}
+	h.ui(func() {
+		s.conv.Stats.ContextMax = 200000
+		s.conv.Stats.ContextUsed = 60000
+		h.d.checkAutoHandoff(s)
+		if n, _ := cards(); n != 0 {
+			t.Fatal("below the soft threshold nothing happens")
+		}
+		s.conv.Stats.ContextUsed = 110000
+		h.d.checkAutoHandoff(s)
+		h.d.checkAutoHandoff(s)
+		n, card := cards()
+		if n != 1 || card == nil || !strings.Contains(card.Text, "55%") {
+			t.Fatalf("the soft threshold asks once: %d cards", n)
+		}
+		h.d.answerRotate(s, card, false)
+		s.conv.Stats.ContextUsed = 160000
+		h.d.checkAutoHandoff(s)
+		if n, card := cards(); n != 2 || card == nil {
+			t.Fatal("without a kmem name the hard threshold asks again instead of rotating")
+		}
+		h.d.org.Kmem[s.id] = "quill"
+		plan := s.conv.AddPlan()
+		h.d.checkAutoHandoff(s)
+		if s.kmemSave != nil {
+			t.Fatal("never rotates while something waits for the user")
+		}
+		plan.PermState = chat.PermCancelled
+		h.d.checkAutoHandoff(s)
+		if s.kmemSave == nil || s.kmemSave.name != "quill" || s.rotateTried != 80 {
+			t.Fatal("the hard threshold rotates automatically through the kmem restart")
+		}
+		if _, card := cards(); card != nil {
+			t.Fatal("open rotate cards close when the automatic rotation starts")
+		}
+		s.kmemSave = nil
+		s.conv.Stats.ContextUsed = 164000
+		h.d.checkAutoHandoff(s)
+		if s.kmemSave != nil {
+			t.Fatal("after a cancelled rotation it waits for 5 more points before trying again")
+		}
+		s.conv.Stats.ContextUsed = 172000
+		h.d.policy.Mode = "off"
+		h.d.checkAutoHandoff(s)
+		if s.kmemSave != nil {
+			t.Fatal("mode off never rotates")
+		}
+	})
+}
