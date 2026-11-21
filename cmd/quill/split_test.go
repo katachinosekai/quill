@@ -522,10 +522,8 @@ func TestKmemNamesAndParsing(t *testing.T) {
 
 func TestKmemNewSessionAndResume(t *testing.T) {
 	h := newHarness(t)
-	var calls []string
 	h.d.kmemOff = false
 	h.d.kmemRun = func(prog string, args ...string) (string, error) {
-		calls = append(calls, prog+" "+strings.Join(args, " "))
 		switch {
 		case prog == "kmem" && len(args) > 1 && args[1] == "list":
 			return "quill  4 items, saved 2026-11-20T12:16:10-08:00\n", nil
@@ -804,10 +802,13 @@ func TestOnlineLocalSwitch(t *testing.T) {
 	h.ui(func() {
 		s := h.d.createSession(h.proj, "opus", "auto")
 		h.d.open(s.id)
-		if h.d.backendSel.Selected != backendOnline || contains(h.d.modelSel.Options, localFallback[0]) || !contains(h.d.modeSel.Options, "auto") {
+		if h.d.backendBtn.Text != backendOnline || contains(h.d.modelSel.Options, localFallback[0]) || !contains(h.d.modeSel.Options, "auto") {
 			t.Fatalf("Online shows only Claude models and every mode: %v %v", h.d.modelSel.Options, h.d.modeSel.Options)
 		}
-		h.d.backendSel.SetSelected(backendLocal)
+		test.Tap(h.d.backendBtn)
+		if h.d.backendBtn.Text != backendLocal || h.d.backendBtn.Importance != widget.WarningImportance {
+			t.Fatal("the button flips to Local and stands out")
+		}
 		if s.model != localFallback[0] || s.mode != "default" {
 			t.Fatalf("Local picks the first local model and leaves auto mode: %q %q", s.model, s.mode)
 		}
@@ -823,7 +824,10 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		if h.d.app.Preferences().String("newModel") != localFallback[0] {
 			t.Fatal("new sessions remember the choice")
 		}
-		h.d.backendSel.SetSelected(backendOnline)
+		test.Tap(h.d.backendBtn)
+		if h.d.backendBtn.Text != backendOnline {
+			t.Fatal("clicking again flips back to Online")
+		}
 		if s.model != "opus" || backendOf(s.model) != backendOnline {
 			t.Fatalf("Online goes back to the last Claude model: %q", s.model)
 		}
@@ -832,4 +836,22 @@ func TestOnlineLocalSwitch(t *testing.T) {
 			t.Fatal("a new local session never starts in auto mode")
 		}
 	})
+}
+
+func TestSuggestionSurvivesReload(t *testing.T) {
+	s := &deskSession{conv: chat.New()}
+	s.conv.Suggestion = "run the tests"
+	var hs handedSession
+	hs.savePending(s)
+	fresh := &deskSession{conv: chat.New()}
+	hs.restorePending(fresh)
+	if fresh.conv.Suggestion != "run the tests" {
+		t.Fatalf("the suggestion comes back after a reload: %q", fresh.conv.Suggestion)
+	}
+	busy := &deskSession{conv: chat.New()}
+	busy.conv.Busy = true
+	hs.restorePending(busy)
+	if busy.conv.Suggestion != "" {
+		t.Fatal("a session that is already busy again gets no stale suggestion")
+	}
 }

@@ -34,7 +34,7 @@ type pane struct {
 	choices *fyne.Container
 	model   *widget.Select
 	mode    *widget.Select
-	backend *widget.RadioGroup
+	backend *widget.Button
 	stop    *widget.Button
 	mic     *widget.Button
 	stats   *canvas.Text
@@ -137,14 +137,13 @@ func (d *desk) newPane() *pane {
 			d.setMode(p.view.s, v)
 		}
 	})
-	p.backend = widget.NewRadioGroup([]string{backendOnline, backendLocal}, func(v string) {
-		if !p.quiet && p.view.s != nil && v != "" {
-			d.setBackend(p.view.s, v)
+	p.backend = widget.NewButton(backendOnline, func() {
+		if p.view.s != nil {
+			d.focusPane(p)
+			d.setBackend(p.view.s, otherBackend(p.view.s.model))
 			d.syncPaneControls(p)
 		}
 	})
-	p.backend.Horizontal = true
-	p.backend.Required = true
 	openAll := widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
 		d.focusPane(p)
 		d.setAllChips(true)
@@ -660,9 +659,7 @@ func (d *desk) syncPaneControls(p *pane) {
 	p.mic.Enable()
 	setOptions(p.model, d.modelOptions(s))
 	setOptions(p.mode, modeOptions(s))
-	if p.backend.Selected != backendOf(s.model) {
-		p.backend.SetSelected(backendOf(s.model))
-	}
+	setBackendButton(p.backend, s.model)
 	if p.model.Selected != s.model {
 		p.model.SetSelected(s.model)
 	}

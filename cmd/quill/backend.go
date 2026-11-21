@@ -32,6 +32,24 @@ func backendOf(model string) string {
 	return backendOnline
 }
 
+func otherBackend(model string) string {
+	if isLocal(model) {
+		return backendOnline
+	}
+	return backendLocal
+}
+
+func setBackendButton(b *widget.Button, model string) {
+	text, imp := backendOnline, widget.MediumImportance
+	if isLocal(model) {
+		text, imp = backendLocal, widget.WarningImportance
+	}
+	if b.Text != text || b.Importance != imp {
+		b.Importance = imp
+		b.SetText(text)
+	}
+}
+
 func fetchOllamaModels(host string) []string {
 	c := http.Client{Timeout: 2 * time.Second}
 	resp, err := c.Get(host + "/api/tags")

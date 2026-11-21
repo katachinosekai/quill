@@ -118,6 +118,7 @@ type handedSession struct {
 	Plan   bool            `json:"plan"`
 	Wait   bool            `json:"planWait"`
 	RunAll bool            `json:"runAll"`
+	Sugg   string          `json:"suggestion,omitempty"`
 }
 
 type pendingAsk struct {
@@ -221,7 +222,7 @@ func (d *desk) reclaimRC(s *deskSession) {
 }
 
 func (hs *handedSession) savePending(s *deskSession) {
-	hs.Wait, hs.RunAll = s.planWait, s.runAll
+	hs.Wait, hs.RunAll, hs.Sugg = s.planWait, s.runAll, s.conv.Suggestion
 	for _, it := range s.conv.PendingPermissions() {
 		if it.Kind == chat.Plan {
 			hs.Plan = true
@@ -233,6 +234,9 @@ func (hs *handedSession) savePending(s *deskSession) {
 
 func (hs handedSession) restorePending(s *deskSession) {
 	s.planWait, s.runAll = hs.Wait, hs.RunAll
+	if hs.Sugg != "" && s.conv.Suggestion == "" && !s.conv.Busy {
+		s.conv.Suggestion = hs.Sugg
+	}
 	if len(s.conv.PendingPermissions()) > 0 {
 		return
 	}
