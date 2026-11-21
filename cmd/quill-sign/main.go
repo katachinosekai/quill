@@ -98,7 +98,7 @@ func sign(dir string) error {
 		if e.IsDir() || n == "SHA256SUMS" || n == "SHA256SUMS.sig" {
 			continue
 		}
-		if strings.HasSuffix(n, ".rpm") || strings.HasSuffix(n, ".AppImage") || strings.HasSuffix(n, ".tar.gz") || strings.HasSuffix(n, ".apk") {
+		if releaseFile(n) {
 			names = append(names, n)
 		}
 	}
@@ -130,4 +130,15 @@ func sign(dir string) error {
 	}
 	fmt.Print(b.String())
 	return nil
+}
+
+// releaseFile: the files a release signs (Linux packages, the Android APK,
+// the Windows exe and zip).
+func releaseFile(n string) bool {
+	for _, ext := range []string{".rpm", ".AppImage", ".tar.gz", ".apk", ".exe", ".zip"} {
+		if strings.HasSuffix(n, ext) {
+			return true
+		}
+	}
+	return false
 }
