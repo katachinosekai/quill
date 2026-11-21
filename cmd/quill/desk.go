@@ -66,50 +66,51 @@ func (s status) String() string {
 }
 
 type deskSession struct {
-	id          string
-	cwd         string
-	title       string
-	conv        *chat.Conversation
-	loaded      bool
-	loadedMod   time.Time
-	persisted   bool
-	proc        *session.Process
-	model       string
-	mode        string
-	failed      string
-	stopping    bool
-	terminal    *live.Process
-	planWait    bool
-	runAll      bool
-	runAllNext  bool
-	queue       []string
-	lastSent    string
-	inTurn      bool
-	restoreMode string
-	retryCmd    string
-	retryRules  []protocol.Rule
-	retryDest   string
-	kmemSave    *kmemSave
-	kmemNew     bool
-	rotateAsk   int
-	rotateTried int
-	lastClaude  string
-	compactFrom string
-	chrome      string
-	addDirs     []string
-	resumeAt    string
-	forkOf      string
-	qedit       *queueEdit
-	coldStamp   time.Time
-	rotateNo    bool
-	limitSeen   string
-	compacting  bool
-	takeover    bool
-	loading     bool
-	rcURL       string
-	rcOn        bool
-	rcName      string
-	created     time.Time
+	id             string
+	cwd            string
+	title          string
+	conv           *chat.Conversation
+	loaded         bool
+	loadedMod      time.Time
+	persisted      bool
+	proc           *session.Process
+	model          string
+	mode           string
+	failed         string
+	stopping       bool
+	clearAfterTurn bool
+	terminal       *live.Process
+	planWait       bool
+	runAll         bool
+	runAllNext     bool
+	queue          []string
+	lastSent       string
+	inTurn         bool
+	restoreMode    string
+	retryCmd       string
+	retryRules     []protocol.Rule
+	retryDest      string
+	kmemSave       *kmemSave
+	kmemNew        bool
+	rotateAsk      int
+	rotateTried    int
+	lastClaude     string
+	compactFrom    string
+	chrome         string
+	addDirs        []string
+	resumeAt       string
+	forkOf         string
+	qedit          *queueEdit
+	coldStamp      time.Time
+	rotateNo       bool
+	limitSeen      string
+	compacting     bool
+	takeover       bool
+	loading        bool
+	rcURL          string
+	rcOn           bool
+	rcName         string
+	created        time.Time
 }
 
 func (s *deskSession) running() bool {
@@ -1117,7 +1118,7 @@ func (d *desk) updateChrome() {
 	if held || s.takeover {
 		d.input.setSuggestion("")
 	} else {
-		d.input.setSuggestion(s.conv.Suggestion)
+		d.input.setSuggestion(d.shownSuggestion(s))
 	}
 	setOptions(d.modelSel, d.modelOptions(s))
 	setOptions(d.modeSel, modeOptions(s))
@@ -1402,6 +1403,9 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	if ev.Type == "result" {
 		d.kmemAfterTurn(s)
 		d.checkAutoHandoff(s)
+		if s.clearAfterTurn {
+			d.clearNow(s)
+		}
 	}
 	d.checkLimitMessage(s, items)
 	d.attention(s, ev, items)

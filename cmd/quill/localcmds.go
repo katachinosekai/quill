@@ -66,7 +66,7 @@ func (d *desk) runLocalCommand(text string) bool {
 		if s == nil {
 			return false
 		}
-		d.createSession(s.cwd, s.model, s.mode)
+		d.clearSession(s)
 	case "model":
 		if s == nil {
 			return false

@@ -177,6 +177,52 @@ func (d *desk) askRelaunch(id string) {
 		}, d.win)
 }
 
+func (d *desk) clearSession(s *deskSession) {
+	if name := d.org.Kmem[s.id]; name != "" && d.kmemAvailable() {
+		d.relaunchViaKmem(s.id, name)
+		return
+	}
+	if s.running() && (s.conv.Busy || s.proc.Busy()) {
+		s.clearAfterTurn = true
+		d.notify(s, "Clearing once Claude finishes this turn.")
+		return
+	}
+	d.clearNow(s)
+}
+
+func (d *desk) clearNow(s *deskSession) {
+	s.clearAfterTurn = false
+	title, _, _ := d.rowText(s.id)
+	if s.running() {
+		p := s.proc
+		s.stopping = true
+		go func() { _ = p.Stop(5 * time.Second) }()
+	}
+	queued := s.queue
+	s.queue = nil
+	d.syncQueue(s)
+	ns := d.replaceWith(s, title)
+	d.org.Place[s.id] = placeInactive
+	d.saveOrg()
+	d.refreshSidebar()
+	if len(queued) > 0 {
+		d.sendTo(ns, strings.Join(queued, "\n\n"))
+	}
+}
+
+func isClearSuggestion(text string) bool {
+	f := strings.Fields(strings.TrimSpace(text))
+	return len(f) > 0 && (f[0] == "/clear" || f[0] == "/compact")
+}
+
+func (d *desk) shownSuggestion(s *deskSession) string {
+	sug := s.conv.Suggestion
+	if isClearSuggestion(sug) && contextPct(s) < d.handoffPolicy().Soft {
+		return ""
+	}
+	return sug
+}
+
 func (d *desk) relaunchSession(id string) {
 	old := d.session(id)
 	if old == nil {

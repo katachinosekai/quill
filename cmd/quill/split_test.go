@@ -602,7 +602,8 @@ func TestKmemRestartSavesThenDeletes(t *testing.T) {
 		old = h.d.createSession(h.proj, "sonnet", "default")
 		h.d.org.Titles[old.id] = "PZ Launcher"
 		h.d.org.Kmem[old.id] = "launcher"
-		h.d.relaunchViaKmem(old.id, "launcher")
+		h.d.open(old.id)
+		h.d.send("/clear")
 		if old.kmemSave == nil || !strings.Contains(old.conv.Items[len(old.conv.Items)-1].Text, "kmem handoff save launcher") {
 			t.Fatal("the old session is asked to save its handoff")
 		}

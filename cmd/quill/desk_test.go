@@ -1085,10 +1085,32 @@ func TestLocalSlashCommands(t *testing.T) {
 		if s.proc != nil || h.d.input.Text != "" {
 			t.Fatal("/upgrade must be handled by Quill, not sent to the CLI")
 		}
-		before := len(h.d.sessions)
+		before, tabs := len(h.d.sessions), len(h.d.tabs)
+		oldID := s.id
 		h.d.send("/clear")
-		if len(h.d.sessions) != before+1 || h.d.current == s {
-			t.Fatal("/clear should start a fresh session")
+		if len(h.d.sessions) != before+1 || h.d.current == s || len(h.d.tabs) != tabs {
+			t.Fatalf("/clear starts a fresh session in the same tab: tabs %d -> %d", tabs, len(h.d.tabs))
+		}
+		for _, id := range h.d.tabs {
+			if id == oldID {
+				t.Fatal("the cleared session leaves the tab strip")
+			}
+		}
+		if h.d.placement(oldID) != placeInactive || h.d.current.cwd != s.cwd || h.d.current.model != s.model {
+			t.Fatal("and stays resumable in Inactive; the new one keeps folder and model")
+		}
+		h.d.current.conv.Suggestion = "/clear"
+		if h.d.shownSuggestion(h.d.current) != "" {
+			t.Fatal("a /clear suggestion is hidden at low context")
+		}
+		h.d.current.conv.Stats.ContextMax, h.d.current.conv.Stats.ContextUsed = 1000, 600
+		if h.d.shownSuggestion(h.d.current) != "/clear" {
+			t.Fatal("and shown once context passes the soft threshold")
+		}
+		h.d.current.conv.Suggestion = "run the tests"
+		h.d.current.conv.Stats.ContextUsed = 10
+		if h.d.shownSuggestion(h.d.current) != "run the tests" {
+			t.Fatal("other suggestions are untouched")
 		}
 		var hasUpgrade bool
 		for _, c := range h.d.commandsFor(h.d.current) {

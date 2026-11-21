@@ -716,7 +716,7 @@ func (d *desk) syncPaneControls(p *pane) {
 	}
 	setText(p.stats, stats)
 	if p.input.Text == "" {
-		p.input.setSuggestion(s.conv.Suggestion)
+		p.input.setSuggestion(d.shownSuggestion(s))
 	}
 }
 
