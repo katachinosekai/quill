@@ -101,6 +101,8 @@ Closing the window hides it (`confirmClose` -> `hideWindow`) when a system tray 
 
 ## UI notes
 
+- Tab chips glow by the same rules as sidebar rows (user 2026-11-20: "tabs are not following glowing rules"): each chip keeps one glow rectangle (`tabChip.glow`, between the card and the content) driven by `setGlow(status.color(), glowStrength)`: waiting/error pulse at full strength, idle a soft 0.3 glow, running and the active tab none. Closing a tab removes its glow from `glowBoxes`. Test: TestTabsGlowLikeSidebar.
+
 - Approval cards follow "center messages" (user 2026-11-20): plan, permission, question, blocked and rotate cards align every label and status line with `v.align()`; status lines use `v.muted` (aligned canvas.Text) and the question card's radio/check groups are wrapped by `v.centered`. `setCenter` also drops `qcards` (cached open question cards), otherwise an open question kept its old alignment (an unsent pick on it resets). Test: TestApprovalCardsFollowCentering.
 
 - Local slash commands (localcmds.go): the headless CLI rejects interactive-only commands ("/upgrade isn't available in this environment"), so Quill handles /upgrade (opens claude.ai/upgrade), /login, /logout, /clear (new session in the same folder), /model <name>, /exit|/quit itself before anything is sent; they are listed first in the / suggestions and replace the CLI's entries of the same name.

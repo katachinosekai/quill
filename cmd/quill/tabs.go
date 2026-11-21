@@ -172,6 +172,7 @@ type tabChip struct {
 	onDrag   func(e *fyne.DragEvent)
 	onDrop   func()
 	onMiddle func()
+	glow     *canvas.Rectangle
 }
 
 func (c *tabChip) MouseDown(*desktop.MouseEvent) {}
@@ -280,24 +281,30 @@ func (d *desk) syncTabs() {
 			bg.StrokeWidth = 2
 		}
 		row := container.NewHBox(padLeft(10), container.NewCenter(sized(9, 9, dt)), padLeft(2), container.NewCenter(label), padLeft(2), container.NewCenter(sized(22, 22, closeBtn)), padLeft(4))
-		inner := []fyne.CanvasObject{bg, container.New(layout.NewCustomPaddedLayout(5, 5, 0, 0), row)}
 		chip := d.tabChips[id]
 		if chip == nil {
-			holder := container.NewStack(inner...)
-			chip = newChip(holder, func() { d.open(id) }, func(at fyne.Position) { d.tabMenu(id, at) })
+			chip = newChip(container.NewStack(), func() { d.open(id) }, func(at fyne.Position) { d.tabMenu(id, at) })
 			chip.onDrag = func(e *fyne.DragEvent) { d.strip.drag(chip, id, e) }
 			chip.onDrop = func() { d.strip.drop() }
 			chip.onMiddle = func() { d.closeTab(id) }
+			chip.glow = canvas.NewRectangle(color.Transparent)
+			chip.glow.CornerRadius = 10
+			chip.glow.StrokeWidth = 1.5
 			d.tabChips[id] = chip
-		} else {
-			holder := chip.content.(*fyne.Container)
-			holder.Objects = inner
-			holder.Refresh()
 		}
+		if active {
+			d.setGlow(chip.glow, nil, 0)
+		} else {
+			d.setGlow(chip.glow, st.color(), glowStrength(st))
+		}
+		holder := chip.content.(*fyne.Container)
+		holder.Objects = []fyne.CanvasObject{bg, chip.glow, container.New(layout.NewCustomPaddedLayout(5, 5, 0, 0), row)}
+		holder.Refresh()
 		chips = append(chips, chip)
 	}
-	for id := range d.tabChips {
+	for id, chip := range d.tabChips {
 		if !seen[id] {
+			d.setGlow(chip.glow, nil, 0)
 			delete(d.tabChips, id)
 		}
 	}
