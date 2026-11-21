@@ -66,7 +66,7 @@ func (d *desk) commandsFor(s *deskSession) []protocol.Command {
 		out = append(out, c)
 	}
 	for _, c := range list {
-		if !seen[c.Name] {
+		if !seen[c.Name] && terminalOnly[c.Name] == "" {
 			out = append(out, c)
 		}
 	}

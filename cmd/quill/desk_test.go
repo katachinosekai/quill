@@ -464,7 +464,7 @@ func TestSlashCommandMenu(t *testing.T) {
 		for _, c := range h.d.cmds.matches {
 			got = append(got, c.Name)
 		}
-		if strings.Join(got, ",") != "code-review,compact,context,copy,cost" {
+		if strings.Join(got, ",") != "code-review,compact,context,copy,cost,remote-control" {
 			t.Fatalf("matches %v", got)
 		}
 		h.d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyTab})

@@ -38,6 +38,16 @@ var localCommands = []protocol.Command{
 	{Name: "cost", Description: "This session's cost and turns (handled by Quill)"},
 	{Name: "context", Description: "This session's context use (handled by Quill)"},
 	{Name: "status", Description: "This session's model, mode, folder and state (handled by Quill)"},
+	{Name: "rename", Description: "Rename this session's tab and its kmem name (handled by Quill)", ArgumentHint: "[name]"},
+	{Name: "remote-control", Description: "Remote Control through claude.ai for this session, like Remote under the message box (handled by Quill)", ArgumentHint: "[on|off]"},
+	{Name: "rc", Description: "Same as /remote-control (handled by Quill)", ArgumentHint: "[on|off]"},
+}
+
+// terminalOnly are Claude Code commands that only change its terminal
+// screen; Quill Desktop hides them and explains instead of sending them.
+var terminalOnly = map[string]string{
+	"color": "/color sets the prompt bar color in Claude Code's terminal; Quill Desktop's colors are in Settings.",
+	"focus": "/focus switches Claude Code's terminal to a focus view; it doesn't change anything in Quill Desktop.",
 }
 
 func (d *desk) runLocalCommand(text string) bool {
@@ -56,8 +66,8 @@ func deviceCommandBlocked(text string) bool {
 	if !strings.HasPrefix(text, "/") {
 		return false
 	}
-	name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
-	return deviceBlocked[name]
+	name, arg, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
+	return deviceBlocked[name] || name == "rename" && strings.TrimSpace(arg) == ""
 }
 
 func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
@@ -96,6 +106,43 @@ func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
 		}
 		d.setModel(s, arg)
 		note("Model set to " + arg + ".")
+	case "rename":
+		if s == nil {
+			return false
+		}
+		if arg != "" {
+			d.renameSession(s.id, arg)
+			note("Renamed this session to “" + arg + "”.")
+		} else {
+			title, _, _ := d.rowText(s.id)
+			d.askName("Rename session", title, func(name string) { d.renameSession(s.id, name) })
+		}
+	case "remote-control", "rc":
+		if s == nil {
+			return false
+		}
+		if s.remote != nil {
+			note("This session runs on another PC; turn Remote Control on or off in Quill Desktop there.")
+			return true
+		}
+		switch strings.ToLower(arg) {
+		case "on":
+			if !s.rcOn {
+				d.setRemoteControl(s, true)
+			} else {
+				note("Remote Control is already on: " + s.rcURL)
+			}
+		case "off":
+			if s.rcOn {
+				d.setRemoteControl(s, false)
+			} else {
+				note("Remote Control is already off.")
+			}
+		default:
+			d.setRemoteControl(s, !s.rcOn)
+		}
+	case "color", "focus":
+		note(terminalOnly[name])
 	case "mcp", "chrome", "tasks", "permissions", "fork", "branch", "copy", "export", "diff", "memory", "hooks", "agents", "add-dir", "rewind", "usage", "cost", "context", "status":
 		if s == nil {
 			return false
