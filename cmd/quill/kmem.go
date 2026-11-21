@@ -38,6 +38,7 @@ type kmemSave struct {
 	spare  int
 	prompt string
 	end    bool
+	place  string
 }
 
 var handoffLine = regexp.MustCompile(`^(\S+)\s+\d+ items?, saved (\S+)`)
@@ -158,7 +159,7 @@ func kmemChoices(hs []kmemHandoff) []string {
 	for _, h := range hs {
 		out = append(out, kmemResumeOf+h.Name+" (saved "+h.Saved.Local().Format("Jan 2 15:04")+")")
 	}
-	return append(out, kmemNoChoice)
+	return out
 }
 
 func choiceHandoff(choice string) string {
@@ -173,7 +174,7 @@ func choiceHandoff(choice string) string {
 }
 
 func (d *desk) kmemSelect(apply func(*widget.Select)) *widget.Select {
-	sel := widget.NewSelect([]string{kmemNewChoice, kmemNoChoice}, nil)
+	sel := widget.NewSelect([]string{kmemNewChoice}, nil)
 	sel.SetSelected(kmemNewChoice)
 	go func() {
 		hs := d.kmemHandoffs()
@@ -353,7 +354,7 @@ func (d *desk) kmemAfterTurn(s *deskSession) {
 			}
 			s.kmemSave = nil
 			if ks.end {
-				d.finishKmemEnd(s, ks.name)
+				d.finishKmemEnd(s, ks.name, ks.place)
 				return
 			}
 			d.finishKmemRelaunch(s, ks.name, prompt)
@@ -381,6 +382,10 @@ func kmemEndMessage(name string) string {
 }
 
 func (d *desk) endAndSave(id string) {
+	d.endAndSaveTo(id, placeArchive)
+}
+
+func (d *desk) endAndSaveTo(id, place string) {
 	s := d.session(id)
 	name := d.org.Kmem[id]
 	if s == nil {
@@ -388,25 +393,30 @@ func (d *desk) endAndSave(id string) {
 	}
 	if name == "" || !d.kmemAvailable() || !s.running() {
 		d.endSession(id)
+		d.setPlacement(id, place)
 		return
 	}
 	spare := 0
 	if s.inTurn {
 		spare = 1
 	}
-	s.kmemSave = &kmemSave{name: name, asked: time.Now().Add(-2 * time.Second), spare: spare, end: true}
-	d.notify(s, fmt.Sprintf("Ending: waiting for this session to save its kmem handoff “%s”; it is stopped and archived after that.", name))
+	s.kmemSave = &kmemSave{name: name, asked: time.Now().Add(-2 * time.Second), spare: spare, end: true, place: place}
+	d.notify(s, fmt.Sprintf("Ending: waiting for this session to save its kmem handoff “%s”; it is stopped and moved to %s after that.", name, d.folderTitle(place, place)))
 	d.sendTo(s, kmemEndMessage(name))
 }
 
-func (d *desk) finishKmemEnd(s *deskSession, name string) {
-	d.notify(s, fmt.Sprintf("Saved kmem handoff “%s”; this session is stopped and moved to Archive (nothing deleted).", name))
+func (d *desk) finishKmemEnd(s *deskSession, name, place string) {
+	if place == "" {
+		place = placeArchive
+	}
+	d.notify(s, fmt.Sprintf("Saved kmem handoff “%s”; this session is stopped and moved to %s (nothing deleted).", name, d.folderTitle(place, place)))
 	if s.running() {
 		p := s.proc
 		s.stopping = true
 		go func() { _ = p.Stop(5 * time.Second) }()
 	}
-	d.org.Place[s.id] = placeArchive
+	d.org.Place[s.id] = place
+	d.markEnded(s.id)
 	d.saveOrg()
 	d.closeTab(s.id)
 	d.refreshSidebar()

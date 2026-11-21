@@ -735,7 +735,7 @@ func (d *desk) forkSession(s *deskSession) (*deskSession, error) {
 	d.sessions[id] = ns
 	if k := d.org.Kmem[s.id]; k != "" {
 		ns.forkOf = k
-		d.org.Kmem[id] = ""
+		d.org.Kmem[id] = kmemSlug(k+"-fork", d.kmemTaken(nil))
 	}
 	d.org.Titles[id] = title + " (fork)"
 	if place := d.placement(s.id); strings.HasPrefix(place, folderPrefix) {
@@ -1046,6 +1046,6 @@ func (d *desk) sessionToolsItem(id string) *fyne.MenuItem {
 	return tools
 }
 
-func forkIntro(kmemName string) string {
-	return fmt.Sprintf("(Quill: this session is a fork of the session with kmem name %q. Don't use that kmem name, its handoff or its task claims; that session still owns them. If this fork needs kmem, ask me for a new name.)\n\n", kmemName)
+func forkIntro(kmemName, own string) string {
+	return fmt.Sprintf("(Quill: this session is a fork of the session with kmem name %q. Its handoff (`kmem handoff get %s`) is context only: don't save to it or use its task claims; that session still owns them. This fork's own kmem name is %q: save handoffs and claim tasks under that name.)\n\n", kmemName, kmemName, own)
 }

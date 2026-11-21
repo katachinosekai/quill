@@ -73,6 +73,7 @@ func (d *desk) askDelete(id string) {
 }
 
 func (d *desk) deleteSession(id string) {
+	d.trashHandoff(id)
 	path := ""
 	if info, ok := d.infos[id]; ok {
 		path = info.Path

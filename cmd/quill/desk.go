@@ -103,6 +103,7 @@ type deskSession struct {
 	addDirs        []string
 	resumeAt       string
 	forkOf         string
+	pendingEnd     int
 	qedit          *queueEdit
 	coldStamp      time.Time
 	rotateNo       bool
@@ -674,6 +675,11 @@ func (d *desk) rowText(id string) (string, string, status) {
 	if k := d.org.Kmem[id]; k != "" {
 		meta += "  ·  kmem " + k
 	}
+	if s != nil && s.pendingEnd != 0 {
+		meta += "  ·  ending soon (open to keep)"
+	} else if s != nil && s.kmemSave != nil && s.kmemSave.end {
+		meta += "  ·  saving handoff, then ending"
+	}
 	if s != nil {
 		if m := session.LocalModel(s.model); m != "" {
 			meta += "  ·  local " + m
@@ -1244,6 +1250,10 @@ func (d *desk) open(id string) {
 	if s == nil {
 		return
 	}
+	d.cancelPendingEnd(s)
+	if d.offerResume(id) {
+		return
+	}
 	if p := d.paneFor(s); p != nil && p != d.focused {
 		d.focusPane(p)
 		return
@@ -1667,7 +1677,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		}
 	}
 	if s.forkOf != "" {
-		text = forkIntro(s.forkOf) + text
+		text = forkIntro(s.forkOf, d.org.Kmem[s.id]) + text
 		s.forkOf = ""
 	}
 	if d.planFirst {

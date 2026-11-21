@@ -7,7 +7,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 )
@@ -149,23 +148,6 @@ func (d *desk) syncTitleToKmem(id string) {
 		d.rebuildRows()
 		d.updateChrome()
 	}
-}
-
-func (d *desk) offerKmemRename(id, title string) {
-	old := d.org.Kmem[id]
-	if old == "" || !d.kmemAvailable() {
-		return
-	}
-	next := kmemSlug(title, func(n string) bool { return n != old && d.kmemTaken(nil)(n) })
-	if next == old {
-		return
-	}
-	dialog.ShowConfirm("Rename the kmem link too?", fmt.Sprintf("This session saves and resumes kmem handoff “%s”. Rename it to “%s”? A saved handoff moves with it.", old, next),
-		func(ok bool) {
-			if ok {
-				d.renameKmem(id, old, next)
-			}
-		}, d.win)
 }
 
 func (d *desk) renameKmem(id, old, next string) {

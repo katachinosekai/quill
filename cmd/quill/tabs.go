@@ -275,7 +275,7 @@ func (d *desk) syncTabs() {
 			label.Color = colMuted
 		}
 		dt := statusMark(st)
-		closeBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() { d.closeTab(id) })
+		closeBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() { d.closeSessionTab(id) })
 		closeBtn.Importance = widget.LowImportance
 		bg := canvas.NewRectangle(colCard)
 		bg.CornerRadius = 10
@@ -289,7 +289,7 @@ func (d *desk) syncTabs() {
 			chip = newChip(container.NewStack(), func() { d.open(id) }, func(at fyne.Position) { d.tabMenu(id, at) })
 			chip.onDrag = func(e *fyne.DragEvent) { d.strip.drag(chip, id, e) }
 			chip.onDrop = func() { d.strip.drop() }
-			chip.onMiddle = func() { d.closeTab(id) }
+			chip.onMiddle = func() { d.closeSessionTab(id) }
 			chip.glow = canvas.NewRectangle(color.Transparent)
 			chip.glow.CornerRadius = 10
 			chip.glow.StrokeWidth = 1.5
@@ -529,19 +529,23 @@ func (d *desk) tabMenu(id string, at fyne.Position) {
 				pos = i
 			}
 		}
-		var kept []string
+		var kept, gone []string
 		for i, t := range d.tabs {
 			if keep(i, pos) {
 				kept = append(kept, t)
+			} else {
+				gone = append(gone, t)
 			}
 		}
+		defer d.closeSessionTabs(gone)
 		d.tabs = kept
 		d.saveTabs()
 		d.tabSig = ""
 		d.syncTabs()
 	}
 	d.sessionMenu(id, at,
-		fyne.NewMenuItem("Close tab", func() { d.closeTab(id) }),
+		fyne.NewMenuItem("Close tab", func() { d.closeSessionTab(id) }),
+		fyne.NewMenuItem("Hide tab (keep running)", func() { d.closeTab(id) }),
 		fyne.NewMenuItem("Close other tabs", func() { closeOthers(func(i, at int) bool { return i == at }) }),
 		fyne.NewMenuItem("Close tabs to the right", func() { closeOthers(func(i, at int) bool { return i <= at }) }),
 	)

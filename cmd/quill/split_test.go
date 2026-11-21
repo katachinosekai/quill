@@ -1873,8 +1873,8 @@ func TestKmemSafetyAndSelectionClicks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ns.forkOf != "quill" || h.d.org.Kmem[ns.id] != "" {
-			t.Fatal("a fork of a kmem session is not linked to that kmem name")
+		if ns.forkOf != "quill" || h.d.org.Kmem[ns.id] != "quill-fork" {
+			t.Fatalf("a fork gets its own kmem name, never the original's: %q", h.d.org.Kmem[ns.id])
 		}
 		h.d.sendTo(ns, "go on")
 		var first string
@@ -1883,7 +1883,7 @@ func TestKmemSafetyAndSelectionClicks(t *testing.T) {
 				first = it.Text
 			}
 		}
-		if !strings.Contains(first, `fork of the session with kmem name "quill"`) || !strings.HasSuffix(first, "go on") || ns.forkOf != "" {
+		if !strings.Contains(first, `fork of the session with kmem name "quill"`) || !strings.Contains(first, `own kmem name is "quill-fork"`) || !strings.HasSuffix(first, "go on") || ns.forkOf != "" {
 			t.Fatalf("the fork's first message tells Claude not to use the original's kmem identity: %q", first)
 		}
 	})

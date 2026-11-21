@@ -35,6 +35,7 @@ type sideOrg struct {
 	Folders []orgFolder        `json:"folders"`
 	RC      map[string]rcTitle `json:"rc,omitempty"`
 	Kmem    map[string]string  `json:"kmem,omitempty"`
+	Ended   map[string]bool    `json:"ended,omitempty"`
 }
 
 func (d *desk) loadOrg() {
@@ -135,7 +136,7 @@ func (d *desk) askName(title, current string, onOK func(string)) {
 
 func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem) {
 	title, _, _ := d.rowText(id)
-	move := func(place string) func() { return func() { d.setPlacement(id, place) } }
+	move := func(place string) func() { return func() { d.placeSession(id, place) } }
 	var moveItems []*fyne.MenuItem
 	for _, f := range d.org.Folders {
 		moveItems = append(moveItems, fyne.NewMenuItem(f.Name, move(folderPrefix+f.ID)))
@@ -150,19 +151,12 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 	toFolder.ChildMenu = fyne.NewMenu("", moveItems...)
 	items := []*fyne.MenuItem{
 		fyne.NewMenuItem("Rename...", func() {
-			d.askName("Rename session", title, func(name string) {
-				d.org.Titles[id] = name
-				d.saveOrg()
-				d.offerKmemRename(id, name)
-				if d.current != nil && d.current.id == id {
-					d.updateChrome()
-				}
-			})
+			d.askName("Rename session", title, func(name string) { d.renameSession(id, name) })
 		}),
 		fyne.NewMenuItem("Open", func() { d.open(id) }),
 		fyne.NewMenuItem("Resume", func() { d.resumeSession(id) }),
 		fyne.NewMenuItem("Open in split view", func() { d.openInSplit(id) }),
-		fyne.NewMenuItem("End session", func() { d.endSession(id) }),
+		fyne.NewMenuItem("End session", func() { d.closeTab(id); d.endWithSave(id, placeInactive) }),
 		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
 		fyne.NewMenuItem("kmem name...", func() { d.askKmemName(id) }),
 		d.sessionToolsItem(id),
@@ -173,9 +167,6 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 		fyne.NewMenuItem("Set archive", move(placeArchive)),
 		fyne.NewMenuItem("Set Created by Claude", move(placeAuto)),
 		toFolder,
-	}
-	if d.org.Kmem[id] != "" && d.kmemAvailable() {
-		items = append(items[:5], append([]*fyne.MenuItem{fyne.NewMenuItem("End and save to kmem", func() { d.endAndSave(id) })}, items[5:]...)...)
 	}
 	if d.org.Place[id] != "" {
 		items = append(items, fyne.NewMenuItem("Automatic placement", move("")))
@@ -261,6 +252,9 @@ func (d *desk) folderMenu(r sideRow, at fyne.Position) {
 }
 
 func (d *desk) resumeSession(id string) {
+	if d.offerResume(id) {
+		return
+	}
 	d.open(id)
 	s := d.sessions[id]
 	if s == nil || s.running() || s.takeover {
@@ -314,9 +308,9 @@ func (d *desk) dropOn(id string, target sideRow) {
 	case strings.HasPrefix(target.key, folderPrefix):
 		d.setPlacement(id, target.key)
 	case target.key == placeInactive || strings.HasPrefix(target.key, placeInactive+":"):
-		d.setPlacement(id, placeInactive)
+		d.placeSession(id, placeInactive)
 	case target.key == placeArchive || strings.HasPrefix(target.key, placeArchive+":"):
-		d.setPlacement(id, placeArchive)
+		d.placeSession(id, placeArchive)
 	case target.key == placeAuto || strings.HasPrefix(target.key, placeAuto+":"):
 		d.setPlacement(id, placeAuto)
 	case target.key == placeActive || strings.HasPrefix(target.key, "a:"):
