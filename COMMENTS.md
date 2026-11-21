@@ -209,3 +209,10 @@ Only with kmem available. After every turn (`result`, after `kmemAfterTurn`) `ch
 ## Notifications (notify.go, internal/folders/events.go)
 
 One event source feeds both outputs: attentionKind turns a chat event into approval, question, plan, finished or error. A process that exits unexpectedly also counts as error. Desktop notifications go over D-Bus with the desktop-entry hint, only for sessions you aren't looking at, and clicking one opens that session. Phone events go to the pairing server's GET /events (same key and pinned TLS) whether or not you're looking: a 200-event ring per boot, an inclusive `since` cursor, and `wait` long polls of up to 25 s, with the write deadline raised for that request only and at most 4 waiters. The events carry only ids, titles, folder names and the type, never message or tool content. The phone setting turns the endpoint off (404).
+
+## Local models (Ollama)
+
+- Model values starting with `ollama:` (picker: `ollama:qwen3.8:27b-80k`, `ollama:qwen3-coder:30b-48k`; `/model ollama:<any tag>` also works) run the same `claude` CLI against Ollama's Anthropic-compatible API: `--model <tag>` plus `ANTHROPIC_BASE_URL` (default `http://localhost:11434`, override with `QUILL_OLLAMA_URL`), `ANTHROPIC_AUTH_TOKEN=ollama`, empty `ANTHROPIC_API_KEY`, haiku/small-fast model mapped to the same tag so background calls don't hit Anthropic. See `session.LocalModel` / `session.LocalEnv`.
+- The env is fixed per process, so switching between a Claude model and a local one on a running session drops the process (refused while a turn is running) and the next message resumes it with `--resume` under the new backend. Switching between two local tags uses set_model.
+- Hand-off compaction (`claudeCompact`) uses the same mapping.
+- Ollama is stopped by GameMode while gaming; local sessions then fail to connect until it's back.

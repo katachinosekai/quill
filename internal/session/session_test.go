@@ -183,6 +183,23 @@ func TestArgs(t *testing.T) {
 	}
 }
 
+func TestLocalModel(t *testing.T) {
+	args := strings.Join(Options{SessionID: "id1", Model: "ollama:qwen3.8:27b-80k"}.Args(), " ")
+	if !strings.Contains(args, "--model qwen3.8:27b-80k ") && !strings.HasSuffix(args, "--model qwen3.8:27b-80k") {
+		t.Error(args)
+	}
+	t.Setenv("QUILL_OLLAMA_URL", "")
+	env := strings.Join(LocalEnv("ollama:qwen3.8:27b-80k"), "\n")
+	for _, want := range []string{"ANTHROPIC_BASE_URL=http://localhost:11434", "ANTHROPIC_AUTH_TOKEN=ollama", "ANTHROPIC_API_KEY=\n", "ANTHROPIC_SMALL_FAST_MODEL=qwen3.8:27b-80k"} {
+		if !strings.Contains(env, want) {
+			t.Errorf("missing %q in %s", want, env)
+		}
+	}
+	if LocalEnv("opus") != nil || LocalModel("opus") != "" {
+		t.Error("claude model treated as local")
+	}
+}
+
 func TestPermissionRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		d    protocol.Decision

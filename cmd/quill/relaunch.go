@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/session"
 	"github.com/katachinosekai/quill/internal/transcript"
 )
 
@@ -111,10 +113,13 @@ func compactSource(conv *chat.Conversation) string {
 
 func (d *desk) claudeCompact(ctx context.Context, model, text string) (string, error) {
 	args := []string{"-p", "--tools", "", "--max-turns", "1", "--no-session-persistence", "--output-format", "text", "--system-prompt", compactSystemMsg}
-	if model != "" && model != "default" {
+	if m := session.LocalModel(model); m != "" {
+		args = append(args, "--model", m)
+	} else if model != "" && model != "default" {
 		args = append(args, "--model", model)
 	}
 	cmd := exec.CommandContext(ctx, d.cfg.ClaudeBin, args...)
+	cmd.Env = append(os.Environ(), session.LocalEnv(model)...)
 	cmd.Dir = privateDir()
 	cmd.Stdin = strings.NewReader("<conversation>\n" + text + "\n</conversation>")
 	var out, errb bytes.Buffer

@@ -8,6 +8,7 @@ import (
 
 	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
+	"github.com/katachinosekai/quill/internal/session"
 )
 
 const upgradeURL = "https://claude.ai/upgrade"
@@ -17,7 +18,7 @@ var localCommands = []protocol.Command{
 	{Name: "login", Description: "Sign in to your Claude account (handled by Quill)"},
 	{Name: "logout", Description: "Sign out of your Claude account (handled by Quill)"},
 	{Name: "clear", Description: "Start a fresh session in the same folder (handled by Quill)"},
-	{Name: "model", Description: "Switch the model for this session (handled by Quill)", ArgumentHint: "<default|fable|opus|sonnet|haiku>"},
+	{Name: "model", Description: "Switch the model for this session (handled by Quill)", ArgumentHint: "<default|fable|opus|sonnet|haiku|ollama:MODEL>"},
 	{Name: "exit", Description: "End this session's Claude process (handled by Quill)"},
 }
 
@@ -52,7 +53,7 @@ func (d *desk) runLocalCommand(text string) bool {
 		if s == nil {
 			return false
 		}
-		if arg == "" || !contains(modelChoices, arg) {
+		if arg == "" || !contains(modelChoices, arg) && session.LocalModel(arg) == "" {
 			dialog.ShowInformation("Model", "Use /model with one of: "+strings.Join(modelChoices, ", "), d.win)
 			return true
 		}
