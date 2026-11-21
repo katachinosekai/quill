@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.13
+Version:        0.1.14
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -62,6 +62,16 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
 
 %changelog
+* Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.14-1
+- Select and copy chat text: drag over formatted text and across messages (snaps to lines and words), double-click a word, Ctrl+A, Copy button or Ctrl+C; clicks elsewhere clear it
+- Right-click a message: copy, rewind to here (optionally undoing file changes), fork from here
+- Session tools menu and slash commands: /rewind, /fork, /export, /diff, /tasks, /mcp, /chrome, /permissions, /memory, /hooks, /agents, /add-dir, /copy
+- One tabbed Settings window
+- Sessions running background tests show as running; queued messages can be edited (down or Escape undoes), sent now or reordered by dragging
+- Smoother chat: plans stay in place, streaming markdown formats as it arrives, plan cards show Claude's question, two-option questions get buttons
+- Auto-handoff also rotates once the prompt cache has gone cold and never during background tasks; forks don't take over the kmem identity
+- Local models: correct context window after switching between Claude and a local model
+
 * Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.13-1
 - Auto-handoff: at 50% context Quill offers to rotate the session through its kmem handoff, at 75% it rotates on its own at a safe point (thresholds from kmem)
 - Local models through Ollama: one Online/Local button next to the model picker, live model list (tool-capable models only), the model's real context window, no auto mode, a clear error when Ollama is down, and a "Remote Control for local sessions" setting
