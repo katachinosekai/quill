@@ -1681,19 +1681,11 @@ func (v *chatView) reflow() {
 	v.scroll.Base.Refresh()
 }
 
+// cardInset: chat column padding plus a card's own padding and border.
+const cardInset = 64
+
 func (v *chatView) buttonRow(btns ...fyne.CanvasObject) fyne.CanvasObject {
-	var objs []fyne.CanvasObject
-	for i, b := range btns {
-		if i > 0 {
-			objs = append(objs, padLeft(6))
-		}
-		objs = append(objs, b)
-	}
-	row := container.NewHBox(objs...)
-	if v.d.center {
-		return container.NewCenter(row)
-	}
-	return row
+	return newFlowRow(6, v.d.center, func() float32 { return v.d.chatWidth() - cardInset }, btns...)
 }
 
 func glowButton(label string, icon fyne.Resource, tint color.Color, enabled bool, tap func()) fyne.CanvasObject {
