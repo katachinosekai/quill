@@ -251,3 +251,25 @@ func TestTaskNotificationFromAttachment(t *testing.T) {
 		t.Fatal("a completion delivered as an attachment (queued_command) ends the task")
 	}
 }
+
+func TestBackgroundLaunchTextInsideOutputIsNotATask(t *testing.T) {
+	c := New()
+	tool := func(id, name, input, result string) {
+		c.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"` + id + `","name":"` + name + `","input":` + input + `}]`)}})
+		b, _ := json.Marshal(result)
+		c.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"` + id + `","content":` + string(b) + `}]`)}})
+	}
+	tool("g1", "Bash", `{"command":"grep -o 'Command running' x.jsonl","description":"Check the other qwen 3 transcript"}`,
+		"Command running in background with ID: bib4khwb4\n<task-id>b8tgo5n5d</task-id>\nmoved to the background (ID: bya8m3rta)")
+	tool("g2", "Bash", `{"command":"cat log"}`, "line one\nCommand running in background with ID: zzzz1234 printed by a script")
+	tool("a1", "Agent", `{"prompt":"review","description":"review"}`, "Done. It ran in the background before. agentId: a1b2c3d4e5")
+	if c.Background() != 0 {
+		t.Fatalf("launch text inside a command's output or a foreground agent's answer is not a background task: %+v", c.BackgroundTasks())
+	}
+	tool("b1", "Bash", `{"command":"./t.sh","run_in_background":true}`, "Command running in background with ID: real12345. Output is being written to: /tmp/o")
+	tool("b2", "Bash", `{"command":"go test ./..."}`, "Command did not complete within its 300s timeout and was moved to the background (ID: real67890). Output is being written to: /tmp/p")
+	tool("a2", "Agent", `{"prompt":"x","run_in_background":true}`, "Async agent launched. agentId: agent12345")
+	if c.Background() != 3 {
+		t.Fatalf("real launches still count: %+v", c.BackgroundTasks())
+	}
+}

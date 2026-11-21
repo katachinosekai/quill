@@ -660,7 +660,7 @@ func ShortPath(p, cwd string) string {
 }
 
 var (
-	bgShell     = regexp.MustCompile(`(?:running in background with ID|moved to the background \(ID):?\s*([A-Za-z0-9_-]{4,})`)
+	bgShell     = regexp.MustCompile(`^\s*(?:Command running in background with ID:\s*|Command did not complete within[^\n]*?moved to the background \(ID:\s*)([A-Za-z0-9_-]{4,})`)
 	bgAnyID     = regexp.MustCompile(`(?i)\b(?:task ?id|agentId|ID)[:=]?\s*([A-Za-z0-9_-]{6,})`)
 	notifyID    = regexp.MustCompile(`<task-id>\s*([^<\s]+)\s*</task-id>`)
 	notifyState = regexp.MustCompile(`<status>\s*([a-z_]+)\s*</status>`)
@@ -684,15 +684,17 @@ func (c *Conversation) trackTask(it *Item) {
 	switch it.ToolName {
 	case "Bash":
 		if m := bgShell.FindStringSubmatch(it.Result); m != nil {
-			id = m[1]
+			moved := strings.HasPrefix(strings.TrimSpace(it.Result), "Command did not complete within")
+			if in.Background && !moved || moved && strings.Contains(it.Result, "Output is being written to:") {
+				id = m[1]
+			}
 		}
 	case "Monitor":
 		if m := bgAnyID.FindStringSubmatch(it.Result); m != nil {
 			id = m[1]
 		}
 	case "Agent", "Task":
-		low := strings.ToLower(it.Result)
-		if in.Background || strings.Contains(low, "background") || strings.Contains(low, "async") {
+		if in.Background {
 			if m := bgAnyID.FindStringSubmatch(it.Result); m != nil {
 				id = m[1]
 			}
