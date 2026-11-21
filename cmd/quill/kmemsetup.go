@@ -190,7 +190,7 @@ func setupKmem(home, bundled string, now time.Time) ([]string, error) {
 	for _, f := range []string{"kmem", "kmem-guard"} {
 		dst := filepath.Join(bin, f)
 		if _, err := os.Stat(dst); err == nil {
-			done = append(done, "kept the existing "+dst+" (Quill never replaces an installed kmem)")
+			done = append(done, "kept the existing "+dst+" (Quill updates it only when it is an older kmem release)")
 			continue
 		}
 		if err := copyExec(filepath.Join(bundled, f), dst); err != nil {
@@ -227,7 +227,7 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 		if p := kmemBin(); p != "" && (bundled == "" || p != userKmemPath() || kmemSetupComplete(home)) {
 			text := "kmem is installed: " + tildePath(p)
 			if bv != "" {
-				text += " (Quill bundles kmem " + bv + "; your installed copy is never replaced)"
+				text += " (Quill Desktop comes with kmem " + bv + " and updates an older kmem in ~/.local/bin to it when it starts)"
 			}
 			status.SetText(text)
 			btn.Hide()

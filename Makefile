@@ -1,7 +1,7 @@
 VERSION := $(shell sed -n 's/^Version: *//p' packaging/quill.spec)
 DIST := dist/pkg
 
-.PHONY: dist srpm rpm appimage clean-pkg windows
+.PHONY: dist srpm rpm appimage clean-pkg windows kmem-sync
 
 dist:
 	rm -rf $(DIST)/quill-$(VERSION) && mkdir -p $(DIST)
@@ -30,3 +30,8 @@ appimage:
 windows:
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc \
 		go build -ldflags "-H windowsgui -X main.version=$(VERSION)" -o dist/quill-windows-amd64.exe ./cmd/quill
+
+# Bundle the current kmem (KMEM_REF=tag or commit, default the kmem repo's HEAD).
+# Run before every release; TestBundledKmemIsCurrent fails when it is behind.
+kmem-sync:
+	scripts/vendor-kmem.sh $(KMEM_REF)

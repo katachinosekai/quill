@@ -111,6 +111,14 @@ func runWindowWith(claudeBin, sock string) int {
 		ClaudeBin:    claudeBin,
 	})
 	d.animate = true
+	go func() {
+		home, _ := os.UserHomeDir()
+		if msg, err := updateKmem(home, bundledKmemDir()); err != nil {
+			fmt.Fprintln(os.Stderr, "kmem update:", err)
+		} else if msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+		}
+	}()
 	d.watchFocus()
 	d.startNotifier()
 	d.keeper = newKeeperClient()
