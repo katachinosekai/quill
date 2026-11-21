@@ -3,6 +3,7 @@ package main
 import (
 	"image/color"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -48,10 +49,96 @@ func (l maxWidthLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	}
 	x = max(0, min(x, size.Width-w))
 	for _, o := range objs {
-		h := size.Height
-		o.Move(fyne.NewPos(x, 0))
-		o.Resize(fyne.NewSize(w, h))
+		placeGliding(o, rect{fyne.NewPos(x, 0), fyne.NewSize(w, size.Height)})
 	}
+}
+
+const (
+	glideWindow   = 400 * time.Millisecond
+	glideDuration = 180 * time.Millisecond
+)
+
+var (
+	glideUntil time.Time
+	glides     = map[fyne.CanvasObject]*glideAnim{}
+)
+
+type rect struct {
+	pos  fyne.Position
+	size fyne.Size
+}
+
+type glideAnim struct {
+	to   rect
+	anim *fyne.Animation
+}
+
+func lerp(a, b, p float32) float32 { return a + (b-a)*p }
+
+func glideStep(from, to rect, p float32) rect {
+	return rect{
+		fyne.NewPos(lerp(from.pos.X, to.pos.X, p), lerp(from.pos.Y, to.pos.Y, p)),
+		fyne.NewSize(lerp(from.size.Width, to.size.Width, p), lerp(from.size.Height, to.size.Height, p)),
+	}
+}
+
+type glideBorder struct{}
+
+func (glideBorder) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	top, bottom, center := objs[0].MinSize(), objs[1].MinSize(), objs[2].MinSize()
+	return fyne.NewSize(max(top.Width, bottom.Width, center.Width), top.Height+bottom.Height+center.Height+2*theme.Padding())
+}
+
+func (glideBorder) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	top, bottom, center := objs[0], objs[1], objs[2]
+	pad := theme.Padding()
+	th := float32(0)
+	if top.Visible() {
+		th = top.MinSize().Height
+		top.Move(fyne.NewPos(0, 0))
+		top.Resize(fyne.NewSize(size.Width, th))
+		th += pad
+	}
+	bh := float32(0)
+	if bottom.Visible() {
+		bh = bottom.MinSize().Height
+		bottom.Move(fyne.NewPos(0, size.Height-bh))
+		bottom.Resize(fyne.NewSize(size.Width, bh))
+		bh += pad
+	}
+	placeGliding(center, rect{fyne.NewPos(0, th), fyne.NewSize(size.Width, max(0, size.Height-th-bh))})
+}
+
+func shouldGlide(from, to rect) bool {
+	return time.Now().Before(glideUntil) && !from.size.IsZero() && from != to
+}
+
+func placeGliding(o fyne.CanvasObject, to rect) {
+	if g := glides[o]; g != nil {
+		if g.to == to {
+			return
+		}
+		g.anim.Stop()
+		delete(glides, o)
+	}
+	from := rect{o.Position(), o.Size()}
+	if !shouldGlide(from, to) {
+		o.Move(to.pos)
+		o.Resize(to.size)
+		return
+	}
+	g := &glideAnim{to: to}
+	g.anim = fyne.NewAnimation(glideDuration, func(p float32) {
+		r := glideStep(from, to, p)
+		o.Move(r.pos)
+		o.Resize(r.size)
+		if p >= 1 && glides[o] == g {
+			delete(glides, o)
+		}
+	})
+	g.anim.Curve = fyne.AnimationEaseOut
+	glides[o] = g
+	g.anim.Start()
 }
 
 func centered(max float32, obj fyne.CanvasObject) *fyne.Container {

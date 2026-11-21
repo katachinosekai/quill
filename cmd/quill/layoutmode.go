@@ -7,11 +7,14 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"time"
 )
 
 const (
 	layoutHorizontal = "horizontal"
 	layoutVertical   = "vertical"
+	labelLandscape   = "Landscape"
+	labelPortrait    = "Portrait"
 )
 
 func (d *desk) layoutMode() string {
@@ -22,12 +25,12 @@ func (d *desk) layoutMode() string {
 }
 
 func (d *desk) layoutButtons() fyne.CanvasObject {
-	d.layoutSel = widget.NewRadioGroup([]string{"Horizontal", "Vertical"}, func(v string) {
+	d.layoutSel = widget.NewRadioGroup([]string{labelLandscape, labelPortrait}, func(v string) {
 		if v == "" || d.suppressLayout {
 			return
 		}
 		mode := layoutHorizontal
-		if v == "Vertical" {
+		if v == labelPortrait {
 			mode = layoutVertical
 		}
 		d.setLayoutMode(mode)
@@ -40,6 +43,9 @@ func (d *desk) layoutButtons() fyne.CanvasObject {
 }
 
 func (d *desk) setLayoutMode(mode string) {
+	if d.animate {
+		glideUntil = time.Now().Add(glideWindow)
+	}
 	d.app.Preferences().SetString("tabLayout", mode)
 	d.applyLayoutMode()
 }
@@ -48,9 +54,9 @@ func (d *desk) applyLayoutMode() {
 	mode := d.layoutMode()
 	d.suppressLayout = true
 	if mode == layoutVertical {
-		d.layoutSel.SetSelected("Vertical")
+		d.layoutSel.SetSelected(labelPortrait)
 	} else {
-		d.layoutSel.SetSelected("Horizontal")
+		d.layoutSel.SetSelected(labelLandscape)
 	}
 	d.suppressLayout = false
 	if mode == layoutVertical {

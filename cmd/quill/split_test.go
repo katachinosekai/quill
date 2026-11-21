@@ -2437,3 +2437,46 @@ func TestSizeSlidersInSettings(t *testing.T) {
 		h.d.closeSettings()
 	})
 }
+
+func TestLandscapePortraitGlide(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		if strings.Join(h.d.layoutSel.Options, ",") != "Landscape,Portrait" || h.d.layoutSel.Selected != labelLandscape {
+			t.Fatalf("labels: %v %q", h.d.layoutSel.Options, h.d.layoutSel.Selected)
+		}
+		h.d.layoutSel.SetSelected(labelPortrait)
+		if h.d.layoutMode() != layoutVertical || h.d.app.Preferences().String("tabLayout") != layoutVertical {
+			t.Fatal("Portrait keeps the saved preference value")
+		}
+		if !glideUntil.IsZero() && time.Now().Before(glideUntil) {
+			t.Fatal("no glide with animations off")
+		}
+		h.d.layoutSel.SetSelected(labelLandscape)
+	})
+	mid := glideStep(rect{fyne.NewPos(0, 100), fyne.NewSize(400, 300)}, rect{fyne.NewPos(200, 0), fyne.NewSize(400, 500)}, 0.5)
+	if mid != (rect{fyne.NewPos(100, 50), fyne.NewSize(400, 400)}) {
+		t.Fatalf("halfway: %+v", mid)
+	}
+	h.ui(func() {
+		box := canvas.NewRectangle(colCard)
+		box.Move(fyne.NewPos(0, 100))
+		box.Resize(fyne.NewSize(400, 300))
+		to := rect{fyne.NewPos(200, 0), fyne.NewSize(400, 500)}
+		placeGliding(box, to)
+		if box.Position() != to.pos || box.Size() != to.size {
+			t.Fatal("outside a view switch the layout is instant (window resizes, sliders)")
+		}
+		from := rect{fyne.NewPos(0, 100), fyne.NewSize(400, 300)}
+		glideUntil = time.Now().Add(glideWindow)
+		if !shouldGlide(from, to) || shouldGlide(to, to) || shouldGlide(rect{}, to) {
+			t.Fatal("during a view switch a placed box glides; unplaced or unmoved boxes don't")
+		}
+		box.Move(from.pos)
+		box.Resize(from.size)
+		placeGliding(box, to)
+		if box.Position() != to.pos || box.Size() != to.size {
+			t.Fatal("and it ends at its new place")
+		}
+		glideUntil = time.Time{}
+	})
+}

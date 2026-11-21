@@ -1021,7 +1021,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	spare := canvas.NewRectangle(color.Transparent)
 	spare.Hide()
 	d.usageBox = container.New(usageLayout{d}, d.chatHost, d.usage.root, spare)
-	d.mainPane = container.NewBorder(headerBox, bottom, nil, nil, d.usageBox)
+	d.mainPane = container.New(glideBorder{}, headerBox, bottom, d.usageBox)
 	d.updateChrome()
 	return d.mainPane
 }
