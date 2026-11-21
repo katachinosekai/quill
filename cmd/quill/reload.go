@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -218,7 +217,7 @@ func (d *desk) trySwap() {
 		path, err := writePrivate("quill-restore-*.json", b)
 		if err == nil {
 			env := append(os.Environ(), restoreEnv+"="+path)
-			err = syscall.Exec(target, os.Args, env)
+			err = execSelf(target, os.Args, env)
 			os.Remove(path)
 		}
 		d.do(func() {

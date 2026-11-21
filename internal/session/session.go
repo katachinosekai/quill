@@ -169,7 +169,7 @@ func Start(opts Options, onEvent func(*protocol.Event)) (*Process, error) {
 	cmd := exec.Command(bin, opts.Args()...)
 	cmd.Dir = opts.Cwd
 	cmd.Env = append(append(os.Environ(), LocalEnv(opts.Model)...), opts.Env...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = childAttr()
 	inR, inW, err := os.Pipe()
 	if err != nil {
 		return nil, err
@@ -233,29 +233,10 @@ func (p *Process) Keep() (in, out *os.File, h Handoff) {
 	return p.stdin, p.stdout, Handoff{PID: p.pid, ErrPath: p.errPath, Seq: p.seq.Load(), Opts: p.opts}
 }
 
-func waitForeign(pid int) {
-	for syscall.Kill(pid, 0) == nil {
-		var ws syscall.WaitStatus
-		if got, _ := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil); got == pid {
-			return
-		}
-		if zombie(pid) {
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-}
-
-func zombie(pid int) bool {
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return true
-	}
-	i := bytes.LastIndexByte(b, ')')
-	return i > 0 && i+2 < len(b) && b[i+2] == 'Z'
-}
-
 func (p *Process) Handoff() (Handoff, error) {
+	if !handoffSupported {
+		return Handoff{}, errors.New("session: live hand-over is not supported on this OS")
+	}
 	if p.Exited() {
 		return Handoff{}, ErrExited
 	}
@@ -281,7 +262,7 @@ func Attach(h Handoff, onEvent func(*protocol.Event)) (*Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	if proc.Signal(syscall.Signal(0)) != nil {
+	if !processExists(proc) {
 		return nil, ErrExited
 	}
 	p := &Process{
@@ -520,7 +501,7 @@ func (p *Process) Request(ctx context.Context, build func(id string) []byte) (*p
 func (p *Process) Interrupt(ctx context.Context) error {
 	_, err := p.Request(ctx, protocol.Interrupt)
 	if err != nil && !errors.Is(err, ErrExited) && p.osProc != nil {
-		_ = p.osProc.Signal(syscall.SIGINT)
+		interruptProcess(p.osProc)
 	}
 	return err
 }
@@ -601,13 +582,13 @@ func (p *Process) Stop(grace time.Duration) error {
 		return p.exitErr
 	case <-time.After(grace):
 	}
-	_ = syscall.Kill(-p.PID(), syscall.SIGTERM)
+	terminateGroup(p.PID(), false)
 	select {
 	case <-p.done:
 		return p.exitErr
 	case <-time.After(3 * time.Second):
 	}
-	_ = syscall.Kill(-p.PID(), syscall.SIGKILL)
+	terminateGroup(p.PID(), true)
 	<-p.done
 	return p.exitErr
 }
@@ -621,8 +602,8 @@ func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, 
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = cwd
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.SysProcAttr = childAttr()
+	cmd.Cancel = func() error { terminateGroup(cmd.Process.Pid, true); return nil }
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -636,7 +617,7 @@ func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, 
 	}
 	defer func() {
 		stdin.Close()
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		terminateGroup(cmd.Process.Pid, false)
 		_ = cmd.Wait()
 	}()
 	if _, err := stdin.Write(protocol.Initialize("cmds")); err != nil {
@@ -655,35 +636,4 @@ func FetchCommands(bin, cwd string, timeout time.Duration) ([]protocol.Command, 
 		return nil, ctx.Err()
 	}
 	return nil, errors.New("no command list from claude")
-}
-
-func inheritFD(f *os.File) (uintptr, error) {
-	rc, err := f.SyscallConn()
-	if err != nil {
-		return 0, err
-	}
-	var fd uintptr
-	var ferr error
-	err = rc.Control(func(raw uintptr) {
-		fd = raw
-		if _, _, e := syscall.Syscall(syscall.SYS_FCNTL, raw, syscall.F_SETFD, 0); e != 0 {
-			ferr = e
-		}
-	})
-	if err != nil {
-		return 0, err
-	}
-	return fd, ferr
-}
-
-func pollableFile(fd uintptr, name string, inherited bool) *os.File {
-	n := int(fd)
-	if !inherited {
-		if d, err := syscall.Dup(n); err == nil {
-			n = d
-		}
-	}
-	syscall.CloseOnExec(n)
-	_ = syscall.SetNonblock(n, true)
-	return os.NewFile(uintptr(n), name)
 }

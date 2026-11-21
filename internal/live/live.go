@@ -6,9 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
 	"time"
 )
 
@@ -64,29 +61,6 @@ func (f *Finder) Running(exclude map[int]bool) map[string]Process {
 	return out
 }
 
-func (f *Finder) alive(p Process) bool {
-	stat, err := os.ReadFile(filepath.Join(f.ProcDir, strconv.Itoa(p.PID), "stat"))
-	if err != nil {
-		return false
-	}
-	s := string(stat)
-	i := strings.LastIndexByte(s, ')')
-	if i < 0 {
-		return false
-	}
-	fields := strings.Fields(s[i+1:])
-	if len(fields) < 20 {
-		return false
-	}
-	if fields[0] == "Z" {
-		return false
-	}
-	if p.ProcStart != "" && fields[19] != p.ProcStart {
-		return false
-	}
-	return true
-}
-
 func (p Process) Background() bool {
 	return p.Kind == "bg"
 }
@@ -109,11 +83,11 @@ func (f *Finder) Release(p Process, claudeBin string, timeout time.Duration) err
 			return nil
 		}
 	}
-	_ = syscall.Kill(p.PID, syscall.SIGTERM)
+	signalPID(p.PID, false)
 	if f.waitGone(p, timeout) {
 		return nil
 	}
-	_ = syscall.Kill(p.PID, syscall.SIGKILL)
+	signalPID(p.PID, true)
 	if f.waitGone(p, 2*time.Second) {
 		return nil
 	}

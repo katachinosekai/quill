@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -378,7 +377,7 @@ func (vp *videoPlayer) stream(ctx context.Context, gen int, start float64, info 
 	args := []string{"-loglevel", "error", "-re", "-ss", strconv.FormatFloat(start, 'f', 2, 64), "-i", vp.src,
 		"-an", "-vf", fmt.Sprintf("scale=%d:%d,fps=%d", info.w, info.h, videoFPS), "-f", "rawvideo", "-pix_fmt", "rgba", "-"}
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	dieWithParent(cmd)
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return
@@ -391,7 +390,7 @@ func (vp *videoPlayer) stream(ctx context.Context, gen int, start float64, info 
 	}
 	if info.audio {
 		a := exec.Command("mpv", "--no-video", "--really-quiet", "--no-terminal", "--start="+strconv.FormatFloat(start, 'f', 2, 64), vp.src)
-		a.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+		dieWithParent(a)
 		if a.Start() == nil {
 			vp.mu.Lock()
 			if vp.gen == gen {

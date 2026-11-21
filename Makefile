@@ -1,7 +1,7 @@
 VERSION := $(shell sed -n 's/^Version: *//p' packaging/quill.spec)
 DIST := dist/pkg
 
-.PHONY: dist srpm rpm appimage clean-pkg
+.PHONY: dist srpm rpm appimage clean-pkg windows
 
 dist:
 	rm -rf $(DIST)/quill-$(VERSION) && mkdir -p $(DIST)
@@ -23,3 +23,10 @@ appimage:
 	cp packaging/io.github.katachinosekai.quill.desktop $(DIST)/AppDir/
 	cp cmd/quill/Icon.png $(DIST)/AppDir/io.github.katachinosekai.quill.png
 	ARCH=x86_64 appimagetool --appimage-extract-and-run $(DIST)/AppDir $(DIST)/Quill-$(VERSION)-x86_64.AppImage
+
+# Windows build for running Quill Desktop on another PC (e.g. a paired PC).
+# Needs the MinGW cross-compiler: sudo dnf install mingw64-gcc mingw64-winpthreads-static
+# No voice input (whisper.cpp is linked for Linux only).
+windows:
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc \
+		go build -ldflags "-H windowsgui -X main.version=$(VERSION)" -o dist/quill-windows-amd64.exe ./cmd/quill

@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -259,7 +258,7 @@ func (p *player) toggle(d *desk, src string) {
 		p.mu.Lock()
 	}
 	cmd := exec.Command("mpv", "--no-video", "--really-quiet", "--no-terminal", src)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	dieWithParent(cmd)
 	if err := cmd.Start(); err != nil {
 		p.mu.Unlock()
 		d.app.OpenURL(fileURL(src))

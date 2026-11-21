@@ -1,3 +1,5 @@
+//go:build !windows
+
 package whisper
 
 /*
@@ -13,13 +15,10 @@ import "C"
 
 import (
 	"errors"
-	"runtime"
 	"strings"
 	"sync"
 	"unsafe"
 )
-
-const SampleRate = 16000
 
 type Model struct {
 	mu  sync.Mutex
@@ -48,10 +47,6 @@ func (m *Model) Close() {
 		C.whisper_free(m.ctx)
 		m.ctx = nil
 	}
-}
-
-func Threads() int {
-	return max(1, min(runtime.NumCPU()/2, 6))
 }
 
 func (m *Model) Transcribe(samples []float32, lang string) (string, error) {
@@ -94,15 +89,4 @@ func (m *Model) Transcribe(samples []float32, lang string) (string, error) {
 		b.WriteString(C.GoString(C.whisper_full_get_segment_text(m.ctx, C.int(i))))
 	}
 	return Clean(b.String()), nil
-}
-
-func Clean(s string) string {
-	var out []string
-	for _, w := range strings.Fields(s) {
-		if strings.HasPrefix(w, "[") && strings.HasSuffix(w, "]") || strings.HasPrefix(w, "(") && strings.HasSuffix(w, ")") {
-			continue
-		}
-		out = append(out, w)
-	}
-	return strings.Join(out, " ")
 }

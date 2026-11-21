@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -280,12 +279,6 @@ func (p *kmemPanel) fillBin(bin []binItem) {
 	}
 	rows = append(rows, container.NewHBox(layout.NewSpacer(), empty))
 	setBox(p.bin, rows...)
-}
-
-// terminalCmd builds the command that opens a terminal running kmem's purge.
-var terminalCmd = func(kmemPath string) *exec.Cmd {
-	script := fmt.Sprintf("%q trash empty; echo; read -r -p 'Press Enter to close this window. ' _", kmemPath)
-	return exec.Command("konsole", "--title", "kmem: empty the recycle bin", "-e", "bash", "-c", script)
 }
 
 func (p *kmemPanel) emptyBin() {
