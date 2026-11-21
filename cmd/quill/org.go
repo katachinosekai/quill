@@ -153,6 +153,7 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 			d.askName("Rename session", title, func(name string) {
 				d.org.Titles[id] = name
 				d.saveOrg()
+				d.offerKmemRename(id, name)
 				if d.current != nil && d.current.id == id {
 					d.updateChrome()
 				}

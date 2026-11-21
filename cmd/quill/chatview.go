@@ -375,6 +375,9 @@ func (v *chatView) emptyState() fyne.CanvasObject {
 }
 
 func (v *chatView) emptySession() fyne.CanvasObject {
+	if v.s.pickPending {
+		return v.d.kmemCard(v.s)
+	}
 	t := widget.NewLabel("New session in " + tildePath(v.s.cwd) + "\nType a message below to start.")
 	t.Alignment = fyne.TextAlignCenter
 	return container.NewVBox(padTop(120), t)

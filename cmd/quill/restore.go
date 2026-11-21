@@ -14,6 +14,7 @@ type sessMeta struct {
 	Mode        string          `json:"mode"`
 	Persisted   bool            `json:"persisted"`
 	KmemNew     bool            `json:"kmemNew,omitempty"`
+	KmemPick    bool            `json:"kmemPick,omitempty"`
 	RotateAsk   int             `json:"rotateAsk,omitempty"`
 	RotateTried int             `json:"rotateTried,omitempty"`
 	LastClaude  string          `json:"lastClaude,omitempty"`
@@ -38,7 +39,7 @@ type savedKmem struct {
 
 func (d *desk) saveSessions(st *restoreState) {
 	for id, s := range d.sessions {
-		m := sessMeta{Cwd: s.cwd, Model: s.model, Mode: s.mode, Persisted: s.persisted, KmemNew: s.kmemNew,
+		m := sessMeta{Cwd: s.cwd, Model: s.model, Mode: s.mode, Persisted: s.persisted, KmemNew: s.kmemNew, KmemPick: s.pickPending,
 			RotateAsk: s.rotateAsk, RotateTried: s.rotateTried, LastClaude: s.lastClaude, RestoreMode: s.restoreMode,
 			RetryCmd: s.retryCmd, RetryRules: s.retryRules, RetryDest: s.retryDest, CompactFrom: s.compactFrom, RotateNo: s.rotateNo,
 			Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, ForkOf: s.forkOf}
@@ -79,6 +80,7 @@ func (d *desk) restoreSessions(st *restoreState) {
 			s.mode = m.Mode
 		}
 		s.kmemNew, s.rotateAsk, s.rotateTried, s.lastClaude = m.KmemNew, m.RotateAsk, m.RotateTried, m.LastClaude
+		s.pickPending = m.KmemPick
 		s.restoreMode, s.retryCmd, s.retryRules, s.retryDest = m.RestoreMode, m.RetryCmd, m.RetryRules, m.RetryDest
 		s.compactFrom, s.rotateNo = m.CompactFrom, m.RotateNo
 		s.chrome, s.addDirs, s.resumeAt, s.forkOf = m.Chrome, m.AddDirs, m.ResumeAt, m.ForkOf

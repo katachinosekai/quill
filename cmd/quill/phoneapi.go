@@ -177,6 +177,7 @@ type apiSession struct {
 	Rev        int        `json:"rev"`
 	UpdatedMs  int64      `json:"updatedMs"`
 	Focused    bool       `json:"focused"`
+	Tokens     int64      `json:"tokens"`
 }
 
 type apiContext struct {
@@ -223,7 +224,7 @@ func (a *phoneAPI) session(id, group string) apiSession {
 	d := a.d
 	title, _, st := d.rowText(id)
 	info := d.infos[id]
-	out := apiSession{ID: id, Title: title, Group: group, Status: apiStatus[st], Folder: info.Cwd, Model: "", Mode: "default", Backend: "online", Kmem: d.org.Kmem[id]}
+	out := apiSession{ID: id, Title: title, Group: group, Status: apiStatus[st], Folder: info.Cwd, Model: "", Mode: "default", Backend: "online", Kmem: d.org.Kmem[id], Tokens: int64(info.Usage.Total())}
 	if !info.Last.IsZero() {
 		out.UpdatedMs = info.Last.UnixMilli()
 	}
@@ -267,6 +268,12 @@ func (a *phoneAPI) session(id, group string) apiSession {
 func (a *phoneAPI) usage() map[string]any {
 	d := a.d
 	u := map[string]any{"paused": d.usagePaused, "pausedUntilMs": int64(0)}
+	credits := creditsText(d.rate)
+	if credits == "not reported yet" {
+		credits = "not reported"
+	}
+	u["credits"] = credits
+	u["todayTokens"], u["weekTokens"] = d.dayWeekTokens()
 	if d.usagePaused && !d.pauseUntil.IsZero() && d.pauseUntil.Unix() > 0 {
 		u["pausedUntilMs"] = d.pauseUntil.UnixMilli()
 	}

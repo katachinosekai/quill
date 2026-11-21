@@ -129,7 +129,7 @@ func (a *phoneAPI) send(s *deskSession, text string) (map[string]any, *apiErr) {
 	if d.usagePaused && !strings.HasPrefix(text, "/") {
 		text = pausedNote + text
 	}
-	if s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
+	if s.pickPending || s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
 		d.enqueue(s, text)
 		return map[string]any{"queued": true, "queue": a.queueJSON(s)}, nil
 	}

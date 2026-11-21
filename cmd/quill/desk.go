@@ -109,6 +109,7 @@ type deskSession struct {
 	limitSeen      string
 	compacting     bool
 	restarting     bool
+	pickPending    bool
 	takeover       bool
 	loading        bool
 	rcURL          string
@@ -1325,6 +1326,11 @@ func (d *desk) newSessionDialog() {
 	d.saveOrg()
 	d.updateChrome()
 	d.syncTabs()
+	if d.kmemAvailable() {
+		s.pickPending = true
+		d.chat.rebuild()
+		return
+	}
 	d.askNewName(s, name)
 }
 
@@ -1593,7 +1599,7 @@ func (d *desk) send(text string) {
 		}
 		defer d.inputFor(s).SetText(draft)
 	}
-	if s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
+	if s.pickPending || s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
 		d.enqueue(s, text)
 		return
 	}

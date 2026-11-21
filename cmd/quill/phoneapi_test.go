@@ -111,6 +111,13 @@ func TestPhoneAPIReadSide(t *testing.T) {
 	if edits == nil || edits["status"] != "stopped" || edits["focused"] != true || edits["backend"] != "online" || edits["group"] == "" {
 		t.Fatalf("edits session: %v", edits)
 	}
+	if _, ok := edits["tokens"].(float64); !ok {
+		t.Fatalf("sessions carry their token total: %v", edits)
+	}
+	usage, _ := sess["usage"].(map[string]any)
+	if usage["credits"] != "not reported" || usage["todayTokens"] == nil || usage["weekTokens"] == nil {
+		t.Fatalf("usage carries credits and today/week tokens: %v", usage)
+	}
 	cursor := int(sess["cursor"].(float64))
 
 	code, items, _ := a.do("GET", "/phone/session/"+editsID+"/items", "", nil)

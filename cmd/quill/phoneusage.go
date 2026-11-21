@@ -25,24 +25,7 @@ func (d *desk) phoneUsage() folders.Usage {
 	if u.Usage.Credits == "not reported yet" {
 		u.Usage.Credits = "not reported"
 	}
-	var today, week transcript.Tokens
-	now := time.Now()
-	todayKey := now.Format("2006-01-02")
-	weekKeys := map[string]bool{}
-	for i := 0; i < 7; i++ {
-		weekKeys[now.AddDate(0, 0, -i).Format("2006-01-02")] = true
-	}
-	for _, info := range d.order {
-		for day, t := range info.Days {
-			if day == todayKey {
-				today = today.Add(t)
-			}
-			if weekKeys[day] {
-				week = week.Add(t)
-			}
-		}
-	}
-	u.Usage.Today, u.Usage.Week = int64(today.Total()), int64(week.Total())
+	u.Usage.Today, u.Usage.Week = d.dayWeekTokens()
 	if p := d.phoneSync; p != nil {
 		for rc, id := range p.rc {
 			info, has := d.infos[id]
@@ -70,4 +53,25 @@ func (d *desk) phoneUsageJSON() []byte {
 		b, _ = json.Marshal(d.phoneUsage())
 	})
 	return b
+}
+
+func (d *desk) dayWeekTokens() (int64, int64) {
+	var today, week transcript.Tokens
+	now := time.Now()
+	todayKey := now.Format("2006-01-02")
+	weekKeys := map[string]bool{}
+	for i := 0; i < 7; i++ {
+		weekKeys[now.AddDate(0, 0, -i).Format("2006-01-02")] = true
+	}
+	for _, info := range d.order {
+		for day, t := range info.Days {
+			if day == todayKey {
+				today = today.Add(t)
+			}
+			if weekKeys[day] {
+				week = week.Add(t)
+			}
+		}
+	}
+	return int64(today.Total()), int64(week.Total())
 }

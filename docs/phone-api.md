@@ -131,7 +131,8 @@ Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new ra
   "epoch": 4,
   "rev": 1932,
   "updatedMs": 1795000000000,
-  "focused": true
+  "focused": true,
+  "tokens": 1532000
 }
 ```
 
@@ -142,6 +143,7 @@ Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new ra
 - `queue`: number of queued messages; `background`: running background tasks.
 - `epoch` changes whenever the item list is renumbered (rewind, fork into this tab, history reload, transcript branch pruning). `rev` grows on every change to any item or to the queue of this session. Both are per session.
 - `focused`: the session shown in the desktop's current view.
+- `tokens`: the session's total tokens from its transcript (refreshed about every 5 s; a growth arrives as a `session` change).
 
 ### Item
 
@@ -239,7 +241,10 @@ Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "qu
     "paused": false,
     "pausedUntilMs": 0,
     "fiveHour": {"pct": 41, "resetsAtMs": 1795003600000},
-    "week": {"pct": 12, "resetsAtMs": 1795400000000}
+    "week": {"pct": 12, "resetsAtMs": 1795400000000},
+    "credits": "not reported",
+    "todayTokens": 3400000,
+    "weekTokens": 110700000
   },
   "models": {"online": ["opus", "sonnet", "haiku"], "local": ["qwen3:14b"]},
   "modes": {"online": ["default", "acceptEdits", "plan", "auto"], "local": ["default", "acceptEdits", "plan"]},
@@ -250,7 +255,7 @@ Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "qu
 - `sessions`: Session objects, in sidebar order: the open tabs plus the sidebar's active and inactive groups, as on the desktop.
 - `boot` changes when Quill restarts; the phone then drops all cached state.
 - `cursor` is the stream position to pass to `/phone/stream` next.
-- `usage.fiveHour` / `usage.week` are left out when unknown.
+- `usage.fiveHour` / `usage.week` are left out when unknown. `usage.credits` is the same text as Quill Desktop's usage panel ("not reported" when the plan reports none); `todayTokens` / `weekTokens` are the token sums of all sessions for today and the last 7 days.
 
 ### GET /phone/folders
 

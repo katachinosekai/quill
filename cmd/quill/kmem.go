@@ -263,6 +263,7 @@ func (d *desk) askKmemName(id string) {
 			d.org.Kmem[id] = ""
 		} else {
 			d.org.Kmem[id] = name
+			defer d.syncTitleToKmem(id)
 		}
 		d.saveOrg()
 	}, d.win)
