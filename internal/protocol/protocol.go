@@ -125,6 +125,7 @@ type Event struct {
 	Subtype         string                `json:"subtype,omitempty"`
 	SessionID       string                `json:"session_id,omitempty"`
 	UUID            string                `json:"uuid,omitempty"`
+	ParentUUID      string                `json:"parentUuid,omitempty"`
 	ParentToolUseID *string               `json:"parent_tool_use_id,omitempty"`
 	MessageRaw      json.RawMessage       `json:"message,omitempty"`
 	Message         *Message              `json:"-"`

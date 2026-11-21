@@ -690,3 +690,99 @@ func (d *desk) cmdFork(s *deskSession) {
 	d.open(ns.id)
 	d.notify(ns, "Forked from “"+strings.TrimSuffix(d.org.Titles[ns.id], " (fork)")+"”. The original session is unchanged.")
 }
+
+// rewind
+
+func (d *desk) rewindTo(s *deskSession, u *chat.Item, files bool) {
+	if s.running() && s.conv.Busy {
+		d.notify(s, "Wait for the current turn to finish before rewinding.")
+		return
+	}
+	idx := -1
+	for i, it := range s.conv.Items {
+		if it == u {
+			idx = i
+		}
+	}
+	if idx < 0 || u.UUID == "" {
+		d.notify(s, "That message can't be rewound to.")
+		return
+	}
+	prev := ""
+	for i := idx - 1; i >= 0; i-- {
+		if it := s.conv.Items[i]; it.Kind == chat.Assistant && it.UUID != "" {
+			prev = it.UUID
+			break
+		}
+	}
+	finish := func(note string) {
+		text := u.Text
+		if prev == "" {
+			title, _, _ := d.rowText(s.id)
+			ns := d.replaceWith(s, title)
+			d.inputFor(ns).SetText(text)
+			d.notify(ns, note+"Rewound to the start: this is a fresh session with your first message ready to edit. The old one is in the sidebar.")
+			return
+		}
+		s.conv.Items = append([]*chat.Item(nil), s.conv.Items[:idx]...)
+		s.conv.Busy = false
+		s.resumeAt = prev
+		if v := d.viewFor(s); v != nil {
+			v.cache = map[*deskSession]*sessView{}
+			v.s = nil
+			v.show(s)
+		}
+		d.restartOnNext(s, note+"Rewound to before “"+oneLine(text, 60)+"”; it's back in the message box to edit.")
+		d.inputFor(s).SetText(text)
+	}
+	if !files {
+		finish("")
+		return
+	}
+	go func() {
+		raw, err := d.control(s, map[string]any{"subtype": "rewind_files", "user_message_id": u.UUID})
+		d.do(func() {
+			if err != nil {
+				d.notify(s, "Files were not rewound ("+err.Error()+"); the conversation was left as it was.")
+				return
+			}
+			var r struct {
+				Changed []string `json:"filesChanged"`
+			}
+			_ = json.Unmarshal(raw, &r)
+			note := "Restored the files to how they were at that message. "
+			if len(r.Changed) > 0 {
+				note = fmt.Sprintf("Restored %s to how they were at that message. ", plural(len(r.Changed), "file"))
+			}
+			finish(note)
+		})
+	}()
+}
+
+func (d *desk) cmdRewind(s *deskSession) {
+	var users []*chat.Item
+	for i := len(s.conv.Items) - 1; i >= 0 && len(users) < 40; i-- {
+		if it := s.conv.Items[i]; it.Kind == chat.User && it.UUID != "" {
+			users = append(users, it)
+		}
+	}
+	var dlg dialog.Dialog
+	var rows []fyne.CanvasObject
+	if len(users) == 0 {
+		rows = append(rows, widget.NewLabel("No earlier messages to rewind to in this session yet."))
+	}
+	for _, u := range users {
+		u := u
+		l := widget.NewLabel(oneLine(u.Text, 140))
+		l.Truncation = fyne.TextTruncateEllipsis
+		conv := widget.NewButtonWithIcon("Rewind", theme.MediaSkipPreviousIcon(), func() { dlg.Hide(); d.rewindTo(s, u, false) })
+		both := widget.NewButtonWithIcon("Rewind + files", theme.HistoryIcon(), func() { dlg.Hide(); d.rewindTo(s, u, true) })
+		rows = append(rows, container.NewBorder(nil, nil, nil, container.NewHBox(conv, both), l))
+	}
+	note := widget.NewLabel("Rewind removes that message and everything after it from the conversation and puts the message back in the box to edit. Rewind + files also undoes Claude's file edits since then (only edits made since Quill turned on file checkpoints).")
+	note.Wrapping = fyne.TextWrapWord
+	note.SizeName = theme.SizeNameCaptionText
+	dlg = dialog.NewCustom("Rewind to before…", "Cancel", container.NewBorder(nil, note, nil, nil, container.NewVScroll(container.NewVBox(rows...))), d.win)
+	dlg.Resize(fyne.NewSize(820, 480))
+	dlg.Show()
+}

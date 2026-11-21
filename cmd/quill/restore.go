@@ -26,6 +26,7 @@ type sessMeta struct {
 	RotateNo    bool            `json:"rotateNo,omitempty"`
 	Chrome      string          `json:"chrome,omitempty"`
 	AddDirs     []string        `json:"addDirs,omitempty"`
+	ResumeAt    string          `json:"resumeAt,omitempty"`
 }
 
 type savedKmem struct {
@@ -39,7 +40,7 @@ func (d *desk) saveSessions(st *restoreState) {
 		m := sessMeta{Cwd: s.cwd, Model: s.model, Mode: s.mode, Persisted: s.persisted, KmemNew: s.kmemNew,
 			RotateAsk: s.rotateAsk, RotateTried: s.rotateTried, LastClaude: s.lastClaude, RestoreMode: s.restoreMode,
 			RetryCmd: s.retryCmd, RetryRules: s.retryRules, RetryDest: s.retryDest, CompactFrom: s.compactFrom, RotateNo: s.rotateNo,
-			Chrome: s.chrome, AddDirs: s.addDirs}
+			Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt}
 		if ks := s.kmemSave; ks != nil {
 			m.KmemSave = &savedKmem{Name: ks.name, Asked: ks.asked, Spare: ks.spare}
 		}
@@ -79,7 +80,7 @@ func (d *desk) restoreSessions(st *restoreState) {
 		s.kmemNew, s.rotateAsk, s.rotateTried, s.lastClaude = m.KmemNew, m.RotateAsk, m.RotateTried, m.LastClaude
 		s.restoreMode, s.retryCmd, s.retryRules, s.retryDest = m.RestoreMode, m.RetryCmd, m.RetryRules, m.RetryDest
 		s.compactFrom, s.rotateNo = m.CompactFrom, m.RotateNo
-		s.chrome, s.addDirs = m.Chrome, m.AddDirs
+		s.chrome, s.addDirs, s.resumeAt = m.Chrome, m.AddDirs, m.ResumeAt
 		if k := m.KmemSave; k != nil {
 			s.kmemSave = &kmemSave{name: k.Name, asked: k.Asked, spare: k.Spare}
 		}

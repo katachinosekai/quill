@@ -337,7 +337,66 @@ func oneLine(s string, n int) string {
 	return s
 }
 
+func abandoned(path string) map[string]bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	parent := map[string]string{}
+	children := map[string][]string{}
+	last := ""
+	r := bufio.NewReaderSize(f, 1<<20)
+	for {
+		line, err := r.ReadBytes('\n')
+		var rec struct {
+			UUID   string `json:"uuid"`
+			Parent string `json:"parentUuid"`
+			Side   bool   `json:"isSidechain"`
+		}
+		if len(bytes.TrimSpace(line)) > 0 && json.Unmarshal(line, &rec) == nil && rec.UUID != "" && !rec.Side {
+			if _, seen := parent[rec.UUID]; !seen {
+				parent[rec.UUID] = rec.Parent
+				if rec.Parent != "" {
+					children[rec.Parent] = append(children[rec.Parent], rec.UUID)
+				}
+			}
+			last = rec.UUID
+		}
+		if err != nil {
+			break
+		}
+	}
+	keep := map[string]bool{}
+	for u := last; u != "" && !keep[u]; u = parent[u] {
+		keep[u] = true
+	}
+	drop := map[string]bool{}
+	var cut func(string)
+	cut = func(u string) {
+		if drop[u] {
+			return
+		}
+		drop[u] = true
+		for _, c := range children[u] {
+			cut(c)
+		}
+	}
+	for p, kids := range children {
+		if len(kids) < 2 || !keep[p] {
+			continue
+		}
+		for _, k := range kids {
+			if !keep[k] {
+				cut(k)
+			}
+		}
+	}
+	return drop
+}
+
 func Load(path string) (*chat.Conversation, error) {
+	drop := abandoned(path)
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -352,7 +411,7 @@ func Load(path string) (*chat.Conversation, error) {
 			if bytes.Contains(line, []byte("<task-notification>")) {
 				c.NoteNotifications(string(line))
 			}
-			if ev, perr := protocol.ParseLine(line); perr == nil {
+			if ev, perr := protocol.ParseLine(line); perr == nil && !drop[ev.UUID] {
 				switch ev.Type {
 				case "user", "assistant":
 					if ev.Cwd != "" && c.Cwd == "" {

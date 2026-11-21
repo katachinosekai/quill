@@ -97,6 +97,7 @@ type deskSession struct {
 	compactFrom string
 	chrome      string
 	addDirs     []string
+	resumeAt    string
 	qedit       *queueEdit
 	coldStamp   time.Time
 	rotateNo    bool
@@ -1310,7 +1311,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		s.failed = err.Error()
 		return err
 	}
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: s.addDirs,
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt,
 		Env: append(d.localEnv(s.model), checkpointEnv)}
 	d.warnInsecureOllama(s)
 	if s.persisted {
@@ -1322,6 +1323,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 	s.stopping = false
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	s.conv.ClearBackground()
+	s.resumeAt = ""
 	p, err := session.Start(opts, func(ev *protocol.Event) {
 		d.do(func() { d.handleEvent(s, ev) })
 	})
