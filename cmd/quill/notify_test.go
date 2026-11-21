@@ -79,7 +79,7 @@ func TestPhoneEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := folders.Listen(cert, 0, "secret-key-123456")
+	srv, err := folders.Listen(cert, 0, []folders.Phone{{ID: "aaaa0001", KeyHash: folders.HashKey("secret-key-123456")}})
 	if err != nil {
 		t.Fatal(err)
 	}

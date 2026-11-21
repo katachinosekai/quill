@@ -41,6 +41,13 @@ type phoneSync struct {
 	gistDue *time.Timer
 	status  *widget.Label
 	ghPath  string
+	pairing *pendingPair
+	list    *fyne.Container
+}
+
+type pendingPair struct {
+	id  string
+	key string
 }
 
 func (d *desk) phone() *phoneSync {
@@ -262,18 +269,14 @@ func (d *desk) startPhoneServer() error {
 	if err != nil {
 		return err
 	}
-	key := prefs.String("phoneKey")
-	if key == "" {
-		key = folders.NewKey()
-		prefs.SetString("phoneKey", key)
-	}
+	phones := d.phones()
 	port := prefs.Int("phonePort")
 	if port == 0 {
 		port = 20000 + rand.IntN(40000)
 	}
-	s, err := folders.Listen(cert, port, key)
+	s, err := folders.Listen(cert, port, phones)
 	if err != nil {
-		s, err = folders.Listen(cert, 0, key)
+		s, err = folders.Listen(cert, 0, phones)
 		if err != nil {
 			return err
 		}
@@ -282,6 +285,7 @@ func (d *desk) startPhoneServer() error {
 	prefs.SetBool("phoneServe", true)
 	s.SetEvents(prefs.BoolWithFallback("phoneNotify", true))
 	s.SetUsageSource(d.phoneUsageJSON)
+	s.SetSeen(func(id string) { d.do(func() { d.phoneSeen(id) }) })
 	p.server, p.fp = s, fp
 	d.publishPhone(true)
 	return nil
@@ -311,12 +315,141 @@ func (d *desk) pairLink() string {
 	host, _ := os.Hostname()
 	pair := folders.Pair{File: folders.FileName, Gist: prefs.String("phoneGist"), Name: host}
 	if p.server != nil {
+		if p.pairing == nil {
+			d.beginPairing()
+		}
 		pair.Hosts = folders.LocalHosts()
+		if n := tailscaleName(); n != "" {
+			pair.Hosts = append(pair.Hosts, n)
+		}
 		pair.Port = p.server.Port
-		pair.Key = prefs.String("phoneKey")
+		pair.Key = p.pairing.key
+		pair.ID = p.pairing.id
 		pair.Fingerprint = p.fp
 	}
 	return pair.Link()
+}
+
+func tailscaleName() string {
+	path, err := exec.LookPath("tailscale")
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "status", "--json").Output()
+	if err != nil {
+		return ""
+	}
+	var st struct {
+		Self struct {
+			DNSName string
+		}
+	}
+	if json.Unmarshal(out, &st) != nil {
+		return ""
+	}
+	return strings.TrimSuffix(st.Self.DNSName, ".")
+}
+
+func (d *desk) phones() []folders.Phone {
+	prefs := d.app.Preferences()
+	list := folders.ParsePhones(prefs.String("phones"))
+	if old := prefs.String("phoneKey"); old != "" {
+		list = append(list, folders.LegacyPhone(old, time.Now()))
+		prefs.SetString("phones", folders.PhonesJSON(list))
+		prefs.SetString("phoneKey", "")
+	}
+	return list
+}
+
+func (d *desk) setPhones(list []folders.Phone) {
+	d.app.Preferences().SetString("phones", folders.PhonesJSON(list))
+	if p := d.phone(); p.server != nil {
+		p.server.SetPhones(list)
+	}
+	d.updatePhoneList()
+}
+
+func (d *desk) beginPairing() {
+	ph, key := folders.NewPhone("New phone", time.Now())
+	d.setPhones(append(d.phones(), ph))
+	d.phone().pairing = &pendingPair{id: ph.ID, key: key}
+}
+
+func (d *desk) endPairing() {
+	p := d.phone()
+	if p.pairing == nil {
+		return
+	}
+	id := p.pairing.id
+	p.pairing = nil
+	list := d.phones()
+	for i, ph := range list {
+		if ph.ID == id && ph.LastSeen == 0 {
+			d.setPhones(append(list[:i:i], list[i+1:]...))
+			return
+		}
+	}
+}
+
+func (d *desk) phoneSeen(id string) {
+	list := d.phones()
+	now := time.Now().UnixMilli()
+	for i := range list {
+		if list[i].ID != id {
+			continue
+		}
+		if list[i].LastSeen != 0 && now-list[i].LastSeen < time.Minute.Milliseconds() {
+			return
+		}
+		list[i].LastSeen = now
+		d.app.Preferences().SetString("phones", folders.PhonesJSON(list))
+		d.updatePhoneList()
+		return
+	}
+}
+
+func (d *desk) revokePhone(id string) {
+	list := d.phones()
+	for i, ph := range list {
+		if ph.ID == id {
+			d.setPhones(append(list[:i:i], list[i+1:]...))
+			return
+		}
+	}
+}
+
+func (d *desk) updatePhoneList() {
+	p := d.phone()
+	if p.list == nil {
+		return
+	}
+	var rows []fyne.CanvasObject
+	for _, ph := range d.phones() {
+		if p.pairing != nil && ph.ID == p.pairing.id && ph.LastSeen == 0 {
+			continue
+		}
+		seen := "never connected"
+		if ph.LastSeen > 0 {
+			seen = "last seen " + ago(time.UnixMilli(ph.LastSeen))
+		}
+		ph := ph
+		revoke := widget.NewButton("Revoke", func() {
+			dialog.ShowConfirm("Revoke phone?", "\""+ph.Name+"\" loses access at once. Pair it again to bring it back.", func(ok bool) {
+				if ok {
+					d.revokePhone(ph.ID)
+				}
+			}, d.win)
+		})
+		revoke.Importance = widget.LowImportance
+		rows = append(rows, container.NewBorder(nil, nil, nil, revoke, widget.NewLabel(ph.Name+" · "+seen)))
+	}
+	if len(rows) == 0 {
+		rows = append(rows, mutedText("No paired phones", fontMeta))
+	}
+	p.list.Objects = rows
+	p.list.Refresh()
 }
 
 func (d *desk) pairDialog() {
@@ -358,21 +491,18 @@ func (d *desk) pairDialog() {
 			linkText.Show()
 		}
 	})
-	newKey := widget.NewButton("New key (unpairs phones)", func() {
-		k := folders.NewKey()
-		d.app.Preferences().SetString("phoneKey", k)
-		d.phone().server.SetKey(k)
-		show()
-	})
 	stop := widget.NewButton("Stop sharing on the network", func() {
 		d.stopPhone()
 		d.app.Preferences().SetBool("phoneServe", false)
 		d.updatePhoneRow()
 	})
-	body := container.NewVBox(container.NewCenter(img), help, container.NewGridWithColumns(2, copyBtn, showBtn), container.NewGridWithColumns(2, newKey, stop), linkText)
+	body := container.NewVBox(container.NewCenter(img), help, container.NewGridWithColumns(2, copyBtn, showBtn), stop, linkText)
 	dlg := dialog.NewCustom("Pair phone", "Close", body, d.win)
 	dlg.Resize(fyne.NewSize(460, 600))
-	dlg.SetOnClosed(d.updatePhoneRow)
+	dlg.SetOnClosed(func() {
+		d.endPairing()
+		d.updatePhoneRow()
+	})
 	dlg.Show()
 }
 
@@ -445,7 +575,9 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	})
 	notifyChk.Checked = d.app.Preferences().BoolWithFallback("phoneNotify", true)
 	head := mutedText("Phone", fontMeta)
-	return container.NewVBox(head, pairBtn, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), d.phoneGistChk, notifyChk, p.status)
+	p.list = container.NewVBox()
+	d.updatePhoneList()
+	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), d.phoneGistChk, notifyChk, p.status)
 }
 
 func (d *desk) updatePhoneRow() {

@@ -17,7 +17,7 @@ func eventServer(t *testing.T) (*Server, func(path, key string) (int, string)) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := Listen(cert, 0, "secret-key-123456")
+	s, err := Listen(cert, 0, []Phone{{ID: "aaaa0001", KeyHash: HashKey("secret-key-123456")}})
 	if err != nil {
 		t.Fatal(err)
 	}

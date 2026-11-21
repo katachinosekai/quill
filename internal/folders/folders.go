@@ -5,7 +5,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -13,7 +12,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -165,7 +163,9 @@ func Fingerprint(der []byte) string {
 
 type Server struct {
 	mu       sync.Mutex
-	key      string
+	phones   []Phone
+	revoked  chan struct{}
+	seen     func(id string)
 	data     []byte
 	ln       net.Listener
 	srv      *http.Server
@@ -182,24 +182,15 @@ type Server struct {
 	usageAt   time.Time
 }
 
-func Listen(cert tls.Certificate, port int, key string) (*Server, error) {
-	if key == "" {
-		return nil, errors.New("no pairing key")
-	}
+func Listen(cert tls.Certificate, port int, phones []Phone) (*Server, error) {
 	ln, err := tls.Listen("tcp", net.JoinHostPort("", strconv.Itoa(port)), &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{key: key, ln: ln, Port: ln.Addr().(*net.TCPAddr).Port, boot: newBoot(), next: 1, wake: make(chan struct{}), eventsOn: true}
+	s := &Server{phones: append([]Phone(nil), phones...), revoked: make(chan struct{}), ln: ln, Port: ln.Addr().(*net.TCPAddr).Port, boot: newBoot(), next: 1, wake: make(chan struct{}), eventsOn: true}
 	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 8 << 10}
 	go s.srv.Serve(ln)
 	return s, nil
-}
-
-func (s *Server) SetKey(key string) {
-	s.mu.Lock()
-	s.key = key
-	s.mu.Unlock()
 }
 
 func (s *Server) Set(data []byte) {
@@ -218,15 +209,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	key, data := s.key, s.data
+	data, seen := s.data, s.seen
+	id := matchPhone(s.phones, r.Header.Get("X-Quill-Key"))
 	s.mu.Unlock()
-	got := r.Header.Get("X-Quill-Key")
-	if key == "" || subtle.ConstantTimeCompare([]byte(got), []byte(key)) != 1 {
+	if id == "" {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	if seen != nil {
+		seen(id)
+	}
 	if r.URL.Path == "/events" {
-		s.serveEvents(w, r)
+		s.serveEvents(w, r, id)
 		return
 	}
 	if r.URL.Path == "/usage.json" {
@@ -243,7 +237,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func LocalHosts() []string {
-	var private, other []string
+	var private, tailnet, other []string
 	ifs, _ := net.Interfaces()
 	for _, i := range ifs {
 		if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 {
@@ -259,15 +253,18 @@ func LocalHosts() []string {
 			if ip.IsLinkLocalUnicast() {
 				continue
 			}
-			if ip.IsPrivate() || (ip[0] == 100 && ip[1]&0xc0 == 64) {
+			if ip.IsPrivate() {
 				private = append(private, ip.String())
+			} else if ip[0] == 100 && ip[1]&0xc0 == 64 {
+				tailnet = append(tailnet, ip.String())
 			} else {
 				other = append(other, ip.String())
 			}
 		}
 	}
 	sort.Strings(private)
-	out := append(private, other...)
+	sort.Strings(tailnet)
+	out := append(append(private, tailnet...), other...)
 	if h, err := os.Hostname(); err == nil && h != "" && !strings.Contains(h, ".") {
 		out = append(out, h+".local")
 	}
@@ -282,6 +279,7 @@ type Pair struct {
 	File        string
 	Gist        string
 	Name        string
+	ID          string
 }
 
 func (p Pair) Link() string {
@@ -291,6 +289,10 @@ func (p Pair) Link() string {
 		v.Set("p", strconv.Itoa(p.Port))
 		v.Set("k", p.Key)
 		v.Set("fp", p.Fingerprint)
+		if p.ID != "" {
+			v.Set("i", p.ID)
+			v.Set("v", "2")
+		}
 	}
 	if p.File != "" {
 		v.Set("f", p.File)

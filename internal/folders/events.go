@@ -82,9 +82,9 @@ func (s *Server) page(since int64) (EventPage, chan struct{}) {
 	return p, s.wake
 }
 
-func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request, id string) {
 	s.mu.Lock()
-	on := s.eventsOn
+	on, revoked := s.eventsOn, s.revoked
 	s.mu.Unlock()
 	if !on {
 		http.NotFound(w, r)
@@ -121,7 +121,12 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-wake:
 		case <-t.C:
+		case <-revoked:
 		case <-r.Context().Done():
+			return
+		}
+		if !s.phoneOK(id) {
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		p, _ = s.page(since)

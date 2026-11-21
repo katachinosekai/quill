@@ -60,7 +60,7 @@ func TestServerKeyAndPinnedCert(t *testing.T) {
 	if err != nil || fp2 != fp || len(fp) != 64 {
 		t.Fatalf("cert must persist: %q %q %v", fp, fp2, err)
 	}
-	s, err := Listen(cert, 0, "secret-key-123456")
+	s, err := Listen(cert, 0, []Phone{{ID: "aaaa0001", KeyHash: HashKey("secret-key-123456")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,9 +103,16 @@ func TestServerKeyAndPinnedCert(t *testing.T) {
 	if code, body := get("/folders.json", "secret-key-123456"); code != 200 || body != `{"version":1}` {
 		t.Fatalf("ok: %d %q", code, body)
 	}
-	s.SetKey("new-key-1234567890")
+	s.SetPhones([]Phone{{ID: "aaaa0001", KeyHash: HashKey("secret-key-123456")}, {ID: "bbbb0002", KeyHash: HashKey("second-phone-key-7890")}})
+	if code, _ := get("/folders.json", "second-phone-key-7890"); code != 200 {
+		t.Fatalf("second phone's own key: %d", code)
+	}
+	s.SetPhones([]Phone{{ID: "bbbb0002", KeyHash: HashKey("second-phone-key-7890")}})
 	if code, _ := get("/folders.json", "secret-key-123456"); code != http.StatusForbidden {
-		t.Fatalf("old key after New key: %d", code)
+		t.Fatalf("revoked phone: %d", code)
+	}
+	if code, _ := get("/folders.json", "second-phone-key-7890"); code != 200 {
+		t.Fatalf("the other phone keeps working: %d", code)
 	}
 }
 
@@ -115,6 +122,12 @@ func TestPairLinkAndGist(t *testing.T) {
 		if !strings.Contains(l, want) {
 			t.Errorf("link %q lacks %q", l, want)
 		}
+	}
+	if strings.Contains(l, "i=") || strings.Contains(l, "v=") {
+		t.Errorf("a link without a phone id is the old kind: %q", l)
+	}
+	if l := (Pair{Hosts: []string{"192.168.1.5"}, Port: 1, Key: "k", Fingerprint: "f", ID: "a1b2c3d4"}).Link(); !strings.Contains(l, "i=a1b2c3d4") || !strings.Contains(l, "v=2") {
+		t.Errorf("per-phone link: %q", l)
 	}
 	if l := (Pair{Gist: "me/abc", Name: "box"}).Link(); strings.Contains(l, "k=") || !strings.Contains(l, "g=me%2Fabc") {
 		t.Errorf("gist-only link: %q", l)

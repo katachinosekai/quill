@@ -132,3 +132,67 @@ func TestPhoneSyncFileServerAndGist(t *testing.T) {
 	})
 	h.ui(h.d.stopPhone)
 }
+
+func TestPerPhoneKeys(t *testing.T) {
+	h := newHarness(t)
+	prefs := h.d.app.Preferences()
+	var srv *folders.Server
+	var first, second url.Values
+	h.ui(func() {
+		prefs.SetInt("phonePort", 0)
+		prefs.SetString("phoneKey", "old-shared-key-0123456789")
+		if err := h.d.startPhoneServer(); err != nil {
+			t.Fatal(err)
+		}
+		srv = h.d.phone().server
+		if prefs.String("phoneKey") != "" || len(h.d.phones()) != 1 || h.d.phones()[0].Name != folders.LegacyPhoneName {
+			t.Fatalf("the shared key becomes one legacy entry: %+v", h.d.phones())
+		}
+		u, _ := url.Parse(h.d.pairLink())
+		first = u.Query()
+		h.d.endPairing()
+		if len(h.d.phones()) != 1 {
+			t.Fatal("a pairing nobody used is dropped when the dialog closes")
+		}
+		u, _ = url.Parse(h.d.pairLink())
+		second = u.Query()
+	})
+	if second.Get("v") != "2" || len(second.Get("i")) != 8 || second.Get("k") == first.Get("k") {
+		t.Fatalf("each pairing gets its own id and key: %v", second)
+	}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	get := func(key string) int {
+		req, _ := http.NewRequest("GET", "https://127.0.0.1:"+strconv.Itoa(srv.Port)+"/usage.json", nil)
+		req.Header.Set("X-Quill-Key", key)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if get(first.Get("k")) != http.StatusForbidden {
+		t.Fatal("the dropped pairing's key is refused")
+	}
+	if get("old-shared-key-0123456789") == http.StatusForbidden || get(second.Get("k")) == http.StatusForbidden {
+		t.Fatal("the legacy phone and the new phone both get in")
+	}
+	h.eventually("seen", func() bool {
+		ok := false
+		for _, p := range h.d.phones() {
+			ok = ok || p.ID == second.Get("i") && p.LastSeen > 0
+		}
+		return ok
+	})
+	h.ui(func() {
+		h.d.endPairing()
+		if len(h.d.phones()) != 2 {
+			t.Fatal("a pairing that connected is kept")
+		}
+		h.d.revokePhone(second.Get("i"))
+	})
+	if get(second.Get("k")) != http.StatusForbidden || get("old-shared-key-0123456789") == http.StatusForbidden {
+		t.Fatal("revoking one phone leaves the other")
+	}
+	h.ui(h.d.stopPhone)
+}
