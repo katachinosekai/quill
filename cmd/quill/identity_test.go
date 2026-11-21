@@ -229,7 +229,10 @@ func TestNewSessionsAlwaysGetKmem(t *testing.T) {
 }
 
 func TestResumeAllFromHandoffs(t *testing.T) {
-	h, _, _ := identityHarness(t)
+	h, k, _ := identityHarness(t)
+	for _, n := range []string{"alpha-work", "beta-work", "gamma-work"} {
+		k.saved[n] = true
+	}
 	h.ui(func() {
 		mk := func(name string, ended bool) *deskSession {
 			s := h.d.createSession(h.proj, "default", "default")
@@ -249,7 +252,8 @@ func TestResumeAllFromHandoffs(t *testing.T) {
 		h.d.org.Kmem[holder.id] = "gamma-work"
 		h.d.addTab(holder.id)
 		notEnded := mk("delta-work", false)
-		h.d.groups = append(h.d.groups, bookGroup{key: placeInactive, ids: []string{a.id, b.id, noName.id, held.id, notEnded.id}})
+		unsaved := mk("never-saved", true)
+		h.d.groups = append(h.d.groups, bookGroup{key: placeInactive, ids: []string{a.id, b.id, noName.id, held.id, notEnded.id, unsaved.id}})
 		got := h.d.resumableIn(placeInactive)
 		if len(got) != 2 || got[0] != a.id || got[1] != b.id {
 			t.Fatalf("only ended sessions with a free kmem name are resumable: %v", got)
@@ -280,7 +284,9 @@ func TestResumeAllFromHandoffs(t *testing.T) {
 
 func TestResumeAllCommand(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "q.sock")
-	h, _, _ := identityHarness(t)
+	h, k, _ := identityHarness(t)
+	k.saved["cmd-work"] = true
+	k.saved["arch-work"] = true
 	var old *deskSession
 	h.ui(func() {
 		old = h.d.createSession(h.proj, "default", "default")
@@ -293,4 +299,36 @@ func TestResumeAllCommand(t *testing.T) {
 		t.Fatal("resume-all not acknowledged")
 	}
 	h.eventually("resumed by command", func() bool { return h.d.org.Kmem[old.id] == "" && !h.d.org.Ended[old.id] })
+	var arch *deskSession
+	h.ui(func() {
+		arch = h.d.createSession(h.proj, "default", "default")
+		h.d.org.Kmem[arch.id] = "arch-work"
+		h.d.org.Place[arch.id] = placeArchive
+		h.d.markEnded(arch.id)
+	})
+	if !sendCommand(sock, "resume-all") {
+		t.Fatal("resume-all not acknowledged")
+	}
+	time.Sleep(200 * time.Millisecond)
+	h.ui(func() {
+		if h.d.org.Kmem[arch.id] != "arch-work" {
+			t.Fatal("plain resume-all only covers Inactive")
+		}
+	})
+	if !sendCommand(sock, "resume-all archive") {
+		t.Fatal("resume-all archive not acknowledged")
+	}
+	h.eventually("archive resumed", func() bool { return h.d.org.Kmem[arch.id] == "" })
+}
+
+func TestTrivialEndIsNotResumable(t *testing.T) {
+	h, _, _ := identityHarness(t)
+	s := runningSession(t, h, false)
+	h.ui(func() {
+		h.d.org.Kmem[s.id] = "short-one"
+		h.d.endWithSave(s.id, placeInactive)
+		if h.d.org.Ended[s.id] {
+			t.Fatal("a session that never saved a handoff is not marked as resumable")
+		}
+	})
 }

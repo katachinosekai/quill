@@ -120,7 +120,6 @@ func (d *desk) endWithSave(id, place string) {
 	if s == nil || !s.running() || trivialSession(s) || d.ensureKmem(id) == "" {
 		d.endSession(id)
 		d.setPlacement(id, place)
-		d.markEnded(id)
 		d.refreshSidebar()
 		return
 	}
@@ -263,10 +262,14 @@ func (d *desk) resumableIn(key string) []string {
 	}
 	slices.Sort(placed)
 	cands = append(cands, placed...)
+	saved := map[string]bool{}
+	for _, h := range d.kmemHandoffs() {
+		saved[h.Name] = true
+	}
 	var out []string
 	seen := map[string]bool{}
 	for _, id := range cands {
-		if seen[id] || !d.org.Ended[id] || d.org.Kmem[id] == "" {
+		if seen[id] || !d.org.Ended[id] || !saved[d.org.Kmem[id]] {
 			continue
 		}
 		seen[id] = true

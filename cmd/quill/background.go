@@ -68,8 +68,12 @@ func (d *desk) listenInstance(path string) {
 					go writeProfile()
 				case "heap":
 					go writeHeap()
-				case "resume-all":
-					d.do(func() { d.resumeAll(d.resumableIn(placeInactive)) })
+				case "resume-all", "resume-all " + placeArchive:
+					key := placeInactive
+					if strings.HasSuffix(strings.TrimSpace(line), placeArchive) {
+						key = placeArchive
+					}
+					d.do(func() { d.resumeAll(d.resumableIn(key)) })
 				case "reload":
 					d.do(func() {
 						d.forceSwap = true

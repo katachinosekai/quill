@@ -59,7 +59,11 @@ func main() {
 		return
 	}
 	if *resumeAll {
-		if !sendCommand(sock, "resume-all") {
+		cmd := "resume-all"
+		if flag.Arg(0) == placeArchive {
+			cmd += " " + placeArchive
+		}
+		if !sendCommand(sock, cmd) {
 			fmt.Fprintln(os.Stderr, "no running Quill answered")
 			os.Exit(1)
 		}
