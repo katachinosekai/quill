@@ -250,6 +250,8 @@ func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
 	var fill func()
 	fill = func() {
 		box.Objects = nil
+		box.Add(d.kmemMemoryRow())
+		box.Add(widget.NewSeparator())
 		for i, f := range memoryFiles(cwd) {
 			f := f
 			_, err := os.Stat(f)

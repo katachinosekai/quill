@@ -1394,8 +1394,9 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		s.failed = err.Error()
 		return err
 	}
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, Prompt: quillPromptHint,
-		Env: append(d.localEnv(s.model), checkpointEnv)}
+	kmemMem := d.kmemMemory()
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, Prompt: sessionPrompt(kmemMem),
+		Env: append(append(d.localEnv(s.model), checkpointEnv), sessionMemoryEnv(kmemMem)...)}
 	d.warnInsecureOllama(s)
 	if s.persisted {
 		opts.Resume = s.id
