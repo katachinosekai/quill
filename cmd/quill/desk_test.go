@@ -133,6 +133,19 @@ func newHarness(t *testing.T) *harness {
 			if len(left) == 0 {
 				break
 			}
+			// Sessions started in the background after the first snapshot
+			// (resume-all, rotations) are stopped too.
+			var late []*deskSession
+			h.ui(func() {
+				for _, s := range h.d.runningSessions() {
+					if !s.stopping {
+						late = append(late, s)
+					}
+				}
+			})
+			if len(late) > 0 {
+				h.d.stopAll(late)
+			}
 			if time.Now().After(deadline) {
 				var ids []string
 				h.ui(func() {

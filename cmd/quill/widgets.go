@@ -169,6 +169,7 @@ type sendEntry struct {
 	lastFix    *acFix
 	onFix      func(string)
 	cursorGen  int
+	later      func(time.Duration, func()) // runs on the UI thread; nil = no deferred refresh
 }
 
 func (e *sendEntry) FocusGained() {
@@ -422,14 +423,17 @@ func (e *sendEntry) Resize(size fyne.Size) {
 		return
 	}
 	e.Refresh()
+	if e.later == nil {
+		return
+	}
 	e.cursorGen++
 	gen := e.cursorGen
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		fyne.Do(func() {
-			if e.cursorGen == gen {
-				e.Refresh()
-			}
-		})
-	}()
+	e.later(30*time.Millisecond, func() {
+		// Skip when a newer resize follows or the box left the window
+		// (closed pane, closed window): refreshing it then can crash Fyne.
+		if e.cursorGen != gen || fyne.CurrentApp() == nil || fyne.CurrentApp().Driver().CanvasForObject(e) == nil {
+			return
+		}
+		e.Refresh()
+	})
 }

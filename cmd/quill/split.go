@@ -107,6 +107,7 @@ func (d *desk) newPane() *pane {
 	p.outline.StrokeWidth = 1
 	p.outline.StrokeColor = color.NRGBA{0xff, 0xff, 0xff, 0x1c}
 	p.input = newSendEntry(func(text string) { d.sendFromPane(p, text) })
+	p.input.later = d.afterUI
 	p.input.ac = d.newAutocorrector()
 	p.input.known = func() func(string) bool { return d.knownWords(p.view.s) }
 	p.input.onFix = func(msg string) { d.flashHint(p.stats, msg) }

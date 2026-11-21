@@ -24,22 +24,23 @@ const (
 )
 
 type restoreState struct {
-	Session string              `json:"session"`
-	Draft   string              `json:"draft"`
-	Width   float32             `json:"width"`
-	Height  float32             `json:"height"`
-	ScrollY float32             `json:"scrollY"`
-	Hidden  bool                `json:"hidden"`
-	Max     bool                `json:"maximized"`
-	Split   *splitState         `json:"split,omitempty"`
-	X       int                 `json:"x"`
-	Y       int                 `json:"y"`
-	Running []string            `json:"running"`
-	Handed  []handedSession     `json:"handed"`
-	Queues  map[string][]string `json:"queues,omitempty"`
-	Meta    map[string]sessMeta `json:"meta,omitempty"`
-	Drafts  map[string]string   `json:"drafts,omitempty"`
-	Paused  *pauseState         `json:"paused,omitempty"`
+	Session  string              `json:"session"`
+	Draft    string              `json:"draft"`
+	DraftFor string              `json:"draftFor,omitempty"`
+	Width    float32             `json:"width"`
+	Height   float32             `json:"height"`
+	ScrollY  float32             `json:"scrollY"`
+	Hidden   bool                `json:"hidden"`
+	Max      bool                `json:"maximized"`
+	Split    *splitState         `json:"split,omitempty"`
+	X        int                 `json:"x"`
+	Y        int                 `json:"y"`
+	Running  []string            `json:"running"`
+	Handed   []handedSession     `json:"handed"`
+	Queues   map[string][]string `json:"queues,omitempty"`
+	Meta     map[string]sessMeta `json:"meta,omitempty"`
+	Drafts   map[string]string   `json:"drafts,omitempty"`
+	Paused   *pauseState         `json:"paused,omitempty"`
 }
 
 type pauseState struct {
@@ -136,11 +137,27 @@ type pendingAsk struct {
 	Request   *protocol.ControlRequest `json:"request"`
 }
 
+// restoreHead: the current tab and the box's unsent text, tied to that tab.
+// Also a brand-new tab whose session has no transcript yet: it is restored
+// from Meta and must stay the current tab.
+func (d *desk) restoreHead() restoreState {
+	st := restoreState{Draft: d.boxDraft(d.current, d.input), Hidden: d.hidden}
+	if d.current != nil {
+		st.Session = d.current.id
+		if !d.split() {
+			st.DraftFor = d.current.id
+		}
+	}
+	return st
+}
+
 func (d *desk) trySwap() {
 	if d.swapTo == "" || d.swapping || d.signingIn != nil {
 		return
 	}
-	if !d.forceSwap && time.Since(d.lastTyped) < typingQuiet {
+	// Never swap while the user is typing, not even for `quill --reload`
+	// (user 2026-11-21: a forced reload mid-prompt moved the draft).
+	if time.Since(d.lastTyped) < typingQuiet {
 		return
 	}
 	for _, s := range d.sessions {
@@ -151,7 +168,7 @@ func (d *desk) trySwap() {
 	d.swapping = true
 	d.stopMedia()
 	d.flushUI()
-	st := restoreState{Draft: d.boxDraft(d.current, d.input), Hidden: d.hidden}
+	st := d.restoreHead()
 	if d.current != nil && !d.split() {
 		d.strip.keepDraft(d.current.id, st.Draft)
 	}
@@ -164,9 +181,6 @@ func (d *desk) trySwap() {
 	d.saveSessions(&st)
 	if d.usagePaused {
 		st.Paused = &pauseState{Until: d.pauseUntil.Unix(), IDs: d.pausedIDs, Text: d.pauseText.Text}
-	}
-	if d.current != nil && d.current.persisted {
-		st.Session = d.current.id
 	}
 	size := d.win.Canvas().Size()
 	st.Width, st.Height = size.Width, size.Height
@@ -360,17 +374,20 @@ func (d *desk) applyRestore(st *restoreState) {
 	if len(st.Running) > 0 || len(st.Handed) > 0 || len(st.Meta) > 0 {
 		d.refreshSidebar()
 	}
-	if st.Draft != "" {
-		d.input.SetText(st.Draft)
-	}
 	defer d.restoreSplit(st.Split)
 	if st.Session == "" {
 		return
 	}
-	if _, ok := d.infos[st.Session]; !ok {
+	if _, ok := d.infos[st.Session]; !ok && d.sessions[st.Session] == nil {
 		return
 	}
 	d.open(st.Session)
+	// The unsent text goes back only into the box of the tab it was typed
+	// in; otherwise it stays that tab's draft (kept in strip.drafts).
+	draftFor := firstNonEmpty(st.DraftFor, st.Session)
+	if st.Draft != "" && d.current != nil && d.current.id == draftFor && d.input.Text == "" {
+		d.input.SetText(st.Draft)
+	}
 	if st.ScrollY > 0 {
 		go func() {
 			time.Sleep(400 * time.Millisecond)

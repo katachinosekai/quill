@@ -65,7 +65,10 @@ func TestSingleInstance(t *testing.T) {
 		uiMu.Lock()
 		defer uiMu.Unlock()
 		f()
-		shown <- true
+		select { // other UI work (policy refresh, cursor refresh) must not block here
+		case shown <- true:
+		default:
+		}
 	}
 	h.ui(func() { h.d.hidden = true })
 	h.d.listenInstance(sock)
@@ -73,11 +76,7 @@ func TestSingleInstance(t *testing.T) {
 		t.Fatal("running instance should answer")
 	}
 	<-shown
-	h.ui(func() {
-		if h.d.hidden {
-			t.Fatal("window should be shown")
-		}
-	})
+	h.eventually("window shown", func() bool { return !h.d.hidden })
 }
 
 func TestCloseHidesInBackground(t *testing.T) {
@@ -148,7 +147,10 @@ func TestReloadCommandForcesSwap(t *testing.T) {
 		uiMu.Lock()
 		defer uiMu.Unlock()
 		f()
-		done <- true
+		select {
+		case done <- true:
+		default:
+		}
 	}
 	h.d.listenInstance(sock)
 	h.ui(func() { h.d.lastTyped = time.Now() })
@@ -156,11 +158,7 @@ func TestReloadCommandForcesSwap(t *testing.T) {
 		t.Fatal("reload not acknowledged")
 	}
 	<-done
-	h.ui(func() {
-		if !h.d.forceSwap {
-			t.Fatal("reload should skip the typing wait")
-		}
-	})
+	h.eventually("reload requested", func() bool { return h.d.forceSwap })
 }
 
 func TestTextAlignSwitch(t *testing.T) {
@@ -260,4 +258,54 @@ func TestWindowPlacementSurvivesUpdate(t *testing.T) {
 	if nw.maxCalls != 1 {
 		t.Fatal("a maximized window reopens maximized")
 	}
+}
+
+func TestForcedReloadWaitsWhileTyping(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.swapTo = "/nonexistent/quill"
+		h.d.forceSwap = true
+		h.d.lastTyped = time.Now()
+		h.d.trySwap()
+		if h.d.swapping {
+			t.Fatal("quill --reload must not swap while the user is typing")
+		}
+		h.d.swapTo, h.d.forceSwap = "", false
+	})
+}
+
+func TestReloadKeepsNewTabAndItsDraft(t *testing.T) {
+	h := newHarness(t)
+	var st restoreState
+	var fresh *deskSession
+	h.ui(func() {
+		h.d.open(editsID)
+		fresh = h.d.createSession(h.proj, "default", "default")
+		if fresh.persisted {
+			t.Fatal("setup: the new tab has no transcript yet")
+		}
+		h.d.input.SetText("I enabled wireless debugging for")
+		st = h.d.restoreHead()
+		if st.Session != fresh.id || st.DraftFor != fresh.id {
+			t.Fatalf("the brand-new current tab is recorded: %+v", st)
+		}
+		// After the swap another tab is showing and the box is empty.
+		h.d.open(editsID)
+		h.d.input.SetText("")
+		h.d.applyRestore(&st)
+		if h.d.current != fresh {
+			t.Fatalf("the reload reopens the tab that was current, not %v", h.d.current.id)
+		}
+		if h.d.input.Text != "I enabled wireless debugging for" {
+			t.Fatalf("the draft is back in its own tab's box: %q", h.d.input.Text)
+		}
+		// A draft tied to another tab never lands in the shown tab's box.
+		h.d.open(editsID)
+		h.d.input.SetText("")
+		other := restoreState{Session: editsID, DraftFor: fresh.id, Draft: "not for this tab"}
+		h.d.applyRestore(&other)
+		if h.d.input.Text == "not for this tab" {
+			t.Fatal("a draft typed in another tab went into this tab's box")
+		}
+	})
 }

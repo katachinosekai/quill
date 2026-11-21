@@ -899,6 +899,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
+	d.input.later = d.afterUI
 	d.input.ac = d.newAutocorrector()
 	d.input.known = func() func(string) bool { return d.knownWords(d.current) }
 	d.input.onFix = func(msg string) { d.flashHint(d.folder, msg) }
