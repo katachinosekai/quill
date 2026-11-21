@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var kmemVersionRe = regexp.MustCompile(`(?m)^KMEM_VERSION = "([0-9][0-9.]*)"`)
@@ -75,5 +76,20 @@ func updateKmem(home, bundled string) (string, error) {
 			return "", err
 		}
 	}
-	return "Updated kmem " + have + " to " + want + " (the kmem that comes with this Quill Desktop).", nil
+	msg := "Updated kmem " + have + " to " + want + " (the kmem that comes with this Quill Desktop)."
+	// kmem 1.5.2 guards the PowerShell tool: existing kmem-guard hooks get
+	// PowerShell in their matcher (settings backed up first).
+	if kmemHooksPresent(home) {
+		changed, _, err := mergeKmemHooks(filepath.Join(home, ".claude", "settings.json"), home, kmemNow())
+		if err != nil {
+			return msg, err
+		}
+		if changed {
+			msg += " The kmem-guard hook now also checks PowerShell commands."
+		}
+	}
+	return msg, nil
 }
+
+// kmemNow is the clock for settings backups (tests replace it).
+var kmemNow = time.Now

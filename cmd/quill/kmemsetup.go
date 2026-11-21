@@ -87,7 +87,7 @@ func kmemHooksFor(goos, home, python string) map[string]map[string]any {
 	}
 	return map[string]map[string]any{
 		"SessionStart": {"hooks": []any{map[string]any{"type": "command", "command": brief, "timeout": 10}}},
-		"PreToolUse": {"matcher": "Bash|Agent|Task|Write|Edit|MultiEdit|NotebookEdit",
+		"PreToolUse": {"matcher": kmemGuardMatcher,
 			"hooks": []any{map[string]any{"type": "command", "command": guard, "timeout": 10}}},
 	}
 }
@@ -115,6 +115,42 @@ func kmemCommand(goos, python, path string, args ...string) (string, []string) {
 		return firstNonEmpty(python, "python"), append([]string{path}, args...)
 	}
 	return path, args
+}
+
+// kmemGuardMatcher: Claude Code on Windows runs commands with its PowerShell
+// tool, which kmem-guard checks from kmem 1.5.2 on (PZ Lock Audit 2).
+const kmemGuardMatcher = "Bash|PowerShell|Agent|Task|Write|Edit|MultiEdit|NotebookEdit"
+
+// addPowerShellToGuard adds PowerShell to the matcher of existing kmem-guard
+// groups that match Bash but not PowerShell (installs from before kmem 1.5.2).
+func addPowerShellToGuard(groups []any) bool {
+	changed := false
+	for _, g := range groups {
+		gm, _ := g.(map[string]any)
+		m, _ := gm["matcher"].(string)
+		if gm == nil || !hasHookCommand([]any{gm}, "kmem-guard") {
+			continue
+		}
+		parts := strings.Split(m, "|")
+		hasBash, hasPS := false, false
+		for _, p := range parts {
+			hasBash = hasBash || p == "Bash"
+			hasPS = hasPS || p == "PowerShell"
+		}
+		if !hasBash || hasPS {
+			continue
+		}
+		out := make([]string, 0, len(parts)+1)
+		for _, p := range parts {
+			out = append(out, p)
+			if p == "Bash" {
+				out = append(out, "PowerShell")
+			}
+		}
+		gm["matcher"] = strings.Join(out, "|")
+		changed = true
+	}
+	return changed
 }
 
 func hasHookCommand(groups []any, needle string) bool {
@@ -162,6 +198,9 @@ func mergeKmemHooks(settingsPath, home string, now time.Time) (bool, string, err
 			needle = "kmem-guard"
 		}
 		if hasHookCommand(groups, needle) {
+			if event == "PreToolUse" && addPowerShellToGuard(groups) {
+				changed = true
+			}
 			continue
 		}
 		hooks[event] = append(groups, group)
