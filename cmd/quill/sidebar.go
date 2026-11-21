@@ -323,6 +323,12 @@ func (d *desk) noteResize(size fyne.Size) {
 			if d.mainPane != nil {
 				relayout(d.mainPane)
 			}
+			if d.bottomBox != nil {
+				relayout(d.bottomBox)
+			}
+			if d.toolbarBox != nil {
+				relayoutTree(d.toolbarBox)
+			}
 			d.chat.relayout()
 		})
 	})
