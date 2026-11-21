@@ -168,6 +168,7 @@ type sendEntry struct {
 	known      func() func(string) bool
 	lastFix    *acFix
 	onFix      func(string)
+	cursorGen  int
 }
 
 func (e *sendEntry) FocusGained() {
@@ -406,4 +407,29 @@ func (fitRight) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		o.Move(fyne.NewPos(size.Width-m.Width-theme.Padding(), (size.Height-m.Height)/2))
 		o.Resize(m)
 	}
+}
+
+// Resize re-places the text cursor whenever the message box changes width.
+// Fyne's entry only moves its cursor during a resize if the text position
+// under the cursor changes in that same layout pass; on the real driver the
+// text re-wraps afterwards, so after a window resize the cursor kept its old
+// spot (user 2026-11-21). Refresh re-wraps the text and moves the cursor; the
+// second, deferred one catches a re-wrap that lands after this frame.
+func (e *sendEntry) Resize(size fyne.Size) {
+	old := e.Size()
+	e.Entry.Resize(size)
+	if old.Width == size.Width || old.IsZero() {
+		return
+	}
+	e.Refresh()
+	e.cursorGen++
+	gen := e.cursorGen
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		fyne.Do(func() {
+			if e.cursorGen == gen {
+				e.Refresh()
+			}
+		})
+	}()
 }
