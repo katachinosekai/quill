@@ -1956,15 +1956,44 @@ func TestOneViewButton(t *testing.T) {
 		if h.d.viewBtn.Text != "" {
 			t.Fatal("the view button has no text")
 		}
-		var seen []string
-		for i := 0; i < 4; i++ {
-			seen = append(seen, state())
+		pick := func(label string) {
 			test.Tap(h.d.viewBtn)
+			for _, it := range h.d.viewItems {
+				if it.Label == label {
+					h.d.viewMenu.Hide()
+					it.Action()
+					return
+				}
+			}
+			t.Fatalf("no %q in the view menu", label)
 		}
-		seen = append(seen, state())
-		if strings.Join(seen, ",") != "Single/single,Split 2/grid,Split 3/grid,Auto split/auto,Single/single" {
-			t.Fatalf("one icon button cycles the views: %v", seen)
+		test.Tap(h.d.viewBtn)
+		var labels, checked []string
+		for _, it := range h.d.viewItems {
+			labels = append(labels, it.Label)
+			if it.Checked {
+				checked = append(checked, it.Label)
+			}
 		}
+		if strings.Join(labels, ",") != "Single,Split 2,Split 3,Auto split" || strings.Join(checked, ",") != "Single" || !h.d.viewMenu.Visible() || state() != "Single/single" {
+			t.Fatalf("the view button opens a menu and changes nothing yet: %v %v %s", labels, checked, state())
+		}
+		h.d.viewMenu.Hide()
+		var seen []string
+		for _, l := range []string{"Split 2", "Split 3", "Auto split", "Single"} {
+			pick(l)
+			seen = append(seen, state())
+		}
+		if strings.Join(seen, ",") != "Split 2/grid,Split 3/grid,Auto split/auto,Single/single" {
+			t.Fatalf("picking a view applies it: %v", seen)
+		}
+		test.Tap(h.d.viewBtn)
+		for _, it := range h.d.viewItems {
+			if it.Checked != (it.Label == "Single") {
+				t.Fatalf("the current view is ticked: %s %v", it.Label, it.Checked)
+			}
+		}
+		h.d.viewMenu.Hide()
 		if h.d.autoChk.Checked {
 			t.Fatal("leaving Auto split turns it off")
 		}
@@ -2441,17 +2470,20 @@ func TestSizeSlidersInSettings(t *testing.T) {
 func TestLandscapePortraitGlide(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
-		if strings.Join(h.d.layoutSel.Options, ",") != "Landscape,Portrait" || h.d.layoutSel.Selected != labelLandscape {
-			t.Fatalf("labels: %v %q", h.d.layoutSel.Options, h.d.layoutSel.Selected)
+		if h.d.layoutBtn.Text != labelLandscape {
+			t.Fatalf("one switch showing the mode: %q", h.d.layoutBtn.Text)
 		}
-		h.d.layoutSel.SetSelected(labelPortrait)
-		if h.d.layoutMode() != layoutVertical || h.d.app.Preferences().String("tabLayout") != layoutVertical {
-			t.Fatal("Portrait keeps the saved preference value")
+		test.Tap(h.d.layoutBtn)
+		if h.d.layoutBtn.Text != labelPortrait || h.d.layoutMode() != layoutVertical || h.d.app.Preferences().String("tabLayout") != layoutVertical {
+			t.Fatal("a click flips to Portrait and keeps the saved preference value")
 		}
 		if !glideUntil.IsZero() && time.Now().Before(glideUntil) {
 			t.Fatal("no glide with animations off")
 		}
-		h.d.layoutSel.SetSelected(labelLandscape)
+		test.Tap(h.d.layoutBtn)
+		if h.d.layoutBtn.Text != labelLandscape || h.d.layoutMode() != layoutHorizontal {
+			t.Fatal("and back")
+		}
 	})
 	mid := glideStep(rect{fyne.NewPos(0, 100), fyne.NewSize(400, 300)}, rect{fyne.NewPos(200, 0), fyne.NewSize(400, 500)}, 0.5)
 	if mid != (rect{fyne.NewPos(100, 50), fyne.NewSize(400, 400)}) {

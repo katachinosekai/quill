@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -277,7 +276,6 @@ type Pair struct {
 	Key         string
 	Fingerprint string
 	File        string
-	Gist        string
 	Name        string
 	ID          string
 }
@@ -297,23 +295,8 @@ func (p Pair) Link() string {
 	if p.File != "" {
 		v.Set("f", p.File)
 	}
-	if p.Gist != "" {
-		v.Set("g", p.Gist)
-	}
 	if p.Name != "" {
 		v.Set("n", p.Name)
 	}
 	return "quillpair://pair?" + v.Encode()
-}
-
-func GistFromURL(s string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(s))
-	if err != nil || u.Host != "gist.github.com" {
-		return "", fmt.Errorf("not a gist URL: %q", s)
-	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", fmt.Errorf("not a gist URL: %q", s)
-	}
-	return parts[0] + "/" + parts[1], nil
 }

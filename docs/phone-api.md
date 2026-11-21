@@ -374,7 +374,7 @@ Each phone has its own key (before this, every phone shared the `phoneKey` prefe
 Pairing link (same scheme, two new params):
 
 ```
-quillpair://pair?h=192.168.1.20,100.101.2.3,desk.tailnet-name.ts.net&p=43117&k=<key>&fp=<sha256 hex>&n=desk&i=a1b2c3d4&v=2&f=quill-folders.json&g=<gist>
+quillpair://pair?h=192.168.1.20,100.101.2.3,desk.tailnet-name.ts.net&p=43117&k=<key>&fp=<sha256 hex>&n=desk&i=a1b2c3d4&v=2&f=quill-folders.json
 ```
 
 - `i`: phone id. `v=2`: per-phone key, and the phone API is available once the desktop has it. Links without `v` are the old shared-key kind.

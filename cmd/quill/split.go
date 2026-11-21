@@ -556,21 +556,39 @@ func (p *pane) queue(items []*chat.Item) {
 
 func (d *desk) splitButtons() fyne.CanvasObject {
 	d.autoSplitCheck()
-	d.viewBtn = widget.NewButtonWithIcon("", theme.GridIcon(), d.nextView)
+	d.viewBtn = widget.NewButtonWithIcon("", theme.GridIcon(), d.showViewMenu)
 	d.viewBtn.Importance = widget.MediumImportance
 	d.syncSplitButtons()
 	return d.viewBtn
 }
 
-func (d *desk) nextView() {
-	switch {
-	case d.autoChk.Checked:
-		d.autoChk.SetChecked(false)
-		d.setSplit(1)
-	case max(1, len(d.panes)) >= maxPanes:
+func (d *desk) showViewMenu() {
+	cur := max(1, len(d.panes))
+	auto := d.autoChk != nil && d.autoChk.Checked
+	item := func(label string, checked bool, pick func()) *fyne.MenuItem {
+		it := fyne.NewMenuItem(label, pick)
+		it.Checked = checked
+		return it
+	}
+	var items []*fyne.MenuItem
+	for n := 1; n <= maxPanes; n++ {
+		n := n
+		items = append(items, item(splitLabel(n), !auto && cur == n, func() { d.pickView(n, false) }))
+	}
+	items = append(items, item("Auto split", auto, func() { d.pickView(0, true) }))
+	d.viewItems = items
+	c := d.win.Canvas()
+	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(d.viewBtn)
+	d.viewMenu = widget.NewPopUpMenu(fyne.NewMenu("", items...), c)
+	d.viewMenu.ShowAtPosition(pos.Add(fyne.NewPos(0, d.viewBtn.Size().Height)))
+}
+
+func (d *desk) pickView(n int, auto bool) {
+	if auto {
 		d.autoChk.SetChecked(true)
-	default:
-		d.setSplit(max(1, len(d.panes)) + 1)
+	} else {
+		d.autoChk.SetChecked(false)
+		d.setSplit(n)
 	}
 	d.syncSplitButtons()
 }

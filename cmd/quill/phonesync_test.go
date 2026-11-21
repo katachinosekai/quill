@@ -16,15 +16,8 @@ import (
 	"github.com/katachinosekai/quill/internal/folders"
 )
 
-func TestPhoneSyncFileServerAndGist(t *testing.T) {
+func TestPhoneSyncFileAndServer(t *testing.T) {
 	dir := t.TempDir()
-	ghLog := filepath.Join(dir, "gh.log")
-	gh := filepath.Join(dir, "gh")
-	script := "#!/bin/sh\necho \"$@\" >> " + ghLog + "\nif [ \"$2\" = create ]; then echo https://gist.github.com/me/0123456789abcdef0123; fi\n"
-	if err := os.WriteFile(gh, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("QUILL_GH", gh)
 	t.Setenv("QUILL_PHONE_DIR", filepath.Join(dir, "phone"))
 	h := newHarness(t)
 	out := filepath.Join(dir, "sync")
@@ -116,20 +109,9 @@ func TestPhoneSyncFileServerAndGist(t *testing.T) {
 		t.Fatalf("served %d %s", resp.StatusCode, body)
 	}
 
-	h.ui(func() { h.d.toggleGist(true) })
-	h.eventually("gist created", func() bool {
-		return h.d.app.Preferences().String("phoneGist") == "me/0123456789abcdef0123"
-	})
-	h.ui(func() {
-		if !strings.Contains(h.d.pairLink(), "g=me%2F0123456789abcdef0123") {
-			t.Fatal("pair link should carry the gist")
-		}
-		h.d.setPlacement(editsID, placeInactive)
-	})
-	h.eventually("gist edited", func() bool {
-		b, _ := os.ReadFile(ghLog)
-		return strings.Contains(string(b), "gist edit 0123456789abcdef0123 --filename "+folders.FileName)
-	})
+	if strings.Contains(link, "g=") {
+		t.Fatal("pair links no longer carry a gist")
+	}
 	h.ui(h.d.stopPhone)
 }
 

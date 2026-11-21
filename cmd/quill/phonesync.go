@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -24,9 +23,8 @@ import (
 )
 
 const (
-	phoneRCMax     = 4000
-	phoneDebounce  = time.Second
-	phoneGistEvery = 60 * time.Second
+	phoneRCMax    = 4000
+	phoneDebounce = time.Second
 )
 
 type phoneSync struct {
@@ -36,11 +34,7 @@ type phoneSync struct {
 	fp      string
 	last    folders.File
 	dirty   *time.Timer
-	gistMu  sync.Mutex
-	gistAt  time.Time
-	gistDue *time.Timer
 	status  *widget.Label
-	ghPath  string
 	pairing *pendingPair
 	list    *fyne.Container
 }
@@ -57,17 +51,9 @@ func (d *desk) phone() *phoneSync {
 		if p.rc == nil {
 			p.rc = map[string]string{}
 		}
-		p.ghPath, _ = exec.LookPath(phoneGH())
 		d.phoneSync = p
 	}
 	return d.phoneSync
-}
-
-func phoneGH() string {
-	if v := os.Getenv("QUILL_GH"); v != "" {
-		return v
-	}
-	return "gh"
 }
 
 func phoneCertDir() string {
@@ -107,7 +93,7 @@ func (d *desk) rememberRC(id, sessionURL string) {
 
 func (d *desk) phoneActive() bool {
 	prefs := d.app.Preferences()
-	return prefs.Bool("phoneServe") || prefs.String("phoneDir") != "" || prefs.String("phoneGist") != ""
+	return prefs.Bool("phoneServe") || prefs.String("phoneDir") != ""
 }
 
 func (d *desk) phoneChanged() {
@@ -158,78 +144,6 @@ func (d *desk) publishPhone(force bool) {
 			d.do(func() { d.phoneStatus(err, "Folders file") })
 		}()
 	}
-	if d.app.Preferences().String("phoneGist") != "" {
-		d.scheduleGist(data)
-	}
-}
-
-func (d *desk) scheduleGist(data []byte) {
-	p := d.phone()
-	p.gistMu.Lock()
-	defer p.gistMu.Unlock()
-	if p.gistDue != nil {
-		p.gistDue.Stop()
-	}
-	wait := time.Until(p.gistAt.Add(phoneGistEvery))
-	if wait < 0 {
-		wait = 0
-	}
-	p.gistDue = time.AfterFunc(wait, func() {
-		p.gistMu.Lock()
-		p.gistAt = time.Now()
-		p.gistMu.Unlock()
-		err := d.pushGist(data)
-		d.do(func() { d.phoneStatus(err, "Gist") })
-	})
-}
-
-func (d *desk) pushGist(data []byte) error {
-	p := d.phone()
-	gist := d.app.Preferences().String("phoneGist")
-	if gist == "" || p.ghPath == "" {
-		return nil
-	}
-	dir, err := os.MkdirTemp("", "quill-gist-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, folders.FileName)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	id := gist[strings.Index(gist, "/")+1:]
-	out, err := exec.CommandContext(ctx, p.ghPath, "gist", "edit", id, "--filename", folders.FileName, path).CombinedOutput()
-	if err != nil {
-		return &phoneErr{strings.TrimSpace(string(out)), err}
-	}
-	return nil
-}
-
-func (d *desk) createGist() (string, error) {
-	p := d.phone()
-	dir, err := os.MkdirTemp("", "quill-gist-")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, folders.FileName)
-	if err := os.WriteFile(path, d.phoneFile().JSON(), 0o600); err != nil {
-		return "", err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, p.ghPath, "gist", "create", "--desc", "Quill folders for Quill for Android", path).CombinedOutput()
-	if err != nil {
-		return "", &phoneErr{strings.TrimSpace(string(out)), err}
-	}
-	lines := strings.Fields(string(out))
-	if len(lines) == 0 {
-		return "", &phoneErr{"gh printed no gist URL", nil}
-	}
-	return folders.GistFromURL(lines[len(lines)-1])
 }
 
 type phoneErr struct {
@@ -311,9 +225,8 @@ func (d *desk) stopPhone() {
 
 func (d *desk) pairLink() string {
 	p := d.phone()
-	prefs := d.app.Preferences()
 	host, _ := os.Hostname()
-	pair := folders.Pair{File: folders.FileName, Gist: prefs.String("phoneGist"), Name: host}
+	pair := folders.Pair{File: folders.FileName, Name: host}
 	if p.server != nil {
 		if p.pairing == nil {
 			d.beginPairing()
@@ -519,32 +432,6 @@ func (d *desk) chooseFolderFile() {
 	dlg.Show()
 }
 
-func (d *desk) toggleGist(on bool) {
-	prefs := d.app.Preferences()
-	if !on {
-		prefs.SetString("phoneGist", "")
-		d.updatePhoneRow()
-		return
-	}
-	if prefs.String("phoneGist") != "" {
-		return
-	}
-	d.phone().status.SetText("Creating secret gist...")
-	go func() {
-		g, err := d.createGist()
-		d.do(func() {
-			if err != nil {
-				d.phoneStatus(err, "Gist")
-				d.updatePhoneRow()
-				return
-			}
-			prefs.SetString("phoneGist", g)
-			d.phoneStatus(nil, "Gist")
-			d.updatePhoneRow()
-		})
-	}()
-}
-
 func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	p := d.phone()
 	p.status = widget.NewLabel("")
@@ -561,12 +448,7 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 		d.updatePhoneRow()
 	})
 	d.phoneFileOff.Importance = widget.LowImportance
-	d.phoneGistChk = widget.NewCheck("Publish to a secret gist", nil)
-	if p.ghPath == "" {
-		d.phoneGistChk.Hide()
-	}
 	d.updatePhoneRow()
-	d.phoneGistChk.OnChanged = d.toggleGist
 	notifyChk := widget.NewCheck("Send notifications to paired phones", func(on bool) {
 		d.app.Preferences().SetBool("phoneNotify", on)
 		if p.server != nil {
@@ -577,7 +459,7 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	head := mutedText("Phone", fontMeta)
 	p.list = container.NewVBox()
 	d.updatePhoneList()
-	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), d.phoneGistChk, notifyChk, p.status)
+	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), notifyChk, p.status)
 }
 
 func (d *desk) updatePhoneRow() {
@@ -591,13 +473,6 @@ func (d *desk) updatePhoneRow() {
 	} else {
 		d.phoneFileBtn.SetText("Write folders file to...")
 		d.phoneFileOff.Hide()
-	}
-	on := prefs.String("phoneGist") != ""
-	if d.phoneGistChk.Checked != on {
-		cb := d.phoneGistChk.OnChanged
-		d.phoneGistChk.OnChanged = nil
-		d.phoneGistChk.SetChecked(on)
-		d.phoneGistChk.OnChanged = cb
 	}
 }
 

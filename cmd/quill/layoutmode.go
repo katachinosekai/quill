@@ -25,21 +25,17 @@ func (d *desk) layoutMode() string {
 }
 
 func (d *desk) layoutButtons() fyne.CanvasObject {
-	d.layoutSel = widget.NewRadioGroup([]string{labelLandscape, labelPortrait}, func(v string) {
-		if v == "" || d.suppressLayout {
-			return
+	d.layoutBtn = widget.NewButton(labelLandscape, func() {
+		if d.layoutMode() == layoutVertical {
+			d.setLayoutMode(layoutHorizontal)
+		} else {
+			d.setLayoutMode(layoutVertical)
 		}
-		mode := layoutHorizontal
-		if v == labelPortrait {
-			mode = layoutVertical
-		}
-		d.setLayoutMode(mode)
 	})
-	d.layoutSel.Horizontal = true
-	d.layoutSel.Required = true
+	d.layoutBtn.Importance = widget.MediumImportance
 	d.settingsBtn = widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	d.settingsBtn.Importance = widget.MediumImportance
-	return container.NewHBox(container.NewCenter(mutedText("Tabs", fontMeta)), d.layoutSel)
+	return d.layoutBtn
 }
 
 func (d *desk) setLayoutMode(mode string) {
@@ -52,13 +48,11 @@ func (d *desk) setLayoutMode(mode string) {
 
 func (d *desk) applyLayoutMode() {
 	mode := d.layoutMode()
-	d.suppressLayout = true
 	if mode == layoutVertical {
-		d.layoutSel.SetSelected(labelPortrait)
+		d.layoutBtn.SetText(labelPortrait)
 	} else {
-		d.layoutSel.SetSelected(labelLandscape)
+		d.layoutBtn.SetText(labelLandscape)
 	}
-	d.suppressLayout = false
 	if mode == layoutVertical {
 		d.bookRow.Hide()
 		d.tabRow.Hide()

@@ -117,8 +117,8 @@ func TestServerKeyAndPinnedCert(t *testing.T) {
 }
 
 func TestPairLinkAndGist(t *testing.T) {
-	l := Pair{Hosts: []string{"192.168.1.5", "box.local"}, Port: 41234, Key: "k_k", Fingerprint: strings.Repeat("a", 64), File: FileName, Gist: "me/0123456789abcdef0123", Name: "box"}.Link()
-	for _, want := range []string{"quillpair://pair?", "h=192.168.1.5%2Cbox.local", "p=41234", "k=k_k", "fp=" + strings.Repeat("a", 64), "g=me%2F0123456789abcdef0123", "n=box", "f=quill-folders.json"} {
+	l := Pair{Hosts: []string{"192.168.1.5", "box.local"}, Port: 41234, Key: "k_k", Fingerprint: strings.Repeat("a", 64), File: FileName, Name: "box"}.Link()
+	for _, want := range []string{"quillpair://pair?", "h=192.168.1.5%2Cbox.local", "p=41234", "k=k_k", "fp=" + strings.Repeat("a", 64), "n=box", "f=quill-folders.json"} {
 		if !strings.Contains(l, want) {
 			t.Errorf("link %q lacks %q", l, want)
 		}
@@ -129,13 +129,7 @@ func TestPairLinkAndGist(t *testing.T) {
 	if l := (Pair{Hosts: []string{"192.168.1.5"}, Port: 1, Key: "k", Fingerprint: "f", ID: "a1b2c3d4"}).Link(); !strings.Contains(l, "i=a1b2c3d4") || !strings.Contains(l, "v=2") {
 		t.Errorf("per-phone link: %q", l)
 	}
-	if l := (Pair{Gist: "me/abc", Name: "box"}).Link(); strings.Contains(l, "k=") || !strings.Contains(l, "g=me%2Fabc") {
-		t.Errorf("gist-only link: %q", l)
-	}
-	if g, err := GistFromURL("https://gist.github.com/me/0123abc\n"); err != nil || g != "me/0123abc" {
-		t.Errorf("gist url: %q %v", g, err)
-	}
-	if _, err := GistFromURL("https://example.com/me/x"); err == nil {
-		t.Error("non-gist URL accepted")
+	if l := (Pair{Name: "box"}).Link(); strings.Contains(l, "k=") || strings.Contains(l, "g=") {
+		t.Errorf("name-only link: %q", l)
 	}
 }
