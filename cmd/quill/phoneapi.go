@@ -202,6 +202,10 @@ type apiSession struct {
 	Tokens     int64      `json:"tokens"`
 	Project    string     `json:"project"`
 	Renamed    bool       `json:"renamed,omitempty"`
+	// Suggestion: the prompt suggestion Quill Desktop shows as ghost text in
+	// the session's empty message box (shownSuggestion, incl. the /clear
+	// rule); left out when there is none.
+	Suggestion string `json:"suggestion,omitempty"`
 }
 
 type apiContext struct {
@@ -277,6 +281,7 @@ func (a *phoneAPI) session(id, group string) apiSession {
 			}
 		}
 		out.Queue = len(s.queue)
+		out.Suggestion = d.shownSuggestion(s)
 		if s.running() {
 			out.Background = s.conv.Background()
 		}

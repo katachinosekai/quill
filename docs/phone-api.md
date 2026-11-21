@@ -143,6 +143,7 @@ Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new ra
 - `mode`: one of the `modes` lists from `/phone/sessions` (today `default`, `acceptEdits`, `plan`, `auto`; Local only `default`, `acceptEdits`, `plan`).
 - `context.max` is 0 when not known yet.
 - `queue`: number of queued messages; `background`: running background tasks.
+- `suggestion` (optional, since 0.1.16): the prompt suggestion Quill Desktop shows as grey text in the session's empty message box; left out when there is none. It changes like any other session field, so the stream sends a `session` change when it appears, changes or goes away.
 - `epoch` changes whenever the item list is renumbered (rewind, fork into this tab, history reload, transcript branch pruning). `rev` grows on every change to any item or to the queue of this session. Both are per session.
 - `focused`: the session shown in the desktop's current view.
 - `tokens`: the session's total tokens from its transcript (refreshed about every 5 s; a growth arrives as a `session` change).
