@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.12
+Version:        0.1.13
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -62,6 +62,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
 
 %changelog
+* Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.13-1
+- Auto-handoff: at 50% context Quill offers to rotate the session through its kmem handoff, at 75% it rotates on its own at a safe point (thresholds from kmem)
+- Local models through Ollama: one Online/Local button next to the model picker, live model list (tool-capable models only), the model's real context window, no auto mode, a clear error when Ollama is down, and a "Remote Control for local sessions" setting
+- Approval cards follow the centering setting
+- Tabs glow in their status color like the sidebar
+- Live updates keep queued messages, every tab's draft, prompt suggestions, each session's model and mode, and restarts in progress
+
 * Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.12-1
 - kmem sessions (when kmem is installed): new sessions can start a new kmem or resume a saved handoff, the sidebar shows each session's kmem name, and Restart as new session saves the handoff, resumes from it in a fresh session and deletes the old one
 - Sessions started from a kmem-resume prompt are linked to their kmem automatically
