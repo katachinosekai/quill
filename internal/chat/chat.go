@@ -277,7 +277,7 @@ func (c *Conversation) applyResult(ev *protocol.Event) []*Item {
 		c.Stats.CostUSD = ev.TotalCostUSD
 	}
 	c.Stats.Turns += ev.NumTurns
-	used, window := ev.LastContext()
+	used, window := ev.LastContext(c.Stats.Model, c.Model)
 	if used > 0 {
 		c.Stats.ContextUsed = used
 	}
