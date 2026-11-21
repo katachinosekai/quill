@@ -1427,9 +1427,10 @@ func TestColdCacheRotation(t *testing.T) {
 func TestChoiceCard(t *testing.T) {
 	for line, want := range map[string][]string{
 		"**Push `4bc346e` now, or wait until you've seen it rotate a session?**": {"Push 4bc346e now", "Wait until you've seen it rotate a session"},
-		"Should I reload now or wait until you've sent the queued messages?":     {"Should I reload now", "Wait until you've sent the queued messages"},
+		"Should I reload now or wait until you've sent the queued messages?":     {"Reload now", "Wait until you've sent the queued messages"},
+		"Should I fix this now or later?":                                        {"Fix this now", "Later"},
 		"**Approve A–E, and which of 3–12 should I include?**":                   nil,
-		"Done. The suite passes.": nil,
+		"Done. The suite passes.":                                                nil,
 	} {
 		_, got, ok := parseChoices(line)
 		if !reflect.DeepEqual(got, want) || ok != (want != nil) {
@@ -1951,6 +1952,152 @@ func TestOneViewButton(t *testing.T) {
 		}
 		if h.d.split() {
 			t.Fatal("and goes back to a single view")
+		}
+	})
+}
+
+func TestReviewFixesChatQueue(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy })
+	h.ui(func() {
+		h.d.open(s.id)
+		s.compacting = true
+		for _, m := range []string{"a", "b", "c"} {
+			h.d.send(m)
+		}
+		h.d.input.SetText("half-written idea")
+		h.d.editQueued(s, 2)
+		if h.d.input.Text != "c" {
+			t.Fatal("edit opens the queued text")
+		}
+		var st restoreState
+		h.d.saveQueues(&st)
+		if h.d.boxDraft(s, h.d.input) != "half-written idea" || !reflect.DeepEqual(st.Queues[s.id], []string{"a", "b", "c"}) {
+			t.Fatal("a reload during an edit keeps the original queued and the real draft, never the unsaved edit")
+		}
+		h.d.historyKey(h.d.input, s, &fyne.KeyEvent{Name: fyne.KeyEscape})
+		if h.d.input.Text != "half-written idea" {
+			t.Fatalf("cancelling an edit gives the draft back: %q", h.d.input.Text)
+		}
+		h.d.editQueued(s, 2)
+		h.d.sendQueuedNow(s, 0)
+		if !reflect.DeepEqual(s.queue, []string{"a", "b"}) {
+			t.Fatal("send now is refused while compacting")
+		}
+		s.queue = append([]string{}, s.queue[1:]...)
+		s.editRemoved(0)
+		h.d.historyKey(h.d.input, s, &fyne.KeyEvent{Name: fyne.KeyEscape})
+		if !reflect.DeepEqual(s.queue, []string{"b", "c"}) {
+			t.Fatalf("the edit goes back to its own place after rows before it were removed: %v", s.queue)
+		}
+		h.d.editQueued(s, 1)
+		h.d.moveQueued(s, 0, 0)
+		s.queue = append(s.queue, "z")
+		h.d.moveQueued(s, 1, 0)
+		h.d.historyKey(h.d.input, s, &fyne.KeyEvent{Name: fyne.KeyEscape})
+		if !reflect.DeepEqual(s.queue, []string{"z", "b", "c"}) {
+			t.Fatalf("moving rows keeps the edit slot after its neighbour: %v", s.queue)
+		}
+		s.compacting = false
+		h.d.editQueued(s, 2)
+		s.queue = nil
+		h.d.historyKey(h.d.input, s, &fyne.KeyEvent{Name: fyne.KeyEscape})
+		if len(s.queue) != 0 {
+			t.Fatalf("an edit cancelled while the session is idle is sent, not stranded: %v", s.queue)
+		}
+		last := s.conv.Items[len(s.conv.Items)-1]
+		if last.Kind != chat.User || last.Text != "c" {
+			t.Fatalf("sent: %+v", last)
+		}
+	})
+	h.eventually("idle again", func() bool { return !s.conv.Busy })
+	h.ui(func() {
+		other := h.d.createSession(h.proj, "default", "default")
+		h.d.open(s.id)
+		h.d.input.SetText("newest text")
+		h.d.open(other.id)
+		h.d.open(s.id)
+		h.d.input.SetText("even newer")
+		var st restoreState
+		if !h.d.split() {
+			h.d.strip.keepDraft(s.id, h.d.boxDraft(s, h.d.input))
+		}
+		h.d.saveSessions(&st)
+		if st.Drafts[s.id] != "even newer" {
+			t.Fatalf("the saved tab draft is the box's current text, not an older copy: %q", st.Drafts[s.id])
+		}
+	})
+}
+
+func TestDragPassThroughAndChoiceRefresh(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy })
+	var ask *chat.Item
+	h.ui(func() {
+		ask = &chat.Item{Seq: 970, Kind: chat.Permission, ToolName: "AskUserQuestion", PermState: chat.PermPending, RequestID: "q",
+			Input: []byte(`{"questions":[{"question":"Which?","header":"Pick","multiSelect":false,"options":[{"label":"A","description":"x"}]}]}`)}
+		s.conv.Items = append(s.conv.Items, ask)
+		h.d.open(s.id)
+		h.d.chat.relayoutInner()
+	})
+	h.eventually("entry laid out", func() bool {
+		found := false
+		deepWalk(h.d.chat.box, func(o fyne.CanvasObject) {
+			if e, ok := o.(*widget.Entry); ok && e.Size().Width > 0 {
+				found = true
+			}
+		})
+		return found
+	})
+	h.ui(func() {
+		var entry *widget.Entry
+		var at fyne.Position
+		origin := h.d.chat.box.Position()
+		driver.WalkVisibleObjectTree(h.d.chat.box, func(o fyne.CanvasObject, pos fyne.Position, _ fyne.Position, _ fyne.Size) bool {
+			if e, ok := o.(*widget.Entry); ok {
+				entry, at = e, pos.Subtract(origin)
+			}
+			return false
+		}, nil)
+		p := at.Add(fyne.NewPos(5, 5))
+		dr, _ := h.d.chat.sel.draggableAt(p)
+		if dr == nil || (dr != fyne.Draggable(entry) && !strings.Contains(fmt.Sprintf("%T", dr), "entry")) {
+			t.Fatalf("a drag that starts in a text box inside the chat goes to that box, got %T", dr)
+		}
+		h.d.chat.sel.Dragged(&fyne.DragEvent{PointEvent: fyne.PointEvent{Position: p.Add(fyne.NewPos(20, 0))}, Dragged: fyne.NewDelta(20, 0)})
+		if h.d.chat.sel.has || h.d.chat.sel.pass == nil {
+			t.Fatal("and no chat selection starts")
+		}
+		h.d.chat.sel.DragEnd()
+		ask.PermState = chat.PermCancelled
+		msg := &chat.Item{Seq: 971, Kind: chat.Assistant, Text: "Done.\n\n**Push now, or wait?**"}
+		s.conv.Items = append(s.conv.Items, msg)
+		h.d.chat.update([]*chat.Item{msg})
+		count := func() int {
+			n := 0
+			deepWalk(h.d.chat.views[msg.Seq].holder, func(o fyne.CanvasObject) {
+				if b, ok := o.(*widget.Button); ok && (b.Text == "Push now" || b.Text == "Wait") {
+					n++
+				}
+			})
+			return n
+		}
+		if count() != 2 {
+			t.Fatalf("choice buttons shown: %d", count())
+		}
+		h.d.sendTo(s, "my own answer")
+		if count() != 0 {
+			t.Fatal("replying removes the old card's buttons right away")
 		}
 	})
 }

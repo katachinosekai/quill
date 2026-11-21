@@ -144,7 +144,15 @@ func (d *desk) trySwap() {
 	d.swapping = true
 	d.stopMedia()
 	d.flushUI()
-	st := restoreState{Draft: d.input.Text, Hidden: d.hidden}
+	st := restoreState{Draft: d.boxDraft(d.current, d.input), Hidden: d.hidden}
+	if d.current != nil && !d.split() {
+		d.strip.keepDraft(d.current.id, st.Draft)
+	}
+	for _, p := range d.panes {
+		if p.view.s != nil {
+			d.strip.keepDraft(p.view.s.id, d.boxDraft(p.view.s, p.input))
+		}
+	}
 	d.saveQueues(&st)
 	d.saveSessions(&st)
 	if d.current != nil && d.current.persisted {

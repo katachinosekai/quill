@@ -547,6 +547,9 @@ func (v *chatView) update(items []*chat.Item) {
 	if added {
 		relayout(v.box)
 	}
+	if v.sel != nil && v.sel.has {
+		v.sel.Refresh()
+	}
 	v.keepUp()
 	v.stickSoon()
 }
@@ -1750,7 +1753,14 @@ func parseChoices(line string) (string, []string, bool) {
 	}
 	a := strings.TrimSpace(ask[:i])
 	b := strings.TrimSpace(ask[i+len(sep):])
-	if a == "" || b == "" || strings.Contains(b, " or ") {
+	low := strings.ToLower(a)
+	for _, stem := range []string{"do you want me to ", "would you like me to ", "should i ", "shall i ", "should we ", "shall we ", "do you want to ", "want me to ", "should it ", "do i "} {
+		if strings.HasPrefix(low, stem) {
+			a = strings.TrimSpace(a[len(stem):])
+			break
+		}
+	}
+	if a == "" || b == "" || strings.Contains(b, " or ") || len(strings.Fields(a)) > 12 || len(strings.Fields(b)) > 12 {
 		return "", nil, false
 	}
 	cap := func(s string) string {
@@ -1827,4 +1837,31 @@ func (d *desk) pickChoice(s *deskSession, it *chat.Item, option string) {
 	}
 	d.sendTo(s, option)
 	d.chatFor(s, []*chat.Item{it})
+}
+
+func (d *desk) refreshChoiceCards(s *deskSession, reply *chat.Item) {
+	var prev *chat.Item
+	for _, it := range s.conv.Items {
+		if it == reply {
+			break
+		}
+		if it.Kind == chat.Assistant && strings.TrimSpace(it.Text) != "" {
+			prev = it
+		}
+	}
+	if prev == nil {
+		return
+	}
+	text := strings.TrimRight(prev.Text, " \n")
+	if _, _, ok := parseChoices(text[strings.LastIndex(text, "\n")+1:]); !ok {
+		return
+	}
+	for _, v := range d.allViews() {
+		if v.s != s {
+			continue
+		}
+		if iv, ok := v.views[prev.Seq]; ok {
+			v.refreshItem(prev, iv)
+		}
+	}
 }

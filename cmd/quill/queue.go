@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -74,6 +75,7 @@ func (d *desk) syncQueue(s *deskSession) {
 		del := widget.NewButtonWithIcon("", theme.CancelIcon(), func() {
 			if i < len(s.queue) {
 				s.queue = append(s.queue[:i], s.queue[i+1:]...)
+				s.editRemoved(i)
 				d.syncQueue(s)
 			}
 		})
@@ -81,12 +83,20 @@ func (d *desk) syncQueue(s *deskSession) {
 		handle := container.NewCenter(sized(16, 16, widget.NewIcon(theme.MenuIcon())))
 		content := bg(colCard, 8, container.NewBorder(nil, nil, handle, container.NewHBox(now, edit, del), l))
 		var row *queueRow
+		q := q
 		row = newQueueRow(content, func(dy float32) {
 			step := row.Size().Height + theme.Padding()
 			if step <= 0 {
 				return
 			}
-			d.moveQueued(s, i, i+int(math.Round(float64(dy/step))))
+			from := i
+			if from >= len(s.queue) || s.queue[from] != q {
+				from = slices.Index(s.queue, q)
+			}
+			if from < 0 {
+				return
+			}
+			d.moveQueued(s, from, from+int(math.Round(float64(dy/step))))
 		})
 		rows = append(rows, row)
 	}
@@ -105,8 +115,35 @@ func (d *desk) inputFor(s *deskSession) *sendEntry {
 }
 
 type queueEdit struct {
-	idx  int
-	text string
+	idx   int
+	text  string
+	draft string
+}
+
+func (d *desk) boxDraft(s *deskSession, in *sendEntry) string {
+	if s != nil && s.qedit != nil {
+		return s.qedit.draft
+	}
+	if in == nil {
+		return ""
+	}
+	return in.Text
+}
+
+func (d *desk) idleForQueue(s *deskSession) bool {
+	return s.running() && !s.conv.Busy && !s.proc.Busy() && !s.compacting
+}
+
+func (s *deskSession) editRemoved(i int) {
+	if s.qedit != nil && i < s.qedit.idx {
+		s.qedit.idx--
+	}
+}
+
+func (s *deskSession) editInserted(i int) {
+	if s.qedit != nil && i <= s.qedit.idx {
+		s.qedit.idx++
+	}
 }
 
 type queueRow struct {
@@ -149,7 +186,9 @@ func (d *desk) moveQueued(s *deskSession, from, to int) {
 	if to != from {
 		item := s.queue[from]
 		rest := append(append([]string{}, s.queue[:from]...), s.queue[from+1:]...)
+		s.editRemoved(from)
 		s.queue = append(append(append([]string{}, rest[:to]...), item), rest[to:]...)
+		s.editInserted(to)
 	}
 	d.syncQueue(s)
 }
@@ -158,8 +197,13 @@ func (d *desk) sendQueuedNow(s *deskSession, i int) {
 	if i < 0 || i >= len(s.queue) {
 		return
 	}
+	if s.compacting || s.takeover || s.loading || s.terminal != nil && !s.running() {
+		d.notify(s, "This session can't take a message right now; it stays queued.")
+		return
+	}
 	text := s.queue[i]
 	s.queue = append(s.queue[:i], s.queue[i+1:]...)
+	s.editRemoved(i)
 	d.syncQueue(s)
 	d.sendTo(s, text)
 }
@@ -172,8 +216,11 @@ func (d *desk) cancelQueueEdit(s *deskSession) bool {
 	s.qedit = nil
 	idx := min(q.idx, len(s.queue))
 	s.queue = append(append(append([]string{}, s.queue[:idx]...), q.text), s.queue[idx:]...)
-	d.inputFor(s).SetText("")
+	d.inputFor(s).SetText(q.draft)
 	d.syncQueue(s)
+	if d.idleForQueue(s) {
+		d.flushQueue(s)
+	}
 	return true
 }
 
@@ -185,8 +232,9 @@ func (d *desk) editQueued(s *deskSession, i int) {
 		d.cancelQueueEdit(s)
 	}
 	text := s.queue[i]
+	draft := d.inputFor(s).Text
 	s.queue = append(s.queue[:i], s.queue[i+1:]...)
-	s.qedit = &queueEdit{idx: i, text: text}
+	s.qedit = &queueEdit{idx: i, text: text, draft: draft}
 	in := d.inputFor(s)
 	in.SetText(text)
 	in.CursorRow = strings.Count(text, "\n")

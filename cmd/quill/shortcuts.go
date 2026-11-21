@@ -40,6 +40,9 @@ func isNewTab(s fyne.Shortcut) bool {
 }
 
 func (d *desk) copySelection() bool {
+	if v := d.viewFor(d.current); v != nil && v.sel != nil && v.sel.copy() {
+		return true
+	}
 	for _, v := range d.allViews() {
 		if v.sel != nil && v.sel.copy() {
 			return true

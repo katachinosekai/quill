@@ -714,7 +714,7 @@ func (d *desk) saveSplit() *splitState {
 			id = p.view.s.id
 		}
 		st.Panes = append(st.Panes, id)
-		st.Drafts = append(st.Drafts, p.input.Text)
+		st.Drafts = append(st.Drafts, d.boxDraft(p.view.s, p.input))
 		if p == d.focused {
 			st.Focus = i
 		}

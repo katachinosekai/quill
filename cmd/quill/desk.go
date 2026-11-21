@@ -1514,15 +1514,16 @@ func (d *desk) send(text string) {
 		return
 	}
 	if s.qedit != nil {
-		idx := s.qedit.idx
+		idx, draft := s.qedit.idx, s.qedit.draft
 		s.qedit = nil
 		if s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
 			idx = min(idx, len(s.queue))
 			s.queue = append(append(append([]string{}, s.queue[:idx]...), text), s.queue[idx:]...)
-			d.clearInputFor(s, text)
+			d.inputFor(s).SetText(draft)
 			d.syncQueue(s)
 			return
 		}
+		defer d.inputFor(s).SetText(draft)
 	}
 	if s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
 		d.enqueue(s, text)
@@ -1602,6 +1603,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 	s.lastSent = text
 	s.inTurn = true
 	it := s.conv.AddUser(text)
+	d.refreshChoiceCards(s, it)
 	if s.title == "" {
 		s.title = oneLine(text, 60)
 	}

@@ -30,6 +30,41 @@ type selLayer struct {
 	has      bool
 	dragging bool
 	copyBtn  *widget.Button
+	pass     fyne.Draggable
+	passAt   fyne.Position
+}
+
+func (l *selLayer) draggableAt(p fyne.Position) (fyne.Draggable, fyne.Position) {
+	root := l.content()
+	if root == nil {
+		return nil, fyne.Position{}
+	}
+	origin := root.Position()
+	var hit fyne.Draggable
+	var at fyne.Position
+	driver.WalkVisibleObjectTree(root, func(o fyne.CanvasObject, pos fyne.Position, _ fyne.Position, _ fyne.Size) bool {
+		dr, ok := o.(fyne.Draggable)
+		if !ok || o == l {
+			return false
+		}
+		if _, row := o.(*queueRow); row {
+			return false
+		}
+		pos = pos.Subtract(origin)
+		sz := o.Size()
+		if p.X >= pos.X && p.X <= pos.X+sz.Width && p.Y >= pos.Y && p.Y <= pos.Y+sz.Height {
+			hit, at = dr, pos
+		}
+		return false
+	}, nil)
+	return hit, at
+}
+
+func (l *selLayer) Resize(s fyne.Size) {
+	l.BaseWidget.Resize(s)
+	if l.has {
+		l.Refresh()
+	}
 }
 
 func newSelLayer(v *chatView) *selLayer {
@@ -41,9 +76,28 @@ func newSelLayer(v *chatView) *selLayer {
 }
 
 func (l *selLayer) Dragged(e *fyne.DragEvent) {
+	if !l.dragging && l.pass == nil {
+		start := e.Position.Subtract(e.Dragged)
+		if dr, at := l.draggableAt(start); dr != nil {
+			l.pass, l.passAt = dr, at
+		}
+	}
+	if l.pass != nil {
+		ev := *e
+		ev.Position = e.Position.Subtract(l.passAt)
+		l.pass.Dragged(&ev)
+		return
+	}
 	if !l.dragging {
 		l.dragging = true
 		l.from = e.Position.Subtract(e.Dragged)
+		if l.v != nil && l.v.d != nil {
+			for _, v := range l.v.d.allViews() {
+				if v.sel != nil && v.sel != l {
+					v.sel.clear()
+				}
+			}
+		}
 	}
 	l.to = e.Position
 	l.has = true
@@ -65,6 +119,7 @@ func (l *selLayer) autoScroll() {
 	switch {
 	case y < edgeScroll:
 		off = max(0, off-edgeScroll)
+		l.v.follow = false
 	case y > view-edgeScroll:
 		off = min(max(0, content-view), off+edgeScroll)
 	default:
@@ -112,6 +167,12 @@ func (l *selLayer) selectAll() {
 }
 
 func (l *selLayer) DragEnd() {
+	if l.pass != nil {
+		p := l.pass
+		l.pass = nil
+		p.DragEnd()
+		return
+	}
 	l.dragging = false
 	l.Refresh()
 }
