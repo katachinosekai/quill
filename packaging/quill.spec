@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.11
+Version:        0.1.12
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -62,6 +62,11 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
 
 %changelog
+* Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.12-1
+- kmem sessions (when kmem is installed): new sessions can start a new kmem or resume a saved handoff, the sidebar shows each session's kmem name, and Restart as new session saves the handoff, resumes from it in a fresh session and deletes the old one
+- Sessions started from a kmem-resume prompt are linked to their kmem automatically
+- Prompts approved with the plan no longer show a line in the chat
+
 * Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.11-1
 - Plan cards: replying with step numbers that cover every step (like "1-4" on a 4-step plan) approves the plan
 
