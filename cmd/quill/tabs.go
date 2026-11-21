@@ -223,6 +223,9 @@ func (d *desk) followDraft() {
 		d.chat.queueBox.Refresh()
 	}
 	first := d.strip.lastCur == ""
+	if prev := d.sessions[d.strip.lastCur]; prev != nil && prev.qedit != nil {
+		d.cancelQueueEdit(prev)
+	}
 	d.strip.keepDraft(d.strip.lastCur, d.input.Text)
 	d.strip.lastCur = cur
 	text := d.strip.draft(cur)

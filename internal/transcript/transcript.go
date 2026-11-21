@@ -349,6 +349,9 @@ func Load(path string) (*chat.Conversation, error) {
 	for {
 		line, err := r.ReadBytes('\n')
 		if len(bytes.TrimSpace(line)) > 0 {
+			if bytes.Contains(line, []byte("<task-notification>")) {
+				c.NoteNotifications(string(line))
+			}
 			if ev, perr := protocol.ParseLine(line); perr == nil {
 				switch ev.Type {
 				case "user", "assistant":

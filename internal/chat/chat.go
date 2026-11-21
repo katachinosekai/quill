@@ -1,11 +1,13 @@
 package chat
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/katachinosekai/quill/internal/protocol"
 )
@@ -84,6 +86,7 @@ type Conversation struct {
 	byRequest  map[string]*Item
 	seq        int
 	bgTasks    map[string]bool
+	CacheTTL   time.Duration
 }
 
 func New() *Conversation {
@@ -212,6 +215,9 @@ func (c *Conversation) CancelPlans() []*Item {
 }
 
 func (c *Conversation) Apply(ev *protocol.Event) []*Item {
+	if len(c.bgTasks) > 0 && bytes.Contains(ev.Raw, []byte("<task-notification>")) {
+		c.NoteNotifications(string(ev.Raw))
+	}
 	if ev.IsSidechain || ev.IsSubagent() {
 		return nil
 	}
@@ -387,6 +393,12 @@ func (c *Conversation) applyAssistant(ev *protocol.Event) []*Item {
 	}
 	if u := ev.Message.Usage; u != nil && u.Context() > 0 {
 		c.Stats.ContextUsed = u.Context()
+		switch {
+		case u.CacheCreation.Ephemeral1h > 0:
+			c.CacheTTL = time.Hour
+		case u.CacheCreation.Ephemeral5m > 0:
+			c.CacheTTL = 5 * time.Minute
+		}
 	}
 	var out []*Item
 	for _, b := range ev.Message.Blocks() {
@@ -691,15 +703,22 @@ func (c *Conversation) trackTask(it *Item) {
 }
 
 func (c *Conversation) taskNotification(text string) {
-	if !strings.Contains(text, "<task-notification>") {
-		return
+	c.NoteNotifications(text)
+}
+
+func (c *Conversation) NoteNotifications(text string) {
+	parts := strings.Split(text, "<task-notification>")
+	for _, part := range parts[1:] {
+		if end := strings.Index(part, "</task-notification>"); end >= 0 {
+			part = part[:end]
+		}
+		id := notifyID.FindStringSubmatch(part)
+		st := notifyState.FindStringSubmatch(part)
+		if id == nil || st == nil || !taskDone[st[1]] {
+			continue
+		}
+		delete(c.bgTasks, id[1])
 	}
-	id := notifyID.FindStringSubmatch(text)
-	st := notifyState.FindStringSubmatch(text)
-	if id == nil || st == nil || !taskDone[st[1]] {
-		return
-	}
-	delete(c.bgTasks, id[1])
 }
 
 func (c *Conversation) Background() int {

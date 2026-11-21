@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"math"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -58,10 +60,15 @@ func (d *desk) syncQueue(s *deskSession) {
 	if len(s.queue) > 0 {
 		rows = append(rows, mutedText("Queued, sent when Claude finishes · ↑ in an empty box edits the last one", fontMeta))
 	}
+	if s.qedit != nil {
+		rows = append(rows, mutedText(fmt.Sprintf("Editing queued message %d · Enter saves it in place · ↓ or Esc puts it back unchanged", s.qedit.idx+1), fontMeta))
+	}
 	for i, q := range s.queue {
 		i := i
 		l := widget.NewLabel(oneLine(q, 160))
 		l.Truncation = fyne.TextTruncateEllipsis
+		now := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.sendQueuedNow(s, i) })
+		now.Importance = widget.LowImportance
 		edit := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() { d.editQueued(s, i) })
 		edit.Importance = widget.LowImportance
 		del := widget.NewButtonWithIcon("", theme.CancelIcon(), func() {
@@ -71,7 +78,17 @@ func (d *desk) syncQueue(s *deskSession) {
 			}
 		})
 		del.Importance = widget.LowImportance
-		rows = append(rows, bg(colCard, 8, container.NewBorder(nil, nil, nil, container.NewHBox(edit, del), l)))
+		handle := container.NewCenter(sized(16, 16, widget.NewIcon(theme.MenuIcon())))
+		content := bg(colCard, 8, container.NewBorder(nil, nil, handle, container.NewHBox(now, edit, del), l))
+		var row *queueRow
+		row = newQueueRow(content, func(dy float32) {
+			step := row.Size().Height + theme.Padding()
+			if step <= 0 {
+				return
+			}
+			d.moveQueued(s, i, i+int(math.Round(float64(dy/step))))
+		})
+		rows = append(rows, row)
 	}
 	v.queueBox.Objects = rows
 	v.queueBox.Refresh()
@@ -87,12 +104,89 @@ func (d *desk) inputFor(s *deskSession) *sendEntry {
 	return d.input
 }
 
-func (d *desk) editQueued(s *deskSession, i int) {
+type queueEdit struct {
+	idx  int
+	text string
+}
+
+type queueRow struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+	dy      float32
+	onDrop  func(dy float32)
+}
+
+func newQueueRow(content fyne.CanvasObject, onDrop func(dy float32)) *queueRow {
+	r := &queueRow{content: content, onDrop: onDrop}
+	r.ExtendBaseWidget(r)
+	return r
+}
+
+func (r *queueRow) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(r.content)
+}
+
+func (r *queueRow) Dragged(e *fyne.DragEvent) {
+	r.dy += e.Dragged.DY
+	r.content.Move(fyne.NewPos(0, r.dy))
+	r.content.Refresh()
+}
+
+func (r *queueRow) DragEnd() {
+	dy := r.dy
+	r.dy = 0
+	r.content.Move(fyne.NewPos(0, 0))
+	if r.onDrop != nil {
+		r.onDrop(dy)
+	}
+}
+
+func (d *desk) moveQueued(s *deskSession, from, to int) {
+	if from < 0 || from >= len(s.queue) {
+		return
+	}
+	to = max(0, min(to, len(s.queue)-1))
+	if to != from {
+		item := s.queue[from]
+		rest := append(append([]string{}, s.queue[:from]...), s.queue[from+1:]...)
+		s.queue = append(append(append([]string{}, rest[:to]...), item), rest[to:]...)
+	}
+	d.syncQueue(s)
+}
+
+func (d *desk) sendQueuedNow(s *deskSession, i int) {
 	if i < 0 || i >= len(s.queue) {
 		return
 	}
 	text := s.queue[i]
 	s.queue = append(s.queue[:i], s.queue[i+1:]...)
+	d.syncQueue(s)
+	d.sendTo(s, text)
+}
+
+func (d *desk) cancelQueueEdit(s *deskSession) bool {
+	if s == nil || s.qedit == nil {
+		return false
+	}
+	q := s.qedit
+	s.qedit = nil
+	idx := min(q.idx, len(s.queue))
+	s.queue = append(append(append([]string{}, s.queue[:idx]...), q.text), s.queue[idx:]...)
+	d.inputFor(s).SetText("")
+	d.syncQueue(s)
+	return true
+}
+
+func (d *desk) editQueued(s *deskSession, i int) {
+	if i < 0 || i >= len(s.queue) {
+		return
+	}
+	if s.qedit != nil {
+		d.cancelQueueEdit(s)
+	}
+	text := s.queue[i]
+	s.queue = append(s.queue[:i], s.queue[i+1:]...)
+	s.qedit = &queueEdit{idx: i, text: text}
 	in := d.inputFor(s)
 	in.SetText(text)
 	in.CursorRow = strings.Count(text, "\n")
@@ -124,6 +218,9 @@ func userHistory(s *deskSession) []string {
 }
 
 func (d *desk) historyKey(e *sendEntry, s *deskSession, k *fyne.KeyEvent) bool {
+	if s != nil && s.qedit != nil && (k.Name == fyne.KeyEscape || k.Name == fyne.KeyDown && e.CursorRow == strings.Count(e.Text, "\n")) {
+		return d.cancelQueueEdit(s)
+	}
 	if s == nil || (k.Name != fyne.KeyUp && k.Name != fyne.KeyDown) {
 		return false
 	}

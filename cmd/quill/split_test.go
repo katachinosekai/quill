@@ -15,8 +15,10 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -696,8 +698,10 @@ func TestPlanApprovedPromptsAreHidden(t *testing.T) {
 
 func TestAutoHandoffPolicy(t *testing.T) {
 	for out, want := range map[string]handoffPolicy{
-		"soft=40 hard=80 mode=ask": {40, 80, "ask"},
-		"mode=off":                 {50, 75, "off"},
+		"soft=40 hard=80 mode=ask": {Soft: 40, Hard: 80, Mode: "ask"},
+		"mode=off":                 {Soft: 50, Hard: 75, Mode: "off"},
+		"ttl=5":                    {Soft: 50, Hard: 75, Mode: "auto", TTL: 5 * time.Minute},
+		"soft=50 ttl=1h":           {Soft: 50, Hard: 75, Mode: "auto", TTL: time.Hour},
 		"soft=90 hard=80":          defaultPolicy,
 		"usage: kmem handoff ...":  defaultPolicy,
 		"soft=0 hard=75":           defaultPolicy,
@@ -1201,6 +1205,192 @@ func TestChatTextSelection(t *testing.T) {
 		h.d.clearSelections()
 		if h.d.chat.sel.has || h.d.copySelection() {
 			t.Fatal("Escape clears the selection")
+		}
+	})
+}
+
+func TestStreamingMarkdownAndPlanCard(t *testing.T) {
+	for in, want := range map[string]string{
+		"Here:\n```go\nfunc x() {":      "Here:\n```go\nfunc x() {\n```",
+		"Done.\n```\nok\n```\nMore":     "Done.\n```\nok\n```\nMore",
+		"This is **bol":                 "This is **bol**",
+		"This is **":                    "This is ",
+		"Use `go te":                    "Use `go te`",
+		"**bold `cod":                   "**bold `cod`**",
+		"a **b** and `c` done":          "a **b** and `c` done",
+		"First para **x**\n\nSecond `y": "First para **x**\n\nSecond `y`",
+	} {
+		if got := closeOpenMarkdown(in); got != want {
+			t.Errorf("closeOpenMarkdown(%q) = %q, want %q", in, got, want)
+		}
+	}
+	c := chat.New()
+	c.AddUser("do it")
+	c.Items = append(c.Items, &chat.Item{Kind: chat.Assistant, Text: "Plan:\n1. build\n\n**Approve 1–6, and should auto-handoff also rotate when the cache has gone cold?**"})
+	c.MarkPlanText()
+	plan := c.AddPlan()
+	if got := planQuestion(c, plan); got != "Approve 1–6, and should auto-handoff also rotate when the cache has gone cold?" {
+		t.Fatalf("the plan card asks Claude's own question: %q", got)
+	}
+	c2 := chat.New()
+	c2.Items = append(c2.Items, &chat.Item{Kind: chat.Assistant, Text: "Plan:\n1. build\n2. test"})
+	if got := planQuestion(c2, c2.AddPlan()); got != "Approve this plan?" {
+		t.Fatalf("without a question the card keeps the generic title: %q", got)
+	}
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		msg := &chat.Item{Seq: 950, Kind: chat.Assistant, Text: "Plan:\n1. build\n\n**Approve?**", InPlan: true}
+		s.conv.Items = append(s.conv.Items, msg)
+		found := false
+		var look func(o fyne.CanvasObject)
+		look = func(o fyne.CanvasObject) {
+			walk(o, func(x fyne.CanvasObject) {
+				switch y := x.(type) {
+				case *widget.RichText:
+					found = found || strings.Contains(y.String(), "Plan:")
+				case *container.ThemeOverride:
+					look(y.Content)
+				}
+			})
+		}
+		look(h.d.chat.render(msg, &itemView{}))
+		if !found {
+			t.Fatal("a plan message stays where it streamed instead of moving into the card")
+		}
+	})
+	for text, want := range map[string]bool{
+		"yes approve all, add the cold cache rotation too, for approval prompts can you change approval message to match the prompted approval message?": true,
+		"yes, approve. also look at the tabs": true,
+		"I approve, and add a test for it?":   true,
+		"yes approve but skip step 2":         false,
+		"yes approve, don't push":             false,
+		"approve all except the release":      false,
+		"yes, can you change it first?":       false,
+	} {
+		if isApproval(text) != want {
+			t.Errorf("isApproval(%q) = %v", text, !want)
+		}
+	}
+}
+
+func TestQueueEditSendNowAndReorder(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.open(s.id)
+		s.compacting = true
+		for _, m := range []string{"one", "two", "three"} {
+			h.d.send(m)
+		}
+		key := func(name fyne.KeyName) bool { return h.d.historyKey(h.d.input, s, &fyne.KeyEvent{Name: name}) }
+		if !reflect.DeepEqual(s.queue, []string{"one", "two", "three"}) {
+			t.Fatalf("queued: %v", s.queue)
+		}
+		key(fyne.KeyUp)
+		if h.d.input.Text != "three" || s.qedit == nil || len(s.queue) != 2 {
+			t.Fatal("up opens the newest queued message for editing")
+		}
+		key(fyne.KeyDown)
+		if h.d.input.Text != "" || s.qedit != nil || !reflect.DeepEqual(s.queue, []string{"one", "two", "three"}) {
+			t.Fatalf("down puts it back unchanged: %v", s.queue)
+		}
+		h.d.editQueued(s, 0)
+		h.d.input.SetText("one, edited")
+		key(fyne.KeyEscape)
+		if !reflect.DeepEqual(s.queue, []string{"one", "two", "three"}) {
+			t.Fatalf("Escape discards the edit and restores the original in place: %v", s.queue)
+		}
+		h.d.editQueued(s, 1)
+		h.d.send("two, edited")
+		if !reflect.DeepEqual(s.queue, []string{"one", "two, edited", "three"}) || s.qedit != nil {
+			t.Fatalf("Enter saves the edit in its own position: %v", s.queue)
+		}
+		h.d.editQueued(s, 2)
+		other := h.d.createSession(h.proj, "default", "default")
+		h.d.open(other.id)
+		if !reflect.DeepEqual(s.queue, []string{"one", "two, edited", "three"}) {
+			t.Fatalf("switching sessions puts an unsaved edit back: %v", s.queue)
+		}
+		h.d.open(s.id)
+		h.d.moveQueued(s, 2, 0)
+		if !reflect.DeepEqual(s.queue, []string{"three", "one", "two, edited"}) {
+			t.Fatalf("reorder: %v", s.queue)
+		}
+		h.d.syncQueue(s)
+		var rows []*queueRow
+		for _, o := range h.d.chat.queueBox.Objects {
+			if r, ok := o.(*queueRow); ok {
+				rows = append(rows, r)
+			}
+		}
+		if len(rows) != 3 {
+			t.Fatalf("one draggable row per queued message: %d", len(rows))
+		}
+		rows[0].Resize(fyne.NewSize(300, 40))
+		rows[0].Dragged(&fyne.DragEvent{Dragged: fyne.NewDelta(0, 2*(40+theme.Padding()))})
+		rows[0].DragEnd()
+		if !reflect.DeepEqual(s.queue, []string{"one", "two, edited", "three"}) {
+			t.Fatalf("dragging a row two rows down moves it there: %v", s.queue)
+		}
+		s.compacting = false
+		h.d.sendQueuedNow(s, 1)
+		if !reflect.DeepEqual(s.queue, []string{"one", "three"}) {
+			t.Fatalf("send now takes just that message out of the queue: %v", s.queue)
+		}
+		last := s.conv.Items[len(s.conv.Items)-1]
+		if last.Kind != chat.User || last.Text != "two, edited" {
+			t.Fatalf("and sends it right away: %+v", last)
+		}
+	})
+}
+
+func TestColdCacheRotation(t *testing.T) {
+	h := newHarness(t)
+	var fire func()
+	h.d.after = func(_ time.Duration, f func()) { fire = f }
+	h.d.kmemOff = false
+	h.d.kmemRun = func(prog string, args ...string) (string, error) {
+		if prog == "kmem" && len(args) > 1 && args[1] == "policy" {
+			return "soft=50 hard=75 mode=auto", nil
+		}
+		return "", errors.New("unexpected")
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy })
+	h.eventually("policy", func() bool { h.d.handoffPolicy(); return !h.d.policyAt.IsZero() })
+	h.ui(func() {
+		h.d.org.Kmem[s.id] = "quill"
+		s.conv.Stats.ContextMax, s.conv.Stats.ContextUsed = 1000, 600
+		s.conv.CacheTTL = 5 * time.Minute
+		if got := cacheTTL(s, h.d.handoffPolicy()); got != 5*time.Minute {
+			t.Fatalf("the session's own cache lifetime is used: %v", got)
+		}
+		h.d.checkAutoHandoff(s)
+		if fire == nil || s.kmemSave != nil {
+			t.Fatal("above the soft threshold a cold-cache check is scheduled, nothing rotates yet")
+		}
+	})
+	saved := fire
+	h.ui(func() { h.d.sendTo(s, "more work") })
+	h.eventually("turn over", func() bool { return !s.conv.Busy })
+	saved()
+	h.ui(func() {
+		if s.kmemSave != nil {
+			t.Fatal("a new turn since then cancels the cold rotation")
+		}
+		s.conv.Stats.ContextMax, s.conv.Stats.ContextUsed = 1000, 600
+		h.d.checkAutoHandoff(s)
+	})
+	fire()
+	h.ui(func() {
+		if s.kmemSave == nil || s.kmemSave.name != "quill" {
+			t.Fatal("after the cache lifetime with no new turn, the session rotates through kmem")
 		}
 	})
 }
