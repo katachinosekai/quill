@@ -29,7 +29,7 @@ appimage:
 # No voice input (whisper.cpp is linked for Linux only).
 windows:
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc \
-		go build -ldflags "-H windowsgui -X main.version=$(VERSION)" -o dist/quill-windows-amd64.exe ./cmd/quill
+		go build -trimpath -ldflags "-H windowsgui -X main.version=$(VERSION)" -o dist/quill-windows-amd64.exe ./cmd/quill
 
 # Bundle the current kmem (KMEM_REF=tag or commit, default the kmem repo's HEAD).
 # Run before every release; TestBundledKmemIsCurrent fails when it is behind.
