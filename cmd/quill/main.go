@@ -118,6 +118,7 @@ func runWindowWith(claudeBin, sock string) int {
 		startHidden = false
 	}
 	d.setupShortcuts()
+	d.refreshLocalModels()
 	go func() {
 		time.Sleep(2 * time.Second)
 		d.do(d.checkCrashReports)

@@ -930,7 +930,6 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	})
 	d.backendSel.Horizontal = true
 	d.backendSel.Required = true
-	d.refreshLocalModels()
 	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands", fontMeta)
 	d.stats = mutedText("", fontMeta)
 	d.stopBtn = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
