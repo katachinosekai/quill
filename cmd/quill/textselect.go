@@ -201,30 +201,84 @@ func charAt(r textRun, x float32) int {
 	return len(rs)
 }
 
-func hitRun(runs []textRun, p fyne.Position) selPoint {
-	if len(runs) == 0 {
-		return selPoint{-1, 0}
-	}
-	best := -1
+type textRow struct {
+	top, bottom float32
+	first, last int
+}
+
+func buildRows(runs []textRun) []textRow {
+	var rows []textRow
 	for i, r := range runs {
 		h := r.t.Size().Height
-		if p.Y < r.pos.Y || p.Y > r.pos.Y+h {
+		mid := r.pos.Y + h/2
+		if n := len(rows); n > 0 && mid >= rows[n-1].top && mid <= rows[n-1].bottom {
+			rows[n-1].last = i
+			rows[n-1].bottom = max(rows[n-1].bottom, r.pos.Y+h)
 			continue
 		}
-		if best == -1 || p.X >= textStart(r) {
-			best = i
+		rows = append(rows, textRow{top: r.pos.Y, bottom: r.pos.Y + h, first: i, last: i})
+	}
+	return rows
+}
+
+func runEnd(r textRun) float32 {
+	return charX(r, len([]rune(r.t.Text)))
+}
+
+func hitRun(runs []textRun, p fyne.Position) selPoint {
+	rows := buildRows(runs)
+	if len(rows) == 0 {
+		return selPoint{-1, 0}
+	}
+	k := len(rows) - 1
+	for i := range rows {
+		hi := rows[i].bottom
+		if i+1 < len(rows) {
+			hi = (rows[i].bottom + rows[i+1].top) / 2
+		}
+		if p.Y <= hi || i == len(rows)-1 {
+			k = i
+			break
 		}
 	}
-	if best >= 0 {
-		return selPoint{best, charAt(runs[best], p.X)}
+	row := rows[k]
+	if p.X <= textStart(runs[row.first]) {
+		return selPoint{row.first, 0}
 	}
-	for i, r := range runs {
-		if r.pos.Y > p.Y {
+	for i := row.first; i <= row.last; i++ {
+		r := runs[i]
+		if p.X < textStart(r) {
+			prev := runs[i-1]
+			if p.X-runEnd(prev) < textStart(r)-p.X {
+				return selPoint{i - 1, len([]rune(prev.t.Text))}
+			}
 			return selPoint{i, 0}
 		}
+		if p.X <= runEnd(r) {
+			return selPoint{i, charAt(r, p.X)}
+		}
 	}
-	last := len(runs) - 1
-	return selPoint{last, len([]rune(runs[last].t.Text))}
+	return selPoint{row.last, len([]rune(runs[row.last].t.Text))}
+}
+
+func isSpace(r rune) bool {
+	return r == ' ' || r == '\t'
+}
+
+func wordStart(r textRun, c int) int {
+	rs := []rune(r.t.Text)
+	for c > 0 && c <= len(rs) && !isSpace(rs[c-1]) {
+		c--
+	}
+	return c
+}
+
+func wordEnd(r textRun, c int) int {
+	rs := []rune(r.t.Text)
+	for c < len(rs) && !isSpace(rs[c]) {
+		c++
+	}
+	return c
 }
 
 func (l *selLayer) span(runs []textRun) (selPoint, selPoint, bool) {
@@ -232,11 +286,19 @@ func (l *selLayer) span(runs []textRun) (selPoint, selPoint, bool) {
 		return selPoint{}, selPoint{}, false
 	}
 	a, b := hitRun(runs, l.from), hitRun(runs, l.to)
+	if a.run < 0 || b.run < 0 {
+		return selPoint{}, selPoint{}, false
+	}
 	if b.run < a.run || b.run == a.run && b.char < a.char {
 		a, b = b, a
 	}
 	if a.run == b.run && a.char == b.char {
 		return a, b, false
+	}
+	same := a.run == b.run && !strings.ContainsFunc(string([]rune(runs[a.run].t.Text)[a.char:b.char]), isSpace)
+	if !same {
+		a.char = wordStart(runs[a.run], a.char)
+		b.char = wordEnd(runs[b.run], b.char)
 	}
 	return a, b, true
 }
@@ -333,39 +395,59 @@ func (r *selRenderer) Refresh() {
 	a, b, ok := l.span(runs)
 	col := theme.Color(theme.ColorNameSelection)
 	var last fyne.Position
+	var lastH float32
 	if ok {
-		for i := a.run; i <= b.run; i++ {
-			run := runs[i]
-			c0, c1 := 0, len([]rune(run.t.Text))
-			if i == a.run {
-				c0 = a.char
-			}
-			if i == b.run {
-				c1 = b.char
-			}
-			if c1 <= c0 {
+		rows := buildRows(runs)
+		for k, row := range rows {
+			if row.last < a.run || row.first > b.run {
 				continue
 			}
-			x0, x1 := charX(run, c0), charX(run, c1)
+			x0, x1 := float32(-1), float32(-1)
+			for i := max(row.first, a.run); i <= min(row.last, b.run); i++ {
+				run := runs[i]
+				c0, c1 := 0, len([]rune(run.t.Text))
+				if i == a.run {
+					c0 = a.char
+				}
+				if i == b.run {
+					c1 = b.char
+				}
+				if c1 < c0 {
+					continue
+				}
+				lo, hi := charX(run, c0), charX(run, c1)
+				if x0 < 0 || lo < x0 {
+					x0 = lo
+				}
+				if hi > x1 {
+					x1 = hi
+				}
+			}
+			if x0 < 0 || x1 <= x0 {
+				continue
+			}
+			bottom := row.bottom
+			if k+1 < len(rows) && rows[k+1].first <= b.run && rows[k+1].top-row.bottom < (row.bottom-row.top)/2 {
+				bottom = rows[k+1].top
+			}
 			rect := canvas.NewRectangle(col)
-			rect.Move(fyne.NewPos(x0, run.pos.Y))
-			rect.Resize(fyne.NewSize(x1-x0, run.t.Size().Height))
+			rect.CornerRadius = 3
+			rect.Move(fyne.NewPos(x0, row.top))
+			rect.Resize(fyne.NewSize(x1-x0, bottom-row.top))
 			r.rects = append(r.rects, rect)
-			last = fyne.NewPos(x1, run.pos.Y+run.t.Size().Height)
+			last = fyne.NewPos(max(x1, runEnd(runs[row.last])), row.top)
+			lastH = row.bottom - row.top
 		}
 	}
 	r.objs = append([]fyne.CanvasObject{}, r.rects...)
 	if ok && !l.dragging {
 		btn := l.copyBtn
 		size := btn.MinSize()
-		x := last.X - size.Width
-		if x < 0 {
-			x = 0
+		pos := fyne.NewPos(last.X+6, last.Y-(size.Height-lastH)/2)
+		if w := l.Size().Width; w > 0 && pos.X+size.Width > w {
+			pos = fyne.NewPos(max(0, min(last.X-size.Width, w-size.Width)), last.Y+lastH+2)
 		}
-		if w := l.Size().Width; w > 0 && x+size.Width > w {
-			x = w - size.Width
-		}
-		btn.Move(fyne.NewPos(x, last.Y+2))
+		btn.Move(pos)
 		btn.Resize(size)
 		r.objs = append(r.objs, btn)
 	}
