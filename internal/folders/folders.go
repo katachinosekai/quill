@@ -261,11 +261,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+func phoneInterface(name string, flags net.Flags) bool {
+	if flags&net.FlagUp == 0 || flags&net.FlagRunning == 0 || flags&net.FlagLoopback != 0 {
+		return false
+	}
+	for _, p := range []string{"docker", "br-", "veth", "virbr"} {
+		if strings.HasPrefix(name, p) {
+			return false
+		}
+	}
+	return true
+}
+
 func LocalHosts() []string {
 	var private, tailnet, other []string
 	ifs, _ := net.Interfaces()
 	for _, i := range ifs {
-		if i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 {
+		if !phoneInterface(i.Name, i.Flags) {
 			continue
 		}
 		addrs, _ := i.Addrs()

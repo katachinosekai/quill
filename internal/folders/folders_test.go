@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -131,5 +132,17 @@ func TestPairLinkAndGist(t *testing.T) {
 	}
 	if l := (Pair{Name: "box"}).Link(); strings.Contains(l, "k=") || strings.Contains(l, "g=") {
 		t.Errorf("name-only link: %q", l)
+	}
+}
+
+func TestPhoneInterfaces(t *testing.T) {
+	up := net.FlagUp | net.FlagRunning
+	for name, want := range map[string]bool{"enp9s0": true, "wlp10s0": true, "tailscale0": true, "docker0": false, "br-1234abcd": false, "veth0a1b": false, "virbr0": false} {
+		if phoneInterface(name, up) != want {
+			t.Errorf("%s: want %v", name, want)
+		}
+	}
+	if phoneInterface("enp9s0", net.FlagUp) || phoneInterface("lo", up|net.FlagLoopback) {
+		t.Error("no link or loopback is skipped")
 	}
 }
