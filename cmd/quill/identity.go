@@ -211,6 +211,9 @@ func (d *desk) resumeFromHandoff(id string) *deskSession {
 }
 
 func (d *desk) renameSession(id, name string) {
+	if s := d.sessions[id]; s != nil && s.remote != nil || strings.HasPrefix(id, remotePrefix) {
+		return // another PC's session: memory only, renamed there
+	}
 	d.org.Titles[id] = name
 	d.retitled(id)
 }

@@ -110,7 +110,9 @@ func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
 		if s == nil {
 			return false
 		}
-		if arg != "" {
+		if s.remote != nil {
+			note("This session runs on another PC; rename it in Quill Desktop there.")
+		} else if arg != "" {
 			d.renameSession(s.id, arg)
 			note("Renamed this session to “" + arg + "”.")
 		} else {

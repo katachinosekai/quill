@@ -187,6 +187,10 @@ type desk struct {
 	kmemOff      bool
 	escClosers   map[fyne.CanvasObject]func()
 	kmemVer      kmemVersion
+	pcLock       *pcLock
+	pcBox        *fyne.Container
+	pcsBtn       *widget.Button
+	pcNote       map[string]string
 	hsMu         sync.Mutex
 	lastHandoffs []kmemHandoff
 	policy       handoffPolicy
@@ -378,6 +382,8 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		do:            fyne.Do,
 		doWait:        fyne.DoAndWait,
 	}
+	d.pcLock = newPCLock()
+	d.pcNote = map[string]string{}
 	d.loadOrg()
 	d.loadRules()
 	d.loadSortState()
@@ -495,7 +501,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	openKmem := widget.NewButtonWithIcon("kmem", theme.StorageIcon(), d.showKmemPanel)
 	openKmem.Importance = widget.LowImportance
 	openKmem.Alignment = widget.ButtonAlignLeading
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), openSettings, openKmem, legend)
+	d.pcBox = container.NewVBox()
+	d.refreshPCBox()
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), d.pcBox, openSettings, openKmem, legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -920,6 +928,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.menuOpen = d.cmds.visible
 	d.input.OnChanged = func(t string) {
 		d.lastTyped = time.Now()
+		d.noteActivity(d.current)
 		d.cmds.update(t)
 	}
 	d.input.onSendNow = d.sendNow
@@ -1169,6 +1178,7 @@ func (d *desk) session(id string) *deskSession {
 }
 
 func (d *desk) open(id string) {
+	d.noteActivity(d.sessions[id])
 	if d.cmds != nil {
 		d.cmds.hide()
 	}

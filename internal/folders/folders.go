@@ -166,6 +166,7 @@ type Server struct {
 	phones   []Phone
 	revoked  chan struct{}
 	seen     func(id string)
+	gate     func(id string, r *http.Request) (ok bool, msg string)
 	api      http.Handler
 	idem     *idemStore
 	data     []byte
@@ -201,6 +202,16 @@ func (s *Server) Set(data []byte) {
 	s.mu.Unlock()
 }
 
+// SetGate decides, per request of a known device, whether it is unlocked.
+// /phone/hello and /phone/unlock always pass (a device must be able to
+// introduce itself and unlock); everything else of a locked device, the
+// folders file, events and usage included, gets 401 "locked".
+func (s *Server) SetGate(g func(id string, r *http.Request) (bool, string)) {
+	s.mu.Lock()
+	s.gate = g
+	s.mu.Unlock()
+}
+
 func (s *Server) Close() error {
 	return s.srv.Close()
 }
@@ -217,7 +228,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	data, seen, api := s.data, s.seen, s.api
+	data, seen, api, gate := s.data, s.seen, s.api, s.gate
 	id := matchPhone(s.phones, r.Header.Get("X-Quill-Key"))
 	s.mu.Unlock()
 	if id == "" {
@@ -230,6 +241,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if seen != nil {
 		seen(id)
+	}
+	if gate != nil && r.URL.Path != "/phone/hello" && r.URL.Path != "/phone/unlock" {
+		if ok, msg := gate(id, r); !ok {
+			WriteError(w, http.StatusUnauthorized, "locked", msg)
+			return
+		}
 	}
 	if phone {
 		if api == nil {

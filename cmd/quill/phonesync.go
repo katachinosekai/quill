@@ -203,6 +203,7 @@ func (d *desk) startPhoneServer() error {
 	s.SetSeen(func(id string) { d.do(func() { d.phoneSeen(id) }) })
 	p.api = newPhoneAPI(d, s)
 	s.SetAPI(p.api)
+	s.SetGate(d.pcGate)
 	p.server, p.fp = s, fp
 	d.publishPhone(true)
 	return nil
@@ -334,6 +335,7 @@ func (d *desk) revokePhone(id string) {
 	list := d.phones()
 	for i, ph := range list {
 		if ph.ID == id {
+			d.pcLock.forget(id)
 			d.setPhones(append(list[:i:i], list[i+1:]...))
 			return
 		}
@@ -363,7 +365,13 @@ func (d *desk) updatePhoneList() {
 			}, d.win)
 		})
 		revoke.Importance = widget.LowImportance
-		rows = append(rows, container.NewBorder(nil, nil, nil, revoke, widget.NewLabel(ph.Name+" · "+seen)))
+		kind := map[string]string{"pc": "PC", "phone": "phone"}[ph.Kind]
+		if kind != "" {
+			seen = kind + " · " + seen
+		}
+		lock := widget.NewCheck("Password", func(on bool) { d.setDeviceLock(ph.ID, on) })
+		lock.Checked = ph.NeedsUnlock()
+		rows = append(rows, container.NewBorder(nil, nil, nil, container.NewHBox(lock, revoke), widget.NewLabel(ph.Name+" · "+seen)))
 	}
 	if len(rows) == 0 {
 		rows = append(rows, mutedText("No paired devices", fontMeta))
@@ -468,7 +476,7 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	head := mutedText("Devices", fontMeta)
 	p.list = container.NewVBox()
 	d.updatePhoneList()
-	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), notifyChk, controlChk, p.status)
+	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), notifyChk, controlChk, d.pcLockSettings(), p.status)
 }
 
 func (d *desk) updatePhoneRow() {

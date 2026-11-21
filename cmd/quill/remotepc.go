@@ -33,6 +33,13 @@ import (
 // of its live sessions as a tab with a remote icon and the PC's name. Tabs
 // come and go with the sessions there. Everything goes over the paired,
 // pinned-TLS link; remote sessions are never re-exported to our own phones.
+//
+// Connections are on demand (user 2026-11-21): nothing connects at start; a
+// click on the PC (sidebar or Settings → Other PCs) asks for that PC's
+// password, and its sessions and chats then live only in memory: no tabs,
+// titles, drafts, kmem names or restore data are saved for them, and
+// disconnecting (by hand, after the idle time, when the PC locks us out, or
+// on reload/quit) drops them all.
 
 const remotePrefix = "r~"
 
@@ -106,6 +113,11 @@ type remoteLink struct {
 	online bool
 	ctl    bool
 	seen   map[string]bool
+
+	mu        sync.Mutex
+	token     string // unlock token: memory only
+	lastUser  time.Time
+	lastTouch time.Time
 }
 
 func remoteLocalID(pcID, rid string) string { return remotePrefix + pcID + "~" + rid }
@@ -122,28 +134,117 @@ func newRemoteClient(fp string) *http.Client {
 	}}}
 }
 
+// startRemotePCs only shows the paired PCs; nothing connects until clicked.
 func (d *desk) startRemotePCs() {
-	for _, c := range d.remotePCs() {
-		d.startRemote(c)
-	}
+	d.refreshPCBox()
 }
 
-func (d *desk) startRemote(c remotePCConf) *remoteLink {
+func newRemoteLink(d *desk, c remotePCConf) *remoteLink {
+	return &remoteLink{d: d, conf: c, client: newRemoteClient(c.FP), stop: make(chan struct{}), seen: map[string]bool{}, lastUser: time.Now()}
+}
+
+// startRemote runs an unlocked link (UI thread).
+func (d *desk) startRemote(l *remoteLink) {
 	if d.remotes == nil {
 		d.remotes = map[string]*remoteLink{}
 	}
-	if old := d.remotes[c.ID]; old != nil {
-		old.close()
+	if old := d.remotes[l.conf.ID]; old != nil {
+		d.disconnectPC(l.conf.ID, "")
 	}
-	l := &remoteLink{d: d, conf: c, client: newRemoteClient(c.FP), stop: make(chan struct{}), seen: map[string]bool{}}
-	d.remotes[c.ID] = l
+	d.remotes[l.conf.ID] = l
 	go l.loop()
-	return l
+	go l.idleWatch(d.pcIdle())
+	d.refreshPCBox()
 }
 
 func (d *desk) stopRemotes() {
-	for _, l := range d.remotes {
-		l.close()
+	for id := range d.remotes {
+		d.disconnectPC(id, "")
+	}
+}
+
+// disconnectPC drops a PC's link and every session of it from memory.
+func (d *desk) disconnectPC(id, why string) {
+	l := d.remotes[id]
+	if l == nil {
+		return
+	}
+	l.close()
+	l.mu.Lock()
+	l.token = ""
+	l.mu.Unlock()
+	for sid := range l.seen {
+		l.drop(sid)
+	}
+	delete(d.remotes, id)
+	if why != "" {
+		d.pcNote[id] = why
+	}
+	d.rebuildRows()
+	d.refreshSidebar()
+	d.refreshPCBox()
+	d.updateChrome()
+}
+
+// userActive counts a user action in one of the PC's tabs; it keeps the
+// connection (here and on the PC: unlock/touch, at most once a minute).
+func (l *remoteLink) userActive() {
+	l.mu.Lock()
+	now := time.Now()
+	l.lastUser = now
+	touch := now.Sub(l.lastTouch) > time.Minute
+	if touch {
+		l.lastTouch = now
+	}
+	l.mu.Unlock()
+	if touch {
+		go func() {
+			if code, _ := l.do("POST", "/phone/unlock/touch", map[string]any{}, nil); code == http.StatusUnauthorized {
+				l.locked()
+			}
+		}()
+	}
+}
+
+func (l *remoteLink) idleFor() time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return time.Since(l.lastUser)
+}
+
+func (l *remoteLink) idleWatch(idle time.Duration) {
+	t := time.NewTicker(min(idle/4, 30*time.Second))
+	defer t.Stop()
+	for {
+		select {
+		case <-l.stop:
+			return
+		case <-t.C:
+			if l.idleFor() > idle {
+				l.d.do(func() {
+					if l.d.remotes[l.conf.ID] == l {
+						l.d.disconnectPC(l.conf.ID, "disconnected after "+idleLabel(int(idle.Minutes()))+" without activity")
+					}
+				})
+				return
+			}
+		}
+	}
+}
+
+// locked: the PC refused our token (expired there, password changed).
+func (l *remoteLink) locked() {
+	l.d.do(func() {
+		if l.d.remotes[l.conf.ID] == l {
+			l.d.disconnectPC(l.conf.ID, "locked by "+l.conf.Name+"; connect again with its password")
+		}
+	})
+}
+
+// noteActivity: called on typing, sending and switching tabs.
+func (d *desk) noteActivity(s *deskSession) {
+	if s != nil && s.remote != nil {
+		s.remote.link.userActive()
 	}
 }
 
@@ -180,6 +281,11 @@ func (l *remoteLink) do(method, path string, body any, out any) (int, error) {
 		return 0, err
 	}
 	req.Header.Set("X-Quill-Key", l.conf.Key)
+	l.mu.Lock()
+	if l.token != "" {
+		req.Header.Set(unlockHeader, l.token)
+	}
+	l.mu.Unlock()
 	if method == "POST" {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Idempotency-Key", idemKey())
@@ -206,8 +312,10 @@ func (l *remoteLink) do(method, path string, body any, out any) (int, error) {
 	return resp.StatusCode, nil
 }
 
-// connect finds a host that answers with the pinned certificate.
+// connect finds a host that answers with the pinned certificate (hello is
+// allowed before unlocking).
 func (l *remoteLink) connect() bool {
+	name, _ := os.Hostname()
 	for _, h := range l.conf.Hosts {
 		host := h
 		if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
@@ -218,16 +326,106 @@ func (l *remoteLink) connect() bool {
 		c.Timeout = 4 * time.Second
 		saved := l.client
 		l.client = &c
-		_, err := l.do("GET", "/phone/sessions", nil, nil)
+		_, err := l.do("POST", "/phone/hello", map[string]string{"name": firstNonEmpty(name, "Quill Desktop"), "app": "quill-desktop " + version}, nil)
 		l.client = saved
 		if err == nil {
-			name, _ := os.Hostname()
-			_, _ = l.do("POST", "/phone/hello", map[string]string{"name": firstNonEmpty(name, "Quill Desktop"), "app": "quill-desktop " + version}, nil)
 			return true
 		}
 	}
 	l.base = ""
 	return false
+}
+
+// unlockPC connects to a PC and unlocks it with the password; on success the
+// link starts (UI thread), else done gets the reason.
+func (d *desk) unlockPC(c remotePCConf, password string, done func(error)) {
+	l := newRemoteLink(d, c)
+	go func() {
+		var err error
+		if !l.connect() {
+			err = errors.New(c.Name + " can't be reached (" + strings.Join(c.Hosts, ", ") + "); is Quill Desktop running there with the phone server on?")
+		} else {
+			var out struct {
+				Token string `json:"token"`
+			}
+			if _, e := l.do("POST", "/phone/unlock", map[string]string{"password": password}, &out); e != nil {
+				err = e
+			} else {
+				l.mu.Lock()
+				l.token = out.Token
+				l.mu.Unlock()
+			}
+		}
+		d.do(func() {
+			if err == nil {
+				delete(d.pcNote, c.ID)
+				d.startRemote(l)
+			}
+			done(err)
+		})
+	}()
+}
+
+// connectPCDialog asks for the PC's password and connects.
+func (d *desk) connectPCDialog(c remotePCConf) {
+	pw := widget.NewPasswordEntry()
+	msg := caption("Its sessions stay in memory only and disconnect after " + idleLabel(int(d.pcIdle().Minutes())) + " without activity.")
+	var dlg *dialog.FormDialog
+	dlg = dialog.NewForm("Connect to "+c.Name, "Connect", "Cancel", []*widget.FormItem{
+		widget.NewFormItem("Password", pw), widget.NewFormItem("", msg),
+	}, func(ok bool) {
+		if !ok {
+			return
+		}
+		d.pcNote[c.ID] = "connecting..."
+		d.refreshPCBox()
+		d.unlockPC(c, pw.Text, func(err error) {
+			if err != nil {
+				d.pcNote[c.ID] = ""
+				d.refreshPCBox()
+				dialog.ShowError(fmt.Errorf("%s: %w", c.Name, err), d.win)
+			}
+		})
+	}, d.win)
+	pw.OnSubmitted = func(string) { dlg.Submit() }
+	dlg.Resize(fyne.NewSize(460, 220))
+	dlg.Show()
+	d.win.Canvas().Focus(pw)
+}
+
+// refreshPCBox: one row per paired PC above Settings in the sidebar; a click
+// connects (password) or disconnects.
+func (d *desk) refreshPCBox() {
+	d.refreshPCsButton()
+	if d.pcBox == nil {
+		return
+	}
+	var rows []fyne.CanvasObject
+	for _, c := range d.remotePCs() {
+		c := c
+		l := d.remotes[c.ID]
+		text := c.Name + " · connect"
+		if l != nil {
+			text = c.Name + " · connected · disconnect"
+			if !l.online {
+				text = c.Name + " · reconnecting · disconnect"
+			}
+		} else if n := d.pcNote[c.ID]; n != "" {
+			text = c.Name + " · " + n
+		}
+		b := widget.NewButtonWithIcon(text, theme.ComputerIcon(), func() {
+			if d.remotes[c.ID] != nil {
+				d.disconnectPC(c.ID, "")
+				return
+			}
+			d.connectPCDialog(c)
+		})
+		b.Importance = widget.LowImportance
+		b.Alignment = widget.ButtonAlignLeading
+		rows = append(rows, b)
+	}
+	d.pcBox.Objects = rows
+	d.pcBox.Refresh()
 }
 
 type remoteSessionsPage struct {
@@ -256,7 +454,7 @@ func (l *remoteLink) loop() {
 	backoff := 2 * time.Second
 	for !l.stopped() {
 		if !l.connect() {
-			l.d.do(func() { l.setOffline() })
+			l.d.do(func() { l.setOffline(); l.d.refreshPCBox() })
 			select {
 			case <-l.stop:
 				return
@@ -267,7 +465,11 @@ func (l *remoteLink) loop() {
 		}
 		backoff = 2 * time.Second
 		var page remoteSessionsPage
-		if _, err := l.do("GET", "/phone/sessions", nil, &page); err != nil {
+		if code, err := l.do("GET", "/phone/sessions", nil, &page); err != nil {
+			if code == http.StatusUnauthorized {
+				l.locked()
+				return
+			}
 			continue
 		}
 		l.d.do(func() { l.applyList(page) })
@@ -279,7 +481,11 @@ func (l *remoteLink) loop() {
 				Reset   bool             `json:"reset"`
 				Changes []map[string]any `json:"changes"`
 			}
-			if _, err := l.do("GET", "/phone/stream?cursor="+strconv.FormatInt(cursor, 10)+"&wait=25", nil, &st); err != nil {
+			if code, err := l.do("GET", "/phone/stream?cursor="+strconv.FormatInt(cursor, 10)+"&wait=25", nil, &st); err != nil {
+				if code == http.StatusUnauthorized {
+					l.locked()
+					return
+				}
 				break
 			}
 			if st.Reset || st.Boot != page.Boot {
@@ -301,7 +507,14 @@ func (l *remoteLink) loop() {
 // applyList brings our tabs in line with the PC's live sessions (UI thread).
 func (l *remoteLink) applyList(page remoteSessionsPage) {
 	d := l.d
+	if d.remotes[l.conf.ID] != l {
+		return
+	}
+	wasOnline := l.online
 	l.online, l.ctl = true, page.Control
+	if !wasOnline {
+		d.refreshPCBox()
+	}
 	now := map[string]bool{}
 	for _, raw := range page.Sessions {
 		var rs remoteSessJSON
@@ -341,6 +554,9 @@ func (l *remoteLink) applyList(page remoteSessionsPage) {
 func (l *remoteLink) drop(id string) {
 	d := l.d
 	delete(l.seen, id)
+	if d.strip != nil {
+		d.strip.keepDraft(id, "")
+	}
 	d.closeTab(id)
 	if d.current != nil && d.current.id == id {
 		d.current = nil
@@ -448,7 +664,7 @@ func (l *remoteLink) fetchItems(s *deskSession) {
 			return
 		}
 		l.d.do(func() {
-			if l.d.sessions[s.id] != s {
+			if l.d.sessions[s.id] != s || l.d.remotes[l.conf.ID] != l {
 				return
 			}
 			conv := chat.New()
@@ -471,8 +687,13 @@ func (l *remoteLink) fetchItems(s *deskSession) {
 func (d *desk) remoteWrite(s *deskSession, op string, body any) {
 	r := s.remote
 	l := r.link
+	l.userActive()
 	go func() {
-		_, err := l.do("POST", "/phone/session/"+url.PathEscape(r.rid)+"/"+op, body, nil)
+		code, err := l.do("POST", "/phone/session/"+url.PathEscape(r.rid)+"/"+op, body, nil)
+		if code == http.StatusUnauthorized {
+			l.locked()
+			return
+		}
 		d.do(func() {
 			if err != nil && d.sessions[s.id] == s {
 				d.chatFor(s, []*chat.Item{s.conv.AddError(l.conf.Name + ": " + err.Error())})
@@ -559,14 +780,14 @@ func (d *desk) remotePCsRow() fyne.CanvasObject {
 		}
 		for _, c := range pcs {
 			c := c
-			state := "connecting..."
+			state := "not connected (click it in the sidebar to connect)"
 			if l := d.remotes[c.ID]; l != nil && l.online {
-				state = fmt.Sprintf("online · %d live session(s)", len(l.seen))
+				state = fmt.Sprintf("connected · %d live session(s), in memory only", len(l.seen))
 				if !l.ctl {
 					state += " · read-only (turn on \"Let paired devices control sessions\" there)"
 				}
-			} else if l != nil && l.base == "" {
-				state = "offline"
+			} else if l != nil {
+				state = "reconnecting"
 			}
 			rm := widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), func() {
 				dialog.ShowConfirm("Remove "+c.Name+"?", "Its sessions leave the tabs. Revoke this PC on "+c.Name+" too (Settings → Sessions → Devices).", func(ok bool) {
@@ -580,14 +801,8 @@ func (d *desk) remotePCsRow() fyne.CanvasObject {
 						}
 					}
 					d.saveRemotePCs(keep)
-					if l := d.remotes[c.ID]; l != nil {
-						l.close()
-						for id := range l.seen {
-							l.drop(id)
-						}
-						delete(d.remotes, c.ID)
-					}
-					d.rebuildRows()
+					d.disconnectPC(c.ID, "")
+					d.refreshPCBox()
 					fill()
 				}, d.win)
 			})
@@ -612,7 +827,7 @@ func (d *desk) addRemotePCDialog(done func()) {
 	link.Wrapping = fyne.TextWrapBreak
 	name := widget.NewEntry()
 	name.SetPlaceHolder("Name, e.g. Office PC (optional)")
-	help := caption("On the other PC, open Quill Desktop → Devices → Pair, copy the pairing link and paste it here while that pairing window is still open (Quill there forgets a pairing that never connected). Turn on \"Let paired devices control sessions\" there to send messages and answer approvals from here.")
+	help := caption("On the other PC, open Quill Desktop → Devices → Pair, copy the pairing link and paste it here while that pairing window is still open (Quill there forgets a pairing that never connected), and set a password there (Settings → Sessions → Devices → Password for paired PCs). Connect from the PC's row in the sidebar; it asks for that password each time. Turn on \"Let paired devices control sessions\" there to send messages and answer approvals from here.")
 	dlg := dialog.NewForm("Add a PC", "Pair", "Cancel", []*widget.FormItem{
 		widget.NewFormItem("Pairing link", link), widget.NewFormItem("Name", name), widget.NewFormItem("", help),
 	}, func(ok bool) {
@@ -628,11 +843,72 @@ func (d *desk) addRemotePCDialog(done func()) {
 			c.Name = n
 		}
 		d.saveRemotePCs(append(d.remotePCs(), c))
-		d.startRemote(c)
+		d.refreshPCBox()
 		if done != nil {
 			done()
 		}
 	}, d.win)
 	dlg.Resize(fyne.NewSize(620, 360))
 	dlg.Show()
+}
+
+// pcsButton: the same rows as a menu next to Settings and kmem, for the
+// layout without a sidebar. Hidden while no PC is paired.
+func (d *desk) pcsButton() *widget.Button {
+	var b *widget.Button
+	b = widget.NewButtonWithIcon("PCs", theme.ComputerIcon(), func() {
+		var items []*fyne.MenuItem
+		for _, c := range d.remotePCs() {
+			c := c
+			label := c.Name + ": connect..."
+			if d.remotes[c.ID] != nil {
+				label = c.Name + ": disconnect"
+			} else if n := d.pcNote[c.ID]; n != "" {
+				label += " (" + n + ")"
+			}
+			items = append(items, fyne.NewMenuItem(label, func() {
+				if d.remotes[c.ID] != nil {
+					d.disconnectPC(c.ID, "")
+				} else {
+					d.connectPCDialog(c)
+				}
+			}))
+		}
+		c := fyne.CurrentApp().Driver().CanvasForObject(b)
+		if c == nil || len(items) == 0 {
+			return
+		}
+		pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(b)
+		m := widget.NewPopUpMenu(fyne.NewMenu("", items...), c)
+		y := pos.Y - m.MinSize().Height
+		if y < 0 {
+			y = pos.Y + b.Size().Height
+		}
+		m.ShowAtPosition(fyne.NewPos(pos.X, y))
+	})
+	b.Importance = widget.MediumImportance
+	return b
+}
+
+func (d *desk) refreshPCsButton() {
+	b := d.pcsBtn
+	if b == nil {
+		return
+	}
+	was, wasText := b.Visible(), b.Text
+	if len(d.remotePCs()) == 0 {
+		b.Hide()
+	} else {
+		text := "PCs"
+		if n := len(d.remotes); n > 0 {
+			text = fmt.Sprintf("PCs · %d connected", n)
+		}
+		if b.Text != text {
+			b.SetText(text)
+		}
+		b.Show()
+	}
+	if (was != b.Visible() || wasText != b.Text) && d.mainPane != nil {
+		relayoutTree(d.mainPane)
+	}
 }

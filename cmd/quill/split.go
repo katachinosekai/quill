@@ -735,12 +735,12 @@ func (d *desk) saveSplit() *splitState {
 	}
 	st := &splitState{}
 	for i, p := range d.panes {
-		id := ""
-		if p.view.s != nil {
-			id = p.view.s.id
+		id, draft := "", ""
+		if s := p.view.s; s != nil && s.remote == nil { // other PCs: memory only
+			id, draft = s.id, d.boxDraft(s, p.input)
 		}
 		st.Panes = append(st.Panes, id)
-		st.Drafts = append(st.Drafts, d.boxDraft(p.view.s, p.input))
+		st.Drafts = append(st.Drafts, draft)
 		if p == d.focused {
 			st.Focus = i
 		}

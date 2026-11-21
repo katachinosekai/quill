@@ -140,7 +140,11 @@ type pendingAsk struct {
 // Also a brand-new tab whose session has no transcript yet: it is restored
 // from Meta and must stay the current tab.
 func (d *desk) restoreHead() restoreState {
-	st := restoreState{Draft: d.boxDraft(d.current, d.input), Hidden: d.hidden}
+	st := restoreState{Hidden: d.hidden}
+	if d.current != nil && d.current.remote != nil {
+		return st // other PCs' sessions and drafts are memory only
+	}
+	st.Draft = d.boxDraft(d.current, d.input)
 	if d.current != nil {
 		st.Session = d.current.id
 		if !d.split() {
@@ -167,6 +171,8 @@ func (d *desk) trySwap() {
 	d.swapping = true
 	d.stopMedia()
 	d.flushUI()
+	// Other PCs' sessions are memory only: never handed over or restored.
+	d.stopRemotes()
 	st := d.restoreHead()
 	if d.current != nil && !d.split() {
 		d.strip.keepDraft(d.current.id, st.Draft)

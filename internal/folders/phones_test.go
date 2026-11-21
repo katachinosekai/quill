@@ -52,3 +52,15 @@ func TestPhonesStoreHashesOnly(t *testing.T) {
 		t.Fatalf("legacy entry counts as used so pairing cleanup keeps it: %+v", l)
 	}
 }
+
+func TestNeedsUnlock(t *testing.T) {
+	on, off := true, false
+	for _, c := range []struct {
+		p    Phone
+		want bool
+	}{{Phone{Kind: "pc"}, true}, {Phone{Kind: "phone"}, false}, {Phone{}, false}, {Phone{Kind: "phone", Lock: &on}, true}, {Phone{Kind: "pc", Lock: &off}, false}} {
+		if c.p.NeedsUnlock() != c.want {
+			t.Errorf("%+v: want %v", c.p, c.want)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -56,7 +57,7 @@ func (d *desk) saveSessions(st *restoreState) {
 		st.Meta[id] = m
 	}
 	for id, text := range d.strip.drafts {
-		if text == "" {
+		if text == "" || strings.HasPrefix(id, remotePrefix) {
 			continue
 		}
 		if st.Drafts == nil {

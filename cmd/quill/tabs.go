@@ -34,7 +34,13 @@ func (d *desk) loadTabs() {
 }
 
 func (d *desk) saveTabs() {
-	if b, err := json.Marshal(d.tabs); err == nil {
+	keep := []string{}
+	for _, id := range d.tabs {
+		if !strings.HasPrefix(id, remotePrefix) { // other PCs: memory only
+			keep = append(keep, id)
+		}
+	}
+	if b, err := json.Marshal(keep); err == nil {
 		d.app.Preferences().SetString("tabs", string(b))
 	}
 	// The sidebar shows live sessions only, so opening or closing a tab

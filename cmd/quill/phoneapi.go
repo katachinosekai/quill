@@ -111,6 +111,8 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.stream(w, r)
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "items":
 		a.items(w, r, parts[1])
+	case r.Method == http.MethodPost && (path == "unlock" || path == "unlock/touch"):
+		a.unlockAPI(w, r, path, folders.PhoneID(r))
 	case r.Method == http.MethodPost:
 		a.write(w, r, path, parts)
 	default:
@@ -144,21 +146,36 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	phone := folders.PhoneID(r)
-	var ctl bool
+	var ctl, unlock bool
 	a.ui(func() {
-		if name := strings.TrimSpace(in.Name); name != "" {
-			list := a.d.phones()
-			for i := range list {
-				if list[i].ID == phone && list[i].Name != name {
-					list[i].Name = clip(name, 60)
-					a.d.app.Preferences().SetString("phones", folders.PhonesJSON(list))
-					a.d.updatePhoneList()
-				}
+		list := a.d.phones()
+		changed := false
+		for i := range list {
+			if list[i].ID != phone {
+				continue
 			}
+			if name := strings.TrimSpace(in.Name); name != "" && list[i].Name != name {
+				list[i].Name = clip(name, 60)
+				changed = true
+			}
+			// The first hello decides the kind; later ones can't change it,
+			// so a PC's key can't pass itself off as a phone.
+			if list[i].Kind == "" {
+				list[i].Kind = "phone"
+				if strings.HasPrefix(in.App, "quill-desktop") {
+					list[i].Kind = "pc"
+				}
+				changed = true
+			}
+			unlock = list[i].NeedsUnlock()
+		}
+		if changed {
+			a.d.app.Preferences().SetString("phones", folders.PhonesJSON(list))
+			a.d.updatePhoneList()
 		}
 		ctl = a.control(phone)
 	})
-	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version})
+	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock})
 }
 
 type apiSession struct {

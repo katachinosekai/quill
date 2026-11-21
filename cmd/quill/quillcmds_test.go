@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"fyne.io/fyne/v2/test"
+
 	"github.com/katachinosekai/quill/internal/protocol"
 )
 
@@ -67,4 +69,31 @@ func TestBackendMenuShot(t *testing.T) {
 	})
 	time.Sleep(300 * time.Millisecond)
 	h.ui(func() { shot(t, h.w, dir, "backend-menu.png") })
+}
+
+func TestPCConnectShot(t *testing.T) {
+	if os.Getenv("DESK_SHOTS") == "" {
+		t.Skip("set DESK_SHOTS=1 to render the paired-PC row and password dialog to .shots/")
+	}
+	dir, _ := filepath.Abs(filepath.Join("..", "..", ".shots"))
+	os.MkdirAll(dir, 0o755)
+	h := newHarness(t)
+	conf := remotePCConf{ID: "a1b2c3d4", Name: "Office PC", Hosts: []string{"192.0.2.10"}, Port: 8443, Key: "k", FP: strings.Repeat("ab", 32)}
+	h.ui(func() {
+		h.d.saveRemotePCs([]remotePCConf{conf})
+		h.d.pcNote[conf.ID] = "disconnected after 15 min without activity"
+		h.d.refreshPCBox()
+	})
+	time.Sleep(300 * time.Millisecond)
+	h.ui(func() { test.Tap(h.d.pcsBtn) })
+	time.Sleep(300 * time.Millisecond)
+	h.ui(func() { shot(t, h.w, dir, "pc-row.png") })
+	h.ui(func() {
+		for _, o := range h.w.Canvas().Overlays().List() {
+			h.w.Canvas().Overlays().Remove(o)
+		}
+	})
+	h.ui(func() { h.d.connectPCDialog(conf) })
+	time.Sleep(300 * time.Millisecond)
+	h.ui(func() { shot(t, h.w, dir, "pc-password.png") })
 }

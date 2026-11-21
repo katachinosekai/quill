@@ -18,6 +18,22 @@ type Phone struct {
 	Created  int64  `json:"created"`
 	LastSeen int64  `json:"lastSeen"`
 	Control  bool   `json:"control"`
+	// Kind is set by the device's first hello: "pc" (Quill Desktop) or
+	// "phone"; "" = not known yet.
+	Kind string `json:"kind,omitempty"`
+	// Lock overrides whether the device must unlock with the PC password
+	// (default: every device except phones).
+	Lock *bool `json:"lock,omitempty"`
+}
+
+// NeedsUnlock: paired PCs (Quill Desktop says hello before anything else)
+// must unlock with the password; phones and devices that never said hello
+// only when Lock says so.
+func (p Phone) NeedsUnlock() bool {
+	if p.Lock != nil {
+		return *p.Lock
+	}
+	return p.Kind == "pc"
 }
 
 func HashKey(key string) string {
