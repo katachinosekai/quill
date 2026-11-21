@@ -145,8 +145,8 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 	r = setupRow{title: "kmem (shared memory)", optional: true}
 	home := homeDir()
 	switch {
-	case win:
-		r.state = "not available on Windows yet: kmem needs Linux or macOS for now (a Windows-ready kmem is requested)"
+	case win && bundledKmemDir() != "" && windowsPython() == "":
+		r.state = "needs Python 3 (see the Python row)"
 	case kmemBin() != "" && kmemSetupComplete(home):
 		r.ok, r.state = true, "set up: "+tildePath(kmemBin())
 	case bundledKmemDir() != "":
@@ -157,6 +157,19 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 	}
 	rows = append(rows, r)
 
+	if win {
+		r = setupRow{title: "Python 3", optional: true}
+		if py := windowsPython(); py != "" {
+			r.ok, r.state = true, "installed ("+py+"; kmem needs it)"
+		} else {
+			r.state, r.action = "missing: kmem needs it", "Install..."
+			r.do = func() {
+				d.runInstaller("Install Python 3", "kmem runs on Python 3. This installs it with winget (Windows' package manager); restart Quill Desktop afterwards so it sees Python.",
+					"winget install -e --id Python.Python.3.13 --accept-source-agreements --accept-package-agreements", refresh)
+			}
+		}
+		rows = append(rows, r)
+	}
 	if !win {
 		r = setupRow{title: "Python 3", optional: true}
 		if lookPath("python3") != "" {

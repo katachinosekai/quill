@@ -30,7 +30,8 @@ type hookRow struct {
 }
 
 func isKmemHook(cmd string) bool {
-	return strings.Contains(cmd, "kmem brief") || strings.Contains(cmd, "kmem-guard")
+	c := strings.NewReplacer(`"`, "", "'", "").Replace(cmd)
+	return strings.Contains(c, "kmem brief") || strings.Contains(c, "kmem-guard")
 }
 
 func hookRows(cwd string) []hookRow {

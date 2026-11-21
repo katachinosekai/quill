@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -95,7 +96,7 @@ func (d *desk) runKmem(prog string, args ...string) (string, error) {
 	defer cancel()
 	if prog == "kmem" {
 		if p := kmemBin(); p != "" {
-			prog = p
+			prog, args = kmemCommand(runtime.GOOS, windowsPython(), p, args...)
 		}
 	}
 	cmd := exec.CommandContext(ctx, prog, args...)

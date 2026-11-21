@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -25,7 +27,8 @@ func bundledKmemDir() string {
 		dirs = append(dirs, filepath.Join(v, "usr", "share", "quill", "kmem"))
 	}
 	if exe, err := os.Executable(); err == nil {
-		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "..", "..", "share", "quill", "kmem"), filepath.Join(filepath.Dir(exe), "..", "share", "quill", "kmem"))
+		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "..", "..", "share", "quill", "kmem"), filepath.Join(filepath.Dir(exe), "..", "share", "quill", "kmem"),
+			filepath.Join(filepath.Dir(exe), "kmem")) // the Windows zip: quill\kmem\kmem
 	}
 	dirs = append(dirs, "/usr/share/quill/kmem")
 	for _, d := range dirs {
@@ -67,12 +70,51 @@ func shellQuote(p string) string {
 }
 
 func kmemHooks(home string) map[string]map[string]any {
+	return kmemHooksFor(runtime.GOOS, home, windowsPython())
+}
+
+// kmemHooksFor: on Windows (kmem 1.5.0+) the hooks run the scripts through
+// Python with a quoted forward-slash path, which cmd, PowerShell and Git
+// Bash all accept (PZ Lock Audit 2, kmem v1.5.0).
+func kmemHooksFor(goos, home, python string) map[string]map[string]any {
 	bin := filepath.Join(home, ".local", "bin")
-	return map[string]map[string]any{
-		"SessionStart": {"hooks": []any{map[string]any{"type": "command", "command": shellQuote(filepath.Join(bin, "kmem")) + " brief 2>&1 || true", "timeout": 10}}},
-		"PreToolUse": {"matcher": "Bash|Agent|Task|Write|Edit|MultiEdit|NotebookEdit",
-			"hooks": []any{map[string]any{"type": "command", "command": shellQuote(filepath.Join(bin, "kmem-guard")), "timeout": 10}}},
+	brief := shellQuote(filepath.Join(bin, "kmem")) + " brief 2>&1 || true"
+	guard := shellQuote(filepath.Join(bin, "kmem-guard"))
+	if goos == "windows" {
+		fwd := func(p string) string { return `"` + strings.ReplaceAll(p, `\`, "/") + `"` }
+		brief = python + " " + fwd(filepath.Join(bin, "kmem")) + " brief"
+		guard = python + " " + fwd(filepath.Join(bin, "kmem-guard"))
 	}
+	return map[string]map[string]any{
+		"SessionStart": {"hooks": []any{map[string]any{"type": "command", "command": brief, "timeout": 10}}},
+		"PreToolUse": {"matcher": "Bash|Agent|Task|Write|Edit|MultiEdit|NotebookEdit",
+			"hooks": []any{map[string]any{"type": "command", "command": guard, "timeout": 10}}},
+	}
+}
+
+// windowsPython: the Python command for kmem on Windows ("" when none works;
+// the Microsoft Store's python.exe stub doesn't answer --version).
+var windowsPython = func() string {
+	if runtime.GOOS != "windows" {
+		return "python3"
+	}
+	for _, c := range []string{"python", "py"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		out, err := exec.CommandContext(ctx, c, "--version").CombinedOutput()
+		cancel()
+		if err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "Python 3") {
+			return c
+		}
+	}
+	return ""
+}
+
+// kmemCommand builds the command that runs kmem (through Python on Windows).
+func kmemCommand(goos, python, path string, args ...string) (string, []string) {
+	if goos == "windows" {
+		return firstNonEmpty(python, "python"), append([]string{path}, args...)
+	}
+	return path, args
 }
 
 func hasHookCommand(groups []any, needle string) bool {
@@ -81,7 +123,8 @@ func hasHookCommand(groups []any, needle string) bool {
 		hs, _ := gm["hooks"].([]any)
 		for _, h := range hs {
 			hm, _ := h.(map[string]any)
-			if c, _ := hm["command"].(string); strings.Contains(c, needle) {
+			// Windows hooks quote the path: python "C:/…/kmem" brief.
+			if c, _ := hm["command"].(string); strings.Contains(strings.NewReplacer(`"`, "", "'", "").Replace(c), needle) {
 				return true
 			}
 		}

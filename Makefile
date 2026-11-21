@@ -43,5 +43,6 @@ windows-zip: windows
 	rm -rf dist/pkg/win && mkdir -p dist/pkg/win/quill
 	cp dist/quill-windows-amd64.exe dist/pkg/win/quill/quill.exe
 	cp LICENSE NOTICE THIRD_PARTY_LICENSES.txt packaging/README-windows.txt dist/pkg/win/quill/
+	mkdir -p dist/pkg/win/quill/kmem && cp third_party/kmem/kmem third_party/kmem/kmem-guard third_party/kmem/VERSION third_party/kmem/LICENSE third_party/kmem/NOTICE dist/pkg/win/quill/kmem/
 	cd dist/pkg/win && rm -f ../quill-$(VERSION)-windows-amd64.zip && zip -qr ../quill-$(VERSION)-windows-amd64.zip quill
 	rm -rf dist/pkg/win
