@@ -749,7 +749,7 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 }
 
 func (v *chatView) markdown(text string) fyne.CanvasObject {
-	rt := widget.NewRichTextFromMarkdown(hardBreaks(text))
+	rt := widget.NewRichTextFromMarkdown(hardBreaks(autolinks(text)))
 	rt.Wrapping = fyne.TextWrapWord
 	for i, seg := range rt.Segments {
 		if cb, ok := seg.(*widget.CodeBlockSegment); ok {
