@@ -885,6 +885,10 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		if r.rcOn {
 			t.Fatal("with the setting off, local sessions never start Remote Control")
 		}
+		h.d.setRemoteControl(r, true)
+		if r.rcOn || r.proc != nil {
+			t.Fatal("with the setting off, the manual Remote Control toggle is refused for local sessions")
+		}
 	})
 }
 
