@@ -34,6 +34,7 @@ type pane struct {
 	choices *fyne.Container
 	model   *widget.Select
 	mode    *widget.Select
+	backend *widget.RadioGroup
 	stop    *widget.Button
 	mic     *widget.Button
 	stats   *canvas.Text
@@ -136,6 +137,14 @@ func (d *desk) newPane() *pane {
 			d.setMode(p.view.s, v)
 		}
 	})
+	p.backend = widget.NewRadioGroup([]string{backendOnline, backendLocal}, func(v string) {
+		if !p.quiet && p.view.s != nil && v != "" {
+			d.setBackend(p.view.s, v)
+			d.syncPaneControls(p)
+		}
+	})
+	p.backend.Horizontal = true
+	p.backend.Required = true
 	openAll := widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
 		d.focusPane(p)
 		d.setAllChips(true)
@@ -146,7 +155,7 @@ func (d *desk) newPane() *pane {
 		d.setAllChips(false)
 	})
 	closeAll.Importance = widget.LowImportance
-	controls := container.NewHBox(p.model, p.mode, layout.NewSpacer(), openAll, closeAll)
+	controls := container.NewHBox(p.backend, p.model, p.mode, layout.NewSpacer(), openAll, closeAll)
 	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
 	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
 	p.stats = mutedText("", fontMeta)
@@ -638,6 +647,7 @@ func (d *desk) syncPaneControls(p *pane) {
 	if s == nil {
 		p.model.Disable()
 		p.mode.Disable()
+		p.backend.Disable()
 		p.stop.Disable()
 		p.mic.Disable()
 		setText(p.stats, "")
@@ -646,7 +656,13 @@ func (d *desk) syncPaneControls(p *pane) {
 	}
 	p.model.Enable()
 	p.mode.Enable()
+	p.backend.Enable()
 	p.mic.Enable()
+	setOptions(p.model, d.modelOptions(s))
+	setOptions(p.mode, modeOptions(s))
+	if p.backend.Selected != backendOf(s.model) {
+		p.backend.SetSelected(backendOf(s.model))
+	}
 	if p.model.Selected != s.model {
 		p.model.SetSelected(s.model)
 	}

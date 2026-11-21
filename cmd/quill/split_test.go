@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -778,6 +781,55 @@ func TestAutoHandoffAsksThenRotates(t *testing.T) {
 		h.d.checkAutoHandoff(s)
 		if s.kmemSave != nil {
 			t.Fatal("mode off never rotates")
+		}
+	})
+}
+
+func TestOnlineLocalSwitch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"models":[{"name":"qwen3.8:27b-80k"},{"name":"llama9:8b"}]}`))
+	}))
+	defer srv.Close()
+	if got := fetchOllamaModels(srv.URL); len(got) != 2 || got[1] != "ollama:llama9:8b" {
+		t.Fatalf("live Ollama list: %v", got)
+	}
+	if fetchOllamaModels("http://127.0.0.1:1") != nil {
+		t.Fatal("Ollama down gives no list")
+	}
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "opus", "auto")
+		h.d.open(s.id)
+		if h.d.backendSel.Selected != backendOnline || contains(h.d.modelSel.Options, localFallback[0]) || !contains(h.d.modeSel.Options, "auto") {
+			t.Fatalf("Online shows only Claude models and every mode: %v %v", h.d.modelSel.Options, h.d.modeSel.Options)
+		}
+		h.d.backendSel.SetSelected(backendLocal)
+		if s.model != localFallback[0] || s.mode != "default" {
+			t.Fatalf("Local picks the first local model and leaves auto mode: %q %q", s.model, s.mode)
+		}
+		if last := s.conv.Items[len(s.conv.Items)-1]; !strings.Contains(last.Text, "auto to default") {
+			t.Fatalf("the mode change is explained: %q", last.Text)
+		}
+		if !reflect.DeepEqual(h.d.modelSel.Options, localFallback) || contains(h.d.modeSel.Options, "auto") {
+			t.Fatalf("Local shows only local models (fallback list) and no auto mode: %v %v", h.d.modelSel.Options, h.d.modeSel.Options)
+		}
+		if _, meta, _ := h.d.rowText(s.id); !strings.Contains(meta, "local qwen3.8:27b-80k") || !strings.Contains(h.d.subtitle.Text, "Local: qwen3.8:27b-80k") {
+			t.Fatalf("a local session is marked in the sidebar and header: %q / %q", meta, h.d.subtitle.Text)
+		}
+		if h.d.app.Preferences().String("newModel") != localFallback[0] {
+			t.Fatal("new sessions remember the choice")
+		}
+		h.d.backendSel.SetSelected(backendOnline)
+		if s.model != "opus" || backendOf(s.model) != backendOnline {
+			t.Fatalf("Online goes back to the last Claude model: %q", s.model)
+		}
+		n := h.d.createSession(h.proj, "ollama:qwen3-coder:30b-48k", "auto")
+		if n.mode != "default" {
+			t.Fatal("a new local session never starts in auto mode")
 		}
 	})
 }
