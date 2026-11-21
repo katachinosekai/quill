@@ -55,6 +55,9 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 		return
 	}
 	phone := folders.PhoneID(r)
+	if len(parts) >= 3 && parts[0] == "session" {
+		a.preload(parts[1])
+	}
 	var out map[string]any
 	var fail *apiErr
 	a.ui(func() {
@@ -119,6 +122,9 @@ func (a *phoneAPI) send(s *deskSession, text string) (map[string]any, *apiErr) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, badReq("text is empty")
+	}
+	if deviceCommandBlocked(text) {
+		return nil, &apiErr{http.StatusConflict, "blocked", "this command opens a desktop window or changes desktop settings; run it on Quill Desktop"}
 	}
 	if d.runLocalCommandFor(s, text) {
 		return map[string]any{"queued": false}, nil
@@ -230,7 +236,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		if *in.Index < 0 || *in.Index >= len(opts) {
 			return nil, badReq("index out of range")
 		}
-		d.pickChoice(s, it, opts[*in.Index])
+		d.pickChoice(s, it, choiceReply(*in.Index, opts[*in.Index]))
 	case "rotate", "dismiss":
 		if it.Kind != chat.Rotate {
 			return nil, badReq(in.Action + " needs a rotate item")
@@ -259,6 +265,9 @@ func (a *phoneAPI) queueAction(s *deskSession, op string, in writeBody) (map[str
 		s.editRemoved(i)
 		a.d.syncQueue(s)
 	} else {
+		if s.compacting || s.takeover || s.loading || s.terminal != nil && !s.running() {
+			return nil, &apiErr{http.StatusConflict, "blocked", "the session can't take a message right now; it stays queued"}
+		}
 		a.d.sendQueuedNow(s, i)
 	}
 	return map[string]any{"queue": a.queueJSON(s)}, nil
@@ -291,7 +300,8 @@ func (a *phoneAPI) newSession(in writeBody) (map[string]any, *apiErr) {
 	if !slices.Contains(modes, mode) {
 		return nil, badReq("unknown mode " + mode)
 	}
-	ns := d.createSession(in.Folder, model, mode)
+	ns := d.addSession(in.Folder, model, mode, false)
+	d.addTab(ns.id)
 	_, group := a.sessionIDs()
 	return map[string]any{"session": a.session(ns.id, firstNonEmpty(group[ns.id], "Open"))}, nil
 }

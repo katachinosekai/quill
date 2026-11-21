@@ -60,9 +60,6 @@ func TestKmemBundleAndSetup(t *testing.T) {
 	if changed, _, _ := mergeKmemHooks(settings, home, now); changed {
 		t.Fatal("running setup twice adds nothing")
 	}
-	if _, err := setupKmem(home, bundled, now); err == nil || !strings.Contains(err.Error(), "never replaces") {
-		t.Fatalf("an installed kmem is never replaced: %v", err)
-	}
 	broken := filepath.Join(t.TempDir(), "settings.json")
 	os.WriteFile(broken, []byte("{not json"), 0o600)
 	if _, _, err := mergeKmemHooks(broken, home, now); err == nil {
@@ -78,6 +75,37 @@ func TestKmemBundleAndSetup(t *testing.T) {
 		if err != nil || !strings.HasPrefix(string(out), "kmem "+bundledKmemVersion(bundled)+" api 1") {
 			t.Fatalf("the installed bundled kmem runs: %s %v", out, err)
 		}
+	}
+	os.WriteFile(filepath.Join(home, ".local", "bin", "kmem"), []byte("#!/bin/sh\necho mine\n"), 0o755)
+	os.Remove(filepath.Join(home, ".local", "bin", "kmem-guard"))
+	if kmemSetupComplete(home) {
+		t.Fatal("a missing kmem-guard means setup is incomplete")
+	}
+	done2, err := setupKmem(home, bundled, now)
+	if err != nil || !strings.Contains(strings.Join(done2, "|"), "kept the existing") {
+		t.Fatalf("finishing setup keeps the installed kmem and adds what is missing: %v %v", done2, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(home, ".local", "bin", "kmem")); string(b) != "#!/bin/sh\necho mine\n" {
+		t.Fatal("an installed kmem is never replaced")
+	}
+	if !kmemSetupComplete(home) {
+		t.Fatal("and setup is complete afterwards")
+	}
+	link := filepath.Join(t.TempDir(), "settings-link.json")
+	os.Symlink(settings, link)
+	if _, _, err := mergeKmemHooks(link, home, now); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("a symlinked settings.json stays a symlink")
+	}
+	odd := filepath.Join(t.TempDir(), "settings.json")
+	os.WriteFile(odd, []byte(`{"hooks":{"PreToolUse":{"x":1}}}`), 0o600)
+	if _, _, err := mergeKmemHooks(odd, home, now); err == nil {
+		t.Fatal("an unexpected hooks shape is left alone")
+	}
+	if shellQuote("/home/a b/.local/bin/kmem") != "'/home/a b/.local/bin/kmem'" || shellQuote("/home/k/kmem") != "/home/k/kmem" {
+		t.Fatal("paths with spaces are quoted in the hook command")
 	}
 }
 

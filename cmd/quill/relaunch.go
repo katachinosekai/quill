@@ -297,6 +297,9 @@ func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
 	}
 	if !replaced {
 		tabs = append(tabs, ns.id)
+		if len(tabs) > maxTabs {
+			tabs = tabs[len(tabs)-maxTabs:]
+		}
 	}
 	d.tabs = tabs
 	d.saveTabs()

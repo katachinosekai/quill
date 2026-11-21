@@ -111,6 +111,9 @@ func (d *desk) kmemHandoffs() []kmemHandoff {
 	if err != nil {
 		return nil
 	}
+	d.hsMu.Lock()
+	d.lastHandoffs = hs
+	d.hsMu.Unlock()
 	return hs
 }
 
@@ -199,7 +202,10 @@ func (d *desk) applyKmemChoice(s *deskSession, choice, title string) {
 		return
 	}
 	delete(d.org.Kmem, s.id)
-	d.org.Kmem[s.id] = kmemSlug(title, d.kmemTaken(nil))
+	d.hsMu.Lock()
+	known := d.lastHandoffs
+	d.hsMu.Unlock()
+	d.org.Kmem[s.id] = kmemSlug(title, d.kmemTaken(known))
 	s.kmemNew = true
 	d.saveOrg()
 	go func() {

@@ -41,7 +41,23 @@ var localCommands = []protocol.Command{
 }
 
 func (d *desk) runLocalCommand(text string) bool {
-	return d.runLocalCommandFor(d.current, text)
+	if !d.runLocalCommandFor(d.current, text) {
+		return false
+	}
+	d.input.SetText("")
+	return true
+}
+
+var deviceBlocked = map[string]bool{"upgrade": true, "login": true, "logout": true, "mcp": true, "chrome": true, "tasks": true,
+	"permissions": true, "fork": true, "branch": true, "copy": true, "export": true, "diff": true, "memory": true, "hooks": true,
+	"agents": true, "add-dir": true, "rewind": true}
+
+func deviceCommandBlocked(text string) bool {
+	if !strings.HasPrefix(text, "/") {
+		return false
+	}
+	name, _, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
+	return deviceBlocked[name]
 }
 
 func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
@@ -129,7 +145,6 @@ func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
 	default:
 		return false
 	}
-	d.input.SetText("")
 	d.updateChrome()
 	return true
 }

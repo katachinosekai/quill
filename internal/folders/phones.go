@@ -73,6 +73,9 @@ func matchPhone(phones []Phone, key string) string {
 func (s *Server) SetPhones(phones []Phone) {
 	s.mu.Lock()
 	s.phones = append([]Phone(nil), phones...)
+	if s.idem != nil {
+		s.idem.keep(phones)
+	}
 	revoked := s.revoked
 	s.revoked = make(chan struct{})
 	s.mu.Unlock()

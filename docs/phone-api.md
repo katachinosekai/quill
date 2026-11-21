@@ -32,10 +32,11 @@ Any non-2xx response has this body:
 | 409 | `stale` | the target changed: the request is no longer pending, the queue entry text no longer matches |
 | 409 | `in_progress` | the same Idempotency-Key is still being handled |
 | 409 | `not_running` | the session has no running Claude process and the action needs one (interrupt) |
-| 409 | `blocked` | Quill refused the send the same way the desktop box would (session loading, taking over, held by a terminal) |
+| 409 | `blocked` | Quill refused the send the same way the desktop box would (session loading, taking over, held by a terminal), or the /command only works on the desktop (dialogs, browser, files, settings: /login, /mcp, /export, /add-dir, ...) |
 | 413 | `too_large` | body over 64 KiB, or `text` over 32 KiB |
 | 422 | `idempotency_mismatch` | Idempotency-Key reused with a different method, path or body |
 | 429 | `rate_limited` | too many writes; see `Retry-After` |
+| 500 | `internal` | the request failed inside Quill Desktop; nothing is remembered for its Idempotency-Key, so it may be retried |
 | 503 | `not_ready` | Quill is still starting |
 
 The `message` is for logs; the phone keys off `code`.

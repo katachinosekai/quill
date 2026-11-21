@@ -295,6 +295,17 @@ func TestPhoneAPIWrites(t *testing.T) {
 	if code, m, _ := a.do("POST", "/phone/session/"+ns["id"].(string)+"/interrupt", key(), map[string]any{}); code != 409 || errCode(m) != "not_running" {
 		t.Fatalf("interrupt without a process: %d %v", code, m)
 	}
+	if code, m, _ := a.do("POST", base+"/send", key(), map[string]string{"text": "/login"}); code != 409 || errCode(m) != "blocked" {
+		t.Fatalf("desktop-only commands are refused for devices: %d %v", code, m)
+	}
+	if _, m, _ := a.do("GET", "/phone/sessions", "", nil); m["control"] != true {
+		t.Fatalf("/phone/sessions reports control: %v", m["control"])
+	}
+	h.ui(func() {
+		if h.d.current == nil || h.d.current.id == ns["id"] {
+			t.Fatal("a device-created session doesn't take over the desktop's current tab")
+		}
+	})
 	if code, m, _ := a.do("POST", "/phone/usage/resume", key(), map[string]any{}); code != 200 || m["usage"] == nil {
 		t.Fatalf("resume: %d %v", code, m)
 	}

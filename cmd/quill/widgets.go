@@ -273,9 +273,6 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 			return
 		}
 		if e.onSend != nil {
-			if e.CursorTextOffset() >= len([]rune(e.Text)) {
-				e.correctBefore(0)
-			}
 			e.onSend(e.Text)
 		}
 		return

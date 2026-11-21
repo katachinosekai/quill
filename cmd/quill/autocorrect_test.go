@@ -64,8 +64,8 @@ func TestAutocorrectTyping(t *testing.T) {
 		e.SetText("")
 		test.Type(e, "please recieve")
 		e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
-		if sent != "please receive" {
-			t.Fatalf("the last word is corrected on send: %q", sent)
+		if sent != "please recieve" {
+			t.Fatalf("Enter sends the text as typed (a correction there couldn't be undone): %q", sent)
 		}
 		e.ac.enabled = func() bool { return false }
 		if typed("recieve ") != "recieve " {
@@ -83,12 +83,12 @@ func TestAutocorrectWithHunspell(t *testing.T) {
 		t.Skip("no en_US dictionary: ", err)
 	}
 	a := &autocorrector{sp: h}
-	for in, want := range map[string]string{"teh": "the", "recieve": "receive", "becuase": "because"} {
+	for in, want := range map[string]string{"teh": "the", "recieve": "receive", "becuase": "because", "adress": "address"} {
 		if got, ok := a.fix(in, in, "", nil); !ok || got != want {
 			t.Errorf("%s -> %q %v", in, got, ok)
 		}
 	}
-	for _, w := range []string{"kmem", "pzlock", "the", "Fyne"} {
+	for _, w := range []string{"kmem", "pzlock", "the", "Fyne", "npm", "src", "sudo", "json", "init", "args", "env", "fmt", "struct", "async", "definately"} {
 		if got, ok := a.fix(w, w, "", nil); ok {
 			t.Errorf("%s should stay, got %q", w, got)
 		}

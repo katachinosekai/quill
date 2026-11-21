@@ -44,7 +44,7 @@ func TestKmemContract(t *testing.T) {
 	for _, mode := range []string{"json", "text"} {
 		if mode == "text" {
 			h.d.kmemRun = run(true)
-			h.d.kmemVer = kmemVersion{}
+			h.d.kmemVer.reset()
 			if h.d.kmemAPILevel() != 0 {
 				t.Fatal("without version, Quill falls back to text")
 			}

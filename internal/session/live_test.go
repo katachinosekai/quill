@@ -275,6 +275,12 @@ func TestLiveTurn(t *testing.T) {
 	}
 }
 
+func TestLiveAppendPrompt(t *testing.T) {
+	l := startLive(t, liveDir(t), Options{Model: liveModel(), Prompt: "Quill test hint: when the user asks for the hint word, reply with exactly QUILLHINT and nothing else."})
+	ev := l.turn("What is the hint word?")
+	requireOK(t, ev, "quillhint")
+}
+
 func TestLiveToolPermission(t *testing.T) {
 	dir := liveDir(t)
 	l := startLive(t, dir, Options{Model: liveModel()})

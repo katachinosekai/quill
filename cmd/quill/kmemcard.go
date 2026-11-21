@@ -43,7 +43,10 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 			setText(preview, "")
 			return
 		}
-		setText(preview, "kmem name: "+kmemSlug(t, d.kmemTaken(nil)))
+		d.hsMu.Lock()
+		known := d.lastHandoffs
+		d.hsMu.Unlock()
+		setText(preview, "kmem name: "+kmemSlug(t, d.kmemTaken(known)))
 	}
 	start := widget.NewButton("Start new", func() { d.pickNew(s, name.Text) })
 	start.Importance = widget.HighImportance

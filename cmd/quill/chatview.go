@@ -1810,6 +1810,9 @@ func parseChoices(line string) (string, []string, bool) {
 	}
 	a := strings.TrimSpace(ask[:i])
 	b := strings.TrimSpace(ask[i+len(sep):])
+	if c := strings.LastIndex(a, ": "); c >= 0 {
+		a = strings.TrimSpace(a[c+2:])
+	}
 	low := strings.ToLower(a)
 	for _, stem := range []string{"do you want me to ", "would you like me to ", "should i ", "shall i ", "should we ", "shall we ", "do you want to ", "want me to ", "should it ", "do i "} {
 		if strings.HasPrefix(low, stem) {
@@ -1817,15 +1820,24 @@ func parseChoices(line string) (string, []string, bool) {
 			break
 		}
 	}
-	if a == "" || b == "" || strings.Contains(b, " or ") || len(strings.Fields(a)) > 12 || len(strings.Fields(b)) > 12 {
+	opts := []string{a}
+	if sep == ", or " && strings.Contains(a, ", ") {
+		opts = strings.Split(a, ", ")
+	}
+	opts = append(opts, b)
+	if len(opts) > 4 || strings.Contains(b, " or ") {
 		return "", nil, false
 	}
-	cap := func(s string) string {
-		r := []rune(s)
+	for i, o := range opts {
+		o = strings.TrimSpace(o)
+		if o == "" || len(strings.Fields(o)) > 12 {
+			return "", nil, false
+		}
+		r := []rune(o)
 		r[0] = []rune(strings.ToUpper(string(r[0])))[0]
-		return string(r)
+		opts[i] = string(r)
 	}
-	return strings.TrimRight(clean, "*_ "), []string{cap(a), cap(b)}, true
+	return strings.TrimRight(clean, "*_ "), opts, true
 }
 
 func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
@@ -1925,9 +1937,9 @@ func (d *desk) refreshChoiceCards(s *deskSession, reply *chat.Item) {
 }
 
 func choiceReply(n int, option string) string {
-	which := "first"
-	if n == 1 {
-		which = "second"
+	which := "next"
+	if n >= 0 && n < 4 {
+		which = [...]string{"first", "second", "third", "fourth"}[n]
 	}
 	return "I pick the " + which + " option: " + option + "."
 }

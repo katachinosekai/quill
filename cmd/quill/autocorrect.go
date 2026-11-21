@@ -179,43 +179,42 @@ func (a *autocorrector) fix(word, token, before string, known func(string) bool)
 		return "", false
 	}
 	ok, sugg := sp.check(word)
-	if ok || len(sugg) == 0 {
+	if ok {
 		return "", false
 	}
-	best := sugg[0]
-	limit := 2
-	if len([]rune(word)) <= 4 {
-		limit = 1
+	for i, c := range sugg {
+		if i == 3 {
+			break
+		}
+		if typoOf(lw, c) {
+			return c, true
+		}
 	}
-	if strings.ContainsAny(best, " -") || strings.EqualFold(best, word) || damerau(lw, strings.ToLower(best)) > limit {
-		return "", false
-	}
-	return best, true
+	return "", false
 }
 
-func damerau(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	d := make([][]int, len(ra)+1)
-	for i := range d {
-		d[i] = make([]int, len(rb)+1)
-		d[i][0] = i
+func typoOf(w, c string) bool {
+	a, b := []rune(w), []rune(c)
+	if len(a) == 0 || len(b) == 0 || a[0] != b[0] || strings.ContainsAny(c, " -'") {
+		return false
 	}
-	for j := range d[0] {
-		d[0][j] = j
-	}
-	for i := 1; i <= len(ra); i++ {
-		for j := 1; j <= len(rb); j++ {
-			cost := 1
-			if ra[i-1] == rb[j-1] {
-				cost = 0
+	if len(a) == len(b) {
+		diff := []int{}
+		for i := range a {
+			if a[i] != b[i] {
+				diff = append(diff, i)
 			}
-			d[i][j] = min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost)
-			if i > 1 && j > 1 && ra[i-1] == rb[j-2] && ra[i-2] == rb[j-1] {
-				d[i][j] = min(d[i][j], d[i-2][j-2]+1)
+		}
+		return len(diff) == 2 && diff[1] == diff[0]+1 && a[diff[0]] == b[diff[1]] && a[diff[1]] == b[diff[0]]
+	}
+	if len(b) == len(a)+1 && len(a) >= 5 {
+		for i := range b {
+			if string(b[:i])+string(b[i+1:]) == w {
+				return true
 			}
 		}
 	}
-	return d[len(ra)][len(rb)]
+	return false
 }
 
 type acFix struct {

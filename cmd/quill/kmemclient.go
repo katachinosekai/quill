@@ -16,6 +16,12 @@ type kmemVersion struct {
 	at  time.Time
 }
 
+func (v *kmemVersion) reset() {
+	v.mu.Lock()
+	v.api, v.at = 0, time.Time{}
+	v.mu.Unlock()
+}
+
 func (d *desk) kmemAPILevel() int {
 	v := &d.kmemVer
 	v.mu.Lock()

@@ -128,11 +128,11 @@ func (s *deskSession) status() status {
 	}
 	restarting := s.restarting || s.compacting || s.kmemSave != nil
 	if !s.running() {
-		if restarting {
-			return stRestart
-		}
 		if s.failed != "" {
 			return stError
+		}
+		if restarting {
+			return stRestart
 		}
 		return stNone
 	}
@@ -178,6 +178,8 @@ type desk struct {
 	kmemRun      func(prog string, args ...string) (string, error)
 	kmemOff      bool
 	kmemVer      kmemVersion
+	hsMu         sync.Mutex
+	lastHandoffs []kmemHandoff
 	policy       handoffPolicy
 	policyAt     time.Time
 	policyBusy   bool
@@ -317,7 +319,6 @@ type desk struct {
 	acKnown       map[string]*wordSet
 	hintPrev      map[*canvas.Text]string
 	windows       map[string]int
-	prunedTabs    bool
 	sideAnim      *fyne.Animation
 	animate       bool
 	root          *fyne.Container
@@ -1151,7 +1152,7 @@ func (d *desk) updateChrome() {
 	if d.modeSel.Selected != s.mode {
 		d.modeSel.SetSelected(s.mode)
 	}
-	if st == stRunning || st == stWaiting && !s.conv.AwaitsReply() || s.running() && s.conv.Background() > 0 {
+	if s.running() && (s.conv.Busy || s.proc.Busy() || len(s.conv.PendingPermissions()) > 0 || s.conv.Background() > 0) {
 		d.stopBtn.Enable()
 	} else {
 		d.stopBtn.Disable()
@@ -1366,7 +1367,6 @@ func (d *desk) addSession(cwd, model, mode string, show bool) *deskSession {
 	}
 	d.sessions[id] = s
 	if !show {
-		d.addTab(id)
 		d.rebuildRows()
 		return s
 	}
@@ -1519,6 +1519,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 		return
 	}
 	d.unkeepSession(s.id)
+	s.restarting = false
 	var items []*chat.Item
 	items = append(items, s.conv.CancelPending()...)
 	for _, it := range s.conv.Items {
@@ -1978,10 +1979,6 @@ func (d *desk) refresh() {
 				d.infos[infos[k].ID] = infos[k]
 			}
 			d.linkKmem(infos)
-			if !d.prunedTabs {
-				d.prunedTabs = true
-				d.pruneStaleTabs()
-			}
 		}
 		d.terms = terms
 		for id, s := range d.sessions {
@@ -2010,6 +2007,7 @@ func (d *desk) watch(ctx context.Context) {
 		d.restore = nil
 		d.do(func() { d.applyRestore(st) })
 	}
+	d.do(d.pruneStaleTabs)
 	d.do(d.reopenLastTab)
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)

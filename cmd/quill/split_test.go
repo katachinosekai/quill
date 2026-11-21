@@ -1428,11 +1428,15 @@ func TestColdCacheRotation(t *testing.T) {
 
 func TestChoiceCard(t *testing.T) {
 	for line, want := range map[string][]string{
-		"**Push `4bc346e` now, or wait until you've seen it rotate a session?**": {"Push 4bc346e now", "Wait until you've seen it rotate a session"},
-		"Should I reload now or wait until you've sent the queued messages?":     {"Reload now", "Wait until you've sent the queued messages"},
-		"Should I fix this now or later?":                                        {"Fix this now", "Later"},
-		"**Approve A–E, and which of 3–12 should I include?**":                   nil,
-		"Done. The suite passes.":                                                nil,
+		"**Push `4bc346e` now, or wait until you've seen it rotate a session?**":                                 {"Push 4bc346e now", "Wait until you've seen it rotate a session"},
+		"Should I reload now or wait until you've sent the queued messages?":                                     {"Reload now", "Wait until you've sent the queued messages"},
+		"Should I fix this now or later?":                                                                        {"Fix this now", "Later"},
+		"**Approve A–E, and which of 3–12 should I include?**":                                                   nil,
+		"Done. The suite passes.":                                                                                nil,
+		"**Which matters most to you for kmem: wide adoption, keeping it open, or controlling commercial use?**": {"Wide adoption", "Keeping it open", "Controlling commercial use"},
+		"Pick a color: red, green, or blue?":                                                                     {"Red", "Green", "Blue"},
+		"Do you want me to merge now, or wait for review?":                                                       {"Merge now", "Wait for review"},
+		"One, two, three, four, or five?":                                                                        nil,
 	} {
 		_, got, ok := parseChoices(line)
 		if !reflect.DeepEqual(got, want) || ok != (want != nil) {

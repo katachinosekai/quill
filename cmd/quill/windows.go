@@ -16,12 +16,10 @@ func (d *desk) noteWindow(s *deskSession) {
 	}
 	st := &s.conv.Stats
 	w := d.modelWindows()
-	keys := []string{}
-	for _, k := range []string{st.Model, s.model} {
-		if k != "" && k != "default" {
-			keys = append(keys, k)
-		}
+	if st.Model == "" && (s.model == "" || s.model == "default") {
+		return
 	}
+	keys := []string{s.model + "|" + st.Model}
 	if st.ContextMax > 0 {
 		changed := false
 		for _, k := range keys {

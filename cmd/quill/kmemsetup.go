@@ -59,12 +59,19 @@ func kmemBin() string {
 	return ""
 }
 
+func shellQuote(p string) string {
+	if !strings.ContainsAny(p, " \t'\"$`\\") {
+		return p
+	}
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}
+
 func kmemHooks(home string) map[string]map[string]any {
 	bin := filepath.Join(home, ".local", "bin")
 	return map[string]map[string]any{
-		"SessionStart": {"hooks": []any{map[string]any{"type": "command", "command": filepath.Join(bin, "kmem") + " brief 2>&1 || true", "timeout": 10}}},
+		"SessionStart": {"hooks": []any{map[string]any{"type": "command", "command": shellQuote(filepath.Join(bin, "kmem")) + " brief 2>&1 || true", "timeout": 10}}},
 		"PreToolUse": {"matcher": "Bash|Agent|Task|Write|Edit|MultiEdit|NotebookEdit",
-			"hooks": []any{map[string]any{"type": "command", "command": filepath.Join(bin, "kmem-guard"), "timeout": 10}}},
+			"hooks": []any{map[string]any{"type": "command", "command": shellQuote(filepath.Join(bin, "kmem-guard")), "timeout": 10}}},
 	}
 }
 
@@ -83,6 +90,9 @@ func hasHookCommand(groups []any, needle string) bool {
 }
 
 func mergeKmemHooks(settingsPath, home string, now time.Time) (bool, string, error) {
+	if real, err := filepath.EvalSymlinks(settingsPath); err == nil {
+		settingsPath = real
+	}
 	settings := map[string]any{}
 	raw, err := os.ReadFile(settingsPath)
 	switch {
@@ -100,7 +110,10 @@ func mergeKmemHooks(settingsPath, home string, now time.Time) (bool, string, err
 	}
 	changed := false
 	for event, group := range kmemHooks(home) {
-		groups, _ := hooks[event].([]any)
+		groups, isList := hooks[event].([]any)
+		if hooks[event] != nil && !isList {
+			return false, "", fmt.Errorf("%s has an unexpected %q hook entry; not changed", settingsPath, event)
+		}
 		needle := "kmem brief"
 		if event == "PreToolUse" {
 			needle = "kmem-guard"
@@ -148,22 +161,42 @@ func copyExec(src, dst string) error {
 	return os.Rename(tmp, dst)
 }
 
-func setupKmem(home, bundled string, now time.Time) ([]string, error) {
-	bin := filepath.Join(home, ".local", "bin")
+func kmemHooksPresent(home string) bool {
+	raw, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		return false
+	}
+	var s struct {
+		Hooks map[string][]any `json:"hooks"`
+	}
+	return json.Unmarshal(raw, &s) == nil && hasHookCommand(s.Hooks["SessionStart"], "kmem brief") && hasHookCommand(s.Hooks["PreToolUse"], "kmem-guard")
+}
+
+func kmemSetupComplete(home string) bool {
 	for _, f := range []string{"kmem", "kmem-guard"} {
-		if _, err := os.Stat(filepath.Join(bin, f)); err == nil {
-			return nil, fmt.Errorf("%s already exists; Quill never replaces an installed kmem", filepath.Join(bin, f))
+		if _, err := os.Stat(filepath.Join(home, ".local", "bin", f)); err != nil {
+			return false
 		}
 	}
+	return kmemHooksPresent(home)
+}
+
+func setupKmem(home, bundled string, now time.Time) ([]string, error) {
+	bin := filepath.Join(home, ".local", "bin")
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		return nil, err
 	}
 	var done []string
 	for _, f := range []string{"kmem", "kmem-guard"} {
-		if err := copyExec(filepath.Join(bundled, f), filepath.Join(bin, f)); err != nil {
+		dst := filepath.Join(bin, f)
+		if _, err := os.Stat(dst); err == nil {
+			done = append(done, "kept the existing "+dst+" (Quill never replaces an installed kmem)")
+			continue
+		}
+		if err := copyExec(filepath.Join(bundled, f), dst); err != nil {
 			return done, err
 		}
-		done = append(done, "installed "+filepath.Join(bin, f))
+		done = append(done, "installed "+dst)
 	}
 	changed, backup, err := mergeKmemHooks(filepath.Join(home, ".claude", "settings.json"), home, now)
 	if err != nil {
@@ -190,7 +223,8 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 	refresh := func() {
 		bundled := bundledKmemDir()
 		bv := bundledKmemVersion(bundled)
-		if p := kmemBin(); p != "" {
+		home, _ := os.UserHomeDir()
+		if p := kmemBin(); p != "" && (bundled == "" || p != userKmemPath() || kmemSetupComplete(home)) {
 			text := "kmem is installed: " + tildePath(p)
 			if bv != "" {
 				text += " (Quill bundles kmem " + bv + "; your installed copy is never replaced)"
@@ -205,6 +239,10 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 			return
 		}
 		status.SetText("kmem " + bv + " comes with Quill but isn't set up yet. kmem gives sessions shared memory: handoffs, tasks and rules.")
+		if kmemBin() != "" {
+			status.SetText("kmem setup is incomplete (kmem-guard or the Claude hooks are missing). Finish it to turn on the guards and the session brief.")
+			btn.SetText("Finish kmem setup...")
+		}
 		btn.Show()
 	}
 	btn.OnTapped = func() {
@@ -226,7 +264,7 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 			if err != nil {
 				msg = strings.TrimSpace(msg + "\nStopped: " + err.Error())
 			}
-			d.kmemVer = kmemVersion{}
+			d.kmemVer.reset()
 			refresh()
 			dialog.ShowInformation("kmem setup", msg, d.win)
 		}, d.win)

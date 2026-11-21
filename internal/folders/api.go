@@ -166,12 +166,25 @@ func (st *idemStore) serve(w http.ResponseWriter, r *http.Request, phone string,
 	st.mu.Unlock()
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	rec := &recorder{header: http.Header{}}
-	h.ServeHTTP(rec, r)
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				rec = &recorder{header: http.Header{}}
+				rec.header.Set("Content-Type", "application/json")
+				rec.WriteHeader(http.StatusInternalServerError)
+				rec.Write([]byte(`{"v":1,"error":{"code":"internal","message":"the request failed inside Quill"}}`))
+				st.mu.Lock()
+				delete(m, key)
+				st.mu.Unlock()
+			}
+		}()
+		h.ServeHTTP(rec, r)
+	}()
 	if rec.status == 0 {
 		rec.status = http.StatusOK
 	}
 	st.mu.Lock()
-	if rec.status == http.StatusTooManyRequests || rec.status == http.StatusServiceUnavailable {
+	if rec.status == http.StatusTooManyRequests || rec.status == http.StatusServiceUnavailable || rec.status == http.StatusInternalServerError {
 		delete(m, key)
 	} else {
 		e.done, e.status, e.body, e.headers = true, rec.status, rec.buf.Bytes(), rec.header.Clone()
@@ -182,4 +195,19 @@ func (st *idemStore) serve(w http.ResponseWriter, r *http.Request, phone string,
 	}
 	w.WriteHeader(rec.status)
 	w.Write(rec.buf.Bytes())
+}
+
+func (st *idemStore) keep(phones []Phone) {
+	ids := map[string]bool{}
+	for _, p := range phones {
+		ids[p.ID] = true
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for id := range st.phones {
+		if !ids[id] {
+			delete(st.phones, id)
+			delete(st.writes, id)
+		}
+	}
 }

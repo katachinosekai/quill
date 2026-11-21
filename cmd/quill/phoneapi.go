@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -99,7 +100,7 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "hello":
 		a.hello(w, r)
 	case r.Method == http.MethodGet && path == "sessions":
-		a.sessions(w)
+		a.sessions(w, folders.PhoneID(r))
 	case r.Method == http.MethodGet && path == "folders":
 		a.folders(w)
 	case r.Method == http.MethodGet && path == "stream":
@@ -286,7 +287,7 @@ func (a *phoneAPI) usage() map[string]any {
 	return u
 }
 
-func (a *phoneAPI) sessions(w http.ResponseWriter) {
+func (a *phoneAPI) sessions(w http.ResponseWriter, phone string) {
 	var body map[string]any
 	a.ui(func() {
 		a.scan()
@@ -299,7 +300,7 @@ func (a *phoneAPI) sessions(w http.ResponseWriter) {
 		cursor := a.next
 		a.mu.Unlock()
 		body = map[string]any{
-			"v": 1, "boot": a.boot, "cursor": cursor, "usage": a.usage(), "sessions": list,
+			"v": 1, "boot": a.boot, "cursor": cursor, "usage": a.usage(), "sessions": list, "control": a.control(phone),
 			"models": map[string]any{"online": modelChoices, "local": a.d.localModelList()},
 			"modes":  map[string]any{"online": modeChoices, "local": localModes},
 		}
@@ -366,6 +367,8 @@ func (t *itemTrack) update(s *deskSession) {
 	start := max(0, len(items)-apiScanTail)
 	if t.lastSeq == 0 {
 		start = 0
+	} else if j := sort.Search(len(items), func(i int) bool { return items[i].Seq > t.lastSeq }); j < start {
+		start = j
 	}
 	for _, it := range items[start:] {
 		if p, ok := t.ptr[it.Seq]; ok && p != it {
@@ -412,6 +415,11 @@ func (a *phoneAPI) scan() {
 		if a.lastSess[id] != string(js) {
 			a.lastSess[id] = string(js)
 			changes = append(changes, map[string]any{"type": "session", "session": json.RawMessage(js)})
+		}
+	}
+	for id := range a.tracks {
+		if d.sessions[id] == nil {
+			delete(a.tracks, id)
 		}
 	}
 	for id := range a.lastSess {
@@ -644,6 +652,39 @@ func openChoiceItem(c *chat.Conversation) *chat.Item {
 	return nil
 }
 
+func (a *phoneAPI) preload(id string) bool {
+	found := true
+	var path string
+	var mod time.Time
+	a.ui(func() {
+		info, known := a.d.infos[id]
+		s := a.d.sessions[id]
+		if !known && s == nil {
+			found = false
+			return
+		}
+		if known && (s == nil || !s.loaded && !s.running()) {
+			path, mod = info.Path, info.ModTime
+		}
+	})
+	if !found || path == "" {
+		return found
+	}
+	conv, _ := transcript.Load(path)
+	a.ui(func() {
+		s := a.d.session(id)
+		if s == nil || conv == nil || s.loaded || s.running() || s.loading {
+			return
+		}
+		s.conv, s.loaded, s.loadedMod = conv, true, mod
+		a.d.noteWindow(s)
+		if conv.Cwd != "" {
+			s.cwd = conv.Cwd
+		}
+	})
+	return true
+}
+
 func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 	q := r.URL.Query()
 	limit := apiWindow
@@ -671,27 +712,10 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	var body map[string]any
-	found := true
-	var path string
-	var mod time.Time
-	a.ui(func() {
-		info, known := a.d.infos[id]
-		s := a.d.sessions[id]
-		if !known && s == nil {
-			found = false
-			return
-		}
-		if known && (s == nil || !s.loaded && !s.running()) {
-			path, mod = info.Path, info.ModTime
-		}
-	})
+	found := a.preload(id)
 	if !found {
 		folders.WriteError(w, http.StatusNotFound, "not_found", "no session "+id)
 		return
-	}
-	var conv *chat.Conversation
-	if path != "" {
-		conv, _ = transcript.Load(path)
 	}
 	a.ui(func() {
 		d := a.d
@@ -699,13 +723,6 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 		if s == nil {
 			found = false
 			return
-		}
-		if conv != nil && !s.loaded && !s.running() && !s.loading {
-			s.conv, s.loaded, s.loadedMod = conv, true, mod
-			d.noteWindow(s)
-			if conv.Cwd != "" {
-				s.cwd = conv.Cwd
-			}
 		}
 		t := a.track(s)
 		items := s.conv.Items
