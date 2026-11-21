@@ -154,6 +154,20 @@ func proposes(last string) bool {
 	return proposalAsk.MatchString(q)
 }
 
+// lastQuestion: the last sentence of line that ends with "?" (quotes and
+// parentheses blanked), or "".
+func lastQuestion(line string) string {
+	i := strings.LastIndex(line, "?")
+	if i < 0 {
+		return ""
+	}
+	q := quotedSpans.ReplaceAllString(line[:i], " ")
+	if m := sentenceEnd.FindAllStringIndex(q, -1); len(m) > 0 {
+		q = q[m[len(m)-1][1]:]
+	}
+	return strings.TrimLeft(q, "*_ ")
+}
+
 // AsksApproval: the turn's last text ends in a question asking to approve,
 // or in a proposal of work (see approvalAsk).
 func (c *Conversation) AsksApproval() bool {
@@ -168,6 +182,12 @@ func (c *Conversation) AsksApproval() bool {
 		t := strings.TrimRight(strings.TrimSpace(it.Text), "*_ ")
 		last := t[strings.LastIndex(t, "\n")+1:]
 		if strings.HasSuffix(t, "?") && approvalAsk.MatchString(quotedSpans.ReplaceAllString(last, " ")) {
+			return true
+		}
+		// The approval question can be followed by a note on the same line
+		// ("Do you approve steps 1–3? Your approval also covers …."; user
+		// 2026-11-21: a typed "Yes" to that was not taken as approval).
+		if q := lastQuestion(last); q != "" && approvalAsk.MatchString(q) {
 			return true
 		}
 		return proposes(last)
