@@ -343,6 +343,36 @@ func (d *desk) resumeHandoffNamed(name string) *deskSession {
 	return ns
 }
 
+var kmemNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
+
+func validKmemName(s string) bool { return kmemNameRe.MatchString(s) }
+
+// resumeNamedFromCLI: `quill --resume NAME` (user 2026-11-21): bring the
+// window up and open that kmem session, or start one from its handoff.
+func (d *desk) resumeNamedFromCLI(name string) {
+	d.showWindow()
+	if !d.kmemAvailable() {
+		return
+	}
+	if d.handoffOwner(name, &deskSession{}) != nil {
+		d.resumeHandoffNamed(name)
+		return
+	}
+	go func() {
+		known := false
+		for _, h := range d.kmemHandoffs() { // runs kmem: off the UI thread
+			known = known || h.Name == name
+		}
+		d.do(func() {
+			if known {
+				d.resumeHandoffNamed(name)
+			} else if s := d.current; s != nil {
+				d.notify(s, "quill --resume: there is no kmem handoff or live session called “"+name+"”.")
+			}
+		})
+	}()
+}
+
 // trashHandoffNamed moves every fact of a handoff to the kmem recycle bin.
 func (d *desk) trashHandoffNamed(name, why string, done func()) {
 	go func() {

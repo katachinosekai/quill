@@ -61,7 +61,16 @@ func (d *desk) listenInstance(path string) {
 				if err != nil {
 					return
 				}
-				switch strings.TrimSpace(line) {
+				cmdLine := strings.TrimSpace(line)
+				if name, ok := strings.CutPrefix(cmdLine, "resume "); ok {
+					if !validKmemName(name) {
+						return
+					}
+					d.do(func() { d.resumeNamedFromCLI(name) })
+					_, _ = c.Write([]byte("ok\n"))
+					return
+				}
+				switch cmdLine {
 				case "show":
 					d.do(d.showWindow)
 				case "profile":
