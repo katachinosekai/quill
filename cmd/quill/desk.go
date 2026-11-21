@@ -158,7 +158,7 @@ type desk struct {
 	localModels []string
 	localBusy   bool
 	fetchLocal  func(host string) []string
-	backendSel  *widget.RadioGroup
+	backendBtn  *widget.Button
 	app         fyne.App
 	win         fyne.Window
 	cfg         config
@@ -921,15 +921,13 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.app.Preferences().SetString("newMode", v)
 		d.setMode(d.current, v)
 	})
-	d.backendSel = widget.NewRadioGroup([]string{backendOnline, backendLocal}, func(v string) {
-		if d.suppress || d.current == nil || v == "" {
+	d.backendBtn = widget.NewButton(backendOnline, func() {
+		if d.current == nil {
 			return
 		}
-		d.setBackend(d.current, v)
+		d.setBackend(d.current, otherBackend(d.current.model))
 		d.updateChrome()
 	})
-	d.backendSel.Horizontal = true
-	d.backendSel.Required = true
 	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands", fontMeta)
 	d.stats = mutedText("", fontMeta)
 	d.stopBtn = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
@@ -945,7 +943,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	openAll.Importance = widget.LowImportance
 	closeAll := widget.NewButtonWithIcon("Collapse chips", theme.MenuDropUpIcon(), func() { d.setAllChips(false) })
 	closeAll.Importance = widget.LowImportance
-	controls := container.NewHBox(d.backendSel, d.modelSel, d.modeSel, d.stt.langBtn, layout.NewSpacer(), openAll, closeAll)
+	controls := container.NewHBox(d.backendBtn, d.modelSel, d.modeSel, d.stt.langBtn, layout.NewSpacer(), openAll, closeAll)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
@@ -993,7 +991,7 @@ func (d *desk) updateChrome() {
 		d.stopBtn.Disable()
 		d.modelSel.Disable()
 		d.modeSel.Disable()
-		d.backendSel.Disable()
+		d.backendBtn.Disable()
 		setText(d.stats, "")
 		return
 	}
@@ -1028,7 +1026,7 @@ func (d *desk) updateChrome() {
 		d.sendBtn.Enable()
 		d.modelSel.Enable()
 		d.modeSel.Enable()
-		d.backendSel.Enable()
+		d.backendBtn.Enable()
 		d.rcStatus.Hide()
 	} else {
 		d.note.Hide()
@@ -1036,7 +1034,7 @@ func (d *desk) updateChrome() {
 		d.sendBtn.Enable()
 		d.modelSel.Enable()
 		d.modeSel.Enable()
-		d.backendSel.Enable()
+		d.backendBtn.Enable()
 		rcText, rcCol := "Remote Control off", color.Color(colMuted)
 		if s.rcOn {
 			rcText, rcCol = "● Remote Control on", colIdle
@@ -1063,9 +1061,7 @@ func (d *desk) updateChrome() {
 	}
 	setOptions(d.modelSel, d.modelOptions(s))
 	setOptions(d.modeSel, modeOptions(s))
-	if d.backendSel.Selected != backendOf(s.model) {
-		d.backendSel.SetSelected(backendOf(s.model))
-	}
+	setBackendButton(d.backendBtn, s.model)
 	if d.modelSel.Selected != s.model {
 		d.modelSel.SetSelected(s.model)
 	}
