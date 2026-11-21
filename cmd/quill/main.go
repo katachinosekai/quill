@@ -36,6 +36,7 @@ func main() {
 	claudeBin := flag.String("claude", "claude", "claude CLI to run")
 	reload := flag.Bool("reload", false, "ask the running Quill to switch to this build now")
 	heapFlag := flag.Bool("heap", false, "write a heap profile of the running Quill into $XDG_RUNTIME_DIR/quill-heap-<pid>.pprof")
+	resumeAll := flag.Bool("resume-all", false, "ask the running Quill to resume every ended kmem session in Inactive from its handoff")
 	profile := flag.Bool("profile", false, "record 10 s of the running Quill's CPU use into $XDG_RUNTIME_DIR/quill-cpu-<pid>.pprof")
 	flag.Parse()
 	if *showVersion {
@@ -52,6 +53,13 @@ func main() {
 	}
 	if *profile {
 		if !sendCommand(sock, "profile") {
+			fmt.Fprintln(os.Stderr, "no running Quill answered")
+			os.Exit(1)
+		}
+		return
+	}
+	if *resumeAll {
+		if !sendCommand(sock, "resume-all") {
 			fmt.Fprintln(os.Stderr, "no running Quill answered")
 			os.Exit(1)
 		}

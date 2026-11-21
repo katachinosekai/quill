@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -275,4 +276,21 @@ func TestResumeAllFromHandoffs(t *testing.T) {
 			t.Fatalf("two fresh sessions carry the names: %d", moved)
 		}
 	})
+}
+
+func TestResumeAllCommand(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "q.sock")
+	h, _, _ := identityHarness(t)
+	var old *deskSession
+	h.ui(func() {
+		old = h.d.createSession(h.proj, "default", "default")
+		h.d.org.Kmem[old.id] = "cmd-work"
+		h.d.org.Place[old.id] = placeInactive
+		h.d.markEnded(old.id)
+	})
+	h.d.listenInstance(sock)
+	if !sendCommand(sock, "resume-all") {
+		t.Fatal("resume-all not acknowledged")
+	}
+	h.eventually("resumed by command", func() bool { return h.d.org.Kmem[old.id] == "" && !h.d.org.Ended[old.id] })
 }

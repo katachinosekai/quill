@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -248,24 +249,34 @@ func (d *desk) trashHandoff(id string) {
 }
 
 func (d *desk) resumableIn(key string) []string {
-	var out []string
+	var cands []string
 	for _, g := range d.groups {
-		if g.key != key {
+		if g.key == key {
+			cands = append(cands, g.ids...)
+		}
+	}
+	var placed []string
+	for id, p := range d.org.Place {
+		if p == key {
+			placed = append(placed, id)
+		}
+	}
+	slices.Sort(placed)
+	cands = append(cands, placed...)
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range cands {
+		if seen[id] || !d.org.Ended[id] || d.org.Kmem[id] == "" {
 			continue
 		}
-		for _, id := range g.ids {
-			if !d.org.Ended[id] || d.org.Kmem[id] == "" {
-				continue
-			}
-			s := d.sessions[id]
-			if s != nil && s.running() {
-				continue
-			}
-			if d.handoffOwner(d.org.Kmem[id], &deskSession{id: id}) != nil {
-				continue
-			}
-			out = append(out, id)
+		seen[id] = true
+		if s := d.sessions[id]; s != nil && s.running() {
+			continue
 		}
+		if d.handoffOwner(d.org.Kmem[id], &deskSession{id: id}) != nil {
+			continue
+		}
+		out = append(out, id)
 	}
 	return out
 }
