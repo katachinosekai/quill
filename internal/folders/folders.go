@@ -1,6 +1,7 @@
 package folders
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -165,6 +166,8 @@ type Server struct {
 	phones   []Phone
 	revoked  chan struct{}
 	seen     func(id string)
+	api      http.Handler
+	idem     *idemStore
 	data     []byte
 	ln       net.Listener
 	srv      *http.Server
@@ -186,7 +189,7 @@ func Listen(cert tls.Certificate, port int, phones []Phone) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{phones: append([]Phone(nil), phones...), revoked: make(chan struct{}), ln: ln, Port: ln.Addr().(*net.TCPAddr).Port, boot: newBoot(), next: 1, wake: make(chan struct{}), eventsOn: true}
+	s := &Server{idem: newIdemStore(), phones: append([]Phone(nil), phones...), revoked: make(chan struct{}), ln: ln, Port: ln.Addr().(*net.TCPAddr).Port, boot: newBoot(), next: 1, wake: make(chan struct{}), eventsOn: true}
 	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 8 << 10}
 	go s.srv.Serve(ln)
 	return s, nil
@@ -203,20 +206,43 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet || r.URL.Path != "/folders.json" && r.URL.Path != "/events" && r.URL.Path != "/usage.json" {
+	phone := strings.HasPrefix(r.URL.Path, "/phone/")
+	if phone {
+		if r.Method != http.MethodGet && r.Method != http.MethodPost {
+			WriteError(w, http.StatusNotFound, "not_found", "unknown path")
+			return
+		}
+	} else if r.Method != http.MethodGet || r.URL.Path != "/folders.json" && r.URL.Path != "/events" && r.URL.Path != "/usage.json" {
 		http.NotFound(w, r)
 		return
 	}
 	s.mu.Lock()
-	data, seen := s.data, s.seen
+	data, seen, api := s.data, s.seen, s.api
 	id := matchPhone(s.phones, r.Header.Get("X-Quill-Key"))
 	s.mu.Unlock()
 	if id == "" {
+		if phone {
+			WriteError(w, http.StatusForbidden, "forbidden", "unknown key")
+			return
+		}
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	if seen != nil {
 		seen(id)
+	}
+	if phone {
+		if api == nil {
+			WriteError(w, http.StatusNotFound, "not_found", "no phone API")
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), phoneKeyCtx{}, id))
+		if r.Method == http.MethodPost {
+			s.idem.serve(w, r, id, api)
+			return
+		}
+		api.ServeHTTP(w, r)
+		return
 	}
 	if r.URL.Path == "/events" {
 		s.serveEvents(w, r, id)

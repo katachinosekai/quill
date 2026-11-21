@@ -200,6 +200,7 @@ func (d *desk) startPhoneServer() error {
 	s.SetEvents(prefs.BoolWithFallback("phoneNotify", true))
 	s.SetUsageSource(d.phoneUsageJSON)
 	s.SetSeen(func(id string) { d.do(func() { d.phoneSeen(id) }) })
+	s.SetAPI(newPhoneAPI(d, s))
 	p.server, p.fp = s, fp
 	d.publishPhone(true)
 	return nil
@@ -456,10 +457,12 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 		}
 	})
 	notifyChk.Checked = d.app.Preferences().BoolWithFallback("phoneNotify", true)
+	controlChk := widget.NewCheck("Let paired phones control sessions", func(on bool) { d.app.Preferences().SetBool("phoneControl", on) })
+	controlChk.Checked = d.app.Preferences().Bool("phoneControl")
 	head := mutedText("Phone", fontMeta)
 	p.list = container.NewVBox()
 	d.updatePhoneList()
-	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), notifyChk, p.status)
+	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), notifyChk, controlChk, p.status)
 }
 
 func (d *desk) updatePhoneRow() {
