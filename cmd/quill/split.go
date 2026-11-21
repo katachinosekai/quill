@@ -578,12 +578,15 @@ func (d *desk) syncSplitButtons() {
 	if d.viewBtn == nil {
 		return
 	}
-	label := splitLabel(max(1, len(d.panes)))
-	if d.autoChk != nil && d.autoChk.Checked {
-		label = "Auto split"
+	icon := theme.ViewFullScreenIcon()
+	if len(d.panes) > 1 {
+		icon = theme.GridIcon()
 	}
-	if d.viewBtn.Text != label {
-		d.viewBtn.SetText(label)
+	if d.autoChk != nil && d.autoChk.Checked {
+		icon = theme.ViewRefreshIcon()
+	}
+	if d.viewBtn.Icon != icon {
+		d.viewBtn.SetIcon(icon)
 	}
 }
 
