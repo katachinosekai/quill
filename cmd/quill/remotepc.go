@@ -105,6 +105,7 @@ type remoteSess struct {
 	// shown, so a slower, older answer can't overwrite a newer window.
 	fetchN, applied int
 	healed          time.Time // last self-heal reload (see blankStuck)
+	reloading       bool      // a Reload click's fetch is running (remotereload.go)
 }
 
 // remoteHealEvery: at most one self-heal reload per session in this time.
@@ -688,9 +689,22 @@ func (l *remoteLink) fetchWindow(s *deskSession, heal bool) {
 			Items []remoteItem `json:"items"`
 		}
 		if _, err := l.do("GET", "/phone/session/"+url.PathEscape(r.rid)+"/items?limit=200", nil, &page); err != nil {
+			l.d.do(func() {
+				if r.reloading && n == r.fetchN {
+					r.reloading = false
+					l.d.updateChrome()
+					l.d.syncPanes()
+				}
+			})
 			return
 		}
 		l.d.do(func() {
+			reloaded := r.reloading && n == r.fetchN
+			if reloaded {
+				r.reloading = false
+				defer l.d.syncPanes()
+				defer l.d.updateChrome()
+			}
 			if l.d.sessions[s.id] != s || l.d.remotes[l.conf.ID] != l || n < r.applied {
 				return
 			}

@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
 
 	"github.com/katachinosekai/quill/internal/chat"
 )
@@ -104,6 +108,43 @@ func TestRemotePCSessionsAsTabs(t *testing.T) {
 		h.d.open(rid)
 	})
 	h.eventually("remote chat loaded", func() bool { return len(h.d.sessions[rid].conv.Items) > 0 })
+
+	// Reload: only shown for remote sessions; it replaces what we hold with the PC's window.
+	var want int
+	h.ui(func() {
+		if !h.d.reloadBtn.Visible() || h.d.reloadBtn.Disabled() {
+			t.Fatal("a remote session shows an enabled Reload button")
+		}
+		want = len(h.d.sessions[rid].conv.Items)
+		stale := chat.New()
+		stale.AddNotice("stale copy")
+		h.d.sessions[rid].conv = stale
+		test.Tap(h.d.reloadBtn)
+		if !h.d.sessions[rid].remote.reloading || !h.d.reloadBtn.Disabled() {
+			t.Fatal("Reload is off while its fetch runs")
+		}
+	})
+	h.eventually("reload brings the PC's window back", func() bool {
+		s := h.d.sessions[rid]
+		return !s.remote.reloading && len(s.conv.Items) == want && s.conv.Items[0].Text != "stale copy" && !h.d.reloadBtn.Disabled()
+	})
+	h.ui(func() {
+		h.d.open(editsID)
+		if h.d.reloadBtn.Visible() {
+			t.Fatal("a local session has no Reload button")
+		}
+		h.d.open(rid)
+		if !h.d.reloadBtn.Visible() {
+			t.Fatal("back on the remote session it shows again")
+		}
+	})
+	if os.Getenv("DESK_SHOTS") != "" {
+		dir, _ := filepath.Abs(filepath.Join("..", "..", ".shots"))
+		os.MkdirAll(dir, 0o755)
+		h.ui(func() { h.w.Resize(fyne.NewSize(1280, 860)) })
+		time.Sleep(200 * time.Millisecond)
+		h.ui(func() { shot(t, h.w, dir, "remote-reload.png") })
+	}
 
 	// Our own phones never see the remote copies. (The test's phone uses the
 	// same key, which is a PC now: it is locked without the token.)

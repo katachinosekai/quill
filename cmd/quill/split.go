@@ -27,6 +27,7 @@ type pane struct {
 	d       *desk
 	view    *chatView
 	title   *widget.Label
+	reload  *widget.Button // Reload for Other PCs sessions (remotereload.go)
 	outline *canvas.Rectangle
 	dropHL  *canvas.Rectangle
 	root    fyne.CanvasObject
@@ -101,7 +102,8 @@ func (d *desk) newPane() *pane {
 	p.title.Truncation = fyne.TextTruncateEllipsis
 	closeBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() { d.closePane(p) })
 	closeBtn.Importance = widget.LowImportance
-	head := container.NewBorder(nil, nil, padLeft(4), closeBtn, p.title)
+	p.reload = d.newRemoteReloadButton("", func() *deskSession { return p.view.s })
+	head := container.NewBorder(nil, nil, padLeft(4), container.NewHBox(p.reload, closeBtn), p.title)
 	p.outline = canvas.NewRectangle(color.Transparent)
 	p.outline.CornerRadius = 14
 	p.outline.StrokeWidth = 1
@@ -525,6 +527,7 @@ func (d *desk) syncPanes() {
 		if p.title.Text != title {
 			p.title.SetText(title)
 		}
+		syncRemoteReload(p.reload, p.view.s)
 		if p == d.focused {
 			p.outline.StrokeWidth = 2.5
 			p.outline.StrokeColor = colText

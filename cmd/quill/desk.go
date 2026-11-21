@@ -238,6 +238,7 @@ type desk struct {
 	subtitle      *canvas.Text
 	note          *widget.Label
 	rcStatus      *canvas.Text
+	reloadBtn     *widget.Button // Reload for Other PCs sessions (remotereload.go)
 	usage         *usagePanel
 	rate          *protocol.RateLimit
 	rateAt        time.Time
@@ -914,8 +915,9 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.rcStatus.Hide()
 	d.tasksBtn = newTasksButton(func() *deskSession { return d.current }, d.cmdTasks)
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
+	d.reloadBtn = d.newRemoteReloadButton("Reload", func() *deskSession { return d.current })
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.updateButton()), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.updateButton()), container.NewCenter(d.reloadBtn), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
 		layout.NewSpacer())
 	d.bookRow = d.buildBookmarks()
 	d.tabRow = d.buildTabs()
@@ -1015,6 +1017,9 @@ func (d *desk) updateChrome() {
 	s := d.current
 	d.suppress = true
 	defer func() { d.suppress = false }()
+	if syncRemoteReload(d.reloadBtn, s) && d.headerBox != nil {
+		d.headerBox.Refresh()
+	}
 	if s == nil {
 		setLabel(d.title, "Quill")
 		setText(d.subtitle, "")
