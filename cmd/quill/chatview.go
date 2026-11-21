@@ -1787,11 +1787,23 @@ func closeOpenMarkdown(s string) string {
 
 var parenAside = regexp.MustCompile(`\s*\([^)]*\)`)
 
+// optionMark: "(option 1)", "(Option B)", "(choice 2)", "(A)", "(2)".
+var optionMark = regexp.MustCompile(`(?i)\((?:option|choice)\s+(\w{1,3})\)|\(([A-D1-4])\)`)
+
+// maxOptionWords: longer unmarked options make no buttons (labels stay short).
+const maxOptionWords = 16
+
 func parseChoices(line string) (string, []string, bool) {
 	clean := strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(line), "#>*-_ "))
 	q := strings.LastIndex(clean, "?")
 	if q < 0 {
 		return "", nil, false
+	}
+	// Options marked "(option 1)", "(option 2)" or "(A)", "(B)" get those
+	// labels, however long they are (user 2026-11-21, Zomboid Networking 2).
+	var marks []string
+	for _, m := range optionMark.FindAllStringSubmatch(clean[:q], -1) {
+		marks = append(marks, "Option "+strings.ToUpper(firstNonEmpty(m[1], m[2])))
 	}
 	// Asides in parentheses explain an option; the button shows just the
 	// option ("option 1 (Quill's paired PCs)" → "Option 1").
@@ -1830,9 +1842,12 @@ func parseChoices(line string) (string, []string, bool) {
 	if len(opts) > 4 || strings.Contains(b, " or ") {
 		return "", nil, false
 	}
+	if len(marks) == len(opts) {
+		return strings.TrimRight(clean, "*_ "), marks, true
+	}
 	for i, o := range opts {
 		o = strings.TrimSpace(o)
-		if o == "" || len(strings.Fields(o)) > 12 {
+		if o == "" || len(strings.Fields(o)) > maxOptionWords {
 			return "", nil, false
 		}
 		r := []rune(o)

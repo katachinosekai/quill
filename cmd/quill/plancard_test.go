@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -77,6 +78,21 @@ func TestChoiceButtonsSkipWhQuestions(t *testing.T) {
 		_, opts, _ := parseChoices(line)
 		if len(opts) != want {
 			t.Errorf("%q: %d options %v, want %d", line, len(opts), opts, want)
+		}
+	}
+}
+
+func TestChoiceButtonsOptionMarkers(t *testing.T) {
+	for line, want := range map[string]string{
+		"**Should I wait for the next session with your friends and read the logs then (option 1), or start on the remaining ~1 s join freeze now (option 2)?**": "Option 1|Option 2",
+		"Ship it to the Workshop and restart Steam and the server (A), or keep testing locally for another evening first (B)?":                                   "Option A|Option B",
+		"Should I build the long thing that has many many words in its very long option text here now, or stop?":                                                 "",
+		"Should I keep the sixteen word option that is still short enough to fit on a button here, or stop?":                                                     "Keep the sixteen word option that is still short enough to fit on a button here|Stop",
+		"Which one should I pick (option 1), or (option 2)?":                                                                                                     "",
+	} {
+		_, opts, _ := parseChoices(line)
+		if got := strings.Join(opts, "|"); got != want {
+			t.Errorf("%q: got %q want %q", line, got, want)
 		}
 	}
 }
