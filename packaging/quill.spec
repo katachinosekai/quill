@@ -66,6 +66,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 - kmem sessions (when kmem is installed): new sessions can start a new kmem or resume a saved handoff, the sidebar shows each session's kmem name, and Restart as new session saves the handoff, resumes from it in a fresh session and deletes the old one
 - Sessions started from a kmem-resume prompt are linked to their kmem automatically
 - Prompts approved with the plan no longer show a line in the chat
+- Pair phone: the instructions point to the scanner in Quill for Android (⚙ → Scan pairing QR code), since phone camera apps can't open pairing links
 
 * Fri Nov 20 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.11-1
 - Plan cards: replying with step numbers that cover every step (like "1-4" on a 4-step plan) approves the plan
