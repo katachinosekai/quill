@@ -190,7 +190,7 @@ type apiPending struct {
 	Plans       int `json:"plans"`
 }
 
-var apiStatus = map[status]string{stNone: "stopped", stRunning: "running", stWaiting: "waiting", stIdle: "idle", stError: "error", stTerminal: "terminal"}
+var apiStatus = map[status]string{stNone: "stopped", stRunning: "running", stWaiting: "waiting", stIdle: "idle", stError: "error", stTerminal: "terminal", stRestart: "running"}
 
 func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 	d := a.d

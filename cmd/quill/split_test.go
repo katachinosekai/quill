@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2512,4 +2513,45 @@ func TestLandscapePortraitGlide(t *testing.T) {
 		}
 		glideUntil = time.Time{}
 	})
+}
+
+func TestKmemRestartStaysInBackground(t *testing.T) {
+	h := newHarness(t)
+	var bg, mine, ns *deskSession
+	h.ui(func() {
+		bg = h.d.createSession(h.proj, "default", "default")
+		mine = h.d.createSession(h.proj, "default", "default")
+		h.d.open(mine.id)
+		h.d.org.Kmem[bg.id] = "bgwork"
+		slot := slices.Index(h.d.tabs, bg.id)
+		bg.kmemSave = &kmemSave{name: "bgwork"}
+		if bg.status() != stRestart {
+			t.Fatal("saving the handoff shows the restart mark")
+		}
+		bg.kmemSave = nil
+		h.d.finishKmemRelaunch(bg, "bgwork", "resume please")
+		if h.d.current != mine {
+			t.Fatal("a background restart doesn't switch the tab")
+		}
+		for _, id := range h.d.tabs {
+			if s := h.d.sessions[id]; s != nil && h.d.org.Kmem[id] == "bgwork" {
+				ns = s
+			}
+		}
+		if ns == nil || slices.Index(h.d.tabs, ns.id) != slot {
+			t.Fatalf("the new session takes the old tab's place: %v", h.d.tabs)
+		}
+		if ns.status() != stRestart {
+			t.Fatalf("restarting until its first reply: %v", ns.status())
+		}
+		mark := statusMark(stRestart)
+		if mark.Objects[1].Visible() != true || mark.Objects[0].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].Visible() {
+			t.Fatal("the restart mark is the refresh icon, not the dot")
+		}
+		setStatusMark(mark, stIdle)
+		if mark.Objects[1].Visible() {
+			t.Fatal("other states show the dot")
+		}
+	})
+	h.eventually("first reply clears the restart mark", func() bool { return ns.status() != stRestart && !ns.conv.Busy })
 }

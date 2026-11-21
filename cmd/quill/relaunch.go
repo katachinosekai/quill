@@ -245,6 +245,7 @@ func (d *desk) relaunchSession(id string) {
 		go func() { _ = p.Stop(5 * time.Second) }()
 	}
 	ns := d.replaceWith(old, title)
+	ns.restarting = true
 	d.org.Place[id] = placeArchive
 	d.saveOrg()
 	d.compactInto(ns, id, path, title, conv)
@@ -276,7 +277,7 @@ func (d *desk) compactInto(ns *deskSession, oldID, path, title string, conv *cha
 func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
 	id := old.id
 	place := d.placement(id)
-	ns := d.createSession(old.cwd, old.model, old.mode)
+	ns := d.addSession(old.cwd, old.model, old.mode, false)
 	d.org.Titles[ns.id] = title
 	if strings.HasPrefix(place, folderPrefix) || place == placeAuto {
 		d.org.Place[ns.id] = place
@@ -300,6 +301,17 @@ func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
 	d.tabs = tabs
 	d.saveTabs()
 	d.saveOrg()
-	d.open(ns.id)
+	switch p := d.paneFor(old); {
+	case p != nil && d.split():
+		d.showInPane(p, ns.id)
+		if d.focused == p {
+			d.open(ns.id)
+		}
+	case d.current == old:
+		d.open(ns.id)
+	default:
+		d.syncTabs()
+		d.refreshSidebar()
+	}
 	return ns
 }

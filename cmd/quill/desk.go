@@ -43,6 +43,7 @@ const (
 	stIdle
 	stError
 	stTerminal
+	stRestart
 )
 
 func (s status) color() color.Color {
@@ -57,12 +58,14 @@ func (s status) color() color.Color {
 		return colError
 	case stTerminal:
 		return colTerminal
+	case stRestart:
+		return colRunning
 	}
 	return color.Transparent
 }
 
 func (s status) String() string {
-	return [...]string{"", "running", "waiting for you", "idle", "error", "open in a terminal"}[s]
+	return [...]string{"", "running", "waiting for you", "idle", "error", "open in a terminal", "restarting"}[s]
 }
 
 type deskSession struct {
@@ -105,6 +108,7 @@ type deskSession struct {
 	rotateNo       bool
 	limitSeen      string
 	compacting     bool
+	restarting     bool
 	takeover       bool
 	loading        bool
 	rcURL          string
@@ -121,7 +125,11 @@ func (s *deskSession) status() status {
 	if s.terminal != nil && !s.running() {
 		return stTerminal
 	}
+	restarting := s.restarting || s.compacting || s.kmemSave != nil
 	if !s.running() {
+		if restarting {
+			return stRestart
+		}
 		if s.failed != "" {
 			return stError
 		}
@@ -129,6 +137,9 @@ func (s *deskSession) status() status {
 	}
 	if len(s.conv.PendingPermissions()) > 0 {
 		return stWaiting
+	}
+	if restarting {
+		return stRestart
 	}
 	busy := s.conv.Busy || s.proc.Busy()
 	if !busy && s.conv.AwaitsReply() {
@@ -486,8 +497,7 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			title.Truncation = fyne.TextTruncateEllipsis
 			meta := canvas.NewText("", colMuted)
 			meta.TextSize = fontDense
-			dt := dot(color.Transparent)
-			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(10, 10, dt))), nil,
+			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(14, 14, statusMark(stNone)))), nil,
 				container.New(&tightVBox{}, title, container.NewPadded(meta)))
 			glow := canvas.NewRectangle(color.Transparent)
 			glow.CornerRadius = 8
@@ -551,13 +561,12 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			col := row.Objects[0].(*fyne.Container)
 			title := col.Objects[0].(*widget.Label)
 			meta := col.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
-			dt := left.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Circle)
+			mark := left.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*fyne.Container)
 			t, m, st2 := d.rowText(r.id)
 			title.SetText(t)
 			meta.Text = m
 			meta.Refresh()
-			dt.FillColor = st2.color()
-			dt.Refresh()
+			setStatusMark(mark, st2)
 			if d.current == nil || d.current.id != r.id {
 				d.setGlow(glow, st2.color(), glowStrength(st2))
 			} else {
@@ -582,7 +591,7 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 }
 
 func legendDot(s status) fyne.CanvasObject {
-	label := map[status]string{stRunning: "run", stWaiting: "wait", stIdle: "idle", stError: "err", stTerminal: "term"}[s]
+	label := map[status]string{stRunning: "run", stWaiting: "wait", stIdle: "idle", stError: "err", stTerminal: "term", stRestart: "restart"}[s]
 	return container.NewHBox(sized(8, 8, dot(s.color())), mutedText(label, fontMeta))
 }
 
@@ -1321,6 +1330,10 @@ func (d *desk) nextSessionName() string {
 }
 
 func (d *desk) createSession(cwd, model, mode string) *deskSession {
+	return d.addSession(cwd, model, mode, true)
+}
+
+func (d *desk) addSession(cwd, model, mode string, show bool) *deskSession {
 	id := session.NewUUID()
 	d.created[id] = true
 	ids := append(d.app.Preferences().StringList("createdSessions"), id)
@@ -1336,6 +1349,11 @@ func (d *desk) createSession(cwd, model, mode string) *deskSession {
 		s.chrome = "on"
 	}
 	d.sessions[id] = s
+	if !show {
+		d.addTab(id)
+		d.rebuildRows()
+		return s
+	}
 	d.current = s
 	d.addTab(id)
 	d.rebuildRows()
@@ -1409,6 +1427,7 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		if s.clearAfterTurn {
 			d.clearNow(s)
 		}
+		s.restarting = false
 	}
 	d.checkLimitMessage(s, items)
 	d.attention(s, ev, items)

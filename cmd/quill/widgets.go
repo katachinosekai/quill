@@ -275,6 +275,30 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 	e.Entry.TypedKey(k)
 }
 
+func statusMark(st status) *fyne.Container {
+	icon := widget.NewIcon(theme.NewColoredResource(theme.ViewRefreshIcon(), theme.ColorNamePrimary))
+	icon.Hide()
+	c := container.NewStack(container.NewCenter(sized(9, 9, dot(color.Transparent))), icon)
+	setStatusMark(c, st)
+	return c
+}
+
+func setStatusMark(c *fyne.Container, st status) {
+	circle := c.Objects[0].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Circle)
+	icon := c.Objects[1]
+	if st == stRestart {
+		circle.Hide()
+		icon.Show()
+		return
+	}
+	icon.Hide()
+	circle.Show()
+	if circle.FillColor != st.color() {
+		circle.FillColor = st.color()
+		circle.Refresh()
+	}
+}
+
 func dot(c color.Color) *canvas.Circle {
 	d := canvas.NewCircle(c)
 	d.StrokeWidth = 0

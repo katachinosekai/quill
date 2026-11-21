@@ -345,6 +345,7 @@ func (d *desk) kmemAfterTurn(s *deskSession) {
 func (d *desk) finishKmemRelaunch(old *deskSession, name, prompt string) {
 	title, _, _ := d.rowText(old.id)
 	ns := d.replaceWith(old, title)
+	ns.restarting = true
 	delete(d.org.Kmem, old.id)
 	d.org.Kmem[ns.id] = name
 	d.saveOrg()

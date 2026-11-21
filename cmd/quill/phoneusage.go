@@ -9,7 +9,7 @@ import (
 )
 
 var phoneStatus = map[status]string{
-	stNone: "none", stRunning: "running", stWaiting: "waiting", stIdle: "idle", stError: "error", stTerminal: "terminal",
+	stNone: "none", stRunning: "running", stWaiting: "waiting", stIdle: "idle", stError: "error", stTerminal: "terminal", stRestart: "running",
 }
 
 func (d *desk) phoneUsage() folders.Usage {
