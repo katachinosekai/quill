@@ -77,6 +77,7 @@ type sendEntry struct {
 	hist       *history
 	browsing   bool
 	onFocus    func()
+	onEscape   func() bool
 }
 
 func (e *sendEntry) FocusGained() {
@@ -156,6 +157,9 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 		return
 	}
 	if e.onHistory != nil && e.onHistory(k) {
+		return
+	}
+	if k.Name == fyne.KeyEscape && e.onEscape != nil && e.onEscape() {
 		return
 	}
 	if k.Name != fyne.KeyUp && k.Name != fyne.KeyDown && !e.browsing {

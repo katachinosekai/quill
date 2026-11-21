@@ -167,6 +167,8 @@ type desk struct {
 	localBusy    bool
 	fetchLocal   func(host string) []localInfo
 	after        func(time.Duration, func())
+	chipBtns     [2]*widget.Button
+	toolbarBox   *fyne.Container
 	usagePaused  bool
 	pauseUntil   time.Time
 	pausedIDs    []string
@@ -247,7 +249,7 @@ type desk struct {
 	setGeneral     *fyne.Container
 	setSessions    *fyne.Container
 	settingsDlg    dialog.Dialog
-	tasksBtn       *widget.Button
+	tasksBtn       *tasksChip
 	phoneSync      *phoneSync
 	phoneFileBtn   *widget.Button
 	phoneFileOff   *widget.Button
@@ -953,6 +955,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.onSendNow = d.sendNow
 	d.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(d.input, d.current, k) }
 	d.input.onFocus = d.clearSelections
+	d.input.onEscape = func() bool { return d.escape(d.current) }
 	d.input.hint = "Message Claude"
 	d.input.SetPlaceHolder(d.input.hint)
 	if d.app.Preferences().Bool("centerInput") {
@@ -994,11 +997,13 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	openAll.Importance = widget.MediumImportance
 	closeAll := widget.NewButtonWithIcon("Collapse chips", theme.MenuDropUpIcon(), func() { d.setAllChips(false) })
 	closeAll.Importance = widget.MediumImportance
-	controls := container.NewVBox(container.NewHBox(d.tasksBtn), container.NewHBox(d.backendBtn, boxed(d.modelSel), boxed(d.modeSel), d.stt.langBtn, layout.NewSpacer(), openAll, closeAll))
+	d.chipBtns = [2]*widget.Button{openAll, closeAll}
+	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, boxed(d.modelSel), boxed(d.modeSel), d.stt.langBtn), container.NewHBox(openAll, closeAll), container.NewPadded(d.tasksBtn))
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
 	toolbar := windowCentered(d.inputWidth, d.sidebarWidth, d.viewToolbar())
+	d.toolbarBox = toolbar
 	d.sizesCard = d.sizePanel()
 	cornerCard := container.New(layout.NewGridWrapLayout(fyne.NewSize(300, d.sizesCard.MinSize().Height)), d.sizesCard)
 	corner := container.NewVBox(layout.NewSpacer(), container.NewHBox(layout.NewSpacer(), cornerCard))
@@ -1126,6 +1131,17 @@ func (d *desk) updateChrome() {
 	}
 	setText(d.stats, statsLine(s))
 	if syncTasksButton(d.tasksBtn, s) && d.mainPane != nil {
+		labels := [2]string{"Open chips", "Collapse chips"}
+		for i, b := range d.chipBtns {
+			if b == nil {
+				continue
+			}
+			want := labels[i]
+			if d.tasksBtn.Visible() {
+				want = ""
+			}
+			b.SetText(want)
+		}
 		relayoutTree(d.mainPane)
 	}
 	if d.usage != nil {
@@ -1518,6 +1534,9 @@ func (d *desk) send(text string) {
 		}
 		d.takeOver(s, t, text)
 		return
+	}
+	if d.usagePaused && !strings.HasPrefix(text, "/") {
+		text = pausedNote + text
 	}
 	if s.qedit != nil {
 		idx, draft := s.qedit.idx, s.qedit.draft

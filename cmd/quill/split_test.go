@@ -1800,8 +1800,8 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgx","name":"Bash","input":{"command":"./test.sh","run_in_background":true}}]`)}})
 		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgx","content":"Command running in background with ID: tsk1. Output is being written to: /tmp/o"}]`)}})
 		h.d.updateChrome()
-		if !h.d.tasksBtn.Visible() || h.d.tasksBtn.Text != "./test.sh" {
-			t.Fatalf("the message bar shows this session's background task: %q %v", h.d.tasksBtn.Text, h.d.tasksBtn.Visible())
+		if !h.d.tasksBtn.Visible() || h.d.tasksBtn.Text() != "Background Tasks: ./test.sh" {
+			t.Fatalf("the message bar shows this session's background task: %q %v", h.d.tasksBtn.Text(), h.d.tasksBtn.Visible())
 		}
 		h.d.rewindTo(s, user, true)
 	})
@@ -2218,6 +2218,50 @@ func TestLiveUsageAndPause(t *testing.T) {
 		all := strings.Join(notes, "\n")
 		if !strings.Contains(all, "This session: $") || !strings.Contains(all, "kmem: quill") || !strings.Contains(all, "5-hour window") {
 			t.Fatalf("/cost, /context, /status answer at once: %s", all)
+		}
+	})
+}
+
+func TestEscapePausedNotesAndChoiceReply(t *testing.T) {
+	if got := choiceReply(0, "Take the square-building split next"); got != "I pick the first option: Take the square-building split next." {
+		t.Fatalf("choice reply: %q", got)
+	}
+	if got := choiceReply(1, "Stop here"); got != "I pick the second option: Stop here." {
+		t.Fatalf("choice reply: %q", got)
+	}
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.open(s.id)
+		h.d.sendTo(s, "hi")
+	})
+	h.eventually("idle", func() bool { return s.running() && !s.conv.Busy })
+	h.ui(func() {
+		h.d.usagePaused = true
+		h.d.send("what is the status?")
+		last := s.conv.Items[len(s.conv.Items)-1]
+		if !strings.HasPrefix(last.Text, pausedNote) || !strings.HasSuffix(last.Text, "what is the status?") {
+			t.Fatalf("questions still go through during a usage pause, marked so paused work stays paused: %q", last.Text)
+		}
+		h.d.usagePaused = false
+	})
+	h.eventually("idle again", func() bool { return !s.conv.Busy })
+	h.ui(func() {
+		h.d.chat.sel.has = true
+		if !h.d.escape(s) || h.d.chat.sel.has {
+			t.Fatal("Escape clears a selection first")
+		}
+		if h.d.escape(s) {
+			t.Fatal("with nothing to clear and an idle session, Escape does nothing")
+		}
+		s.conv.Busy = true
+		if !h.d.escape(s) {
+			t.Fatal("Escape interrupts a working session")
+		}
+		h.d.setShare("inputShare", 1)
+		if w := h.d.toolbarBox.Objects[0].Size().Width; w < h.d.inputWidth()-1 {
+			t.Fatalf("the Settings/view row follows the message box width: %v vs %v", w, h.d.inputWidth())
 		}
 	})
 }

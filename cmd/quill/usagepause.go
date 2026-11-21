@@ -322,3 +322,5 @@ func (d *desk) pauseSettings() fyne.CanvasObject {
 	note.SizeName = theme.SizeNameCaptionText
 	return container.NewVBox(container.NewHBox(chk, boxed(sel)), note)
 }
+
+const pausedNote = "(Quill: the usage pause is on. Answer this, but don't resume paused work or start new tasks until Quill says the window has reset.)\n\n"

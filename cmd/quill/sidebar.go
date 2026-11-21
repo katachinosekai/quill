@@ -290,6 +290,9 @@ func (d *desk) setShare(pref string, v float32) {
 	if d.bottomBox != nil {
 		relayout(d.bottomBox)
 	}
+	if d.toolbarBox != nil {
+		relayoutTree(d.toolbarBox)
+	}
 	if d.mainPane != nil {
 		relayout(d.mainPane)
 		relayout(d.usageBox)

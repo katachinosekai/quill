@@ -22,7 +22,7 @@ const (
 )
 
 type pane struct {
-	tasks   *widget.Button
+	tasks   *tasksChip
 	d       *desk
 	view    *chatView
 	title   *widget.Label
@@ -113,6 +113,7 @@ func (d *desk) newPane() *pane {
 	p.input.onShortcut = d.handleShortcut
 	p.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(p.input, p.view.s, k) }
 	p.input.onFocus = d.clearSelections
+	p.input.onEscape = func() bool { return d.escape(p.view.s) }
 	sendBtn := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.sendFromPane(p, p.input.Text) })
 	sendBtn.Importance = widget.HighImportance
 	p.stop = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
@@ -157,7 +158,7 @@ func (d *desk) newPane() *pane {
 	})
 	closeAll.Importance = widget.MediumImportance
 	p.tasks = newTasksButton(func() *deskSession { return p.view.s }, d.cmdTasks)
-	controls := container.NewVBox(container.NewHBox(p.tasks), container.NewHBox(p.backend, boxed(p.model), boxed(p.mode), layout.NewSpacer(), openAll, closeAll))
+	controls := container.NewBorder(nil, nil, container.NewHBox(p.backend, boxed(p.model), boxed(p.mode)), container.NewHBox(openAll, closeAll), container.NewPadded(p.tasks))
 	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
 	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
 	p.stats = mutedText("", fontMeta)

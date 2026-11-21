@@ -35,7 +35,7 @@ func (d *desk) layoutButtons() fyne.CanvasObject {
 	d.layoutSel.Horizontal = true
 	d.layoutSel.Required = true
 	d.settingsBtn = widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
-	d.settingsBtn.Importance = widget.LowImportance
+	d.settingsBtn.Importance = widget.MediumImportance
 	return container.NewHBox(container.NewCenter(mutedText("Tabs", fontMeta)), d.layoutSel)
 }
 

@@ -68,7 +68,7 @@ func (d *desk) setupShortcuts() {
 	})
 	d.win.Canvas().SetOnTypedKey(func(k *fyne.KeyEvent) {
 		if k.Name == fyne.KeyEscape {
-			d.clearSelections()
+			d.escape(d.current)
 		}
 	})
 	d.win.Canvas().AddShortcut(newTabShortcut, func(fyne.Shortcut) { d.newSessionDialog() })
@@ -77,4 +77,18 @@ func (d *desk) setupShortcuts() {
 		d.win.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: k, Modifier: fyne.KeyModifierShortcutDefault}, func(fyne.Shortcut) { d.openTabNumber(n) })
 	}
 	d.input.onShortcut = d.handleShortcut
+}
+
+func (d *desk) escape(s *deskSession) bool {
+	for _, v := range d.allViews() {
+		if v.sel != nil && v.sel.has {
+			d.clearSelections()
+			return true
+		}
+	}
+	if s != nil && s.running() && (s.conv.Busy || s.proc.Busy()) {
+		d.interrupt(s)
+		return true
+	}
+	return false
 }

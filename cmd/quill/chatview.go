@@ -1813,7 +1813,8 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 			if r := []rune(label); len(r) > 60 {
 				label = string(r[:59]) + "…"
 			}
-			btns = append(btns, glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(s), func() { v.d.pickChoice(s, it, o) }))
+			n := len(btns)
+			btns = append(btns, glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(s), func() { v.d.pickChoice(s, it, choiceReply(n, o)) }))
 		}
 		parts = append(parts, v.buttonRow(btns...))
 	}
@@ -1864,4 +1865,12 @@ func (d *desk) refreshChoiceCards(s *deskSession, reply *chat.Item) {
 			v.refreshItem(prev, iv)
 		}
 	}
+}
+
+func choiceReply(n int, option string) string {
+	which := "first"
+	if n == 1 {
+		which = "second"
+	}
+	return "I pick the " + which + " option: " + option + "."
 }

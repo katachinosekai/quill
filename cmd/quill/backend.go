@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2/widget"
@@ -306,15 +307,49 @@ func boxed(o fyne.CanvasObject) fyne.CanvasObject {
 	return container.NewThemeOverride(o, boxedTheme{})
 }
 
-func newTasksButton(session func() *deskSession, open func(*deskSession)) *widget.Button {
-	b := widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
+type tasksChip struct {
+	widget.BaseWidget
+	label *widget.Label
+	box   fyne.CanvasObject
+	onTap func()
+}
+
+func newTasksButton(session func() *deskSession, open func(*deskSession)) *tasksChip {
+	c := &tasksChip{label: widget.NewLabel("")}
+	c.label.Truncation = fyne.TextTruncateEllipsis
+	c.label.TextStyle = fyne.TextStyle{Bold: true}
+	r := canvas.NewRectangle(theme.Color(theme.ColorNameButton))
+	r.CornerRadius = theme.Size(theme.SizeNameInputRadius)
+	icon := widget.NewIcon(theme.MediaPlayIcon())
+	c.box = container.NewStack(r, container.NewBorder(nil, nil, container.NewCenter(sized(16, 16, icon)), nil, c.label))
+	c.onTap = func() {
 		if s := session(); s != nil {
 			open(s)
 		}
-	})
-	b.Importance = widget.MediumImportance
-	b.Hide()
-	return b
+	}
+	c.ExtendBaseWidget(c)
+	c.Hide()
+	return c
+}
+
+func (c *tasksChip) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(c.box)
+}
+
+func (c *tasksChip) Tapped(*fyne.PointEvent) {
+	if c.onTap != nil {
+		c.onTap()
+	}
+}
+
+func (c *tasksChip) MinSize() fyne.Size {
+	return fyne.NewSize(60, c.BaseWidget.MinSize().Height)
+}
+
+func (c *tasksChip) Text() string { return c.label.Text }
+
+func (c *tasksChip) Resize(s fyne.Size) {
+	c.BaseWidget.Resize(fyne.NewSize(max(s.Width, 1), max(s.Height, 1)))
 }
 
 func tasksLabel(s *deskSession) string {
@@ -325,18 +360,14 @@ func tasksLabel(s *deskSession) string {
 	if len(tasks) == 0 {
 		return ""
 	}
-	what := tasks[0].What
-	if what == "" {
-		what = tasks[0].Tool
+	var names []string
+	for _, t := range tasks {
+		names = append(names, oneLine(firstNonEmpty(t.What, t.Tool), 28))
 	}
-	label := oneLine(what, 40)
-	if n := len(tasks) - 1; n > 0 {
-		label += fmt.Sprintf(" +%d more", n)
-	}
-	return label
+	return "Background Tasks: " + oneLine(strings.Join(names, ", "), 60)
 }
 
-func syncTasksButton(b *widget.Button, s *deskSession) bool {
+func syncTasksButton(b *tasksChip, s *deskSession) bool {
 	if b == nil {
 		return false
 	}
@@ -346,8 +377,8 @@ func syncTasksButton(b *widget.Button, s *deskSession) bool {
 		b.Hide()
 		return was
 	}
-	if b.Text != label {
-		b.SetText(label)
+	if b.label.Text != label {
+		b.label.SetText(label)
 	}
 	b.Show()
 	return !was
