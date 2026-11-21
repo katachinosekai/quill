@@ -301,8 +301,13 @@ func (d *desk) relaunchViaKmem(id, name string) {
 	}
 }
 
+var kmemSaveExtra = [][]string{{"kmem"}, {"pzlock", "status"}}
+
 func (d *desk) kmemSaveAllowed(s *deskSession, r *protocol.ControlRequest) bool {
-	return s.kmemSave != nil && readOnlyRequest(r, [][]string{{"kmem"}})
+	if s.kmemSave == nil {
+		return false
+	}
+	return readOnlyRequest(r, append(d.readOnlyExtra(), kmemSaveExtra...))
 }
 
 func (d *desk) kmemAfterTurn(s *deskSession) {
