@@ -294,6 +294,9 @@ func (e *sendEntry) undoFix() bool {
 }
 
 func (e *sendEntry) TypedRune(r rune) {
+	if e.onActivity != nil {
+		e.onActivity()
+	}
 	if isACBoundary(r) && e.correctBefore(r) {
 		e.Entry.TypedRune(r)
 		return

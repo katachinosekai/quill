@@ -76,6 +76,7 @@ func newSelLayer(v *chatView) *selLayer {
 }
 
 func (l *selLayer) Dragged(e *fyne.DragEvent) {
+	l.v.touched()
 	if !l.dragging && l.pass == nil {
 		start := e.Position.Subtract(e.Dragged)
 		if dr, at := l.draggableAt(start); dr != nil {

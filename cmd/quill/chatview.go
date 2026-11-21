@@ -126,6 +126,7 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 		if v.autoScrolling {
 			return
 		}
+		v.touched()
 		y := v.scroll.Offset.Y
 		switch {
 		case v.atBottom():
@@ -660,9 +661,10 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	o := v.renderItem(it, iv)
 	if (it.Kind == chat.User || it.Kind == chat.Assistant) && v.s != nil {
 		s := v.s
-		m := newMsgMenu(o, func(at fyne.Position) { v.d.messageMenu(s, it, at) })
-		m.onTap = v.d.clearSelections
+		m := newMsgMenu(o, func(at fyne.Position) { v.touched(); v.d.messageMenu(s, it, at) })
+		m.onTap = func() { v.touched(); v.d.clearSelections() }
 		m.onDouble = func(at fyne.Position) {
+			v.touched()
 			if v.sel != nil {
 				v.sel.selectWordAt(at)
 			}
@@ -1963,4 +1965,13 @@ func choiceReply(n int, option string) string {
 		which = [...]string{"first", "second", "third", "fourth"}[n]
 	}
 	return "I pick the " + which + " option: " + option + "."
+}
+
+// touched: the user scrolled, clicked or dragged in this view; for another
+// PC's session it keeps the connection (user 2026-11-21: your touches and
+// typing count, output and an open window don't).
+func (v *chatView) touched() {
+	if v.d != nil {
+		v.d.noteActivity(v.s)
+	}
 }

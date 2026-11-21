@@ -163,6 +163,7 @@ type sendEntry struct {
 	hist       *history
 	browsing   bool
 	upArmed    time.Time
+	onActivity func() // any key or typing (Other PCs idle timer)
 	onFocus    func()
 	onEscape   func() bool
 	ac         *autocorrector
@@ -246,6 +247,9 @@ func (e *sendEntry) KeyUp(k *fyne.KeyEvent) {
 }
 
 func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
+	if e.onActivity != nil {
+		e.onActivity()
+	}
 	if k.Name == fyne.KeyBackspace && e.undoFix() {
 		return
 	}

@@ -938,6 +938,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.cmds.update(t)
 	}
 	d.input.onSendNow = d.sendNow
+	d.input.onActivity = func() { d.noteActivity(d.current) }
 	d.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(d.input, d.current, k) }
 	d.input.onFocus = d.clearSelections
 	d.input.onEscape = func() bool { return d.escape(d.current) }
