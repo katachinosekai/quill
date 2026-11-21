@@ -35,3 +35,25 @@ func TestAsksQuestion(t *testing.T) {
 		}
 	}
 }
+
+func TestProposalsGetTheCard(t *testing.T) {
+	for text, want := range map[string]bool{
+		"**Should I ship ELTF 1.3.7 now (Workshop upload, Steam restart, pzserver deploy, and one join check)?**":                                                              true,
+		"Done.\n\n**Should I adapt ELTF's ALifeSquares to A-Life 1.5.3 next? I'd keep its client-side join queue and drop the server part A-Life now covers, as ELTF 1.3.7.**": true,
+		"**Do you want me to add the Windows exe to the release?**":                                                                                                            true,
+		"Would you like me to start the release prep?":                                                                                                                         true,
+		"**Should I do the plan-card fix next, or one of the missing panel options?**":                                                                                         false,
+		"**Which panels should I build: all of them, the first four, or a set you name?**":                                                                                     false,
+		"Which did you mean: option 1 (Quill's paired PCs), option 2, or both? Once you answer, I'll write the full plan for approval.":                                        false,
+		"Anything else?":             false,
+		"Should I? Hmm.":             true,
+		"I wonder what to do. Done.": false,
+	} {
+		c := New()
+		c.AddUser("hi")
+		c.Items = append(c.Items, &Item{Kind: Assistant, Text: text})
+		if got := c.AsksApproval(); got != want {
+			t.Errorf("AsksApproval(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

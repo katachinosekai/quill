@@ -119,14 +119,43 @@ func (c *Conversation) AddPlan() *Item {
 // approvalAsk: a closing question that asks to go ahead with a plan
 // ("Approve this plan?", "Go ahead with steps 1–3?", "Okay to run this?",
 // "Shall I proceed?"; user 2026-11-21 after PZ Launcher's missed cards). An
-// ordinary question ("Anything else?", "Should I add X?") is not one.
+// ordinary question ("Anything else?") is not one. Since 2026-11-21 (user,
+// via Zomboid Networking 2) a closing proposal ("Should I ship 1.3.7 now?",
+// "Do you want me to adapt it next?") also gets the card, unless it names
+// options ("A or B?") or asks which/what: those get option buttons.
 var approvalAsk = regexp.MustCompile(`(?i)\bapprov|\bgo ahead\b|\bproceed\b|\b(?:okay|ok) to\b|\brun (?:this|it|these|them)\b|\bcarry (?:it|this|them) out\b|\bsteps? \d`)
 
 // quotedSpans are quotes and parentheses: words in them are named, not asked
 // ("…instead of "Approve plan & run all"?" is no approval question).
 var quotedSpans = regexp.MustCompile("\"[^\"]*\"|“[^”]*”|`[^`]*`|\\([^)]*\\)")
 
-// AsksApproval: the turn's last text ends in a question asking to approve.
+var proposalAsk = regexp.MustCompile(`(?i)^\W*(?:should|shall|can|may) (?:i|we)\b|^\W*(?:do you )?want me to\b|^\W*would you like me to\b|^\W*ready for me to\b`)
+var sentenceEnd = regexp.MustCompile(`[.!?]\s+`) // not the dots in 1.3.7
+var whAsk = regexp.MustCompile(`(?i)^\W*(?:which|what|who|where|when|why|how)\b`)
+
+// proposes: the last line's question (up to its last "?") offers to do work
+// and names no options.
+func proposes(last string) bool {
+	q := last
+	if i := strings.LastIndex(q, "?"); i >= 0 {
+		q = q[:i]
+	} else {
+		return false
+	}
+	q = quotedSpans.ReplaceAllString(q, " ")
+	// The question is the last sentence before the "?".
+	if m := sentenceEnd.FindAllStringIndex(q, -1); len(m) > 0 {
+		q = q[m[len(m)-1][1]:]
+	}
+	q = strings.TrimLeft(q, "*_ ")
+	if whAsk.MatchString(q) || strings.Contains(" "+strings.ToLower(q)+" ", " or ") {
+		return false
+	}
+	return proposalAsk.MatchString(q)
+}
+
+// AsksApproval: the turn's last text ends in a question asking to approve,
+// or in a proposal of work (see approvalAsk).
 func (c *Conversation) AsksApproval() bool {
 	for i := len(c.Items) - 1; i >= 0; i-- {
 		it := c.Items[i]
@@ -138,7 +167,10 @@ func (c *Conversation) AsksApproval() bool {
 		}
 		t := strings.TrimRight(strings.TrimSpace(it.Text), "*_ ")
 		last := t[strings.LastIndex(t, "\n")+1:]
-		return strings.HasSuffix(t, "?") && approvalAsk.MatchString(quotedSpans.ReplaceAllString(last, " "))
+		if strings.HasSuffix(t, "?") && approvalAsk.MatchString(quotedSpans.ReplaceAllString(last, " ")) {
+			return true
+		}
+		return proposes(last)
 	}
 	return false
 }

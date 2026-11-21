@@ -1532,7 +1532,7 @@ func TestAsksApprovalShowsPlanCard(t *testing.T) {
 		"Plan.\n\n**Okay to run this?**":                                         true,
 		"Plan.\n\n**Shall I proceed?**":                                          true,
 		"**Pick C1 or C2. Do you approve steps 1–6 to put it in the launcher?**": true,
-		"**Should I add a Settings row for this?**":                              false,
+		"**Should I add a Settings row for this?**":                              true, // proposals get the card since 2026-11-21 (user)
 		"Which size do you want, 48 or 64?":                                      false,
 	} {
 		c.AddUser("x")

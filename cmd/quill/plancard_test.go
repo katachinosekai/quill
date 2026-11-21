@@ -42,6 +42,17 @@ func TestPlanCardOnlyForApprovalQuestions(t *testing.T) {
 		if s := end(true, "1. Edit x.\n\n**Do you approve steps 1–4?**"); cards(s) != 1 {
 			t.Fatal("a blocked call + an approval question: plan card")
 		}
+		for _, q := range []string{
+			"**Should I ship ELTF 1.3.7 now (Workshop upload, Steam restart, pzserver deploy, and one join check)?**",
+			"**Should I adapt ELTF's ALifeSquares to A-Life 1.5.3 next? I'd keep its client-side join queue, as ELTF 1.3.7.**",
+		} {
+			if s := end(false, q); cards(s) != 1 {
+				t.Fatalf("a closing proposal gets the plan card (user via Zomboid Networking 2): %q", q)
+			}
+			if s := end(true, q); cards(s) != 1 {
+				t.Fatalf("also after a blocked call: %q", q)
+			}
+		}
 		if s := end(true, "1. Edit x.\n2. Build."); cards(s) != 1 {
 			t.Fatal("a blocked call and no question: plan card, as before")
 		}
