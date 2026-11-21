@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.14
+Version:        0.1.15
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -70,6 +70,19 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.15-1
+- Sidebar lists live sessions grouped by kmem project; one identity for tab, session and kmem name; kmem panel with handoffs, tasks, memory and recycle bin; Auto-handoff settings row
+- kmem is the default memory for Quill sessions; Quill bundles kmem 1.4.0 and updates an older installed kmem when it starts
+- Slash commands fitted to Quill and kmem: /export (clipboard, file, kmem handoff), /rewind (files only; warns about kmem changes and offers to release claimed tasks), /memory (Quill's memory choice first), /permissions (add rules, Plan-first and Workspace tabs), /add-dir (session, project or settings), /hooks (kmem hooks marked and repairable), /mcp (tools, clear sign-in), /agents (create, edit, delete, kmem briefing), /chrome (Enabled by default), /rename, /remote-control
+- Online/Local button opens a menu with Remote (Remote Control for the session)
+- Other PCs: pair another Quill Desktop and see its live sessions as tabs; it asks the device password to connect, keeps them in memory only and disconnects when idle (15 min by default)
+- Device password for every paired device, phones included (set it in Settings → Sessions → Devices; Quill for Android 0.9.10 or later asks for it)
+- Windows build (make windows)
+- Message box: Up and Down move through lines first, the draft is kept, two quick presses leave a draft for earlier messages
+- Plan cards only for approval questions; either/or questions get option buttons
+- Phone API: projects, handoffs, session menu actions, notification text, unlock
+- Escape closes the open popup or dialog; reload never swaps while typing; message box cursor fixes; autocorrect, clickable links and many review fixes
+- Bundles Quill for Android 0.9.11
 * Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.14-1
 - Select and copy chat text: drag over formatted text and across messages (snaps to lines and words), double-click a word, Ctrl+A, Copy button or Ctrl+C; clicks elsewhere clear it
 - Right-click a message: copy, rewind to here (optionally undoing file changes), fork from here
