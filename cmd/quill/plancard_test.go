@@ -55,3 +55,17 @@ func TestPlanCardOnlyForApprovalQuestions(t *testing.T) {
 		}
 	})
 }
+
+func TestChoiceButtonsSkipWhQuestions(t *testing.T) {
+	for line, want := range map[string]int{
+		"**Which of the missing panel options (/rewind, /memory) should I build next, or is there something else first?**": 0,
+		"**Which panels should I build: all of them in that order, only the first four, or a specific set you name?**":     3,
+		"Should I do the plan-card fix next, or one of the missing panel options?":                                         2,
+		"How should I name it, or should I skip it?":                                                                       0,
+	} {
+		_, opts, _ := parseChoices(line)
+		if len(opts) != want {
+			t.Errorf("%q: %d options %v, want %d", line, len(opts), opts, want)
+		}
+	}
+}

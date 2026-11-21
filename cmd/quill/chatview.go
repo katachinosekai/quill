@@ -1817,6 +1817,11 @@ func parseChoices(line string) (string, []string, bool) {
 			break
 		}
 	}
+	// "Which panels should I build, or is there something else?": the first
+	// part is the question itself, not an option.
+	if f := strings.ToLower(strings.Fields(a + " x")[0]); f == "which" || f == "what" || f == "who" || f == "where" || f == "when" || f == "why" || f == "how" {
+		return "", nil, false
+	}
 	opts := []string{a}
 	if sep == ", or " && strings.Contains(a, ", ") {
 		opts = strings.Split(a, ", ")
