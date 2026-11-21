@@ -177,54 +177,55 @@ type sideRow struct {
 }
 
 type desk struct {
-	nameClose    func()
-	limitMsg     string
-	notifier     *notifier
-	notifySink   func(sid, title, body string)
-	foreground   bool
-	compactor    func(ctx context.Context, model, text string) (string, error)
-	kmemRun      func(prog string, args ...string) (string, error)
-	kmemOff      bool
-	escClosers   map[fyne.CanvasObject]func()
-	kmemVer      kmemVersion
-	pcLock       *pcLock
-	pcBox        *fyne.Container
-	pcsBtn       *widget.Button
-	pcNote       map[string]string
-	hsMu         sync.Mutex
-	lastHandoffs []kmemHandoff
-	policy       handoffPolicy
-	policyAt     time.Time
-	policyBusy   bool
-	localModels  []string
-	localBusy    bool
-	fetchLocal   func(host string) []localInfo
-	after        func(time.Duration, func())
-	toolbarRow   *fyne.Container
-	chipBtns     [2]*widget.Button
-	toolbarBox   *fyne.Container
-	usagePaused  bool
-	pauseUntil   time.Time
-	pausedIDs    []string
-	pauseBanner  *fyne.Container
-	pauseText    *widget.Label
-	controlFn    func(s *deskSession, req map[string]any) (json.RawMessage, error)
-	pingLocal    func(host string) bool
-	localWindows map[string]int
-	warnedOllama bool
-	backendBtn   *widget.Button
-	app          fyne.App
-	win          fyne.Window
-	cfg          config
-	scanner      *transcript.Scanner
-	finder       *live.Finder
-	center       bool
-	sessions     map[string]*deskSession
-	infos        map[string]transcript.Info
-	order        []transcript.Info
-	terms        map[string]live.Process
-	current      *deskSession
-	ownPIDs      sync.Map
+	nameClose     func()
+	limitMsg      string
+	notifier      *notifier
+	notifySink    func(sid, title, body string)
+	foreground    bool
+	compactor     func(ctx context.Context, model, text string) (string, error)
+	kmemRun       func(prog string, args ...string) (string, error)
+	kmemOff       bool
+	escClosers    map[fyne.CanvasObject]func()
+	kmemVer       kmemVersion
+	pcLock        *pcLock
+	pcPassRefresh func()
+	pcBox         *fyne.Container
+	pcsBtn        *widget.Button
+	pcNote        map[string]string
+	hsMu          sync.Mutex
+	lastHandoffs  []kmemHandoff
+	policy        handoffPolicy
+	policyAt      time.Time
+	policyBusy    bool
+	localModels   []string
+	localBusy     bool
+	fetchLocal    func(host string) []localInfo
+	after         func(time.Duration, func())
+	toolbarRow    *fyne.Container
+	chipBtns      [2]*widget.Button
+	toolbarBox    *fyne.Container
+	usagePaused   bool
+	pauseUntil    time.Time
+	pausedIDs     []string
+	pauseBanner   *fyne.Container
+	pauseText     *widget.Label
+	controlFn     func(s *deskSession, req map[string]any) (json.RawMessage, error)
+	pingLocal     func(host string) bool
+	localWindows  map[string]int
+	warnedOllama  bool
+	backendBtn    *widget.Button
+	app           fyne.App
+	win           fyne.Window
+	cfg           config
+	scanner       *transcript.Scanner
+	finder        *live.Finder
+	center        bool
+	sessions      map[string]*deskSession
+	infos         map[string]transcript.Info
+	order         []transcript.Info
+	terms         map[string]live.Process
+	current       *deskSession
+	ownPIDs       sync.Map
 
 	rows          []sideRow
 	list          *widget.List
@@ -2415,7 +2416,17 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		// earlier approval is still in force: Claude is asking about new work,
 		// so that approval ends here (user 2026-11-21: no card and no autofill
 		// after an "Approve this plan?" that followed an approved card).
-		if s.planWait || d.planFirst && s.conv.AsksApproval() {
+		// A blocked call whose turn ends with another question (which of two
+		// things, what was meant) gets no card: the question stays, with its
+		// option buttons, and the plan comes after the answer (user
+		// 2026-11-21: "Approve plan & run all" under a "which did you mean"
+		// question).
+		asks := d.planFirst && s.conv.AsksApproval()
+		if s.planWait && !asks && s.conv.AsksQuestion() {
+			s.planWait = false
+			return nil
+		}
+		if s.planWait || asks {
 			s.planWait = false
 			s.runAll, s.runAllNext = false, false
 			out := s.conv.CancelPlans()

@@ -122,6 +122,11 @@ func (c *Conversation) AddPlan() *Item {
 // ordinary question ("Anything else?", "Should I add X?") is not one.
 var approvalAsk = regexp.MustCompile(`(?i)\bapprov|\bgo ahead\b|\bproceed\b|\b(?:okay|ok) to\b|\brun (?:this|it|these|them)\b|\bcarry (?:it|this|them) out\b|\bsteps? \d`)
 
+// quotedSpans are quotes and parentheses: words in them are named, not asked
+// ("…instead of "Approve plan & run all"?" is no approval question).
+var quotedSpans = regexp.MustCompile("\"[^\"]*\"|“[^”]*”|`[^`]*`|\\([^)]*\\)")
+
+// AsksApproval: the turn's last text ends in a question asking to approve.
 func (c *Conversation) AsksApproval() bool {
 	for i := len(c.Items) - 1; i >= 0; i-- {
 		it := c.Items[i]
@@ -133,7 +138,24 @@ func (c *Conversation) AsksApproval() bool {
 		}
 		t := strings.TrimRight(strings.TrimSpace(it.Text), "*_ ")
 		last := t[strings.LastIndex(t, "\n")+1:]
-		return strings.HasSuffix(t, "?") && approvalAsk.MatchString(last)
+		return strings.HasSuffix(t, "?") && approvalAsk.MatchString(quotedSpans.ReplaceAllString(last, " "))
+	}
+	return false
+}
+
+// AsksQuestion: the turn's last text ends with a question to the user (its
+// last line has a "?"), whatever it asks.
+func (c *Conversation) AsksQuestion() bool {
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		it := c.Items[i]
+		if it.Kind == User || it.Kind == Plan {
+			return false
+		}
+		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
+			continue
+		}
+		t := strings.TrimSpace(it.Text)
+		return strings.Contains(t[strings.LastIndex(t, "\n")+1:], "?")
 	}
 	return false
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"regexp"
 	"strings"
 	"time"
 
@@ -1784,13 +1785,17 @@ func closeOpenMarkdown(s string) string {
 	return s + add
 }
 
+var parenAside = regexp.MustCompile(`\s*\([^)]*\)`)
+
 func parseChoices(line string) (string, []string, bool) {
 	clean := strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(line), "#>*-_ "))
 	q := strings.LastIndex(clean, "?")
 	if q < 0 {
 		return "", nil, false
 	}
-	ask := clean[:q]
+	// Asides in parentheses explain an option; the button shows just the
+	// option ("option 1 (Quill's paired PCs)" → "Option 1").
+	ask := strings.TrimSpace(parenAside.ReplaceAllString(clean[:q], ""))
 	sep := ", or "
 	i := strings.LastIndex(ask, sep)
 	if i < 0 {
