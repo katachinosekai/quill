@@ -173,19 +173,31 @@ func (d *desk) cmdExport(s *deskSession, arg string) {
 		write(path)
 		return
 	}
-	dlg := dialog.NewFileSave(func(w fyne.URIWriteCloser, err error) {
-		if err != nil || w == nil {
-			return
+	save := func() {
+		dlg := dialog.NewFileSave(func(w fyne.URIWriteCloser, err error) {
+			if err != nil || w == nil {
+				return
+			}
+			path := w.URI().Path()
+			w.Close()
+			write(path)
+		}, d.win)
+		dlg.SetFileName(safeName(title) + ".md")
+		if l, err := storage.ListerForURI(storage.NewFileURI(s.cwd)); err == nil {
+			dlg.SetLocation(l)
 		}
-		path := w.URI().Path()
-		w.Close()
-		write(path)
-	}, d.win)
-	dlg.SetFileName(safeName(title) + ".md")
-	if l, err := storage.ListerForURI(storage.NewFileURI(s.cwd)); err == nil {
-		dlg.SetLocation(l)
+		dlg.Show()
 	}
-	dlg.Show()
+	var choose dialog.Dialog
+	copyBtn := widget.NewButtonWithIcon("Copy to clipboard", theme.ContentCopyIcon(), func() {
+		choose.Hide()
+		d.app.Clipboard().SetContent(text)
+		d.notify(s, fmt.Sprintf("Copied the conversation as Markdown (%s).", plural(len([]rune(text)), "character")))
+	})
+	saveBtn := widget.NewButtonWithIcon("Save to file...", theme.DocumentSaveIcon(), func() { choose.Hide(); save() })
+	copyBtn.Importance = widget.HighImportance
+	choose = dialog.NewCustom("Export conversation", "Cancel", container.NewVBox(caption("The conversation as Markdown: your messages, Claude's replies and one line per tool call."), container.NewHBox(copyBtn, saveBtn)), d.win)
+	choose.Show()
 }
 
 // diff
@@ -253,6 +265,8 @@ func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
 		box.Objects = nil
 		box.Add(d.kmemMemoryRow())
 		box.Add(widget.NewSeparator())
+		box.Add(d.autoMemoryRow(cwd))
+		box.Add(widget.NewSeparator())
 		for i, f := range memoryFiles(cwd) {
 			f := f
 			_, err := os.Stat(f)
@@ -287,6 +301,37 @@ func (d *desk) memoryPane(cwd string) fyne.CanvasObject {
 	}
 	fill()
 	return box
+}
+
+// autoMemoryRow: Claude Code's Auto-memory switch and its folder for this
+// project, like its own /memory dialog.
+func (d *desk) autoMemoryRow(cwd string) fyne.CanvasObject {
+	chk := widget.NewCheck("Auto-memory (Claude Code reads and writes its memory folder)", nil)
+	chk.Checked = autoMemoryOn()
+	reverting := false
+	chk.OnChanged = func(on bool) {
+		if reverting {
+			return
+		}
+		if err := setAutoMemory(on); err != nil {
+			reverting = true
+			chk.SetChecked(!on)
+			reverting = false
+			dialog.ShowError(err, d.win)
+		}
+	}
+	dir := filepath.Join(homeDir(), ".claude", "projects", transcript.Sanitize(cwd), "memory")
+	open := widget.NewButtonWithIcon("Open auto-memory folder", theme.FolderOpenIcon(), func() {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			dialog.ShowError(err, d.win)
+			return
+		}
+		d.openPath(dir)
+	})
+	open.Importance = widget.MediumImportance
+	note := caption("Saved in ~/.claude/settings.json (autoMemoryEnabled); sessions started after the change use it. Folder: " + tildePath(dir))
+	note.Wrapping = fyne.TextWrapBreak
+	return container.NewVBox(container.NewBorder(nil, nil, nil, container.NewCenter(open), chk), note)
 }
 
 func (d *desk) cmdMemory(s *deskSession) {
@@ -341,46 +386,167 @@ func permissionRules(cwd string) []permRule {
 	return out
 }
 
-func removeRule(r permRule) error {
-	m, err := readSettings(r.file)
-	if err != nil {
+// updateSettings changes one Claude Code settings file: read (a missing
+// file is empty), change, write a temp file next to it and rename it over
+// (symlinks are followed; the mode is kept). Invalid JSON is left alone.
+func updateSettings(path string, change func(m map[string]any) error) error {
+	target := path
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		target = real
+	}
+	m := map[string]any{}
+	if b, err := os.ReadFile(target); err == nil {
+		if err := json.Unmarshal(b, &m); err != nil {
+			return fmt.Errorf("%s is not valid JSON; not changed: %w", tildePath(path), err)
+		}
+		if m == nil {
+			m = map[string]any{}
+		}
+	} else if !os.IsNotExist(err) {
 		return err
 	}
-	perms, _ := m["permissions"].(map[string]any)
-	list, _ := perms[r.kind].([]any)
-	var kept []any
-	removed := false
-	for _, x := range list {
-		if s, ok := x.(string); ok && s == r.rule && !removed {
-			removed = true
-			continue
-		}
-		kept = append(kept, x)
+	if err := change(m); err != nil {
+		return err
 	}
-	if !removed {
-		return fmt.Errorf("rule not found")
-	}
-	if kept == nil {
-		kept = []any{}
-	}
-	perms[r.kind] = kept
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	target := r.file
-	if real, err := filepath.EvalSymlinks(r.file); err == nil {
-		target = real
-	}
 	mode := os.FileMode(0o600)
 	if st, err := os.Stat(target); err == nil {
 		mode = st.Mode().Perm()
+	} else if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
 	}
 	tmp := target + ".quill-tmp"
 	if err := os.WriteFile(tmp, append(b, '\n'), mode); err != nil {
 		return err
 	}
 	return os.Rename(tmp, target)
+}
+
+func permsOf(m map[string]any) map[string]any {
+	perms, _ := m["permissions"].(map[string]any)
+	if perms == nil {
+		perms = map[string]any{}
+		m["permissions"] = perms
+	}
+	return perms
+}
+
+func removeRule(r permRule) error {
+	return updateSettings(r.file, func(m map[string]any) error {
+		perms := permsOf(m)
+		list, _ := perms[r.kind].([]any)
+		var kept []any
+		removed := false
+		for _, x := range list {
+			if s, ok := x.(string); ok && s == r.rule && !removed {
+				removed = true
+				continue
+			}
+			kept = append(kept, x)
+		}
+		if !removed {
+			return fmt.Errorf("rule not found")
+		}
+		if kept == nil {
+			kept = []any{}
+		}
+		perms[r.kind] = kept
+		return nil
+	})
+}
+
+// addRule appends an allow/ask/deny rule (once) to one settings file.
+func addRule(file, kind, rule string) error {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return fmt.Errorf("the rule is empty")
+	}
+	return updateSettings(file, func(m map[string]any) error {
+		perms := permsOf(m)
+		list, _ := perms[kind].([]any)
+		for _, x := range list {
+			if s, _ := x.(string); s == rule {
+				return fmt.Errorf("%s already has %s rule %q", tildePath(file), kind, rule)
+			}
+		}
+		perms[kind] = append(list, rule)
+		return nil
+	})
+}
+
+// Workspace folders: permissions.additionalDirectories of a settings file.
+type workDir struct {
+	scope, file, dir string
+}
+
+func workspaceDirs(cwd string) []workDir {
+	var out []workDir
+	for _, f := range settingsFiles(cwd) {
+		m, err := readSettings(f[1])
+		if err != nil {
+			continue
+		}
+		perms, _ := m["permissions"].(map[string]any)
+		list, _ := perms["additionalDirectories"].([]any)
+		for _, x := range list {
+			if s, ok := x.(string); ok && s != "" {
+				out = append(out, workDir{f[0], f[1], s})
+			}
+		}
+	}
+	return out
+}
+
+func setWorkspaceDir(file, dir string, add bool) error {
+	return updateSettings(file, func(m map[string]any) error {
+		perms := permsOf(m)
+		list, _ := perms["additionalDirectories"].([]any)
+		var kept []any
+		found := false
+		for _, x := range list {
+			if s, _ := x.(string); s == dir {
+				found = true
+				if !add {
+					continue
+				}
+			}
+			kept = append(kept, x)
+		}
+		switch {
+		case add && found:
+			return fmt.Errorf("%s is already a workspace folder there", tildePath(dir))
+		case add:
+			kept = append(kept, dir)
+		case !found:
+			return fmt.Errorf("folder not found")
+		}
+		if kept == nil {
+			kept = []any{}
+		}
+		perms["additionalDirectories"] = kept
+		return nil
+	})
+}
+
+// autoMemoryOn: Claude Code's auto-memory setting (autoMemoryEnabled in the
+// user settings, default on), as its own /memory switch writes it.
+func autoMemoryOn() bool {
+	m, err := readSettings(filepath.Join(homeDir(), ".claude", "settings.json"))
+	if err != nil {
+		return true
+	}
+	v, ok := m["autoMemoryEnabled"].(bool)
+	return !ok || v
+}
+
+func setAutoMemory(on bool) error {
+	return updateSettings(filepath.Join(homeDir(), ".claude", "settings.json"), func(m map[string]any) error {
+		m["autoMemoryEnabled"] = on
+		return nil
+	})
 }
 
 func (d *desk) permissionsPane(cwd string) fyne.CanvasObject {
@@ -409,13 +575,132 @@ func (d *desk) permissionsPane(cwd string) fyne.CanvasObject {
 		box.Refresh()
 	}
 	fill()
-	note := widget.NewLabel("Rules from ~/.claude/settings.json (User), .claude/settings.json (Project) and .claude/settings.local.json (Local) of " + tildePath(cwd) + ". Add rules with \"Always allow...\" on a blocked command.")
+	note := widget.NewLabel("Rules from ~/.claude/settings.json (User), .claude/settings.json (Project) and .claude/settings.local.json (Local) of " + tildePath(cwd) + ". Also added by \"Always allow...\" on a blocked command.")
 	note.Wrapping = fyne.TextWrapWord
 	note.SizeName = theme.SizeNameCaptionText
 	ro := widget.NewButtonWithIcon("Read-only commands (run without a plan)...", theme.SettingsIcon(), d.readOnlyDialog)
 	ro.Importance = widget.LowImportance
 	ro.Alignment = widget.ButtonAlignLeading
-	return container.NewBorder(nil, container.NewVBox(note, ro), nil, nil, container.NewVScroll(box))
+	add := widget.NewButtonWithIcon("Add rule...", theme.ContentAddIcon(), func() { d.addRuleDialog(cwd, fill) })
+	add.Importance = widget.MediumImportance
+	rules := container.NewBorder(container.NewHBox(add), container.NewVBox(note, ro), nil, nil, container.NewVScroll(box))
+	return container.NewAppTabs(container.NewTabItem("Rules", rules), container.NewTabItem("Workspace", d.workspacePane(cwd)))
+}
+
+var settingsScopes = []string{"Local (this folder, only you)", "Project (this folder, shared in the repo)", "User (all folders)"}
+
+func scopeFile(cwd, label string) string {
+	for _, f := range settingsFiles(cwd) {
+		if strings.HasPrefix(label, f[0]) {
+			return f[1]
+		}
+	}
+	return ""
+}
+
+func (d *desk) addRuleDialog(cwd string, done func()) {
+	kind := widget.NewRadioGroup([]string{"allow", "ask", "deny"}, nil)
+	kind.Horizontal = true
+	kind.SetSelected("allow")
+	rule := widget.NewEntry()
+	rule.SetPlaceHolder("Bash(npm test *)   or   Read(./docs/**)   or   WebFetch(domain:example.com)")
+	where := widget.NewSelect(settingsScopes, nil)
+	where.SetSelected(settingsScopes[0])
+	dlg := dialog.NewForm("Add permission rule", "Add", "Cancel", []*widget.FormItem{
+		widget.NewFormItem("Kind", kind), widget.NewFormItem("Rule", rule), widget.NewFormItem("Save in", where),
+		widget.NewFormItem("", caption("Tool(pattern), as in Claude Code's /permissions. Deny wins over ask, ask over allow.")),
+	}, func(ok bool) {
+		if !ok {
+			return
+		}
+		if err := addRule(scopeFile(cwd, where.Selected), kind.Selected, rule.Text); err != nil {
+			dialog.ShowError(err, d.win)
+			return
+		}
+		done()
+	}, d.win)
+	dlg.Resize(fyne.NewSize(620, 320))
+	dlg.Show()
+}
+
+// workspacePane: the extra folders Claude may use (additionalDirectories in
+// the settings files, plus this session's /add-dir folders).
+func (d *desk) workspacePane(cwd string) fyne.CanvasObject {
+	box := container.NewVBox()
+	var fill func()
+	fill = func() {
+		box.Objects = nil
+		dirs := workspaceDirs(cwd)
+		if s := d.current; s != nil && s.cwd == cwd {
+			for _, dir := range s.addDirs {
+				dirs = append(dirs, workDir{scope: "This session", dir: dir})
+			}
+		}
+		if len(dirs) == 0 {
+			box.Add(widget.NewLabel("No extra working folders. Claude works in " + tildePath(cwd) + "."))
+		}
+		for _, w := range dirs {
+			w := w
+			l := widget.NewLabel(w.scope + " · " + tildePath(w.dir))
+			l.Truncation = fyne.TextTruncateEllipsis
+			rm := widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), func() {
+				var err error
+				if w.file == "" {
+					if s := d.current; s != nil {
+						s.addDirs = removeString(s.addDirs, w.dir)
+						d.restartOnNext(s, "Removed "+tildePath(w.dir)+" from this session's working folders.")
+					}
+				} else {
+					err = setWorkspaceDir(w.file, w.dir, false)
+				}
+				if err != nil {
+					dialog.ShowError(err, d.win)
+				}
+				fill()
+			})
+			rm.Importance = widget.LowImportance
+			box.Add(container.NewBorder(nil, nil, nil, rm, l))
+		}
+		box.Refresh()
+	}
+	fill()
+	add := widget.NewButtonWithIcon("Add folder...", theme.FolderNewIcon(), func() {
+		dialog.ShowFolderOpen(func(u fyne.ListableURI, err error) {
+			if err != nil || u == nil {
+				return
+			}
+			dir := u.Path()
+			where := widget.NewSelect(append([]string{"This session only"}, settingsScopes...), nil)
+			where.SetSelected("This session only")
+			dialog.ShowForm("Add "+tildePath(dir), "Add", "Cancel", []*widget.FormItem{widget.NewFormItem("Remember in", where)}, func(ok bool) {
+				if !ok {
+					return
+				}
+				if where.Selected == "This session only" {
+					if s := d.current; s != nil {
+						d.addDir(s, dir)
+					}
+				} else if err := setWorkspaceDir(scopeFile(cwd, where.Selected), dir, true); err != nil {
+					dialog.ShowError(err, d.win)
+				}
+				fill()
+			}, d.win)
+		}, d.win)
+	})
+	add.Importance = widget.MediumImportance
+	note := caption("Settings folders apply to sessions started after the change (Claude Code's permissions.additionalDirectories); session folders restart the session's Claude on your next message.")
+	note.Wrapping = fyne.TextWrapWord
+	return container.NewBorder(container.NewHBox(add), note, nil, nil, container.NewVScroll(box))
+}
+
+func removeString(list []string, v string) []string {
+	var out []string
+	for _, x := range list {
+		if x != v {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 func (d *desk) cmdPermissions(s *deskSession) {
@@ -782,6 +1067,16 @@ func (d *desk) cmdFork(s *deskSession) {
 // rewind
 
 func (d *desk) rewindTo(s *deskSession, u *chat.Item, files bool) {
+	d.rewindMode(s, u, files, false)
+}
+
+// rewindCode undoes Claude's file edits since a message and keeps the whole
+// conversation (Claude Code's "Restore code").
+func (d *desk) rewindCode(s *deskSession, u *chat.Item) {
+	d.rewindMode(s, u, true, true)
+}
+
+func (d *desk) rewindMode(s *deskSession, u *chat.Item, files, keepChat bool) {
 	if s.running() && s.conv.Busy {
 		d.notify(s, "Wait for the current turn to finish before rewinding.")
 		return
@@ -851,7 +1146,12 @@ func (d *desk) rewindTo(s *deskSession, u *chat.Item, files bool) {
 					d.notify(s, "Files were not rewound ("+err.Error()+"); the conversation was left as it was.")
 					return
 				}
-				finish(fmt.Sprintf("Restored %s to how they were at that message (+%d −%d). ", plural(len(preview.FilesChanged), "file"), preview.Insertions, preview.Deletions))
+				note := fmt.Sprintf("Restored %s to how they were at that message (+%d −%d). ", plural(len(preview.FilesChanged), "file"), preview.Insertions, preview.Deletions)
+				if keepChat {
+					d.notify(s, note+"The conversation is unchanged.")
+					return
+				}
+				finish(note)
 			})
 		}()
 	}
@@ -865,6 +1165,10 @@ func (d *desk) rewindTo(s *deskSession, u *chat.Item, files bool) {
 				return
 			}
 			if p.CanRewind != nil && !*p.CanRewind || len(p.FilesChanged) == 0 {
+				if keepChat {
+					d.notify(s, "There are no file changes to undo since that message.")
+					return
+				}
 				finish("There were no file changes to undo since that message. ")
 				return
 			}
@@ -876,7 +1180,11 @@ func (d *desk) rewindTo(s *deskSession, u *chat.Item, files bool) {
 				}
 				names = append(names, tildePath(f))
 			}
-			msg := fmt.Sprintf("Restore %s (+%d −%d) to how they were before “%s”, and rewind the conversation?\n\n%s", plural(len(p.FilesChanged), "file"), p.Insertions, p.Deletions, oneLine(u.Text, 60), strings.Join(names, "\n"))
+			what := ", and rewind the conversation?"
+			if keepChat {
+				what = "? The conversation stays as it is."
+			}
+			msg := fmt.Sprintf("Restore %s (+%d −%d) to how they were before “%s”%s\n\n%s", plural(len(p.FilesChanged), "file"), p.Insertions, p.Deletions, oneLine(u.Text, 60), what, strings.Join(names, "\n"))
 			dlg := dialog.NewConfirm("Rewind files?", msg, func(ok bool) {
 				if ok {
 					apply(p)
@@ -913,9 +1221,10 @@ func (d *desk) cmdRewind(s *deskSession) {
 		l.Truncation = fyne.TextTruncateEllipsis
 		conv := widget.NewButtonWithIcon("Rewind", theme.MediaSkipPreviousIcon(), func() { dlg.Hide(); d.rewindTo(s, u, false) })
 		both := widget.NewButtonWithIcon("Rewind + files", theme.HistoryIcon(), func() { dlg.Hide(); d.rewindTo(s, u, true) })
-		rows = append(rows, container.NewBorder(nil, nil, nil, container.NewHBox(conv, both), l))
+		code := widget.NewButtonWithIcon("Files only", theme.DocumentIcon(), func() { dlg.Hide(); d.rewindCode(s, u) })
+		rows = append(rows, container.NewBorder(nil, nil, nil, container.NewHBox(conv, both, code), l))
 	}
-	note := widget.NewLabel("Rewind removes that message and everything after it from the conversation and puts the message back in the box to edit. Rewind + files also undoes Claude's file edits since then (only edits made since Quill turned on file checkpoints).")
+	note := widget.NewLabel("Rewind removes that message and everything after it from the conversation and puts the message back in the box to edit. Rewind + files also undoes Claude's file edits since then; Files only undoes those edits and keeps the conversation (only edits made since Quill turned on file checkpoints).")
 	note.Wrapping = fyne.TextWrapWord
 	note.SizeName = theme.SizeNameCaptionText
 	dlg = dialog.NewCustom("Rewind to before…", "Cancel", container.NewBorder(nil, note, nil, nil, container.NewVScroll(container.NewVBox(rows...))), d.win)
@@ -999,7 +1308,8 @@ func (d *desk) messageMenuItems(s *deskSession, it *chat.Item) []*fyne.MenuItem 
 		if it.Kind == chat.User {
 			items = append(items,
 				fyne.NewMenuItem("Rewind to here", func() { d.rewindTo(s, it, false) }),
-				fyne.NewMenuItem("Rewind to here and undo file changes", func() { d.rewindTo(s, it, true) }))
+				fyne.NewMenuItem("Rewind to here and undo file changes", func() { d.rewindTo(s, it, true) }),
+				fyne.NewMenuItem("Undo file changes since here (keep the chat)", func() { d.rewindCode(s, it) }))
 		}
 		items = append(items, fyne.NewMenuItem("Fork from here", func() { d.forkFrom(s, it) }))
 	}

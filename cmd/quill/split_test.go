@@ -1806,7 +1806,7 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 			}
 			return strings.Join(out, ",")
 		}
-		if got := labels(h.d.messageMenuItems(s, user)); got != "Copy message,Rewind to here,Rewind to here and undo file changes,Fork from here" {
+		if got := labels(h.d.messageMenuItems(s, user)); got != "Copy message,Rewind to here,Rewind to here and undo file changes,Undo file changes since here (keep the chat),Fork from here" {
 			t.Fatalf("user message menu: %s", got)
 		}
 		if got := labels(h.d.messageMenuItems(s, reply)); got != "Copy message,Fork from here" {
