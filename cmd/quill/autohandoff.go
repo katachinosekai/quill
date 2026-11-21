@@ -79,10 +79,14 @@ func (d *desk) handoffPolicy() handoffPolicy {
 	}
 	if !d.policyBusy && time.Since(d.policyAt) > policyRefresh {
 		d.policyBusy = true
+		started := time.Now()
 		go func() {
 			p, ok := d.kmemPolicy()
 			d.do(func() {
 				d.policyBusy = false
+				if d.policyAt.After(started) {
+					return // saved from Settings meanwhile; that value is newer
+				}
 				d.policyAt = time.Now()
 				if ok {
 					d.policy = p
