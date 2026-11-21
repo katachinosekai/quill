@@ -33,6 +33,7 @@ type Options struct {
 	Chrome    string
 	AddDirs   []string
 	ResumeAt  string
+	Prompt    string
 }
 
 func (o Options) Args() []string {
@@ -69,6 +70,9 @@ func (o Options) Args() []string {
 	}
 	if o.ResumeAt != "" && o.Resume != "" {
 		args = append(args, "--resume-session-at", o.ResumeAt)
+	}
+	if o.Prompt != "" {
+		args = append(args, "--append-system-prompt", o.Prompt)
 	}
 	return append(args, o.ExtraArgs...)
 }

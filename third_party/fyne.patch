@@ -79,3 +79,15 @@ diff -urN a/driver/walk.go b/driver/walk.go
 +func WalkVisibleObjectTree(obj fyne.CanvasObject, beforeChildren func(fyne.CanvasObject, fyne.Position, fyne.Position, fyne.Size) bool, afterChildren func(fyne.CanvasObject, fyne.Position, fyne.CanvasObject)) bool {
 +	return intdriver.WalkVisibleObjectTree(obj, beforeChildren, afterChildren)
 +}
+
+diff -urN a/widget/entry_offset.go b/widget/entry_offset.go
+--- a/widget/entry_offset.go	1970-01-01 00:00:00.000000000 +0000
++++ b/widget/entry_offset.go	2026-11-21 12:00:00.000000000 -0800
+@@ -0,0 +1,7 @@
++package widget
++
++func (e *Entry) SetCursorTextOffset(pos int) {
++	e.CursorRow, e.CursorColumn = e.rowColFromTextPos(pos)
++	e.syncSelectable()
++	e.Refresh()
++}

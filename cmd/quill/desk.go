@@ -311,6 +311,9 @@ type desk struct {
 	background    bool
 	hidden        bool
 	sideFrac      float32
+	ac            *autocorrector
+	acKnown       map[string]*wordSet
+	hintPrev      map[*canvas.Text]string
 	sideAnim      *fyne.Animation
 	animate       bool
 	root          *fyne.Container
@@ -467,7 +470,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	_ = roBtn
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
-	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes)
+	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("Typing"), d.autocorrectSettings())
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), rulesBtn, widget.NewSeparator(), heading("Phone"), d.buildPhoneRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
@@ -965,6 +968,9 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
+	d.input.ac = d.newAutocorrector()
+	d.input.known = func() func(string) bool { return d.knownWords(d.current) }
+	d.input.onFix = func(msg string) { d.flashHint(d.folder, msg) }
 	d.cmds = newCmdMenu(d)
 	d.input.onKey = d.cmds.key
 	d.input.menuOpen = d.cmds.visible
@@ -1378,7 +1384,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		s.failed = err.Error()
 		return err
 	}
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt,
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, Prompt: quillPromptHint,
 		Env: append(d.localEnv(s.model), checkpointEnv)}
 	d.warnInsecureOllama(s)
 	if s.persisted {
@@ -2350,6 +2356,13 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 				}
 			} else if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermRetryAllowed
+			}
+			return nil
+		}
+		if targets := openerTargets(it, s.cwd); len(targets) > 0 {
+			if s.proc.DenyWith(it.RequestID, it.Request, openerMessage) == nil {
+				it.PermState = chat.PermDenied
+				return []*chat.Item{s.conv.AddNotice("Shown here instead of opening a window: " + strings.Join(targets, " "))}
 			}
 			return nil
 		}

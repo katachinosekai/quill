@@ -9,6 +9,8 @@ URL:            https://github.com/katachinosekai/quill
 Source0:        %{name}-%{version}.tar.gz
 ExclusiveArch:  x86_64
 
+Recommends:     hunspell
+Recommends:     hunspell-en-US
 BuildRequires:  golang >= 1.26
 BuildRequires:  gcc
 BuildRequires:  gcc-c++

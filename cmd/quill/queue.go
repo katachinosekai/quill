@@ -332,9 +332,7 @@ func (e *sendEntry) setHistoryText(text string) {
 	e.browsing = true
 	e.SetText(text)
 	e.browsing = false
-	e.CursorRow = strings.Count(text, "\n")
-	e.CursorColumn = len([]rune(text[strings.LastIndex(text, "\n")+1:]))
-	e.Refresh()
+	e.SetCursorTextOffset(len([]rune(text)))
 }
 
 func (d *desk) syncVisibleQueues() {

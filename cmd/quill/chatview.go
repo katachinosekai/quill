@@ -691,10 +691,18 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		}
 		return md
 	case chat.Tool:
+		var row fyne.CanvasObject
 		if !v.steps {
-			return v.stepRun(it)
+			row = v.stepRun(it)
+		} else {
+			row = v.renderTool(it, iv)
 		}
-		return v.renderTool(it, iv)
+		if it.ToolName == "SendUserFile" {
+			if p := v.mediaPreviews(sentFiles(it)); p != nil {
+				return container.NewVBox(row, p)
+			}
+		}
+		return row
 	case chat.Permission:
 		if it.PermState == chat.PermAutoAllowed {
 			return container.NewWithoutLayout()
@@ -724,6 +732,11 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		l.TextStyle.Italic = true
 		l.Importance = widget.MediumImportance
 		l.SizeName = theme.SizeNameCaptionText
+		if strings.HasPrefix(it.Text, openerNotice) {
+			if p := v.mediaPreviews(it.Text); p != nil {
+				return container.NewVBox(l, p)
+			}
+		}
 		return l
 	case chat.Error:
 		l := widget.NewLabel(it.Text)

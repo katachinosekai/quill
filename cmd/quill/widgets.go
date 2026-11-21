@@ -2,7 +2,6 @@ package main
 
 import (
 	"image/color"
-	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -165,6 +164,10 @@ type sendEntry struct {
 	browsing   bool
 	onFocus    func()
 	onEscape   func() bool
+	ac         *autocorrector
+	known      func() func(string) bool
+	lastFix    *acFix
+	onFix      func(string)
 }
 
 func (e *sendEntry) FocusGained() {
@@ -240,6 +243,10 @@ func (e *sendEntry) KeyUp(k *fyne.KeyEvent) {
 }
 
 func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
+	if k.Name == fyne.KeyBackspace && e.undoFix() {
+		return
+	}
+	e.lastFix = nil
 	if e.onKey != nil && e.onKey(k) {
 		return
 	}
@@ -254,9 +261,7 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 	}
 	if k.Name == fyne.KeyTab && e.AcceptsTab() {
 		e.SetText(e.suggestion)
-		e.CursorRow = strings.Count(e.Text, "\n")
-		e.CursorColumn = len([]rune(e.Text[strings.LastIndex(e.Text, "\n")+1:]))
-		e.Refresh()
+		e.SetCursorTextOffset(len([]rune(e.Text)))
 		return
 	}
 	if (k.Name == fyne.KeyReturn || k.Name == fyne.KeyEnter) && !e.shift {
@@ -268,6 +273,9 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 			return
 		}
 		if e.onSend != nil {
+			if e.CursorTextOffset() >= len([]rune(e.Text)) {
+				e.correctBefore(0)
+			}
 			e.onSend(e.Text)
 		}
 		return
