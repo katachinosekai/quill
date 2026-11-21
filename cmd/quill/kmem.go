@@ -102,11 +102,11 @@ func (d *desk) runKmem(prog string, args ...string) (string, error) {
 }
 
 func (d *desk) kmemHandoffs() []kmemHandoff {
-	out, err := d.runKmem("kmem", "handoff", "list")
+	hs, err := d.kmemHandoffList()
 	if err != nil {
 		return nil
 	}
-	return parseHandoffList(out)
+	return hs
 }
 
 func (d *desk) kmemTaken(hs []kmemHandoff) func(string) bool {
@@ -311,8 +311,7 @@ func (d *desk) kmemAfterTurn(s *deskSession) {
 			}
 		}
 		if !saved && recent {
-			out, _ := d.runKmem("kmem", "handoff", "get", ks.name)
-			saved = strings.Contains(out, "session cs:"+s.id+")")
+			saved = strings.Contains(d.kmemHandoffText(ks.name), "session cs:"+s.id+")")
 		}
 		prompt := ""
 		if saved {

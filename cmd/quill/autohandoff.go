@@ -80,12 +80,11 @@ func (d *desk) handoffPolicy() handoffPolicy {
 	if !d.policyBusy && time.Since(d.policyAt) > policyRefresh {
 		d.policyBusy = true
 		go func() {
-			out, err := d.runKmem("kmem", "handoff", "policy")
-			p, ok := parsePolicy(out)
+			p, ok := d.kmemPolicy()
 			d.do(func() {
 				d.policyBusy = false
 				d.policyAt = time.Now()
-				if err == nil && ok {
+				if ok {
 					d.policy = p
 				} else {
 					d.policy = defaultPolicy

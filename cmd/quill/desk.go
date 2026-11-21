@@ -176,6 +176,7 @@ type desk struct {
 	compactor    func(ctx context.Context, model, text string) (string, error)
 	kmemRun      func(prog string, args ...string) (string, error)
 	kmemOff      bool
+	kmemVer      kmemVersion
 	policy       handoffPolicy
 	policyAt     time.Time
 	policyBusy   bool
