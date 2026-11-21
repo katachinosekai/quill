@@ -101,6 +101,26 @@ type remoteSess struct {
 	epoch   int
 	rev     int
 	fetched int // rev of the items we hold, -1 = none
+	// fetchN numbers item fetches as they start; applied is the newest one
+	// shown, so a slower, older answer can't overwrite a newer window.
+	fetchN, applied int
+	healed          time.Time // last self-heal reload (see blankStuck)
+}
+
+// remoteHealEvery: at most one self-heal reload per session in this time.
+var remoteHealEvery = 10 * time.Second
+
+// blankStuck: a user or assistant item with no text that isn't streaming any
+// more, or still "streaming" while the session isn't running. That is a reply
+// whose text never reached us (the connection dropped mid-stream); one full
+// reload brings it back (same rule as Quill Android).
+func blankStuck(c *chat.Conversation, status string) bool {
+	for _, it := range c.Items {
+		if (it.Kind == chat.User || it.Kind == chat.Assistant) && strings.TrimSpace(it.Text) == "" && (!it.Streaming || status != "running") {
+			return true
+		}
+	}
+	return false
 }
 
 type remoteLink struct {
@@ -654,8 +674,15 @@ func remoteChatItem(ri remoteItem) *chat.Item {
 
 // fetchItems loads the latest window of a shown remote session's chat.
 func (l *remoteLink) fetchItems(s *deskSession) {
+	l.fetchWindow(s, false)
+}
+
+// fetchWindow: heal marks the self-heal reload, which never starts another.
+func (l *remoteLink) fetchWindow(s *deskSession, heal bool) {
 	r := s.remote
 	want := r.rev
+	r.fetchN++
+	n := r.fetchN
 	go func() {
 		var page struct {
 			Items []remoteItem `json:"items"`
@@ -664,9 +691,10 @@ func (l *remoteLink) fetchItems(s *deskSession) {
 			return
 		}
 		l.d.do(func() {
-			if l.d.sessions[s.id] != s || l.d.remotes[l.conf.ID] != l {
+			if l.d.sessions[s.id] != s || l.d.remotes[l.conf.ID] != l || n < r.applied {
 				return
 			}
+			r.applied = n
 			conv := chat.New()
 			for _, ri := range page.Items {
 				conv.Items = append(conv.Items, remoteChatItem(ri))
@@ -679,6 +707,10 @@ func (l *remoteLink) fetchItems(s *deskSession) {
 				v.show(s)
 			}
 			l.d.updateChrome()
+			if !heal && blankStuck(conv, r.status) && time.Since(r.healed) >= remoteHealEvery {
+				r.healed = time.Now()
+				l.fetchWindow(s, true)
+			}
 		})
 	}()
 }

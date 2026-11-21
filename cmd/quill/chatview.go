@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"image/color"
 	"regexp"
 	"strings"
@@ -41,8 +42,13 @@ type itemView struct {
 	sig      string
 }
 
+// itemSig changes whenever an item's shown content does. The text is hashed,
+// not just measured: a finished reply can replace the streamed text with one
+// of the same length, and the phone API's revs must not miss that.
 func itemSig(it *chat.Item) string {
-	return fmt.Sprintf("%d|%d|%t|%t|%t|%d|%d|%d|%d", it.Kind, len(it.Text), it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, len(it.Diff))
+	h := fnv.New64a()
+	h.Write([]byte(it.Text))
+	return fmt.Sprintf("%d|%d|%x|%t|%t|%t|%d|%d|%d|%d", it.Kind, len(it.Text), h.Sum64(), it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, len(it.Diff))
 }
 
 type chatView struct {
