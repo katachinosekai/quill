@@ -209,6 +209,9 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 			continue
 		}
 		for _, id := range g.ids {
+			if strings.HasPrefix(id, remotePrefix) {
+				continue
+			}
 			if _, ok := group[id]; !ok {
 				group[id] = g.title
 				ids = append(ids, id)
@@ -216,7 +219,7 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 		}
 	}
 	for _, id := range d.tabs {
-		if d.staleTab(id) {
+		if d.staleTab(id) || strings.HasPrefix(id, remotePrefix) {
 			continue
 		}
 		if _, ok := group[id]; !ok {

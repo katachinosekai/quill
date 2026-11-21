@@ -289,6 +289,10 @@ func (d *desk) syncTabs() {
 			bg.StrokeWidth = 2
 		}
 		row := container.NewHBox(padLeft(10), container.NewCenter(sized(14, 14, dt)), padLeft(2), container.NewCenter(label), padLeft(2), container.NewCenter(sized(22, 22, closeBtn)), padLeft(4))
+		if s := d.sessions[id]; s != nil && s.remote != nil {
+			// A session on another PC: computer icon in front of its title.
+			row.Objects = append([]fyne.CanvasObject{row.Objects[0], row.Objects[1], padLeft(4), container.NewCenter(sized(16, 16, widget.NewIcon(theme.ComputerIcon())))}, row.Objects[2:]...)
+		}
 		chip := d.tabChips[id]
 		if chip == nil {
 			chip = newChip(container.NewStack(), func() { d.open(id) }, func(at fyne.Position) { d.tabMenu(id, at) })

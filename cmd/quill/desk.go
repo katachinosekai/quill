@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image/color"
 	"net/url"
@@ -95,6 +96,7 @@ type deskSession struct {
 	retryDest      string
 	kmemSave       *kmemSave
 	kmemNew        bool
+	remote         *remoteSess // a live session on a paired PC; nil = local
 	resumeNext     string
 	resumeAs       string
 	rotateAsk      int
@@ -126,6 +128,9 @@ func (s *deskSession) running() bool {
 }
 
 func (s *deskSession) status() status {
+	if s.remote != nil {
+		return remoteStatus(s.remote)
+	}
 	if s.terminal != nil && !s.running() {
 		return stTerminal
 	}
@@ -275,6 +280,7 @@ type desk struct {
 	setSessions   *fyne.Container
 	policyUI      *policyRow
 	kmemPanelNow  *kmemPanel
+	remotes       map[string]*remoteLink
 	settingsDlg   dialog.Dialog
 	tasksBtn      *tasksChip
 	phoneSync     *phoneSync
@@ -379,6 +385,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		d.created[id] = true
 	}
 	d.initPhone()
+	d.startRemotePCs()
 	return d
 }
 
@@ -483,7 +490,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
 	d.setGeneral = container.NewVBox(planChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
-	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow())
+	d.setSessions = container.NewVBox(rcChk, rcLocalChk, chromeChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
 	openSettings.Alignment = widget.ButtonAlignLeading
@@ -667,17 +674,24 @@ func (d *desk) rowText(id string) (string, string, status) {
 	} else if _, ok := d.terms[id]; ok {
 		st = stTerminal
 	}
+	if s != nil && s.remote != nil {
+		title = s.remote.title
+		last = time.Time{}
+	}
 	if title == "" {
 		title = "New session"
 	}
 	meta := ago(last)
+	if s != nil && s.remote != nil {
+		meta = "on " + s.remote.link.conf.Name
+	}
 	if msgs > 0 {
 		meta += fmt.Sprintf("  ·  %d msgs", msgs)
 	}
 	if st != stNone {
 		meta += "  ·  " + st.String()
 	}
-	if s != nil && st == stRunning && !s.conv.Busy && !s.proc.Busy() {
+	if s != nil && s.remote == nil && st == stRunning && !s.conv.Busy && !s.proc.Busy() {
 		meta += fmt.Sprintf("  ·  %d in background", s.conv.Working())
 	}
 	if k := d.org.Kmem[id]; k != "" {
@@ -1170,6 +1184,9 @@ func (d *desk) open(id string) {
 	if s == nil {
 		return
 	}
+	if r := s.remote; r != nil && r.fetched != r.rev {
+		defer r.link.fetchItems(s)
+	}
 	d.cancelPendingEnd(s)
 	if d.offerResume(id) {
 		return
@@ -1315,6 +1332,9 @@ func (d *desk) canAnswer(s *deskSession) bool {
 }
 
 func (d *desk) ensureProcess(s *deskSession) error {
+	if s.remote != nil {
+		return errors.New("this session runs on " + s.remote.link.conf.Name)
+	}
 	if s.running() {
 		return nil
 	}
@@ -1495,6 +1515,13 @@ func (d *desk) send(text string) {
 	if text == "" {
 		return
 	}
+	if s != nil && s.remote != nil {
+		// Everything typed in a remote tab, /commands included, goes to that
+		// PC; its Quill answers or refuses (desktop-only commands) there.
+		d.clearInputFor(s, text)
+		d.sendTo(s, text)
+		return
+	}
 	if d.runLocalCommand(text) {
 		return
 	}
@@ -1584,6 +1611,10 @@ func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
 }
 
 func (d *desk) sendTo(s *deskSession, text string) {
+	if s.remote != nil {
+		d.remoteWrite(s, "send", map[string]string{"text": text})
+		return
+	}
 	s.coldStamp = time.Time{}
 	if err := d.ensureProcess(s); err != nil {
 		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start claude: " + err.Error())})
@@ -1691,6 +1722,10 @@ func (d *desk) sendNow(text string) {
 }
 
 func (d *desk) interrupt(s *deskSession) {
+	if s != nil && s.remote != nil {
+		d.remoteWrite(s, "interrupt", map[string]any{})
+		return
+	}
 	p := s.proc
 	if p == nil || p.Exited() {
 		return
@@ -1703,6 +1738,10 @@ func (d *desk) interrupt(s *deskSession) {
 }
 
 func (d *desk) answer(s *deskSession, it *chat.Item, dec protocol.Decision) {
+	if s != nil && s.remote != nil {
+		d.remoteDecision(s, it, dec)
+		return
+	}
 	if s = d.cardOwner(s, it); s == nil {
 		return
 	}
@@ -1734,6 +1773,10 @@ func isQuestion(it *chat.Item) bool {
 }
 
 func (d *desk) answerQuestions(s *deskSession, it *chat.Item, answers map[string]string) {
+	if s != nil && s.remote != nil {
+		d.remoteAnswers(s, it, answers)
+		return
+	}
 	if s = d.cardOwner(s, it); s == nil {
 		return
 	}
@@ -2573,6 +2616,10 @@ func (d *desk) approveByText(s *deskSession) {
 
 func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
 	if s = d.cardOwner(s, it); s == nil {
+		return
+	}
+	if s.remote != nil {
+		d.remotePlan(s, it, ok)
 		return
 	}
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {

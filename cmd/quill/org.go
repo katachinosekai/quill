@@ -144,6 +144,13 @@ func (d *desk) sessionMenu(id string, at fyne.Position, extra ...*fyne.MenuItem)
 // sessionMenuItems: one session = one tab = one kmem name (user 2026-11-21).
 // No folders or placements; ended sessions are resumed from the kmem panel.
 func (d *desk) sessionMenuItems(id string) []*fyne.MenuItem {
+	if s := d.sessions[id]; s != nil && s.remote != nil {
+		return []*fyne.MenuItem{
+			fyne.NewMenuItem("Open", func() { d.open(id) }),
+			fyne.NewMenuItem("Open in split view", func() { d.openInSplit(id) }),
+			fyne.NewMenuItem("Stop the current turn", func() { d.interrupt(s) }),
+		}
+	}
 	title, _, _ := d.rowText(id)
 	items := []*fyne.MenuItem{
 		fyne.NewMenuItem("Rename...", func() {

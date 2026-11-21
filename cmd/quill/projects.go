@@ -78,6 +78,9 @@ func (d *desk) projectKeyFor(id string) string {
 // projectOf: the project set in Quill, else kmem's config ("project", then
 // the first word of "topic"), else the first word of the session's title.
 func (d *desk) projectOf(id string) string {
+	if s := d.sessions[id]; s != nil && s.remote != nil {
+		return firstNonEmpty(s.remote.project, s.remote.link.conf.Name)
+	}
 	if p := d.org.Projects[d.projectKeyFor(id)]; p != "" {
 		return p
 	}

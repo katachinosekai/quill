@@ -1895,6 +1895,10 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 }
 
 func (d *desk) pickChoice(s *deskSession, it *chat.Item, option string) {
+	if s != nil && s.remote != nil {
+		d.remoteChoice(s, it, option)
+		return
+	}
 	after := false
 	for _, x := range s.conv.Items {
 		if x == it {

@@ -206,6 +206,14 @@ func (d *desk) answerRotate(s *deskSession, it *chat.Item, rotate bool) {
 	if s == nil || it.PermState != chat.PermPending {
 		return
 	}
+	if s.remote != nil {
+		action := "dismiss"
+		if rotate {
+			action = "rotate"
+		}
+		d.remoteWrite(s, "answer", map[string]any{"requestId": it.RequestID, "action": action})
+		return
+	}
 	if !rotate {
 		s.rotateNo = true
 		it.PermState = chat.PermDenied

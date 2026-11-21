@@ -68,6 +68,10 @@ func (d *desk) closeSessionTabs(ids []string) {
 
 func (d *desk) closeSessionTab(id string) {
 	s := d.sessions[id]
+	if s != nil && s.remote != nil {
+		d.closeTab(id)
+		return
+	}
 	if d.waitingOnUser(s) {
 		title, _, _ := d.rowText(id)
 		dialog.ShowConfirm("Close and end this session?",
