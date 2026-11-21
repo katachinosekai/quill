@@ -95,6 +95,9 @@ type deskSession struct {
 	rotateTried int
 	lastClaude  string
 	compactFrom string
+	qedit       *queueEdit
+	coldStamp   time.Time
+	rotateNo    bool
 	limitSeen   string
 	compacting  bool
 	takeover    bool
@@ -159,6 +162,7 @@ type desk struct {
 	localModels  []string
 	localBusy    bool
 	fetchLocal   func(host string) []localInfo
+	after        func(time.Duration, func())
 	pingLocal    func(host string) bool
 	localWindows map[string]int
 	warnedOllama bool
@@ -1156,6 +1160,9 @@ func (d *desk) open(id string) {
 	if d.cmds != nil {
 		d.cmds.hide()
 	}
+	if c := d.current; c != nil && c.id != id && c.qedit != nil {
+		d.cancelQueueEdit(c)
+	}
 	d.flushUI()
 	s := d.session(id)
 	if s == nil {
@@ -1475,6 +1482,17 @@ func (d *desk) send(text string) {
 		d.takeOver(s, t, text)
 		return
 	}
+	if s.qedit != nil {
+		idx := s.qedit.idx
+		s.qedit = nil
+		if s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
+			idx = min(idx, len(s.queue))
+			s.queue = append(append(append([]string{}, s.queue[:idx]...), text), s.queue[idx:]...)
+			d.clearInputFor(s, text)
+			d.syncQueue(s)
+			return
+		}
+	}
 	if s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
 		d.enqueue(s, text)
 		return
@@ -1526,6 +1544,7 @@ func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
 }
 
 func (d *desk) sendTo(s *deskSession, text string) {
+	s.coldStamp = time.Time{}
 	if err := d.ensureProcess(s); err != nil {
 		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start claude: " + err.Error())})
 		d.updateChrome()
@@ -2322,6 +2341,9 @@ var notApproval = []string{"but", "don't", "dont", "do not", "not ", "no ", "wai
 const retryPrefix = "I approve the action that Claude Code's auto-mode check blocked: "
 
 func approves(text string) bool {
+	if isRetry(text) {
+		return false
+	}
 	return isApproval(text) || text == planGoMessage
 }
 
@@ -2394,10 +2416,32 @@ func isRetry(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), retryPrefix)
 }
 
+var strongApproval = []string{"yes approve", "yes, approve", "yes i approve", "yes, i approve", "i approve", "approve all", "yes approved", "yes, approved", "plan approved"}
+
+var strongStop = []string{"but", "don't", "dont", "do not", "not ", "wait", "instead", "hold", "stop", "except", "cancel", "skip", "don’t"}
+
 func isApproval(text string) bool {
 	t := strings.ToLower(strings.TrimSpace(text))
 	t = strings.TrimRight(t, ".! ")
-	if t == "" || len(t) > 200 {
+	if t == "" || len(t) > 2000 {
+		return false
+	}
+	for _, p := range strongApproval {
+		if !strings.HasPrefix(t, p) {
+			continue
+		}
+		rest := t[len(p):]
+		if rest != "" && !strings.ContainsAny(rest[:1], " ,:;-—.!") {
+			continue
+		}
+		for _, n := range strongStop {
+			if strings.Contains(" "+rest+" ", n) {
+				return false
+			}
+		}
+		return true
+	}
+	if len(t) > 200 {
 		return false
 	}
 	if approvalWords[t] {

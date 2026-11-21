@@ -230,3 +230,21 @@ func TestBackgroundTasksCountAsWork(t *testing.T) {
 		t.Fatal("a new process starts with no background tasks")
 	}
 }
+
+func TestTaskNotificationFromAttachment(t *testing.T) {
+	c := New()
+	c.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"q1","name":"Bash","input":{"command":"./t.sh","run_in_background":true}}]`)}})
+	c.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"q1","content":"Command running in background with ID: b2b3pwaaq. Output is being written to: /tmp/o"}]`)}})
+	if c.Background() != 1 {
+		t.Fatal("started")
+	}
+	raw := []byte(`{"parentUuid":"x","isSidechain":false,"attachment":{"type":"queued_command","prompt":"<task-notification>\\n<task-id>b2b3pwaaq</task-id>\\n<status>completed</status>\\n</task-notification>"},"type":"attachment"}`)
+	ev, err := protocol.ParseLine(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Apply(ev)
+	if c.Background() != 0 {
+		t.Fatal("a completion delivered as an attachment (queued_command) ends the task")
+	}
+}

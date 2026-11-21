@@ -40,7 +40,7 @@ type itemView struct {
 }
 
 func itemSig(it *chat.Item) string {
-	return fmt.Sprintf("%d|%d|%t|%t|%t|%d|%d|%d|%t|%d", it.Kind, len(it.Text), it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, it.InPlan, len(it.Diff))
+	return fmt.Sprintf("%d|%d|%t|%t|%t|%d|%d|%d|%d", it.Kind, len(it.Text), it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, len(it.Diff))
 }
 
 type chatView struct {
@@ -619,13 +619,10 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		l.Alignment = v.align()
 		return bgPad(colBubble, 14, 4, 10, msgText(l))
 	case chat.Assistant:
-		if it.InPlan {
-			return container.NewWithoutLayout()
+		if it.Streaming {
+			return msgText(v.markdown(closeOpenMarkdown(it.Text)))
 		}
 		md := msgText(v.markdown(it.Text))
-		if it.Streaming {
-			return md
-		}
 		if p := v.mediaPreviews(it.Text); p != nil {
 			return container.NewVBox(md, p)
 		}
@@ -1491,20 +1488,15 @@ func centerLists(segs []widget.RichTextSegment, indent string) []widget.RichText
 }
 
 func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
-	title := widget.NewLabel("Approve this plan?")
+	title := widget.NewLabel(planQuestion(v.s.conv, it))
 	title.Alignment = v.align()
+	title.Wrapping = fyne.TextWrapWord
 	title.TextStyle = fyne.TextStyle{Bold: true}
-	msg := widget.NewLabel("Approving runs all of it: every command and change for this request is approved automatically until Claude finishes.")
+	msg := widget.NewLabel("Claude's plan is above. Approving runs all of it: every command and change for this request is approved automatically until Claude finishes.")
 	msg.Wrapping = fyne.TextWrapWord
 	msg.Alignment = v.align()
 	msg.SizeName = theme.SizeNameCaptionText
-	parts := []fyne.CanvasObject{title}
-	if plan := v.s.conv.PlanText(it); plan != "" {
-		parts = append(parts, msgText(v.markdown(plan)), widget.NewSeparator())
-	} else {
-		msg.SetText("Claude listed everything it will do above. " + msg.Text)
-	}
-	parts = append(parts, msg)
+	parts := []fyne.CanvasObject{title, msg}
 	border := colAccent
 	owner := v.s
 	if it.PermState == chat.PermPending {
@@ -1657,4 +1649,67 @@ const chatItemGap = 2
 
 func chatBox() *fyne.Container {
 	return container.New(layout.NewCustomPaddedVBoxLayout(chatItemGap))
+}
+
+var mdNoise = strings.NewReplacer("**", "", "__", "", "`", "")
+
+func planQuestion(c *chat.Conversation, plan *chat.Item) string {
+	text := ""
+	if c != nil {
+		text = c.PlanText(plan)
+		if text == "" {
+			for i := len(c.Items) - 1; i >= 0; i-- {
+				if c.Items[i] == plan {
+					for j := i - 1; j >= 0; j-- {
+						if c.Items[j].Kind == chat.User {
+							break
+						}
+						if c.Items[j].Kind == chat.Assistant && strings.TrimSpace(c.Items[j].Text) != "" {
+							text = c.Items[j].Text
+							break
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+	text = strings.TrimSpace(text)
+	last := strings.TrimSpace(text[strings.LastIndex(text, "\n")+1:])
+	last = strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(last), "#>*-_ "))
+	last = strings.TrimRight(last, "*_ ")
+	if strings.HasSuffix(last, "?") && len(last) <= 300 {
+		return last
+	}
+	return "Approve this plan?"
+}
+
+func closeOpenMarkdown(s string) string {
+	fences := 0
+	for _, l := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "```") {
+			fences++
+		}
+	}
+	if fences%2 == 1 {
+		return s + "\n```"
+	}
+	last := s[strings.LastIndex(s, "\n\n")+1:]
+	add := ""
+	if strings.Count(last, "`")%2 == 1 {
+		add = "`"
+	}
+	outside := ""
+	for i, part := range strings.Split(last+add, "`") {
+		if i%2 == 0 {
+			outside += part
+		}
+	}
+	if strings.Count(outside, "**")%2 == 1 {
+		if add == "" && strings.HasSuffix(s, "**") {
+			return strings.TrimSuffix(s, "**")
+		}
+		add += "**"
+	}
+	return s + add
 }

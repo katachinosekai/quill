@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -19,6 +20,7 @@ import (
 type handoffPolicy struct {
 	Soft, Hard int
 	Mode       string
+	TTL        time.Duration
 }
 
 const (
@@ -28,7 +30,7 @@ const (
 
 var (
 	defaultPolicy = handoffPolicy{Soft: 50, Hard: 75, Mode: "auto"}
-	policyField   = regexp.MustCompile(`\b(soft|hard|mode)\s*=\s*(\w+)`)
+	policyField   = regexp.MustCompile(`\b(soft|hard|mode|ttl)\s*=\s*(\w+)`)
 )
 
 func parsePolicy(out string) (handoffPolicy, bool) {
@@ -45,6 +47,16 @@ func parsePolicy(out string) (handoffPolicy, bool) {
 			} else {
 				p.Hard = n
 			}
+		case "ttl":
+			v := m[2]
+			if strings.Trim(v, "0123456789") == "" {
+				v += "m"
+			}
+			ttl, err := time.ParseDuration(v)
+			if err != nil || ttl <= 0 {
+				return defaultPolicy, false
+			}
+			p.TTL = ttl
 		case "mode":
 			switch m[2] {
 			case "auto", "ask", "off":
@@ -118,6 +130,9 @@ func (d *desk) checkAutoHandoff(s *deskSession) {
 		d.relaunchViaKmem(s.id, name)
 		return
 	}
+	if p.Mode == "auto" && name != "" && !s.rotateNo {
+		d.scheduleCold(s, p)
+	}
 	level := 1
 	if hard {
 		level = 2
@@ -129,6 +144,46 @@ func (d *desk) checkAutoHandoff(s *deskSession) {
 	d.closeRotateCards(s)
 	it := s.conv.AddRotate(fmt.Sprintf("Context is at %d%%.", pct))
 	d.chatFor(s, []*chat.Item{it})
+}
+
+func cacheTTL(s *deskSession, p handoffPolicy) time.Duration {
+	if p.TTL > 0 {
+		return p.TTL
+	}
+	if s.conv.CacheTTL > 0 {
+		return s.conv.CacheTTL
+	}
+	return time.Hour
+}
+
+func (d *desk) scheduleCold(s *deskSession, p handoffPolicy) {
+	ttl := cacheTTL(s, p)
+	stamp := time.Now()
+	s.coldStamp = stamp
+	after := d.after
+	if after == nil {
+		after = func(t time.Duration, f func()) { time.AfterFunc(t, f) }
+	}
+	after(ttl+30*time.Second, func() {
+		d.do(func() { d.coldRotate(s, stamp, ttl) })
+	})
+}
+
+func (d *desk) coldRotate(s *deskSession, stamp time.Time, ttl time.Duration) {
+	if s.coldStamp != stamp || s.rotateNo || !d.safePoint(s) {
+		return
+	}
+	p := d.handoffPolicy()
+	pct := contextPct(s)
+	name := d.org.Kmem[s.id]
+	if p.Mode != "auto" || name == "" || pct < p.Soft {
+		return
+	}
+	s.coldStamp = time.Time{}
+	s.rotateTried = pct
+	d.closeRotateCards(s)
+	d.notify(s, fmt.Sprintf("The prompt cache has gone cold (idle for over %s) and context is at %d%%: rotating through kmem “%s” now, since the next turn would pay full price for the whole context anyway.", ttl.Round(time.Minute), pct, name))
+	d.relaunchViaKmem(s.id, name)
 }
 
 func (d *desk) closeRotateCards(s *deskSession) {
@@ -149,6 +204,7 @@ func (d *desk) answerRotate(s *deskSession, it *chat.Item, rotate bool) {
 		return
 	}
 	if !rotate {
+		s.rotateNo = true
 		it.PermState = chat.PermDenied
 		d.chatFor(s, []*chat.Item{it})
 		return

@@ -256,13 +256,18 @@ func (hs handedSession) restorePending(s *deskSession) {
 
 func (d *desk) saveQueues(st *restoreState) {
 	for id, s := range d.sessions {
-		if len(s.queue) == 0 {
+		q := append([]string(nil), s.queue...)
+		if e := s.qedit; e != nil {
+			idx := min(e.idx, len(q))
+			q = append(append(append([]string{}, q[:idx]...), e.text), q[idx:]...)
+		}
+		if len(q) == 0 {
 			continue
 		}
 		if st.Queues == nil {
 			st.Queues = map[string][]string{}
 		}
-		st.Queues[id] = append([]string(nil), s.queue...)
+		st.Queues[id] = q
 	}
 }
 

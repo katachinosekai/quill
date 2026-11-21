@@ -135,3 +135,19 @@ func TestScanUsage(t *testing.T) {
 		t.Fatalf("%+v %+v", info.Usage, info.Days)
 	}
 }
+
+func TestLoadEndsTasksFromAttachments(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	lines := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"q1","name":"Bash","input":{"command":"./t.sh","run_in_background":true}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"q1","content":"Command running in background with ID: b2b3pwaaq. Output is being written to: /tmp/o"}]}}
+{"parentUuid":"x","attachment":{"type":"queued_command","prompt":"<task-notification>\\n<task-id>b2b3pwaaq</task-id>\\n<status>completed</status>\\n</task-notification>"},"type":"attachment"}
+`
+	if err := os.WriteFile(p, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil || c.Background() != 0 {
+		t.Fatalf("a reloaded transcript doesn't resurrect finished tasks: %v %d", err, c.Background())
+	}
+}
