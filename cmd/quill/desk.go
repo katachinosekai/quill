@@ -244,6 +244,7 @@ type desk struct {
 	ownPIDs        sync.Map
 
 	rows          []sideRow
+	rowCaps       map[string]string
 	list          *widget.List
 	search        *widget.Entry
 	chat          *chatView
@@ -582,8 +583,11 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			title.Truncation = fyne.TextTruncateEllipsis
 			meta := canvas.NewText("", colMuted)
 			meta.TextSize = fontDense
+			caption := canvas.NewText("", colMuted)
+			caption.TextSize = fontDense
+			head := container.NewBorder(nil, nil, nil, container.NewCenter(caption), title)
 			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(14, 14, statusMark(stNone)))), nil,
-				container.New(&tightVBox{}, title, container.NewPadded(meta)))
+				container.New(&tightVBox{}, head, container.NewPadded(meta)))
 			glow := canvas.NewRectangle(color.Transparent)
 			glow.CornerRadius = 8
 			glow.StrokeWidth = 1.5
@@ -644,13 +648,25 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			left := row.Objects[1].(*fyne.Container)
 			left.Objects[0].(*canvas.Rectangle).SetMinSize(fyne.NewSize(float32(r.depth-1)*16, 1))
 			col := row.Objects[0].(*fyne.Container)
-			title := col.Objects[0].(*widget.Label)
+			head := col.Objects[0].(*fyne.Container)
+			title := head.Objects[0].(*widget.Label)
+			caption := head.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
 			meta := col.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
 			mark := left.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*fyne.Container)
 			t, m, st2 := d.rowText(r.id)
 			title.SetText(t)
 			meta.Text = m
 			meta.Refresh()
+			c := d.rowCaption(r.id)
+			if d.rowCaps == nil {
+				d.rowCaps = map[string]string{}
+			}
+			d.rowCaps[r.id] = c
+			if caption.Text != c {
+				caption.Text = c
+				caption.Refresh()
+				head.Refresh()
+			}
 			setStatusMark(mark, st2)
 			if d.current == nil || d.current.id != r.id {
 				d.setGlow(glow, st2.color(), glowStrength(st2))
@@ -934,6 +950,7 @@ func (d *desk) matches(id, cwd, q string) bool {
 func (d *desk) refreshSidebar() {
 	d.listTheme.Refresh()
 	d.syncTabs()
+	d.syncRowCaptions()
 }
 
 func (d *desk) refreshSidebarSoon() {

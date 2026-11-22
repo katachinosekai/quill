@@ -211,6 +211,7 @@ func (u *usagePanel) update() {
 	setLabel(u.today, "Today "+tok(today.Total())+"  ·  7 days "+tok(week.Total()))
 	short := strings.Replace(strings.Replace(sess, "  ·  context ", " · ctx ", 1), " tokens", " tok", 1)
 	u.syncStrip(short, "Today "+tok(today.Total())+" · 7d "+tok(week.Total()))
+	d.syncRowCaptions()
 }
 
 type stripItem struct {

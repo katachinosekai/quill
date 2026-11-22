@@ -87,6 +87,7 @@ func (d *desk) applyLayoutMode() {
 	if d.usageBox != nil {
 		relayout(d.usageBox)
 	}
+	d.syncRowCaptions()
 }
 
 func (d *desk) settingsCwd() string {
