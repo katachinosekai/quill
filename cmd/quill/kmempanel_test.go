@@ -32,7 +32,9 @@ func TestKmemPanel(t *testing.T) {
 	h.d.kmemVer.reset()
 	var mu sync.Mutex
 	var calls []string
-	binText := "[f467b16] fact, 8 days in bin, by launcher: wrong topic\n    (decision) launcher/x text\n"
+	longWhy := "wrong topic: filed under 'decision' because of a bad add syntax, re-added under launcher/decisions/features as a new fact with the same text, so this copy is not needed any more and only takes space in the history"
+	binText := "[f467b16] fact, 8 days in bin, by launcher: " + longWhy + "\n    (decision) launcher/x text...\n"
+	fullText := "[f467b16] decision: launcher/x text that kmem trash list cuts short but kmem show prints whole, all the way to the end.\n  IN THE RECYCLE BIN"
 	h.d.kmemRun = func(prog string, args ...string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -53,13 +55,15 @@ func TestKmemPanel(t *testing.T) {
 			return `{"tasks": [{"id": "t1", "prio": 4, "status": "open", "title": "Do it", "topic": "load-opt", "owner": null}], "api": 1}`, nil
 		case a == "trash list":
 			return binText, nil
+		case a == "show f467b16":
+			return fullText, nil
 		}
 		return "", nil
 	}
 	var started []string
 	oldTerm := terminalCmd
-	terminalCmd = func(kmemPath string) *exec.Cmd {
-		started = append(started, kmemPath)
+	terminalCmd = func(kmemPath string, id ...string) *exec.Cmd {
+		started = append(started, kmemPath+" "+strings.Join(id, " "))
 		return exec.Command("true")
 	}
 	defer func() { terminalCmd = oldTerm }()
@@ -77,10 +81,32 @@ func TestKmemPanel(t *testing.T) {
 		if !strings.Contains(labelsIn(p.hand.Objects), "old-work") || !strings.Contains(labelsIn(p.tasks.Objects), "Do it") {
 			t.Fatal("handoffs and tasks are listed")
 		}
-		if !strings.Contains(labelsIn(p.bin.Objects), "f467b16") {
-			t.Fatal("the bin lists its items")
+		row := buttonContaining(p.bin.Objects, "f467b16")
+		if row == nil {
+			t.Fatal("the bin lists its items as rows to click")
 		}
-		restore := buttonIn(p.bin.Objects, "Restore")
+		if buttonIn(p.bin.Objects, "Restore") != nil {
+			t.Fatal("no buttons in the list rows; they are in the item's window")
+		}
+		test.Tap(row)
+		if p.binWin == nil {
+			t.Fatal("clicking a row opens the item's window")
+		}
+	})
+	h.eventually("full reason and text in the window", func() bool {
+		all := labelsIn([]fyne.CanvasObject{h.w.Canvas().Overlays().Top()})
+		return strings.Contains(all, longWhy) && strings.Contains(all, "all the way to the end")
+	})
+	h.ui(func() {
+		var restore *widget.Button
+		deepWalk(h.w.Canvas().Overlays().Top(), func(o fyne.CanvasObject) {
+			if b, ok := o.(*widget.Button); ok && b.Text == "Restore" {
+				restore = b
+			}
+		})
+		if restore == nil {
+			t.Fatal("the window has Restore")
+		}
 		test.Tap(restore)
 	})
 	h.eventually("restored", func() bool {
@@ -93,6 +119,9 @@ func TestKmemPanel(t *testing.T) {
 		confirmTopDialog(t, h)
 	})
 	h.eventually("terminal opened", func() bool { return len(started) == 1 })
+	if !strings.HasSuffix(strings.TrimSpace(started[0]), "kmem") && strings.Contains(started[0], "f467b16") {
+		t.Fatalf("Empty bin purges everything, not one item: %q", started[0])
+	}
 	h.ui(func() {
 		p.deleteHandoff("old-work", 3)
 		confirmTopDialog(t, h)
@@ -158,4 +187,16 @@ func confirmTopDialog(t *testing.T, h *harness) {
 		t.Fatalf("the top dialog has no Yes button: %s", labelsIn([]fyne.CanvasObject{ovs[len(ovs)-1]}))
 	}
 	test.Tap(b)
+}
+
+func buttonContaining(objs []fyne.CanvasObject, part string) *widget.Button {
+	var found *widget.Button
+	for _, o := range objs {
+		deepWalk(o, func(x fyne.CanvasObject) {
+			if b, ok := x.(*widget.Button); ok && found == nil && strings.Contains(b.Text, part) {
+				found = b
+			}
+		})
+	}
+	return found
 }

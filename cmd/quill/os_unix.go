@@ -17,8 +17,13 @@ func dieWithParent(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Pdeat
 
 // terminalCmd opens a terminal running kmem's purge, where kmem itself asks
 // the user to type the confirmation.
-var terminalCmd = func(kmemPath string) *exec.Cmd {
-	script := fmt.Sprintf("%q trash empty; echo; read -r -p 'Press Enter to close this window. ' _", kmemPath)
+// With an id it purges only that item ("kmem trash empty ID").
+var terminalCmd = func(kmemPath string, id ...string) *exec.Cmd {
+	target := ""
+	if len(id) > 0 && validBinID(id[0]) {
+		target = " " + id[0]
+	}
+	script := fmt.Sprintf("%q trash empty%s; echo; read -r -p 'Press Enter to close this window. ' _", kmemPath, target)
 	return exec.Command("konsole", "--title", "kmem: empty the recycle bin", "-e", "bash", "-c", script)
 }
 

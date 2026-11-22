@@ -49,6 +49,26 @@ type binItem struct {
 	ID, Head, Preview string
 }
 
+// binMeta / binReason split kmem's head line "fact, 1.0 days in bin, by X:
+// reason" into what it is and why it is in the bin.
+func (it binItem) binMeta() string {
+	if i := strings.Index(it.Head, ": "); i > 0 {
+		return it.Head[:i]
+	}
+	return it.Head
+}
+
+func (it binItem) binReason() string {
+	if i := strings.Index(it.Head, ": "); i > 0 {
+		return strings.TrimSpace(it.Head[i+2:])
+	}
+	return ""
+}
+
+var binIDRe = regexp.MustCompile(`^[a-z0-9]{3,16}$`)
+
+func validBinID(id string) bool { return binIDRe.MatchString(id) }
+
 var binHead = regexp.MustCompile(`^\[([a-z0-9]+)\]\s+(.*)$`)
 
 func parseBin(out string) []binItem {
@@ -85,6 +105,7 @@ type kmemPanel struct {
 	dlg                    dialog.Dialog
 	tabs                   *container.AppTabs
 	over, hand, tasks, bin *fyne.Container
+	binWin                 dialog.Dialog // the open bin item window (tests)
 	topics                 *widget.List
 	topicList              []kmemTopic
 	topicShown             []kmemTopic
@@ -255,11 +276,10 @@ func (p *kmemPanel) reload() {
 }
 
 func (p *kmemPanel) fillBin(bin []binItem) {
-	d := p.d
 	empty := widget.NewButtonWithIcon("Empty bin...", theme.DeleteIcon(), p.emptyBin)
 	empty.Importance = widget.DangerImportance
 	rows := []fyne.CanvasObject{
-		caption("Facts and tasks moved to the bin are hidden everywhere. Restore brings one back. Empty bin is kmem's final purge: it blanks the text in kmem's history and backups and cannot be undone. Only you can do it; kmem asks you to type the confirmation in a terminal and only purges items that have been in the bin for 7 days or more."),
+		caption("Facts and tasks moved to the bin are hidden everywhere. Click an item to read it in full and why it is in the bin, and to restore or delete it. Deleting is kmem's final purge: it blanks the text in kmem's history and backups and cannot be undone; only you can do it, in a terminal where kmem asks you to type the confirmation."),
 	}
 	if len(bin) == 0 {
 		rows = append(rows, widget.NewLabel("The recycle bin is empty."))
@@ -267,23 +287,82 @@ func (p *kmemPanel) fillBin(bin []binItem) {
 	}
 	for _, it := range bin {
 		it := it
-		restore := widget.NewButtonWithIcon("Restore", theme.ContentUndoIcon(), func() {
-			go func() {
-				out, err := d.runKmem("kmem", "trash", "restore", it.ID)
-				d.do(func() {
-					if err != nil {
-						dialog.ShowError(fmt.Errorf("kmem: %s", oneLine(firstNonEmpty(strings.TrimSpace(out), err.Error()), 300)), d.win)
-					}
-					p.reload()
-				})
-			}()
-		})
-		restore.Importance = widget.LowImportance
-		rows = append(rows, container.NewBorder(nil, nil, nil, restore,
-			container.NewVBox(boldLabel("["+it.ID+"] "+it.Head), caption(it.Preview))), widget.NewSeparator())
+		label := "[" + it.ID + "] " + it.binMeta() + "  ·  " + oneLine(firstNonEmpty(it.binReason(), it.Preview), 90)
+		row := widget.NewButton(label, func() { p.showBinItem(it) })
+		row.Alignment = widget.ButtonAlignLeading
+		row.Importance = widget.LowImportance
+		rows = append(rows, row)
 	}
-	rows = append(rows, container.NewHBox(layout.NewSpacer(), empty))
+	rows = append(rows, widget.NewSeparator(), container.NewHBox(layout.NewSpacer(), empty))
 	setBox(p.bin, rows...)
+}
+
+// showBinItem opens one bin item in its own window: the full reason and
+// text (scrolling when long), with Restore and Delete for good.
+func (p *kmemPanel) showBinItem(it binItem) {
+	d := p.d
+	text := wrapLabel("Loading the full text from kmem…")
+	body := container.NewVBox(
+		boldLabel("["+it.ID+"] "+it.binMeta()),
+		widget.NewSeparator(),
+		boldLabel("Why it is in the bin"),
+		wrapLabel(firstNonEmpty(it.binReason(), "(no reason given)")),
+		widget.NewSeparator(),
+		boldLabel("Full text"),
+		text,
+	)
+	go func() {
+		out, err := d.runKmem("kmem", "show", it.ID)
+		d.do(func() {
+			if err != nil || strings.TrimSpace(out) == "" {
+				text.SetText(firstNonEmpty(it.Preview, "(kmem didn't return the text)"))
+				return
+			}
+			text.SetText(strings.TrimSpace(out))
+		})
+	}()
+	var win dialog.Dialog
+	restore := widget.NewButtonWithIcon("Restore", theme.ContentUndoIcon(), func() {
+		go func() {
+			out, err := d.runKmem("kmem", "trash", "restore", it.ID)
+			d.do(func() {
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("kmem: %s", oneLine(firstNonEmpty(strings.TrimSpace(out), err.Error()), 300)), d.win)
+					return
+				}
+				win.Hide()
+				p.reload()
+			})
+		}()
+	})
+	purge := widget.NewButtonWithIcon("Delete for good...", theme.DeleteIcon(), func() {
+		dialog.ShowConfirm("Delete ["+it.ID+"] for good?",
+			"A terminal opens and runs kmem's final purge for this item (kmem trash empty "+it.ID+"). kmem asks you to type the confirmation there. Purged text is gone for good, also from backups.",
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				cmd := terminalCmd(firstNonEmpty(kmemBin(), "kmem"), it.ID)
+				if err := cmd.Start(); err != nil {
+					dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty %s` in a terminal yourself", err, it.ID), d.win)
+					return
+				}
+				go func() {
+					_ = cmd.Wait()
+					d.do(func() {
+						win.Hide()
+						p.reload()
+					})
+				}()
+			}, d.win)
+	})
+	purge.Importance = widget.DangerImportance
+	closeBtn := widget.NewButton("Close", func() { win.Hide() })
+	content := container.NewBorder(nil, container.NewHBox(restore, purge, layout.NewSpacer(), closeBtn), nil, nil, container.NewVScroll(body))
+	win = dialog.NewCustomWithoutButtons("Recycle bin item", content, d.win)
+	win.Resize(fyne.NewSize(720, 520))
+	win.Show()
+	p.binWin = win
 }
 
 func (p *kmemPanel) emptyBin() {
