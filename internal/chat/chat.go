@@ -43,6 +43,7 @@ const (
 
 type Item struct {
 	Seq         int
+	Time        time.Time // when it was said: the transcript's timestamp, or when it arrived
 	Kind        Kind
 	Text        string
 	Streaming   bool
@@ -74,6 +75,7 @@ type Stats struct {
 
 type Conversation struct {
 	Items      []*Item
+	at         time.Time // the event being applied (Apply), for new items
 	SessionID  string
 	Model      string
 	Mode       string
@@ -103,6 +105,12 @@ func New() *Conversation {
 func (c *Conversation) add(it *Item) *Item {
 	c.seq++
 	it.Seq = c.seq
+	if it.Time.IsZero() {
+		it.Time = c.at
+		if it.Time.IsZero() {
+			it.Time = time.Now()
+		}
+	}
 	c.Items = append(c.Items, it)
 	return it
 }
@@ -380,6 +388,12 @@ func (c *Conversation) CancelPlans() []*Item {
 }
 
 func (c *Conversation) Apply(ev *protocol.Event) []*Item {
+	// Items from a transcript keep the time they were said.
+	c.at = time.Time{}
+	if t, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
+		c.at = t.Local()
+	}
+	defer func() { c.at = time.Time{} }()
 	if len(c.bgTasks) > 0 && bytes.Contains(ev.Raw, []byte("<task-notification>")) {
 		c.NoteNotifications(string(ev.Raw))
 	}

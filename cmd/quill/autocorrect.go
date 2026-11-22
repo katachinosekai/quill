@@ -302,6 +302,9 @@ func (e *sendEntry) TypedRune(r rune) {
 		return
 	}
 	e.lastFix = nil
+	if e.formatRune(r) {
+		return
+	}
 	e.Entry.TypedRune(r)
 }
 
@@ -416,7 +419,11 @@ func (d *desk) autocorrectSettings() fyne.CanvasObject {
 	if !hunspellAvailable() {
 		chk.Disable()
 		words.Disable()
-		return container.NewVBox(row, mutedText("Needs hunspell with an en_US dictionary (e.g. dnf install hunspell hunspell-en-US, or apt install hunspell hunspell-en-us).", fontMeta))
+		fmtChk := widget.NewCheck("Auto formatting (capital letters, — dashes, list continuation with Shift+Enter)", func(on bool) { d.app.Preferences().SetBool(prefAutoFormat, on) })
+		fmtChk.Checked = d.autoFormatOn()
+		return container.NewVBox(row, mutedText("Needs hunspell with an en_US dictionary (e.g. dnf install hunspell hunspell-en-US, or apt install hunspell hunspell-en-us).", fontMeta), fmtChk)
 	}
-	return row
+	fmtChk := widget.NewCheck("Auto formatting (capital letters, — dashes, list continuation with Shift+Enter)", func(on bool) { d.app.Preferences().SetBool(prefAutoFormat, on) })
+	fmtChk.Checked = d.autoFormatOn()
+	return container.NewVBox(row, fmtChk)
 }

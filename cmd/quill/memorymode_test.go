@@ -28,7 +28,7 @@ func TestMemoryModeUsesKmem(t *testing.T) {
 }
 
 func TestSessionPromptAndEnv(t *testing.T) {
-	if sessionPrompt(false) != quillPromptHint || sessionMemoryEnv(false) != nil {
+	if !strings.HasPrefix(sessionPrompt(false), quillPromptHint) || !strings.Contains(sessionPrompt(false), "(recommended)") || sessionMemoryEnv(false) != nil {
 		t.Fatal("claude mode must keep the plain hint and env")
 	}
 	p := sessionPrompt(true)

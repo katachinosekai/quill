@@ -676,6 +676,9 @@ func (v *chatView) centered(o fyne.CanvasObject) fyne.CanvasObject {
 
 func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	o := v.renderItem(it, iv)
+	if it.Kind == chat.User || it.Kind == chat.Assistant {
+		o = v.withTime(o, it.Time)
+	}
 	if (it.Kind == chat.User || it.Kind == chat.Assistant) && v.s != nil {
 		s := v.s
 		m := newMsgMenu(o, func(at fyne.Position) { v.touched(); v.d.messageMenu(s, it, at) })

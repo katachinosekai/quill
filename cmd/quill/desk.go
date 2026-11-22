@@ -488,6 +488,14 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		d.app.Preferences().SetBool("planFirst", on)
 	})
 	planChk.Checked = d.planFirst
+	newSessions := d.newSessionModelSetting()
+	sttChk := widget.NewCheck("Speech to text (the mic and Voice buttons under the message box)", func(on bool) {
+		d.app.Preferences().SetBool(prefSTTOff, !on)
+		if d.stt != nil {
+			d.stt.syncOff()
+		}
+	})
+	sttChk.Checked = !d.app.Preferences().Bool(prefSTTOff)
 	animChk := widget.NewCheck("Animate new text (replies fade in while they stream)", func(on bool) { d.app.Preferences().SetBool(prefAnimateText, on) })
 	animChk.Checked = d.animateText()
 	chipChk := widget.NewCheck("New tool chips start collapsed", d.setCollapseChips)
@@ -514,7 +522,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	_ = roBtn
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
-	d.setGeneral = container.NewVBox(planChk, animChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
+	d.setGeneral = container.NewVBox(planChk, animChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Typing"), sttChk, d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
@@ -943,6 +951,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input = newSendEntry(d.send)
 	d.input.later = d.afterUI
 	d.input.ac = d.newAutocorrector()
+	d.input.autoFormat = d.autoFormatOn
 	d.input.known = func() func(string) bool { return d.knownWords(d.current) }
 	d.input.onFix = func(msg string) { d.flashHint(d.folder, msg) }
 	d.cmds = newCmdMenu(d)
@@ -2355,7 +2364,7 @@ func (d *desk) setCenter(on bool) {
 }
 
 const (
-	planAskMessage = "Quill plan-first approval: nothing was run. Before running anything that needs approval, list everything you are going to do for this request (every command, file change and tool, in order, with a short reason), then stop and wait. The user will approve the whole plan at once."
+	planAskMessage = "Quill plan-first approval: nothing was run. Before running anything that needs approval, list everything you are going to do for this request (every command, file change and tool, in order, with a short reason), then stop and wait. The user will approve the whole plan at once. If you have questions, end the plan with them numbered, one per line, options in each line and a recommended option marked \"(recommended)\"."
 	planGoMessage  = "Plan approved. Go ahead and carry out the whole plan; every tool call for this request is pre-approved."
 )
 

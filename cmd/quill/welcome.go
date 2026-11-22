@@ -14,25 +14,27 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// Welcome (user 2026-11-21): six questions on a new install, before the
+// Welcome (user 2026-11-21): seven questions on a new install, before the
 // Setup checks. Online or local model, the speech-to-text language, plan
 // first or not, kmem or Claude's auto memory, and Quill's default kmem rules
 // (beginner) or none (advanced). Shown once;
 // Settings → Setup → "Run welcome again" opens it later.
 
 const (
-	prefWelcomeSeen = "welcomeSeen"
-	prefSTTOff      = "sttOff"
-	welcomeOnline   = "Online: Claude (needs a Claude sign-in)"
-	welcomeLocal    = "Local: an open-weight model through Ollama, on this PC"
-	welcomeRules    = "Default rules (recommended for beginners)"
-	welcomeNoRules  = "No rules (advanced: write your own, or none)"
-	welcomeVoiceOff = "Off (no speech to text)"
-	welcomeAsk      = "Ask me first: Claude shows a plan and waits for my OK (recommended for beginners)"
-	welcomeLetWork  = "Let Claude work: no plan step (advanced)"
-	welcomeKmem     = "kmem: shared memory, handoffs and tasks (recommended with the default rules)"
-	welcomeAutoMem  = "Claude's auto memory: a MEMORY.md per folder"
-	welcomeHomeOnly = "No: only on my home network"
+	prefWelcomeSeen    = "welcomeSeen"
+	prefSTTOff         = "sttOff"
+	welcomeOnline      = "Online: Claude (needs a Claude sign-in)"
+	welcomeLocal       = "Local: an open-weight model through Ollama, on this PC"
+	welcomeRules       = "Default rules (recommended for beginners)"
+	welcomeNoRules     = "No rules (advanced: write your own, or none)"
+	welcomeVoiceOff    = "Off (no speech to text)"
+	welcomeAsk         = "Ask me first: Claude shows a plan and waits for my OK (recommended for beginners)"
+	welcomeLetWork     = "Let Claude work: no plan step (advanced)"
+	welcomeKmem        = "kmem: shared memory, handoffs and tasks (recommended with the default rules)"
+	welcomeAutoMem     = "Claude's auto memory: a MEMORY.md per folder"
+	welcomeHomeOnly    = "No: only on my home network"
+	welcomeAutocorrect = "Autocorrect (fixes misspelled words as you type)"
+	welcomeAutoFormat  = "Auto formatting (capital letters, — dashes, lists with Shift+Enter)"
 )
 
 // welcomeChoices is what the user picked; applyWelcome turns it into settings.
@@ -43,7 +45,8 @@ type welcomeChoices struct {
 	Rules      bool
 	PlanFirst  bool
 	KmemMemory bool
-	Remote     string // "" or "skip", or a vpnOption id
+	Remote     string   // "" or "skip", or a vpnOption id
+	Typing     []string // the typing help picked (welcomeAutocorrect, welcomeAutoFormat)
 }
 
 // freshInstall: no tabs saved and Setup never shown, so Quill has not been
@@ -143,6 +146,12 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 		p.SetString(memoryModeKey, memoryModeClaude)
 		done = append(done, "Sessions use Claude's auto memory.")
 	}
+	if c.Typing != nil {
+		ac, af := contains(c.Typing, welcomeAutocorrect), contains(c.Typing, welcomeAutoFormat)
+		p.SetBool("autocorrect", ac)
+		p.SetBool(prefAutoFormat, af)
+		done = append(done, map[bool]string{true: "Autocorrect on.", false: "Autocorrect off."}[ac], map[bool]string{true: "Auto formatting on.", false: "Auto formatting off."}[af])
+	}
 	if o, ok := vpnByID(c.Remote); ok {
 		p.SetString(prefRemoteAccess, o.ID)
 		done = append(done, "Remote access: "+o.Name+" (Setup installs and connects it).")
@@ -223,6 +232,14 @@ func (d *desk) showWelcome(after func()) {
 		remote.SetSelected(o.Name)
 	}
 
+	typing := widget.NewCheckGroup([]string{welcomeAutocorrect, welcomeAutoFormat}, nil)
+	if d.autocorrectOn() {
+		typing.Selected = append(typing.Selected, welcomeAutocorrect)
+	}
+	if d.autoFormatOn() {
+		typing.Selected = append(typing.Selected, welcomeAutoFormat)
+	}
+
 	rules := widget.NewRadioGroup([]string{welcomeRules, welcomeNoRules}, nil)
 	rules.SetSelected(welcomeRules)
 	rulesNote := caption("Shared rules every Claude session follows: start with kmem brief, claim tasks, save handoffs, git safety in shared folders.")
@@ -247,7 +264,7 @@ func (d *desk) showWelcome(after func()) {
 	showRules.Importance = widget.LowImportance
 
 	body := container.NewVBox(
-		caption("Six quick choices. All of them can be changed later in Settings."),
+		caption("Seven quick choices. All of them can be changed later in Settings."),
 		widget.NewSeparator(),
 		boldLabel("1. Which model should new sessions use?"), model, localNote,
 		widget.NewSeparator(),
@@ -259,7 +276,9 @@ func (d *desk) showWelcome(after func()) {
 		widget.NewSeparator(),
 		container.NewBorder(nil, nil, nil, showRules, boldLabel("5. Shared rules for your sessions (kmem)")), rules, rulesNote,
 		widget.NewSeparator(),
-		boldLabel("6. Reach Quill from outside your home network (phone, other PCs)?"), remote,
+		boldLabel("6. Typing help in the message box"), typing,
+		widget.NewSeparator(),
+		boldLabel("7. Reach Quill from outside your home network (phone, other PCs)?"), remote,
 		caption("Optional. A VPN lets Quill for Android reach this PC from anywhere; Setup installs and connects it next."),
 	)
 	dlg := dialog.NewCustomConfirm("Welcome to Quill Desktop", "Done", "Skip", container.NewVScroll(body), func(ok bool) {
@@ -273,6 +292,7 @@ func (d *desk) showWelcome(after func()) {
 				PlanFirst:  plan.Selected == welcomeAsk,
 				KmemMemory: mem.Selected == welcomeKmem,
 				Remote:     remoteID(remote.Selected),
+				Typing:     append([]string{}, typing.Selected...),
 			})
 			d.notifyWelcome(done)
 			if remoteID(remote.Selected) != "" {
@@ -311,4 +331,41 @@ func remoteID(name string) string {
 		return o.ID
 	}
 	return ""
+}
+
+// newSessionModelSetting: Settings → New sessions: online or one of the
+// local models (the same setting the Welcome's first question sets).
+func (d *desk) newSessionModelSetting() fyne.CanvasObject {
+	const online = "Online: Claude"
+	opts := []string{online}
+	for _, m := range d.localModelList() {
+		opts = append(opts, "Local: "+strings.TrimPrefix(m, "ollama:"))
+	}
+	sel := widget.NewSelect(opts, nil)
+	cur := d.app.Preferences().StringWithFallback("newModel", "default")
+	sel.Selected = online
+	if isLocal(cur) {
+		sel.Selected = "Local: " + strings.TrimPrefix(cur, "ollama:")
+		if !contains(opts, sel.Selected) {
+			sel.Options = append(sel.Options, sel.Selected)
+		}
+	}
+	sel.OnChanged = func(v string) {
+		if v == online {
+			if isLocal(d.app.Preferences().String("newModel")) {
+				d.app.Preferences().SetString("newModel", "default")
+			}
+			return
+		}
+		name := strings.TrimPrefix(v, "Local: ")
+		for _, m := range d.localModelList() {
+			if strings.TrimPrefix(m, "ollama:") == name {
+				d.app.Preferences().SetString("newModel", m)
+				return
+			}
+		}
+		d.app.Preferences().SetString("newModel", "ollama:"+name)
+	}
+	return container.NewVBox(container.NewBorder(nil, nil, widget.NewLabel("New sessions use"), nil, sel),
+		caption("Each session can still switch with the Online/Local button under the message box."))
 }

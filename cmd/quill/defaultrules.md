@@ -21,6 +21,3 @@ Quill Desktop's default rules for people who run several Claude sessions on the 
 11. kmem-guard is a speed bump against mistakes, not enforcement: follow the rules where nothing checks, never work around a block, and record false positives.
 12. Wrong or sensitive facts and tasks go to the recycle bin (`kmem trash <id> "reason"`); only the user empties it.
 13. `kmem maintain` (daily) and `kmem audit` (weekly) run on their own; tell the user about audit problems and never repair history by hand.
-
-## Plans
-14. End a plan with its open questions numbered, one per line (`1. …?`, `2. …?`), each with its options in the line ("A or B?", "yes or no?", "pick any of a–d?") and a recommended option marked "(recommended)"; Quill's plan card turns each into its own buttons, checkboxes or text field.

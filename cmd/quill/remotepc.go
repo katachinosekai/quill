@@ -622,6 +622,7 @@ type remoteItem struct {
 	Text      string `json:"text"`
 	Streaming bool   `json:"streaming"`
 	InPlan    bool   `json:"inPlan"`
+	TimeMs    int64  `json:"timeMs"`
 	Tool      *struct {
 		Name    string `json:"name"`
 		ID      string `json:"id"`
@@ -659,6 +660,9 @@ func remoteChatItem(ri remoteItem) *chat.Item {
 		kind = chat.Notice
 	}
 	it := &chat.Item{Kind: kind, Seq: ri.Seq, Text: ri.Text, Streaming: ri.Streaming, InPlan: ri.InPlan}
+	if ri.TimeMs > 0 {
+		it.Time = time.UnixMilli(ri.TimeMs)
+	}
 	if t := ri.Tool; t != nil {
 		it.ToolName, it.ToolID, it.Summary, it.HasResult, it.ResultError, it.Result = t.Name, t.ID, t.Summary, t.Done, t.IsError, t.Result
 	}

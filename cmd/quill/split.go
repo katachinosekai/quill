@@ -111,6 +111,7 @@ func (d *desk) newPane() *pane {
 	p.input = newSendEntry(func(text string) { d.sendFromPane(p, text) })
 	p.input.later = d.afterUI
 	p.input.ac = d.newAutocorrector()
+	p.input.autoFormat = d.autoFormatOn
 	p.input.known = func() func(string) bool { return d.knownWords(p.view.s) }
 	p.input.onFix = func(msg string) { d.flashHint(p.stats, msg) }
 	p.input.onSendNow = func(text string) { d.sendNowFromPane(p, text) }

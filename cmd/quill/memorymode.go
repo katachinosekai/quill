@@ -40,11 +40,17 @@ func (d *desk) kmemMemory() bool {
 	return memoryModeUsesKmem(mode, kmemSetupComplete(homeDir()), d.kmemAvailable())
 }
 
+// planFormatHint: how a plan's questions should look so Quill's plan card can
+// turn each into a control (built in since the user retired shared rule 28,
+// 2026-11-22).
+const planFormatHint = "When a plan or proposal ends with questions for the user, number them, one per line (\"1. …?\", \"2. …?\"), put each question's options in its line (\"A or B?\", \"yes or no?\", \"pick any of a–d?\") and mark a recommended option \"(recommended)\"; Quill's plan card turns each into its own buttons, checkboxes or text field."
+
 func sessionPrompt(kmem bool) string {
+	p := quillPromptHint + " " + planFormatHint
 	if kmem {
-		return quillPromptHint + " " + kmemMemoryHint
+		return p + " " + kmemMemoryHint
 	}
-	return quillPromptHint
+	return p
 }
 
 func sessionMemoryEnv(kmem bool) []string {

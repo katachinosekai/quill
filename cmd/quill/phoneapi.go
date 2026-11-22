@@ -609,6 +609,9 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 		kind = "question"
 	}
 	m := map[string]any{"seq": it.Seq, "rev": rev, "kind": kind, "text": it.Text, "streaming": it.Streaming, "inPlan": it.InPlan}
+	if !it.Time.IsZero() {
+		m["timeMs"] = it.Time.UnixMilli() // when it was said (message times)
+	}
 	switch it.Kind {
 	case chat.Tool:
 		res, cut := capText(it.Result, apiResultMax)

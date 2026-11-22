@@ -169,6 +169,8 @@ type sendEntry struct {
 	ac         *autocorrector
 	known      func() func(string) bool
 	lastFix    *acFix
+	autoFormat func() bool // auto formatting on? (autoformat.go)
+	lastFmt    *fmtChange
 	onFix      func(string)
 	cursorGen  int
 	later      func(time.Duration, func()) // runs on the UI thread; nil = no deferred refresh
@@ -250,10 +252,11 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 	if e.onActivity != nil {
 		e.onActivity()
 	}
-	if k.Name == fyne.KeyBackspace && e.undoFix() {
+	if k.Name == fyne.KeyBackspace && (e.undoFix() || e.undoFormat()) {
 		return
 	}
 	e.lastFix = nil
+	e.lastFmt = nil
 	if e.onKey != nil && e.onKey(k) {
 		return
 	}
@@ -285,6 +288,9 @@ func (e *sendEntry) TypedKey(k *fyne.KeyEvent) {
 		return
 	}
 	e.Entry.TypedKey(k)
+	if k.Name == fyne.KeyReturn || k.Name == fyne.KeyEnter {
+		e.formatNewline() // Shift+Enter: continue or end a list
+	}
 }
 
 func statusMark(st status) *fyne.Container {
