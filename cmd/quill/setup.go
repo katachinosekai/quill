@@ -259,7 +259,9 @@ func (d *desk) setupPane() fyne.CanvasObject {
 		}
 		again := widget.NewButtonWithIcon("Check again", theme.ViewRefreshIcon(), fill)
 		again.Importance = widget.LowImportance
-		box.Add(container.NewHBox(again))
+		welcome := widget.NewButton("Run welcome again", func() { d.showWelcome(func() { d.do(fill) }) })
+		welcome.Importance = widget.LowImportance
+		box.Add(container.NewHBox(again, welcome))
 		box.Refresh()
 	}
 	fill()
@@ -272,16 +274,29 @@ func (d *desk) showSetup() {
 	dlg.Show()
 }
 
-// setupAtStart shows Setup once when Claude Code or the sign-in is missing.
+// setupAtStart: on a new install the Welcome first, then Setup once when
+// Claude Code or the sign-in is missing.
 func (d *desk) setupAtStart() {
+	fresh := d.freshInstall()
+	if !fresh {
+		d.app.Preferences().SetBool(prefWelcomeSeen, true) // existing installs skip the Welcome
+	}
 	go func() {
 		time.Sleep(3 * time.Second) // the account check runs first
 		d.do(func() {
-			if d.app.Preferences().Bool("setupSeen") || !d.setupMissing() {
+			if fresh && !d.app.Preferences().Bool(prefWelcomeSeen) {
+				d.showWelcome(d.setupIfMissing)
 				return
 			}
-			d.app.Preferences().SetBool("setupSeen", true)
-			d.showSetup()
+			d.setupIfMissing()
 		})
 	}()
+}
+
+func (d *desk) setupIfMissing() {
+	if d.app.Preferences().Bool("setupSeen") || !d.setupMissing() {
+		return
+	}
+	d.app.Preferences().SetBool("setupSeen", true)
+	d.showSetup()
 }

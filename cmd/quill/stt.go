@@ -192,7 +192,21 @@ func newSpeech(d *desk) *speech {
 		d.pickLanguage(sp.lang(), func(code string) { sp.setLang(code) })
 	})
 	sp.langBtn.Importance = widget.MediumImportance
+	sp.syncOff()
 	return sp
+}
+
+// syncOff hides the mic and language buttons while speech to text is off
+// (Welcome's "Off"); picking a language turns it on again.
+func (sp *speech) syncOff() {
+	off := sp.d.app.Preferences().Bool(prefSTTOff)
+	for _, b := range []*widget.Button{sp.btn, sp.langBtn} {
+		if off {
+			b.Hide()
+		} else {
+			b.Show()
+		}
+	}
 }
 
 func (sp *speech) target() *sendEntry {
@@ -208,7 +222,9 @@ func (sp *speech) lang() string {
 
 func (sp *speech) setLang(code string) {
 	sp.d.app.Preferences().SetString("sttLang", code)
+	sp.d.app.Preferences().SetBool(prefSTTOff, false)
 	sp.langBtn.SetText("Voice: " + strings.ToUpper(code))
+	sp.syncOff()
 }
 
 func (sp *speech) loadModel(lang string) (*whisper.Model, error) {
