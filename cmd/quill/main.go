@@ -129,6 +129,8 @@ func runWindowWith(claudeBin, sock string) int {
 			fmt.Fprintln(os.Stderr, "kmem update:", err)
 		} else if msg != "" {
 			fmt.Fprintln(os.Stderr, msg)
+			d.kmemVer.reset()
+			d.refreshKmemVer() // the version line must not keep offering the update just done
 		}
 	}()
 	d.watchFocus()

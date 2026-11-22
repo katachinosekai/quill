@@ -110,6 +110,7 @@ func (d *desk) memoryModeRadio(changed func()) fyne.CanvasObject {
 		default:
 			return
 		}
+		d.refreshKmemVer()
 		if changed != nil {
 			changed()
 		}

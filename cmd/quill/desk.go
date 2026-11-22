@@ -222,6 +222,8 @@ type desk struct {
 	kmemNeedsNow  kmemNeeds
 	kmemBinSetBtn *widget.Button
 	kmemBinNow    *binView
+	verLine       *verLine         // kmem version under the message box; kmemverline.go
+	statsRow      *fyne.Container
 	controlFn      func(s *deskSession, req map[string]any) (json.RawMessage, error)
 	pingLocal      func(host string) bool
 	localWindows   map[string]int
@@ -1024,7 +1026,9 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	})
 	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.stt.langBtn, d.tasksBtn), d.chipsBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
-	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
+	d.verLine = d.newVerLine()
+	d.statsRow = container.New(hintsLayout{}, d.verLine.slot, d.folder)
+	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), d.statsRow)
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
 	toolbar := windowCentered(d.inputWidth, d.sidebarWidth, d.viewToolbar())
 	d.toolbarBox = toolbar

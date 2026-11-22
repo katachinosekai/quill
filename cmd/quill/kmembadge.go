@@ -196,6 +196,7 @@ func (d *desk) readKmemNeeds() (kmemNeeds, bool) {
 
 // refreshKmemNeeds asks kmem in the background and updates the bubble.
 func (d *desk) refreshKmemNeeds() {
+	d.refreshKmemVer()
 	if !d.kmemAvailable() {
 		return
 	}

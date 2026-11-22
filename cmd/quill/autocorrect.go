@@ -373,6 +373,14 @@ func (d *desk) knownWords(s *deskSession) func(string) bool {
 	return func(w string) bool { return ws.set[w] }
 }
 
+// relayoutHints: the hint line's width changed; its row (with the kmem
+// version) lays out again so the two share the room.
+func (d *desk) relayoutHints(t *canvas.Text) {
+	if t == d.folder && d.statsRow != nil {
+		d.statsRow.Refresh()
+	}
+}
+
 func (d *desk) flashHint(t *canvas.Text, msg string) {
 	if t == nil {
 		return
@@ -387,10 +395,12 @@ func (d *desk) flashHint(t *canvas.Text, msg string) {
 	}
 	d.hintPrev[t] = prev
 	setText(t, msg)
+	d.relayoutHints(t)
 	time.AfterFunc(acHintFor, func() {
 		d.do(func() {
 			if t.Text == msg {
 				setText(t, prev)
+				d.relayoutHints(t)
 			}
 			if d.hintPrev[t] == prev {
 				delete(d.hintPrev, t)

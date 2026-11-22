@@ -13,13 +13,23 @@ const kmemAPI = 1
 type kmemVersion struct {
 	mu  sync.Mutex
 	api int
+	ver string // the installed kmem's version ("" if unknown)
 	at  time.Time
 }
 
 func (v *kmemVersion) reset() {
 	v.mu.Lock()
-	v.api, v.at = 0, time.Time{}
+	v.api, v.ver, v.at = 0, "", time.Time{}
 	v.mu.Unlock()
+}
+
+// kmemInstalledVersion: the version `kmem version --json` reports (cached
+// with the API level; "" if unknown). Not on the UI thread.
+func (d *desk) kmemInstalledVersion() string {
+	d.kmemAPILevel()
+	d.kmemVer.mu.Lock()
+	defer d.kmemVer.mu.Unlock()
+	return d.kmemVer.ver
 }
 
 func (d *desk) kmemAPILevel() int {
@@ -29,13 +39,14 @@ func (d *desk) kmemAPILevel() int {
 	if !v.at.IsZero() && time.Since(v.at) < policyRefresh {
 		return v.api
 	}
-	v.api, v.at = 0, time.Now()
+	v.api, v.ver, v.at = 0, "", time.Now()
 	out, err := d.runKmem("kmem", "version", "--json")
 	var r struct {
-		API int `json:"api"`
+		API     int    `json:"api"`
+		Version string `json:"version"`
 	}
 	if err == nil && json.Unmarshal([]byte(strings.TrimSpace(out)), &r) == nil {
-		v.api = r.API
+		v.api, v.ver = r.API, r.Version
 	}
 	return v.api
 }
