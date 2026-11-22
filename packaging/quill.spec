@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.18
+Version:        0.1.19
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -70,6 +70,15 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.19-1
+- kmem 1.6.1 bundled: handoffs follow renames, stricter kmem-guard
+- Welcome on new installs: online or local model, speech-to-text language (or off), ask first or let Claude work, kmem or Claude's auto memory, and Quill's default kmem rules (recommended for beginners) or none (advanced)
+- Optional default kmem rules in Settings → Memory, installed only when you have no rules file
+- kmem banner: items in the recycle bin and audit problems that wait for you
+- Other PCs: Reload button for remote sessions; a blank reply heals itself with one reload; an older answer can't overwrite a newer one
+- Empty messages no longer leave blank rows in the chat
+- A typed "yes" approves a plan whose question has a note after it
+- Bundles Quill for Android 0.9.16
 * Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.18-1
 - kmem 1.5.3 bundled: kmem-guard also checks commands from Claude Code's PowerShell tool (what Claude Code uses on Windows); the kmem-guard hook's matcher gets PowerShell, existing hooks are updated when Quill Desktop updates an older kmem (settings backed up first), and reads hook input sent as UTF-8 with a BOM or as UTF-16
 - Other PCs: scrolling, clicks and any key keep the connection active
