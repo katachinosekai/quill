@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.23
+Version:        0.1.24
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -74,6 +74,17 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.24-1
+- Smoother streaming: one paragraph layout, no blink, a steady reveal, and text keeps the message font size while it streams
+- Centered text scales with the window: an overlong line wraps into even lines, wide lists are capped at 75% of the chat, and lists, lettered lists ("a.", "b)") and plan questions line up as one centered column (left-aligned with centering off)
+- A line that starts with inline code is centered correctly
+- Plan card: "(recommended)" next to the recommended option, which is picked by default; questions keep inline code; "with ..." no longer splits an option
+- One Chips menu; Model, Mode, Voice and Tasks open menus like Online; the split-view button matches the stop button and sits above it
+- Queued messages follow centering; message times redraw at once when turned on or off and sit closer to their message
+- A fresh session loads kmem without a plan round; typed approvals like "Approve the plan, also ..." count
+- Phone connection: gzip, more time for large pages, keep-alive, HTTP/2 and streaming deltas
+- quill --reload takes a build waiting behind the update line; kmem 1.7.0
+- Bundles Quill for Android 0.9.24: reuses its connection to Quill Desktop (far fewer handshakes on mobile data/VPN); folder/usage sync works with the device password and no longer runs when paired; downloads only the new words of a streaming reply; centered lists keep their shape (markers lined up, one centered column; left-aligned with centering off), lettered lists, plan questions keep inline code, centered queue
 * Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.23-1
 - Much less memory and CPU: the bundled Fyne parsed the fonts again for every chat message (1.5 GB and over a full CPU core after a few hours); now each font is parsed once (265 MB, idle CPU near 0); a safety net keeps the garbage collector from spinning
 - Faster, leaner session scans (start-up allocations -85 %) and phone change tracking (-90 %)
