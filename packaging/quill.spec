@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.20
+Version:        0.1.21
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -74,6 +74,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.21-1
+- Replies are formatted while they stream in (no raw ** or # any more): finished paragraphs fade in, the last one is revealed word by word; Settings → General → "Animate new text" turns the animation off
+- Plan cards find the approval question among a plan's numbered closing questions, so such plans get the card (with a control for each question)
+- Bundles Quill for Android 0.9.18
 * Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.20-1
 - Plan cards answer their questions: an option marked recommended goes with Approve ("Other answers…" shows the rest), one Approve per option otherwise, and plans that ask several things get a control for each (Yes/No, options, checkboxes, a text field) with all answers sent together
 - Phone API: plan items carry their choices and questions, and approvals can carry the answers (Quill for Android and Other PCs use them)
