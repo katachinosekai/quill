@@ -63,6 +63,24 @@ func dropQuestionWord(o string) string {
 	return o
 }
 
+// continuation: a comma part that goes on with the option before it
+// ("all of them, with single-action buttons getting …") rather than
+// starting a new one (user 2026-11-22).
+var continuation = regexp.MustCompile(`(?i)^(?:with|without|including|plus|so|so that|which|that|where|while|because|but|then|except|unless|since|using|via|like|such as|e\.g\.|i\.e\.)\b`)
+
+// mergeContinuations joins comma parts that continue the part before them.
+func mergeContinuations(parts []string) []string {
+	var out []string
+	for _, p := range parts {
+		if len(out) > 0 && continuation.MatchString(strings.TrimSpace(p)) {
+			out[len(out)-1] += ", " + p
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 // recommendedOption: which of n options (split as parseChoices splits them,
 // but with their parenthesised asides kept) says "recommended".
 func recommendedOption(sentence string, n int) int {
@@ -74,7 +92,7 @@ func recommendedOption(sentence string, n int) int {
 	if len(segs) < 2 {
 		segs = splitOutsideParens(ask, " or ")
 	} else {
-		head := splitOutsideParens(segs[0], ", ")
+		head := mergeContinuations(splitOutsideParens(segs[0], ", "))
 		segs = append(head, segs[1:]...)
 	}
 	if len(segs) != n {

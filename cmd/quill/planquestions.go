@@ -108,7 +108,7 @@ func planQuestions(text string) []planQ {
 		if m := qNumLead.FindStringSubmatch(mdNoise.Replace(l)); m != nil {
 			fmt.Sscan(m[1], &num)
 		}
-		line := codeOrURL.ReplaceAllString(l, " ")
+		line := keepCode(l)
 		line = strings.TrimSpace(mdNoise.Replace(line))
 		line = strings.TrimSpace(listLead.ReplaceAllString(line, ""))
 		line = strings.TrimSpace(strings.TrimLeft(line, "#>*_ "))
@@ -140,6 +140,18 @@ func planQuestions(text string) []planQ {
 		}
 	}
 	return out
+}
+
+// keepCode keeps inline code and URLs in a question's text (Q3 lost
+// `dist/quill -tags wayland`, user 2026-11-22), dropping only those with a
+// "?" inside, which would split the question.
+func keepCode(l string) string {
+	return codeOrURL.ReplaceAllStringFunc(l, func(m string) string {
+		if strings.Contains(m, "?") {
+			return " "
+		}
+		return strings.Trim(m, "`")
+	})
 }
 
 // questionSentences: the sentences of a line that end in "?" (quoted words

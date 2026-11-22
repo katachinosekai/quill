@@ -48,7 +48,9 @@ func TestPlanCardQuestionForm(t *testing.T) {
 	if len(radios) != 2 || len(checks) != 1 || len(entries) != 1 || approve == nil {
 		t.Fatalf("controls: %d radio groups, %d check groups, %d text fields, approve %v", len(radios), len(checks), len(entries), approve != nil)
 	}
-	if radios[0].Selected != "v0.1.20 ship now" {
+	// The recommended option is picked and says so (user 2026-11-22); the
+	// answer sent is still the bare option (checked below).
+	if radios[0].Selected != "v0.1.20 ship now (recommended)" {
 		t.Fatalf("the recommended option starts picked: %q", radios[0].Selected)
 	}
 	if os.Getenv("DESK_SHOTS") != "" {
