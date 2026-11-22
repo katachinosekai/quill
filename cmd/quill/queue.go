@@ -51,6 +51,10 @@ func (d *desk) viewFor(s *deskSession) *chatView {
 	if d.current == s {
 		return d.chat
 	}
+	// The kmem window's assistant (docs/design/kmem-window.md §4).
+	if w := d.kmemWin; w != nil && s != nil && w.s == s && w.view != nil {
+		return w.view
+	}
 	return nil
 }
 

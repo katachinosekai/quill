@@ -77,6 +77,7 @@ type deskSession struct {
 	loaded         bool
 	loadedMod      time.Time
 	persisted      bool
+	hidden         bool // the kmem window's assistant: not in the session list, tabs or phone API (docs/design/kmem-window.md §4)
 	proc           *session.Process
 	model          string
 	mode           string
@@ -225,6 +226,7 @@ type desk struct {
 	kmemBinSetBtn *widget.Button
 	kmemBinNow    *binView
 	verLine       *verLine         // kmem version under the message box; kmemverline.go
+	kmemWin       *kmemWindow      // the kmem operations window, nil while closed; kmemwindow*.go
 	statsRow      *fyne.Container
 	controlFn      func(s *deskSession, req map[string]any) (json.RawMessage, error)
 	pingLocal      func(host string) bool

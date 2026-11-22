@@ -28,6 +28,7 @@ type sessMeta struct {
 	RotateNo    bool            `json:"rotateNo,omitempty"`
 	Chrome      string          `json:"chrome,omitempty"`
 	AddDirs     []string        `json:"addDirs,omitempty"`
+	Hidden      bool            `json:"hidden,omitempty"` // the kmem window's assistant
 	ResumeAt    string          `json:"resumeAt,omitempty"`
 	ForkOf      string          `json:"forkOf,omitempty"`
 }

@@ -37,6 +37,9 @@ type sideOrg struct {
 	RC      map[string]rcTitle `json:"rc,omitempty"`
 	Kmem    map[string]string  `json:"kmem,omitempty"`
 	Ended   map[string]bool    `json:"ended,omitempty"`
+	// Hidden: ids of the kmem window's assistant sessions, kept out of the
+	// sidebar even after they end (docs/design/kmem-window.md §4).
+	Hidden map[string]bool `json:"hidden,omitempty"`
 	// Projects: kmem name (or session id) -> project shown in the sidebar.
 	Projects map[string]string `json:"projects,omitempty"`
 	// Dirs: project -> extra working folders every session of it gets

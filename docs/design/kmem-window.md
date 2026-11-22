@@ -527,7 +527,16 @@ Manual checks (user, KDE Wayland):
 - **Reports get lost.** This happens if sessions still SendMessage to a
   closed operator. Question 2 and migration step 7 address it.
 
-## 14. Open questions for the user
+## 14. Decisions (user 2026-11-22: the recommended option for all ten)
+
+Decided: role split after the 1.8.1 rollout; a kmem brief line (no new
+rule); the bubble counts every open "kmem issue:" task and a paused
+rollout; on close release idle claims and transfer the rest (48 h lease);
+closing mid-turn asks it to stop and save at once; a live kmem-lock-audit
+tab is offered to move into the window; hot reload keeps the assistant and
+reopens the window; the Monday check-in opens the window, else files
+"kmem issue: check-in due"; the old kmem dialog is removed. The questions
+as asked:
 
 1. When should the role split happen? After the 1.8.1 rollout finishes (recommended), or now with kmem-dev taking the rollout over?
 2. How do sessions learn to file "kmem issue: …" tasks instead of messaging the operator? A line in kmem brief (recommended), a new shared rule 30, or both?

@@ -40,6 +40,7 @@ type restoreState struct {
 	Meta     map[string]sessMeta `json:"meta,omitempty"`
 	Drafts   map[string]string   `json:"drafts,omitempty"`
 	Paused   *pauseState         `json:"paused,omitempty"`
+	KmemWin  bool                `json:"kmemWin,omitempty"` // the kmem window was open: reopen it
 }
 
 type pauseState struct {
@@ -138,6 +139,7 @@ type handedSession struct {
 	Wait   bool            `json:"planWait"`
 	RunAll bool            `json:"runAll"`
 	Sugg   string          `json:"suggestion,omitempty"`
+	Hidden bool            `json:"hidden,omitempty"` // the kmem window's assistant
 }
 
 type pendingAsk struct {
