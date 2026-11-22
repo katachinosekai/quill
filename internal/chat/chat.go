@@ -186,9 +186,18 @@ var optionsLine = regexp.MustCompile(`(?i)\bor\b`)
 // their own line got no card). The options line must follow the question
 // directly, not be numbered itself, and gets a "?" if it has none.
 func JoinOptionLines(text string) string {
+	out, _ := JoinOptionLineSpans(text)
+	return strings.Join(out, "\n")
+}
+
+// JoinOptionLineSpans is JoinOptionLines' lines, with the index of the
+// original line each one starts at (a joined line covers its original lines
+// up to the next one's start).
+func JoinOptionLineSpans(text string) ([]string, []int) {
 	lines := strings.Split(text, "\n")
 	out := make([]string, 0, len(lines))
-	for _, l := range lines {
+	first := make([]int, 0, len(lines))
+	for i, l := range lines {
 		t := strings.TrimSpace(l)
 		if n := len(out); n > 0 && t != "" && !numberedQ.MatchString(t) && optionsLine.MatchString(t) && len(strings.Fields(t)) <= 30 {
 			prev := strings.TrimRight(strings.TrimSpace(out[n-1]), "*_ ")
@@ -202,8 +211,9 @@ func JoinOptionLines(text string) string {
 			}
 		}
 		out = append(out, l)
+		first = append(first, i)
 	}
-	return strings.Join(out, "\n")
+	return out, first
 }
 
 // AsksApproval: the turn's last text ends in a question asking to approve,

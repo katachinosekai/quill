@@ -83,6 +83,7 @@ type chatView struct {
 	live          *widget.Label
 	stepOpen      map[*chat.Item]bool
 	planAns       map[*chat.Item]map[int]planAnswer // plan card answers, kept across redraws
+	planPlain     map[*chat.Item]bool               // plans shown as written plus the card, not overlaid
 	frame         *fyne.Container
 	inner         *fyne.Container
 	steps         bool
@@ -597,6 +598,12 @@ func (v *chatView) update(items []*chat.Item) {
 				heads[h] = true
 			}
 		}
+		// A plan's reply shows its controls while it is pending.
+		if it.Kind == chat.Plan {
+			if r := planReply(v.s.conv, it); r != nil {
+				heads[r] = true
+			}
+		}
 	}
 	for h := range heads {
 		if iv, ok := v.views[h.Seq]; ok {
@@ -726,6 +733,9 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	case chat.Assistant:
 		if it.Streaming {
 			return msgText(v.markdown(closeOpenMarkdown(it.Text)))
+		}
+		if o := v.renderPlanReply(it); o != nil {
+			return o
 		}
 		if body, card := v.choiceCard(it); card != nil {
 			return container.NewVBox(msgText(v.markdownBlocks(body)), card)
@@ -1690,6 +1700,9 @@ func centerLists(segs []widget.RichTextSegment, indent string) []widget.RichText
 }
 
 func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
+	if v.planOverlaid(it) {
+		return container.NewWithoutLayout() // its reply has the controls (planoverlay.go)
+	}
 	title := widget.NewLabel(planQuestion(v.s.conv, it))
 	title.Alignment = v.align()
 	title.Wrapping = fyne.TextWrapWord
@@ -2248,72 +2261,7 @@ func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.Can
 		for _, o := range labels {
 			lines = append(lines, measureWords(o, size, fyne.TextStyle{}))
 		}
-		var ctl fyne.CanvasObject
-		switch q.Kind {
-		case qYesNo:
-			r := widget.NewRadioGroup(labels, nil)
-			r.Horizontal = true
-			if a, ok := ans[q.ID]; ok && a.Yes != nil {
-				r.Selected = labels[map[bool]int{true: 0, false: 1}[*a.Yes]]
-			}
-			r.OnChanged = func(sel string) {
-				a := ans[q.ID]
-				if sel == "" {
-					a.Yes = nil
-				} else {
-					yes := sel == labels[0]
-					a.Yes = &yes
-				}
-				ans[q.ID] = a
-			}
-			ctl = r
-		case qSingle:
-			r := widget.NewRadioGroup(labels, nil)
-			if a, ok := ans[q.ID]; ok && a.Choice >= 0 && a.Choice < len(labels) {
-				r.Selected = labels[a.Choice]
-			}
-			r.OnChanged = func(sel string) {
-				a := planAnswer{Choice: -1}
-				for j, o := range labels {
-					if o == sel {
-						a.Choice = j
-					}
-				}
-				ans[q.ID] = a
-			}
-			ctl = r
-		case qMulti:
-			c := widget.NewCheckGroup(q.Options, nil)
-			if a, ok := ans[q.ID]; ok {
-				for _, p := range a.Picks {
-					if p >= 0 && p < len(q.Options) {
-						c.Selected = append(c.Selected, q.Options[p])
-					}
-				}
-			}
-			c.OnChanged = func(sel []string) {
-				picks := []int{}
-				for j, o := range q.Options {
-					for _, x := range sel {
-						if x == o {
-							picks = append(picks, j)
-						}
-					}
-				}
-				ans[q.ID] = planAnswer{Picks: picks, Choice: -1}
-			}
-			ctl = c
-		default:
-			e := widget.NewMultiLineEntry()
-			e.Wrapping = fyne.TextWrapWord
-			e.SetMinRowsVisible(2)
-			e.SetPlaceHolder("Your answer")
-			if a, ok := ans[q.ID]; ok {
-				e.Text = a.Text
-			}
-			e.OnChanged = func(t string) { ans[q.ID] = planAnswer{Text: t, Choice: -1} }
-			ctl = e
-		}
+		ctl := planControl(q, labels, ans)
 		box.Add(container.NewVBox(l, ctl))
 	}
 	note := widget.NewLabel("Unanswered questions are sent as \"no answer\".")
@@ -2325,6 +2273,76 @@ func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.Can
 	// Labels and radio rows add their padding and the radio icon.
 	extra := 2*theme.Size(theme.SizeNameInnerPadding) + theme.Size(theme.SizeNameInlineIcon) + 2*theme.Padding()
 	return newColumn(true, func(avail float32) float32 { return groupWidth(avail, lines, extra) }, box)
+}
+
+// planControl: a plan question's control (planQuestionForm's and the reply
+// overlay's), writing its answer into ans; labels are recommendedLabels(q).
+func planControl(q planQ, labels []string, ans map[int]planAnswer) fyne.CanvasObject {
+	switch q.Kind {
+	case qYesNo:
+		r := widget.NewRadioGroup(labels, nil)
+		r.Horizontal = true
+		if a, ok := ans[q.ID]; ok && a.Yes != nil {
+			r.Selected = labels[map[bool]int{true: 0, false: 1}[*a.Yes]]
+		}
+		r.OnChanged = func(sel string) {
+			a := ans[q.ID]
+			if sel == "" {
+				a.Yes = nil
+			} else {
+				yes := sel == labels[0]
+				a.Yes = &yes
+			}
+			ans[q.ID] = a
+		}
+		return r
+	case qSingle:
+		r := widget.NewRadioGroup(labels, nil)
+		if a, ok := ans[q.ID]; ok && a.Choice >= 0 && a.Choice < len(labels) {
+			r.Selected = labels[a.Choice]
+		}
+		r.OnChanged = func(sel string) {
+			a := planAnswer{Choice: -1}
+			for j, o := range labels {
+				if o == sel {
+					a.Choice = j
+				}
+			}
+			ans[q.ID] = a
+		}
+		return r
+	case qMulti:
+		c := widget.NewCheckGroup(q.Options, nil)
+		if a, ok := ans[q.ID]; ok {
+			for _, p := range a.Picks {
+				if p >= 0 && p < len(q.Options) {
+					c.Selected = append(c.Selected, q.Options[p])
+				}
+			}
+		}
+		c.OnChanged = func(sel []string) {
+			picks := []int{}
+			for j, o := range q.Options {
+				for _, x := range sel {
+					if x == o {
+						picks = append(picks, j)
+					}
+				}
+			}
+			ans[q.ID] = planAnswer{Picks: picks, Choice: -1}
+		}
+		return c
+	default:
+		e := widget.NewMultiLineEntry()
+		e.Wrapping = fyne.TextWrapWord
+		e.SetMinRowsVisible(2)
+		e.SetPlaceHolder("Your answer")
+		if a, ok := ans[q.ID]; ok {
+			e.Text = a.Text
+		}
+		e.OnChanged = func(t string) { ans[q.ID] = planAnswer{Text: t, Choice: -1} }
+		return e
+	}
 }
 
 // recommendedLabels: the option labels a question's radio buttons show,

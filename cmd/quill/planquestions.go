@@ -31,6 +31,10 @@ type planQ struct {
 	Kind        planQKind `json:"kind"`
 	Options     []string  `json:"options,omitempty"`
 	Recommended int       `json:"recommended"` // -1 = none
+
+	// line, end: the original lines of the plan text the question is on
+	// (end exclusive), for showing its control in place (planoverlay.go).
+	line, end int
 }
 
 var (
@@ -51,7 +55,8 @@ var (
 // approval itself. Fewer than one useful question returns nil (the plain
 // card, or the single-choice card from planChoices, is used then).
 func planQuestions(text string) []planQ {
-	lines := strings.Split(chat.JoinOptionLines(text), "\n")
+	lines, first := chat.JoinOptionLineSpans(text)
+	nOrig := strings.Count(text, "\n") + 1
 	// Lettered items ("a. …", "- **b.** …") are the options a "which of"
 	// question offers.
 	var letters []string
@@ -160,6 +165,10 @@ func planQuestions(text string) []planQ {
 				continue
 			}
 			q.ID, q.Num = len(out)+1, num
+			q.line, q.end = first[start+li], nOrig
+			if start+li+1 < len(first) {
+				q.end = first[start+li+1]
+			}
 			out = append(out, q)
 			lineOf = li
 		}
@@ -421,10 +430,14 @@ func parsePlanAnswers(qs []planQ, raw map[string]json.RawMessage) (map[int]planA
 // proposal like "Should I ship 1.3.7 now?" is answered by Approve itself, and
 // a pick in it ("…v0.1.18 (recommended), or …?") by planChoices' buttons.
 func planItemQuestions(s *deskSession, it *chat.Item) []planQ {
+	return planQuestionsFor(planQuestion(s.conv, it), planItemText(s, it))
+}
+
+// planQuestionsFor: planItemQuestions for a card titled title over text.
+func planQuestionsFor(title, text string) []planQ {
 	// Only when the title has no explicit approval ("Do you approve…?") is
 	// its question the approval itself.
 	own := ""
-	title := planQuestion(s.conv, it)
 	explicit := false
 	sents := questionSentences(strings.TrimSpace(strings.Trim(mdNoise.Replace(title), "*_ ")))
 	for _, q := range sents {
@@ -434,7 +447,7 @@ func planItemQuestions(s *deskSession, it *chat.Item) []planQ {
 		own = normQ(sents[len(sents)-1])
 	}
 	var out []planQ
-	for _, q := range planQuestions(planItemText(s, it)) {
+	for _, q := range planQuestions(text) {
 		if own != "" && normQ(q.Text) == own {
 			continue
 		}
