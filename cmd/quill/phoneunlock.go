@@ -37,9 +37,13 @@ import (
 //   - only within 30 days of the last password unlock, and only while the
 //     device password is the one that unlock used;
 //   - only when the request comes from one of this PC's directly connected
-//     subnets (no VPN, no loopback, not this PC's own address) that is the
-//     remembered home network, and that network's default gateway still has
-//     the remembered MAC. The phone's SSID/BSSID count for nothing.
+//     subnets (no VPN, no loopback, not this PC's own address), arrived on
+//     that interface's own address, is the remembered home network, and that
+//     network's default gateway still has the remembered MAC. The phone's
+//     SSID/BSSID count for nothing. The home network is recorded only by
+//     turning the switch on (from a still valid password-unlocked
+//     connection); a readable, different gateway MAC forgets it and turns
+//     the switch off.
 //
 // A failed proof (bad signature, unknown, expired, replayed or other device's
 // nonce) counts toward the password lock-out (pcMaxFails).
@@ -82,15 +86,32 @@ type netSnap struct {
 	Ifaces []netIface
 }
 
-// Test hooks: the network view and the request's source address.
+// lanConn is one request's connection: the phone's source address and the
+// local address it reached on this PC (both needed; missing = not local).
+type lanConn struct {
+	IP    netip.Addr
+	Local netip.Addr
+}
+
+func (c lanConn) String() string { return c.IP.String() }
+
+func connAddr(s string) netip.Addr {
+	ap, err := netip.ParseAddrPort(s)
+	if err != nil {
+		return netip.Addr{}
+	}
+	return ap.Addr().Unmap().WithZone("")
+}
+
+// Test hooks: the network view and the request's connection.
 var (
-	lanSnapshot   = readNetSnap
-	lanRemoteAddr = func(r *http.Request) netip.Addr {
-		ap, err := netip.ParseAddrPort(r.RemoteAddr)
-		if err != nil {
-			return netip.Addr{}
+	lanSnapshot = readNetSnap
+	lanConnOf   = func(r *http.Request) lanConn {
+		c := lanConn{IP: connAddr(r.RemoteAddr)}
+		if la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && la != nil {
+			c.Local = connAddr(la.String())
 		}
-		return ap.Addr().Unmap().WithZone("")
+		return c
 	}
 )
 
@@ -173,6 +194,21 @@ func (s netSnap) local(ip netip.Addr) (netIface, netip.Prefix, bool) {
 	return netIface{}, netip.Prefix{}, false
 }
 
+// localVia: like local, and the connection also arrived on one of the
+// matched interface's own addresses (http.LocalAddrContextKey).
+func (s netSnap) localVia(c lanConn) (netIface, netip.Prefix, bool) {
+	i, p, ok := s.local(c.IP)
+	if !ok || !c.Local.IsValid() {
+		return netIface{}, netip.Prefix{}, false
+	}
+	for _, a := range i.Addrs {
+		if a.Addr().Unmap() == c.Local.Unmap().WithZone("") {
+			return i, p, true
+		}
+	}
+	return netIface{}, netip.Prefix{}, false
+}
+
 func (s netSnap) iface(name string) (netIface, bool) {
 	for _, i := range s.Ifaces {
 		if i.Name == name {
@@ -182,10 +218,10 @@ func (s netSnap) iface(name string) (netIface, bool) {
 	return netIface{}, false
 }
 
-// learn remembers the home network a phone at ip is on (nil when ip isn't
-// local or the interface's gateway MAC isn't known).
-func (s netSnap) learn(ip netip.Addr) *lanHome {
-	i, _, ok := s.local(ip)
+// learn remembers the home network a phone on connection c is on (nil when
+// c isn't local or the interface's gateway MAC isn't known).
+func (s netSnap) learn(c lanConn) *lanHome {
+	i, _, ok := s.localVia(c)
 	if !ok || i.GwMAC == "" {
 		return nil
 	}
@@ -198,19 +234,33 @@ func (s netSnap) learn(ip netip.Addr) *lanHome {
 	return h
 }
 
-// homeValid: the remembered network is still what this PC is on: same
-// interface (not a VPN), one of its subnets, same gateway MAC.
-func (s netSnap) homeValid(h lanHome) bool {
+type homeState int
+
+const (
+	homeOK      homeState = iota
+	homeUnknown           // can't tell right now (interface down, gateway MAC unreadable): deny, keep the home
+	homeChanged           // gateway MAC readable and different: forget the home
+)
+
+// homeState: is the remembered network still what this PC is on (same
+// interface, not a VPN, one of its subnets, same gateway MAC)?
+func (s netSnap) homeState(h lanHome) homeState {
+	if h.GwMAC == "" {
+		return homeChanged
+	}
 	i, ok := s.iface(h.Iface)
-	if !ok || !lanIfaceOK(i) || i.GwMAC == "" || h.GwMAC == "" || !strings.EqualFold(i.GwMAC, h.GwMAC) {
-		return false
+	if !ok || !lanIfaceOK(i) || i.GwMAC == "" {
+		return homeUnknown
+	}
+	if !strings.EqualFold(i.GwMAC, h.GwMAC) {
+		return homeChanged
 	}
 	for _, a := range i.Addrs {
 		if h.hasPrefix(a.Masked()) {
-			return true
+			return homeOK
 		}
 	}
-	return false
+	return homeUnknown
 }
 
 func (h lanHome) hasPrefix(p netip.Prefix) bool {
@@ -222,12 +272,12 @@ func (h lanHome) hasPrefix(p netip.Prefix) bool {
 	return false
 }
 
-// atHome: ip is a neighbour on the remembered, still valid home network.
-func (s netSnap) atHome(h lanHome, ip netip.Addr) bool {
-	if !s.homeValid(h) {
+// atHome: c is a neighbour on the remembered, still valid home network.
+func (s netSnap) atHome(h lanHome, c lanConn) bool {
+	if s.homeState(h) != homeOK {
 		return false
 	}
-	i, p, ok := s.local(ip)
+	i, p, ok := s.localVia(c)
 	return ok && i.Name == h.Iface && h.hasPrefix(p)
 }
 
@@ -279,10 +329,11 @@ func (d *desk) saveLanDevices(m map[string]lanDevice) {
 	d.app.Preferences().SetString(prefLanUnlock, string(b))
 }
 
-// lanCheck: may device id unlock without the password from ip right now?
-// (UI thread.) A home network that changed is forgotten here, so the waiver
-// stays off until the next password unlock.
-func (d *desk) lanCheck(id string, ip netip.Addr, snap netSnap, now time.Time) bool {
+// lanCheck: may device id unlock without the password on connection c right
+// now? (UI thread.) When the home network's gateway MAC is readable and
+// different, the home is forgotten and the switch turned off: the user turns
+// it on again in Quill Desktop → Devices (nothing re-learns it by itself).
+func (d *desk) lanCheck(id string, c lanConn, snap netSnap, now time.Time) bool {
 	if !lanUnlockSupported {
 		return false
 	}
@@ -303,35 +354,49 @@ func (d *desk) lanCheck(id string, ip netip.Addr, snap netSnap, now time.Time) b
 	if subtle.ConstantTimeCompare([]byte(st.PwHash), []byte(lanPwHash(stored))) != 1 {
 		return false
 	}
-	if !snap.homeValid(*st.Home) {
-		st.Home = nil
+	if snap.homeState(*st.Home) == homeChanged {
+		st.On, st.Home = false, nil
 		m[id] = st
 		d.saveLanDevices(m)
+		d.updatePhoneList()
 		return false
 	}
-	return snap.atHome(*st.Home, ip)
+	return snap.atHome(*st.Home, c)
 }
 
 // setLanUnlock is the per-device switch "No password on this home network".
-// Turning it on remembers the network the phone was last seen on, if that is
-// a local one; otherwise the next password unlock from a local network does.
-func (d *desk) setLanUnlock(id string, on bool) {
+// Turning it on remembers the current home network, from the connection of
+// the phone's password unlock, which must still be valid; that is the only
+// place the home network is ever recorded. Returns why it can't turn on.
+func (d *desk) setLanUnlock(id string, on bool) error {
 	p, ok := d.device(id)
 	if !ok || p.Kind != "phone" {
-		return
+		return fmt.Errorf("only phones can unlock without a password")
 	}
 	m := d.lanDevices()
 	st := m[id]
-	st.On, st.Home = on, nil
-	if on {
-		if a := d.phone().api; a != nil {
-			if ip, ok := a.lan.seen(id); ok {
-				st.Home = lanSnapshot().learn(ip)
-			}
+	if !on {
+		st.On, st.Home = false, nil
+		m[id] = st
+		d.saveLanDevices(m)
+		return nil
+	}
+	var home *lanHome
+	if a := d.phone().api; a != nil {
+		a.lan.mu.Lock()
+		tok, c, ok := a.lan.pwTok[id], a.lan.pwConn[id], a.lan.pwTok[id] != ""
+		a.lan.mu.Unlock()
+		if ok && d.pcLock.valid(id, tok, d.pcIdle(), false) {
+			home = lanSnapshot().learn(c)
 		}
 	}
+	if home == nil {
+		return fmt.Errorf("Unlock %s with the password while it is on this PC's home network (not over a VPN), then turn this on.", p.Name)
+	}
+	st.On, st.Home = true, home
 	m[id] = st
 	d.saveLanDevices(m)
+	return nil
 }
 
 // revokeLanUnlock: the notice's Revoke: switch off, key dropped, session ended.
@@ -389,28 +454,27 @@ func (l *pcLock) lockedOut(id string) (bool, string) {
 func (l *pcLock) failProof(id, code, what string) (string, string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	f := l.fails[id]
-	if f.n >= pcMaxFails {
-		f.n = 0
-	}
-	f.n++
-	f.until = l.now().Add(pcLockout)
-	l.fails[id] = f
-	if f.n >= pcMaxFails {
+	n, already := l.failLocked(id, l.now())
+	if already || n >= pcMaxFails {
 		return "locked_out", fmt.Sprintf("%s; locked for %d min", what, int(pcLockout.Minutes()))
 	}
-	return code, fmt.Sprintf("%s (%d of %d tries)", what, f.n, pcMaxFails)
+	return code, fmt.Sprintf("%s (%d of %d tries)", what, n, pcMaxFails)
 }
 
-// grant gives device id a fresh unlock token (after a valid key proof).
+// grant gives device id a fresh unlock token (after a valid key proof);
+// "" when a concurrent failure locked the device meanwhile.
 func (l *pcLock) grant(id string) string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	tok := hex.EncodeToString(b)
 	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	if f := l.fails[id]; f.n >= pcMaxFails && now.Before(f.until) {
+		return ""
+	}
 	delete(l.fails, id)
-	l.tokens[id] = pcToken{tok: tok, last: l.now()}
-	l.mu.Unlock()
+	l.tokens[id] = pcToken{tok: tok, last: now}
 	return tok
 }
 
@@ -424,27 +488,14 @@ type lanNonce struct {
 type lanMem struct {
 	mu     sync.Mutex
 	nonces map[string]lanNonce
-	pwTok  map[string]string     // token of the device's last password unlock
-	lastIP map[string]netip.Addr // last source address per device
+	pwTok  map[string]string  // token of the device's last password unlock
+	pwConn map[string]lanConn // and the connection it came from
 
 	dialogs map[string]dialog.Dialog // open notices (UI thread)
 }
 
 func newLanMem() *lanMem {
-	return &lanMem{nonces: map[string]lanNonce{}, pwTok: map[string]string{}, lastIP: map[string]netip.Addr{}, dialogs: map[string]dialog.Dialog{}}
-}
-
-func (m *lanMem) see(id string, ip netip.Addr) {
-	m.mu.Lock()
-	m.lastIP[id] = ip
-	m.mu.Unlock()
-}
-
-func (m *lanMem) seen(id string) (netip.Addr, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	ip, ok := m.lastIP[id]
-	return ip, ok
+	return &lanMem{nonces: map[string]lanNonce{}, pwTok: map[string]string{}, pwConn: map[string]lanConn{}, dialogs: map[string]dialog.Dialog{}}
 }
 
 func (m *lanMem) issue(dev string, now time.Time) (string, time.Time) {
@@ -489,9 +540,8 @@ func (m *lanMem) take(n, dev string, now time.Time) bool {
 // --- HTTP handlers ---
 
 // lanHello: the hello's "lanUnlock" (UI thread).
-func (a *phoneAPI) lanHello(phone string, ip netip.Addr, snap netSnap) bool {
-	a.lan.see(phone, ip)
-	return a.d.lanCheck(phone, ip, snap, a.d.pcLock.now())
+func (a *phoneAPI) lanHello(phone string, c lanConn, snap netSnap) bool {
+	return a.d.lanCheck(phone, c, snap, a.d.pcLock.now())
 }
 
 type bufResponse struct {
@@ -526,13 +576,13 @@ func (a *phoneAPI) unlockRoute(w http.ResponseWriter, r *http.Request, phone str
 		folders.WriteError(w, http.StatusBadRequest, "bad_request", "body must be JSON {password} or {nonce, sig}")
 		return
 	}
-	ip := lanRemoteAddr(r)
+	c := lanConnOf(r)
 	if in.Nonce != "" || in.Sig != "" {
 		if in.Password != nil {
 			folders.WriteError(w, http.StatusBadRequest, "bad_request", "send either {password} or {nonce, sig}")
 			return
 		}
-		a.keyUnlock(w, phone, in.Nonce, in.Sig, ip)
+		a.keyUnlock(w, phone, in.Nonce, in.Sig, c)
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
@@ -547,8 +597,7 @@ func (a *phoneAPI) unlockRoute(w http.ResponseWriter, r *http.Request, phone str
 			Needed bool   `json:"needed"`
 		}
 		if json.Unmarshal(rec.buf.Bytes(), &out) == nil && out.Token != "" && out.Needed {
-			snap := lanSnapshot()
-			a.ui(func() { a.notePasswordUnlock(phone, out.Token, ip, snap) })
+			a.ui(func() { a.notePasswordUnlock(phone, out.Token, c) })
 		}
 	}
 	for k, v := range rec.header {
@@ -558,31 +607,27 @@ func (a *phoneAPI) unlockRoute(w http.ResponseWriter, r *http.Request, phone str
 	_, _ = w.Write(rec.buf.Bytes())
 }
 
-// notePasswordUnlock (UI thread): restarts the 30 days, ties the waiver to
-// the current device password and, with the switch on and no home network
-// remembered, remembers the one the phone is on now.
-func (a *phoneAPI) notePasswordUnlock(phone, tok string, ip netip.Addr, snap netSnap) {
+// notePasswordUnlock (UI thread): restarts the 30 days and ties the waiver
+// to the current device password. It never changes the home network; the
+// token and connection are kept so that turning the switch on can record it.
+func (a *phoneAPI) notePasswordUnlock(phone, tok string, c lanConn) {
 	d := a.d
-	a.lan.see(phone, ip)
 	p, ok := d.device(phone)
 	if !ok || p.Kind != "phone" {
 		return
 	}
 	a.lan.mu.Lock()
-	a.lan.pwTok[phone] = tok
+	a.lan.pwTok[phone], a.lan.pwConn[phone] = tok, c
 	a.lan.mu.Unlock()
 	m := d.lanDevices()
 	st := m[phone]
 	st.PwAt = d.pcLock.now().UnixMilli()
 	st.PwHash = lanPwHash(d.app.Preferences().String(prefPCPassword))
-	if st.On && (st.Home == nil || !snap.homeValid(*st.Home)) {
-		st.Home = snap.learn(ip)
-	}
 	m[phone] = st
 	d.saveLanDevices(m)
 }
 
-func (a *phoneAPI) keyUnlock(w http.ResponseWriter, phone, nonce, sig string, ip netip.Addr) {
+func (a *phoneAPI) keyUnlock(w http.ResponseWriter, phone, nonce, sig string, c lanConn) {
 	d := a.d
 	if locked, msg := d.pcLock.lockedOut(phone); locked {
 		folders.WriteError(w, http.StatusForbidden, "locked_out", msg)
@@ -594,8 +639,7 @@ func (a *phoneAPI) keyUnlock(w http.ResponseWriter, phone, nonce, sig string, ip
 	var ok bool
 	var fp, name, keyB64 string
 	a.ui(func() {
-		a.lan.see(phone, ip)
-		ok = d.lanCheck(phone, ip, snap, now)
+		ok = d.lanCheck(phone, c, snap, now)
 		fp = d.phone().fp
 		p, _ := d.device(phone)
 		name = p.Name
@@ -619,13 +663,18 @@ func (a *phoneAPI) keyUnlock(w http.ResponseWriter, phone, nonce, sig string, ip
 		return
 	}
 	tok := d.pcLock.grant(phone)
+	if tok == "" {
+		_, msg := d.pcLock.lockedOut(phone)
+		folders.WriteError(w, http.StatusForbidden, "locked_out", msg)
+		return
+	}
 	a.lan.mu.Lock()
 	delete(a.lan.pwTok, phone)
 	a.lan.mu.Unlock()
 	var idle int
 	a.ui(func() {
 		idle = int(d.pcIdle().Minutes())
-		a.lanNotice(phone, name, ip.String())
+		a.lanNotice(phone, name, c.String())
 	})
 	folders.WriteJSON(w, http.StatusOK, map[string]any{"token": tok, "idleMin": idle, "needed": true, "method": "key"})
 }
@@ -637,12 +686,9 @@ func (a *phoneAPI) unlockChallenge(w http.ResponseWriter, r *http.Request, phone
 		folders.WriteError(w, http.StatusForbidden, "locked_out", msg)
 		return
 	}
-	ip, snap, now := lanRemoteAddr(r), lanSnapshot(), d.pcLock.now()
+	c, snap, now := lanConnOf(r), lanSnapshot(), d.pcLock.now()
 	var ok bool
-	a.ui(func() {
-		a.lan.see(phone, ip)
-		ok = d.lanCheck(phone, ip, snap, now)
-	})
+	a.ui(func() { ok = d.lanCheck(phone, c, snap, now) })
 	if !ok {
 		folders.WriteError(w, http.StatusForbidden, "lan_unlock_off", "this device must unlock with the PC's password")
 		return
@@ -669,7 +715,7 @@ func (a *phoneAPI) unlockKey(w http.ResponseWriter, r *http.Request, phone strin
 	}
 	der, _ := x509.MarshalPKIXPublicKey(key)
 	tok := r.Header.Get(unlockHeader)
-	ip, snap := lanRemoteAddr(r), lanSnapshot()
+	c, snap := lanConnOf(r), lanSnapshot()
 	code, msg := "", ""
 	var lan bool
 	a.ui(func() {
@@ -690,7 +736,7 @@ func (a *phoneAPI) unlockKey(w http.ResponseWriter, r *http.Request, phone strin
 		st.Key, st.KeyAt = base64.StdEncoding.EncodeToString(der), d.pcLock.now().UnixMilli()
 		m[phone] = st
 		d.saveLanDevices(m)
-		lan = d.lanCheck(phone, ip, snap, d.pcLock.now())
+		lan = d.lanCheck(phone, c, snap, d.pcLock.now())
 	})
 	if code != "" {
 		folders.WriteError(w, http.StatusForbidden, code, msg)
@@ -702,7 +748,15 @@ func (a *phoneAPI) unlockKey(w http.ResponseWriter, r *http.Request, phone strin
 // lanUnlockCheck is the per-phone switch in Quill Desktop → Devices (off by
 // default; greyed out without the Password switch or off Linux).
 func (d *desk) lanUnlockCheck(ph folders.Phone) *widget.Check {
-	c := widget.NewCheck("No password on this home network", func(on bool) { d.setLanUnlock(ph.ID, on) })
+	var c *widget.Check
+	c = widget.NewCheck("No password on this home network", func(on bool) {
+		if err := d.setLanUnlock(ph.ID, on); err != nil && on {
+			c.SetChecked(false)
+			if d.win != nil {
+				dialog.ShowInformation("Home network not recorded", err.Error(), d.win)
+			}
+		}
+	})
 	c.Checked = d.lanDevices()[ph.ID].On
 	if !lanUnlockSupported || !ph.NeedsUnlock() {
 		c.Disable()

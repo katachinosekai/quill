@@ -134,18 +134,18 @@ func (l *pcLock) unlock(id, stored, pw string) (tok, code, msg string) {
 	ok := checkPCPassword(stored, pw)
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now = l.now()
 	if !ok {
-		f := l.fails[id]
-		if f.n >= pcMaxFails {
-			f.n = 0
-		}
-		f.n++
-		f.until = now.Add(pcLockout)
-		l.fails[id] = f
-		if f.n >= pcMaxFails {
+		n, already := l.failLocked(id, now)
+		if already || n >= pcMaxFails {
 			return "", "locked_out", fmt.Sprintf("wrong password; locked for %d min", int(pcLockout.Minutes()))
 		}
-		return "", "wrong_password", fmt.Sprintf("wrong password (%d of %d tries)", f.n, pcMaxFails)
+		return "", "wrong_password", fmt.Sprintf("wrong password (%d of %d tries)", n, pcMaxFails)
+	}
+	// A concurrent failure may have locked the device while the password
+	// was being checked: the lock-out wins.
+	if f := l.fails[id]; f.n >= pcMaxFails && now.Before(f.until) {
+		return "", "locked_out", fmt.Sprintf("too many wrong passwords; try again in %d min", int(f.until.Sub(now).Minutes())+1)
 	}
 	delete(l.fails, id)
 	b := make([]byte, 32)
@@ -153,6 +153,24 @@ func (l *pcLock) unlock(id, stored, pw string) (tok, code, msg string) {
 	tok = hex.EncodeToString(b)
 	l.tokens[id] = pcToken{tok: tok, last: now}
 	return tok, "", ""
+}
+
+// failLocked counts one failed unlock (l.mu held). During a lock-out it
+// changes nothing (already=true): the count is reset only once the lock-out
+// time has passed, so concurrent failures can never lower it or lift a
+// lock-out.
+func (l *pcLock) failLocked(id string, now time.Time) (n int, already bool) {
+	f := l.fails[id]
+	if f.n >= pcMaxFails {
+		if now.Before(f.until) {
+			return f.n, true
+		}
+		f.n = 0
+	}
+	f.n++
+	f.until = now.Add(pcLockout)
+	l.fails[id] = f
+	return f.n, false
 }
 
 func (d *desk) pcIdle() time.Duration {

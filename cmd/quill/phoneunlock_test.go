@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -80,24 +81,40 @@ func TestLanLocalSubnets(t *testing.T) {
 
 func TestLanHomeGateway(t *testing.T) {
 	s := testSnap(testGwMAC)
-	h := s.learn(netip.MustParseAddr("192.0.2.50"))
+	conn := func(ip, local string) lanConn {
+		c := lanConn{IP: netip.MustParseAddr(ip)}
+		if local != "" {
+			c.Local = netip.MustParseAddr(local)
+		}
+		return c
+	}
+	h := s.learn(conn("192.0.2.50", "192.0.2.10"))
 	if h == nil || h.Iface != "eth0" || h.GwMAC != testGwMAC || len(h.Prefixes) != 2 {
 		t.Fatalf("learn: %+v", h)
 	}
-	if !s.atHome(*h, netip.MustParseAddr("192.0.2.77")) || !s.atHome(*h, netip.MustParseAddr("2001:db8:1::77")) {
+	if !s.atHome(*h, conn("192.0.2.77", "192.0.2.10")) || !s.atHome(*h, conn("2001:db8:1::77", "2001:db8:1::10")) {
 		t.Fatal("a neighbour on the home network is at home")
 	}
-	if s.atHome(*h, netip.MustParseAddr("198.51.100.7")) {
+	if s.atHome(*h, conn("198.51.100.7", "198.51.100.1")) {
 		t.Fatal("VPN peer is not at home")
 	}
+	// The connection must have arrived on the home interface's own address.
+	for _, local := range []string{"", "10.8.0.1", "198.51.100.1", "127.0.0.1"} {
+		if s.atHome(*h, conn("192.0.2.77", local)) || s.learn(conn("192.0.2.77", local)) != nil {
+			t.Fatalf("local address %q is not the home interface's", local)
+		}
+	}
+	if s.homeState(*h) != homeOK {
+		t.Fatal("home ok")
+	}
 	moved := testSnap(testOtherMAC)
-	if moved.homeValid(*h) || moved.atHome(*h, netip.MustParseAddr("192.0.2.77")) {
+	if moved.homeState(*h) != homeChanged || moved.atHome(*h, conn("192.0.2.77", "192.0.2.10")) {
 		t.Fatal("a different gateway MAC is a different network")
 	}
-	if noGw := testSnap(""); noGw.homeValid(*h) || noGw.learn(netip.MustParseAddr("192.0.2.50")) != nil {
-		t.Fatal("unknown gateway MAC: no waiver, nothing learned")
+	if noGw := testSnap(""); noGw.homeState(*h) != homeUnknown || noGw.atHome(*h, conn("192.0.2.77", "192.0.2.10")) || noGw.learn(conn("192.0.2.50", "192.0.2.10")) != nil {
+		t.Fatal("unreadable gateway MAC: no waiver, home kept, nothing learned")
 	}
-	if s.learn(netip.MustParseAddr("10.8.0.5")) != nil || s.learn(netip.MustParseAddr("100.64.1.9")) != nil {
+	if s.learn(conn("10.8.0.5", "10.8.0.1")) != nil || s.learn(conn("100.64.1.9", "100.64.1.2")) != nil {
 		t.Fatal("never learn a VPN network")
 	}
 }
@@ -139,13 +156,22 @@ type lanTest struct {
 	shift atomic.Int64
 	mu    sync.Mutex
 	snap  netSnap
-	ip    netip.Addr
+	conn  lanConn
 	sink  []string
 }
 
-func (l *lanTest) set(snap netSnap, ip string) {
+// set: the PC's network and the phone's address; the connection arrives on
+// eth0's own address (or local, when given; "-" = missing).
+func (l *lanTest) set(snap netSnap, ip string, local ...string) {
+	c := lanConn{IP: netip.MustParseAddr(ip), Local: netip.MustParseAddr("192.0.2.10")}
+	if len(local) > 0 {
+		c.Local = netip.Addr{}
+		if local[0] != "-" {
+			c.Local = netip.MustParseAddr(local[0])
+		}
+	}
 	l.mu.Lock()
-	l.snap, l.ip = snap, netip.MustParseAddr(ip)
+	l.snap, l.conn = snap, c
 	l.mu.Unlock()
 }
 
@@ -216,10 +242,10 @@ func newLanTest(t *testing.T) *lanTest {
 	l := &lanTest{t: t, h: newHarness(t)}
 	h := l.h
 	l.set(testSnap(testGwMAC), "192.0.2.50")
-	oldSnap, oldAddr := lanSnapshot, lanRemoteAddr
+	oldSnap, oldConn := lanSnapshot, lanConnOf
 	lanSnapshot = func() netSnap { l.mu.Lock(); defer l.mu.Unlock(); return l.snap }
-	lanRemoteAddr = func(*http.Request) netip.Addr { l.mu.Lock(); defer l.mu.Unlock(); return l.ip }
-	t.Cleanup(func() { lanSnapshot, lanRemoteAddr = oldSnap, oldAddr })
+	lanConnOf = func(*http.Request) lanConn { l.mu.Lock(); defer l.mu.Unlock(); return l.conn }
+	t.Cleanup(func() { lanSnapshot, lanConnOf = oldSnap, oldConn })
 	var link string
 	h.ui(func() {
 		h.d.pcLock.now = func() time.Time { return time.Now().Add(time.Duration(l.shift.Load())) }
@@ -267,6 +293,11 @@ func TestLanUnlockFlow(t *testing.T) {
 
 	// Key registration: locked device → gate; Password switch off → no
 	// password session; then with a password-unlocked session it works.
+	h.ui(func() {
+		if err := h.d.setLanUnlock(l.id, true); err == nil {
+			t.Fatal("the switch needs a password-unlocked connection to record the home network")
+		}
+	})
 	if code, m := l.post("/phone/unlock/key", "key-00000000000000001", map[string]string{"publicKey": l.pubKey()}); code != 401 || errCode(m) != "locked" {
 		t.Fatalf("key while locked: %d %v", code, m)
 	}
@@ -373,19 +404,55 @@ func TestLanUnlockFlow(t *testing.T) {
 	}
 	l.set(testSnap(testGwMAC), "192.0.2.50")
 
-	// Home network changed (gateway MAC): off, and stays off until the next
-	// password unlock even when the old gateway comes back.
+	// The connection must arrive on the home interface's own address.
+	l.set(testSnap(testGwMAC), "192.0.2.50", "-")
+	if l.hello("hello-0000000000000013") {
+		t.Fatal("no local address: no waiver")
+	}
+	l.set(testSnap(testGwMAC), "192.0.2.50", "10.8.0.1")
+	if l.hello("hello-0000000000000014") {
+		t.Fatal("arrived on a VPN address: no waiver")
+	}
+
+	// Gateway MAC unreadable (ARP miss): no waiver, home kept.
+	l.set(testSnap(""), "192.0.2.50")
+	if l.hello("hello-0000000000000015") {
+		t.Fatal("unreadable gateway MAC: no waiver")
+	}
+	if st := l.state(); !st.On || st.Home == nil {
+		t.Fatalf("unreadable gateway MAC keeps the home: %+v", st)
+	}
+	l.set(testSnap(testGwMAC), "192.0.2.50")
+	if !l.hello("hello-0000000000000016") {
+		t.Fatal("gateway readable again: waiver back")
+	}
+
+	// Home network changed (gateway MAC readable and different): home
+	// forgotten, switch off; a password unlock never re-learns it, only
+	// turning the switch on again does.
 	l.set(testSnap(testOtherMAC), "192.0.2.50")
 	if l.hello("hello-0000000000000004") {
 		t.Fatal("gateway MAC changed: no waiver")
 	}
-	l.set(testSnap(testGwMAC), "192.0.2.50")
-	if l.hello("hello-0000000000000005") || l.state().Home != nil {
-		t.Fatal("waiver stays off until the next password unlock")
+	if st := l.state(); st.On || st.Home != nil {
+		t.Fatalf("network changed: switch off, home forgotten: %+v", st)
 	}
+	l.passwordUnlock("pw-000000000000000004")
+	if l.hello("hello-0000000000000017") || l.state().Home != nil || l.state().On {
+		t.Fatal("a password unlock never records the home network")
+	}
+	l.set(testSnap(testGwMAC), "192.0.2.50")
 	l.passwordUnlock("pw-000000000000000002")
+	if l.hello("hello-0000000000000005") || l.state().Home != nil {
+		t.Fatal("still off after the old gateway comes back and a password unlock")
+	}
+	h.ui(func() {
+		if err := h.d.setLanUnlock(l.id, true); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if !l.hello("hello-0000000000000006") {
-		t.Fatal("password unlock at home turns it back on")
+		t.Fatal("turning the switch on again records the home network")
 	}
 
 	// 30 days after the last password unlock: password again.
@@ -462,5 +529,57 @@ func TestLanUnlockFlow(t *testing.T) {
 	}
 	if code, _, m := l.challenge("ch-000000000000000007"); code != 403 || errCode(m) != "lan_unlock_off" {
 		t.Fatalf("challenge after revoke: %d %v", code, m)
+	}
+}
+
+// Concurrent failures never lower the count or lift a lock-out (password
+// path and key-proof path).
+func TestLanLockoutConcurrent(t *testing.T) {
+	stored := hashPCPassword("correct horse")
+	l := newPCLock()
+	var wg sync.WaitGroup
+	for range 3*pcMaxFails + 2 { // not a multiple: the old reset left n=2
+		wg.Add(1)
+		go func() { defer wg.Done(); l.unlock("dev", stored, "wrong") }()
+	}
+	wg.Wait()
+	if locked, _ := l.lockedOut("dev"); !locked {
+		t.Fatalf("password: still locked after %d concurrent failures: %+v", 3*pcMaxFails+2, l.fails["dev"])
+	}
+	if tok, code, _ := l.unlock("dev", stored, "correct horse"); tok != "" || code != "locked_out" {
+		t.Fatalf("password during the lock-out: %q %q", tok, code)
+	}
+
+	k := newPCLock()
+	for range 20 {
+		var wg sync.WaitGroup
+		for range 4*pcMaxFails + 1 {
+			wg.Add(1)
+			go func() { defer wg.Done(); k.failProof("phone", "bad_signature", "x") }()
+		}
+		wg.Wait()
+		if locked, _ := k.lockedOut("phone"); !locked {
+			t.Fatalf("key proof: lock-out lifted by concurrent failures: %+v", k.fails["phone"])
+		}
+		if k.grant("phone") != "" {
+			t.Fatal("no token during the lock-out")
+		}
+	}
+	// Once the lock-out time has passed, counting starts again.
+	k.now = func() time.Time { return time.Now().Add(pcLockout + time.Minute) }
+	if code, _ := k.failProof("phone", "bad_signature", "x"); code != "bad_signature" || k.grant("phone") == "" {
+		t.Fatalf("after the lock-out: %q", code)
+	}
+}
+
+func TestLanConnOf(t *testing.T) {
+	r, _ := http.NewRequest("POST", "/phone/hello", nil)
+	r.RemoteAddr = "[::ffff:192.0.2.50]:40000"
+	if c := lanConnOf(r); c.IP != netip.MustParseAddr("192.0.2.50") || c.Local.IsValid() {
+		t.Fatalf("no local address in the context: %+v", c)
+	}
+	r = r.WithContext(context.WithValue(r.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("192.0.2.10"), Port: 43117}))
+	if c := lanConnOf(r); c.Local != netip.MustParseAddr("192.0.2.10") {
+		t.Fatalf("local address: %+v", c)
 	}
 }

@@ -157,7 +157,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	phone := folders.PhoneID(r)
-	ip, snap := lanRemoteAddr(r), lanSnapshot()
+	conn, snap := lanConnOf(r), lanSnapshot()
 	var ctl, unlock, lan bool
 	a.ui(func() {
 		list := a.d.phones()
@@ -186,7 +186,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 			a.d.updatePhoneList()
 		}
 		ctl = a.control(phone)
-		lan = a.lanHello(phone, ip, snap)
+		lan = a.lanHello(phone, conn, snap)
 	})
 	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan})
 }

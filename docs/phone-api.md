@@ -433,8 +433,10 @@ When Quill Android is on the trusted home network, it can unlock with a signatur
 - its switch "No password on this home network" in Quill Desktop → Devices is on (off by default; Linux only, elsewhere the switch is greyed out);
 - it registered a key (`/phone/unlock/key`) from a password-unlocked session;
 - its last password unlock was less than 30 days ago and the device password hasn't changed since;
-- the request comes from one of Quill Desktop's own directly connected subnets (IPv4 or IPv6): never a VPN (100.64.0.0/10, the Tailscale IPv6 range, interfaces `wg*`, `tun*`, `zt*`, `tailscale*`, point-to-point links), never loopback, link-local or Quill Desktop's own address. The phone's SSID/BSSID count for nothing;
-- that subnet is the remembered home network and its IPv4 default gateway still has the remembered MAC address (read from `/proc/net/route` and `/proc/net/arp`). The home network is remembered when the switch is turned on (from the address the phone was last seen at) or, if that wasn't a home network, at the next password unlock from one. When it changes, the waiver is off until the next password unlock, which remembers the new one.
+- the request comes from one of Quill Desktop's own directly connected subnets (IPv4 or IPv6) and arrived on an address of that same interface: never a VPN (100.64.0.0/10, the Tailscale IPv6 range, interfaces `wg*`, `tun*`, `zt*`, `tailscale*`, point-to-point links), never loopback, link-local or Quill Desktop's own address. The phone's SSID/BSSID count for nothing;
+- that subnet is the remembered home network and its IPv4 default gateway still has the remembered MAC address (read from `/proc/net/route` and `/proc/net/arp`). If the gateway MAC can't be read right now (e.g. no ARP entry), that request gets no waiver but the home network stays remembered.
+
+The home network is recorded only when the user turns the switch on in Quill Desktop → Devices, from the connection of the phone's password unlock, which must still be valid at that moment (otherwise the switch stays off and Quill Desktop says to unlock with the password on the home network first). A password unlock never changes it. When the gateway MAC is readable and different, Quill Desktop forgets the home network and turns the switch off; the user turns it on again to record the new one.
 
 After each key unlock Quill Desktop shows "Phone X unlocked without a password from <ip>" with **Revoke** (switch off, key dropped, the phone's session ends).
 
@@ -448,7 +450,7 @@ After each key unlock Quill Desktop shows "Phone X unlocked without a password f
 quill-unlock-v1|<deviceId>|<nonce>|<fingerprint>
 ```
 
-`<deviceId>` is `phoneId` from hello (the pairing link's `i`), `<nonce>` exactly as received, `<fingerprint>` the pinned certificate's SHA-256 in lowercase hex (the pairing link's `fp`, 64 chars). Success: `{"token": "...", "idleMin": 15, "needed": true, "method": "key"}`. Bad signature: `403 bad_signature`; unknown, used, expired or another device's nonce: `403 bad_nonce`; both count toward the same 5-try lock-out as wrong passwords (`403 locked_out`). `403 lan_unlock_off` if the conditions stopped holding (not counted).
+`<deviceId>` is `phoneId` from hello (the pairing link's `i`), `<nonce>` exactly as received, `<fingerprint>` the pinned certificate's SHA-256 in lowercase hex (the pairing link's `fp`, 64 chars). Success: `{"token": "...", "idleMin": 15, "needed": true, "method": "key"}`. Bad signature: `403 bad_signature`; unknown, used, expired or another device's nonce: `403 bad_nonce`; both count toward the same 5-try lock-out as wrong passwords (`403 locked_out`). `403 lan_unlock_off` if the conditions stopped holding (not counted). During a lock-out further failures neither add to nor reset the count; it starts again only after the 15 minutes.
 
 ## Pairing and per-phone keys
 
