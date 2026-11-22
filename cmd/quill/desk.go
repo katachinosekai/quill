@@ -534,7 +534,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		}
 	})
 	sttChk.Checked = !d.app.Preferences().Bool(prefSTTOff)
-	animChk := widget.NewCheck("Animate new text (replies fade in while they stream)", func(on bool) { d.app.Preferences().SetBool(prefAnimateText, on) })
+	animChk := widget.NewCheck("Animate new text (replies appear character by character while they stream)", func(on bool) { d.app.Preferences().SetBool(prefAnimateText, on) })
 	animChk.Checked = d.animateText()
 	chipChk := widget.NewCheck("New tool chips start collapsed", d.setCollapseChips)
 	chipChk.Checked = d.collapseChips

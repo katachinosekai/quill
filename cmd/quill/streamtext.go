@@ -18,9 +18,9 @@ import (
 // paragraphs are rendered once and never redrawn or faded again; the
 // growing last paragraph is rendered with its open markup closed for now.
 // With "Animate new text" on, one timer per reply reveals the text at a
-// steady pace, whole words at a time, speeding up gently when the model is
-// ahead and never more than a few words per frame; off, text appears as it
-// arrives.
+// steady pace, character by character (user 2026-11-22; it was whole words),
+// speeding up gently when the model is ahead and never more than
+// revealMaxStep characters per frame; off, text appears as it arrives.
 
 const (
 	prefAnimateText = "animateText"
@@ -161,12 +161,8 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 				gap := len(text) - st.pos
 				step := min(max(revealMinRate, gap/revealCatchUp), revealMaxStep)
 				n := min(st.pos+step, len(text))
-				// Whole words, and never in the middle of a character.
-				if sp := strings.IndexAny(text[n:], " \n"); sp >= 0 && sp <= revealMaxStep {
-					n += sp
-				} else if sp < 0 && !st.it.Streaming {
-					n = len(text)
-				}
+				// Character by character (user 2026-11-22: not whole words),
+				// never in the middle of a multi-byte character.
 				for n < len(text) && !utf8.RuneStart(text[n]) {
 					n++
 				}
