@@ -453,16 +453,6 @@ func (d *desk) showBackendMenu(s *deskSession, b *widget.Button, after func()) {
 		d.notify(s, "This session runs on another PC; change Online, Local and Remote in Quill Desktop there.")
 		return
 	}
-	c := fyne.CurrentApp().Driver().CanvasForObject(b)
-	if c == nil {
-		return
-	}
 	// The button sits at the bottom of the window: open the menu above it.
-	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(b)
-	m := widget.NewPopUpMenu(fyne.NewMenu("", d.backendItems(s, after)...), c)
-	y := pos.Y - m.MinSize().Height
-	if y < 0 {
-		y = pos.Y + b.Size().Height
-	}
-	m.ShowAtPosition(fyne.NewPos(pos.X, y))
+	menuAbove(b, d.backendItems(s, after))
 }

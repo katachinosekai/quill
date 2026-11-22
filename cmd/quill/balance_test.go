@@ -33,35 +33,29 @@ func TestOverlongLine(t *testing.T) {
 
 // The balanced width keeps the line count of a plain wrap at the target and
 // evens the lines out: no short tail.
-func TestBalancedWidthEvensLines(t *testing.T) {
+func TestBalancedEvensLines(t *testing.T) {
 	test.NewTempApp(t)
 	size := msgTextSize()
-	target := fyne.MeasureText(strings.Repeat("n", 60), size, fyne.TextStyle{}).Width
-	words := strings.Fields(longItem)
-	ws := make([]float32, len(words))
-	for i, w := range words {
-		ws[i] = fyne.MeasureText(w, size, fyne.TextStyle{}).Width
-	}
-	sp := fyne.MeasureText(" ", size, fyne.TextStyle{}).Width
-	b := balancedWidth(longItem, target, size, fyne.TextStyle{})
+	w := measureWords(longItem, size, fyne.TextStyle{})
+	target := w.total / 3.2
+	b := w.balanced(target, 0)
 	if b <= 0 || b > target {
-		t.Fatalf("balancedWidth = %v, want in (0, %v]", b, target)
+		t.Fatalf("balanced = %v, want in (0, %v]", b, target)
 	}
-	if got, want := greedyLines(ws, sp, b), greedyLines(ws, sp, target); got != want {
+	if got, want := w.lines(b), w.lines(target); got != want {
 		t.Fatalf("balanced wrap takes %d lines, plain wrap %d", got, want)
 	}
-	// Lines at the balanced width: the shortest is at least 60% of the longest.
 	var lines []float32
 	x := float32(-1)
-	for _, w := range ws {
-		if x >= 0 && x+sp+w <= b {
-			x += sp + w
+	for _, ww := range w.ws {
+		if x >= 0 && x+w.sp+ww <= b {
+			x += w.sp + ww
 			continue
 		}
 		if x >= 0 {
 			lines = append(lines, x)
 		}
-		x = w
+		x = ww
 	}
 	lines = append(lines, x)
 	lo, hi := lines[0], lines[0]
@@ -71,9 +65,14 @@ func TestBalancedWidthEvensLines(t *testing.T) {
 	if lo < 0.6*hi {
 		t.Fatalf("unbalanced lines %v at width %v", lines, b)
 	}
-	// Short text and single words need no balancing.
-	if balancedWidth("Done.", target, size, fyne.TextStyle{}) != 0 || balancedWidth(strings.Repeat("x", 200), target, size, fyne.TextStyle{}) != 0 {
+	if measureWords("Done.", size, fyne.TextStyle{}).balanced(target, 0) != 0 || measureWords(strings.Repeat("x", 200), size, fyne.TextStyle{}).balanced(target, 0) != 0 {
 		t.Fatal("one-line or one-word text must not be balanced")
+	}
+	// The floor wins over evening out: fewer lines, never narrower.
+	for _, floor := range []float32{target * 0.9, target * 1.5, w.total * 0.6} {
+		if fb := w.balanced(target, floor); fb != 0 && fb < floor {
+			t.Fatalf("floor %v: width %v", floor, fb)
+		}
 	}
 }
 
@@ -92,68 +91,94 @@ func firstList(t *testing.T, segs []widget.RichTextSegment) *widget.ListSegment 
 	return nil
 }
 
-func TestBalancedListWidth(t *testing.T) {
+// columns finds the scaling columns in a centered block.
+func columns(o fyne.CanvasObject) []*colLayout {
+	var out []*colLayout
+	deepWalk(o, func(x fyne.CanvasObject) {
+		if c, ok := x.(*fyne.Container); ok {
+			if l, ok := c.Layout.(*colLayout); ok {
+				out = append(out, l)
+			}
+		}
+	})
+	return out
+}
+
+// Widths scale with the chat: no fixed numbers (user 2026-11-22).
+func TestListColumnScalesWithChat(t *testing.T) {
 	test.NewTempApp(t)
 	for _, marker := range []string{"1. ", "- "} {
 		even := firstList(t, parseMD(marker+"Read the code first\n"+marker+"Change the layout\n"+marker+"Run all the tests"))
-		if balancedListWidth(even) != listNaturalWidth(even, 0) {
-			t.Fatalf("%q: a list with no overlong item keeps its natural width", marker)
+		nat := listNaturalWidth(even, 0)
+		c := columns(listColumn(even, widget.NewRichText(even)))[0]
+		for _, avail := range []float32{nat + 10, 2 * nat, 3000} {
+			if got := c.width(avail); got != nat {
+				t.Fatalf("%q: even list at %v: column %v, want its natural %v", marker, avail, got, nat)
+			}
 		}
 		l := firstList(t, parseMD(marker+"Read the code first\n"+marker+longItem+"\n"+marker+"Run all the tests"))
-		nat, bal := listNaturalWidth(l, 0), balancedListWidth(l)
-		if bal >= nat {
-			t.Fatalf("%q: overlong item: balanced %v, natural %v; want narrower", marker, bal, nat)
+		c = columns(listColumn(l, widget.NewRichText(l)))[0]
+		natLong := listNaturalWidth(l, 0)
+		var prev float32
+		for _, avail := range []float32{natLong * 1.2, natLong * 1.6, natLong * 2.5} {
+			w := c.width(avail)
+			if w >= natLong {
+				t.Fatalf("%q: overlong item at %v: column %v, want narrower than %v", marker, avail, w, natLong)
+			}
+			if w < balanceFloorShare*avail-1 {
+				t.Fatalf("%q: column %v narrower than %.0f%% of the chat (%v)", marker, w, balanceFloorShare*100, avail)
+			}
+			if w < prev {
+				t.Fatalf("%q: a wider chat gave a narrower column (%v after %v)", marker, w, prev)
+			}
+			prev = w
 		}
-		if bal < listNaturalWidth(even, 0) {
-			t.Fatalf("%q: balanced width %v is narrower than the other items (%v)", marker, bal, listNaturalWidth(even, 0))
-		}
-	}
-	one := firstList(t, parseMD("- "+longItem))
-	if balancedListWidth(one) != listNaturalWidth(one, 0) {
-		t.Fatal("a one-item list is unchanged")
 	}
 }
 
-// balancedColumns lists the fitCenter widths in a centered block.
-func balancedColumns(o fyne.CanvasObject) []float32 {
-	var out []float32
-	var walk func(fyne.CanvasObject)
-	walk = func(o fyne.CanvasObject) {
-		c, ok := o.(*fyne.Container)
-		if !ok {
-			return
-		}
-		if f, ok := c.Layout.(fitCenter); ok {
-			out = append(out, f.natural)
-		}
-		for _, k := range c.Objects {
-			walk(k)
+// A list wider than the chat is capped at listCapShare of it and centered.
+func TestWideListCappedToShareOfChat(t *testing.T) {
+	test.NewTempApp(t)
+	long := strings.Repeat("A plan step that is long but not much longer than the others in the list. ", 3)
+	l := firstList(t, parseMD("1. "+long+"\n2. "+long+"x\n3. "+long+"y"))
+	c := columns(listColumn(l, widget.NewRichText(l)))[0]
+	nat := listNaturalWidth(l, 0)
+	for _, avail := range []float32{nat * 0.5, nat * 0.9} {
+		if got, want := c.width(avail), listCapShare*avail; got != want {
+			t.Fatalf("list wider than the chat (%v > %v): column %v, want %v", nat, avail, got, want)
 		}
 	}
-	walk(o)
-	return out
+	if got := c.width(nat * 1.1); got != nat {
+		t.Fatalf("list that fits: column %v, want natural %v", got, nat)
+	}
 }
 
 func TestCenteredParagraphBalancesOverlongLine(t *testing.T) {
 	test.NewTempApp(t)
-	got := balancedColumns(centeredBlocks(parseMD("a. Read the code first\nb. " + longItem + "\nc. Run all the tests")))
-	if len(got) != 1 {
-		t.Fatalf("lettered group with an overlong line: %d balanced columns, want 1", len(got))
+	if n := len(columns(centeredBlocks(parseMD("a. Read the code first\nb. " + longItem + "\nc. Run all the tests")))); n != 1 {
+		t.Fatalf("lettered group with an overlong line: %d columns, want 1", n)
 	}
-	if n := len(balancedColumns(centeredBlocks(parseMD("Read the code first\nChange the layout\nRun all the tests")))); n != 0 {
-		t.Fatalf("even paragraph group: %d balanced columns, want 0", n)
+	if n := len(columns(centeredBlocks(parseMD("Read the code first\nChange the layout\nRun all the tests")))); n != 0 {
+		t.Fatalf("even paragraph group: %d columns, want 0", n)
 	}
-	if n := len(balancedColumns(centeredBlocks(parseMD(longItem)))); n != 0 {
-		t.Fatalf("single line: %d balanced columns, want 0", n)
+	if n := len(columns(centeredBlocks(parseMD(longItem)))); n != 0 {
+		t.Fatalf("single line: %d columns, want 0", n)
 	}
-	// The overlong line keeps its place between the others.
 	o := centeredBlocks(parseMD("Read the code first\n" + longItem + "\nRun all the tests"))
 	box, ok := o.(*fyne.Container)
 	if !ok || len(box.Objects) != 3 {
 		t.Fatalf("want 3 parts (before, balanced line, after), got %T", o)
 	}
-	if _, ok := box.Objects[1].(*fyne.Container).Layout.(fitCenter); !ok {
+	c, ok := box.Objects[1].(*fyne.Container).Layout.(*colLayout)
+	if !ok {
 		t.Fatal("the middle part is the balanced line")
+	}
+	// Narrow chat: the line wraps at the chat's own width anyway.
+	if w := c.width(300); w > 300 {
+		t.Fatalf("column %v wider than a 300 px chat", w)
+	}
+	if a, b := c.width(1000), c.width(2000); b < a {
+		t.Fatalf("a wider chat gave a narrower column: %v then %v", a, b)
 	}
 }
 
@@ -162,38 +187,34 @@ func TestCenteredParagraphBalancesOverlongLine(t *testing.T) {
 func TestCenteredParagraphStyledRunsAreOneLine(t *testing.T) {
 	test.NewTempApp(t)
 	styled := strings.Repeat("The first paragraph has **bold** words, `code` and a [link](https://example.com) to stream. ", 3)
-	if n := len(balancedColumns(centeredBlocks(parseMD(styled)))); n != 0 {
-		t.Fatalf("one styled paragraph: %d balanced columns, want 0", n)
+	if n := len(columns(centeredBlocks(parseMD(styled)))); n != 0 {
+		t.Fatalf("one styled paragraph: %d columns, want 0", n)
 	}
 	o := centeredBlocks(parseMD("Read the code first\n" + styled + "\nRun all the tests"))
 	box, ok := o.(*fyne.Container)
 	if !ok || len(box.Objects) != 3 {
 		t.Fatalf("want 3 parts (before, balanced styled line, after), got %T", o)
 	}
-	f, ok := box.Objects[1].(*fyne.Container)
-	if !ok {
-		t.Fatal("the middle part is the balanced line")
-	}
-	if got := f.Objects[0].(*widget.RichText).String(); !strings.Contains(got, "bold") || !strings.Contains(got, "link") || strings.Contains(got, "Run all") {
+	got := box.Objects[1].(*fyne.Container).Objects[0].(*widget.RichText).String()
+	if !strings.Contains(got, "bold") || !strings.Contains(got, "link") || strings.Contains(got, "Run all") {
 		t.Fatalf("the balanced column holds the whole styled line and nothing else: %q", got)
 	}
 }
 
-func TestPlanQuestionsBalanceOverlong(t *testing.T) {
-	h := newHarness(t)
-	h.ui(func() {
-		qs := []planQ{
-			{ID: 1, Text: "Rebuild now? Yes or no?", Kind: qYesNo, Recommended: -1},
-			{ID: 2, Text: longItem + "?", Kind: qYesNo, Recommended: -1},
-			{ID: 3, Text: "Push too? Yes or no?", Kind: qYesNo, Recommended: -1},
-		}
-		h.d.center = true
-		if n := len(balancedColumns(h.d.chat.planQuestionForm(qs, map[int]planAnswer{}))); n != 1 {
-			t.Fatalf("centering on: %d balanced questions, want 1", n)
-		}
-		h.d.center = false
-		if n := len(balancedColumns(h.d.chat.planQuestionForm(qs, map[int]planAnswer{}))); n != 0 {
-			t.Fatalf("centering off: %d balanced questions, want 0", n)
-		}
-	})
+// colLayout re-works its width when the chat is resized.
+func TestColumnFollowsResize(t *testing.T) {
+	test.NewTempApp(t)
+	calls := 0
+	o := widget.NewLabel("x")
+	c := newColumn(true, func(avail float32) float32 { calls++; return avail / 2 }, o)
+	c.Resize(fyne.NewSize(800, 40))
+	calls = 1
+	c.Resize(fyne.NewSize(800, 50))
+	if o.Size().Width != 400 || o.Position().X != 200 || calls != 1 {
+		t.Fatalf("at 800: width %v x %v calls %d", o.Size().Width, o.Position().X, calls)
+	}
+	c.Resize(fyne.NewSize(1200, 50))
+	if o.Size().Width != 600 || o.Position().X != 300 || calls != 2 {
+		t.Fatalf("at 1200: width %v x %v calls %d", o.Size().Width, o.Position().X, calls)
+	}
 }

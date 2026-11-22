@@ -178,40 +178,43 @@ type sideRow struct {
 }
 
 type desk struct {
-	nameClose     func()
-	limitMsg      string
-	notifier      *notifier
-	notifySink    func(sid, title, body string)
-	foreground    bool
-	compactor     func(ctx context.Context, model, text string) (string, error)
-	kmemRun       func(prog string, args ...string) (string, error)
-	kmemOff       bool
-	escClosers    map[fyne.CanvasObject]func()
-	kmemVer       kmemVersion
-	pcLock        *pcLock
-	pcPassRefresh func()
-	pcBox         *fyne.Container
-	pcsBtn        *widget.Button
-	pcNote        map[string]string
-	hsMu          sync.Mutex
-	lastHandoffs  []kmemHandoff
-	policy        handoffPolicy
-	policyAt      time.Time
-	policyBusy    bool
-	localModels   []string
-	localBusy     bool
-	fetchLocal    func(host string) []localInfo
-	fetchServer   func(localServerConf) []string
-	localAgain    bool
-	after         func(time.Duration, func())
-	toolbarRow    *fyne.Container
-	chipBtns      [2]*widget.Button
-	toolbarBox    *fyne.Container
-	usagePaused   bool
-	pauseUntil    time.Time
-	pausedIDs     []string
-	pauseBanner   *fyne.Container
-	pauseText     *widget.Label
+	nameClose      func()
+	limitMsg       string
+	notifier       *notifier
+	notifySink     func(sid, title, body string)
+	foreground     bool
+	compactor      func(ctx context.Context, model, text string) (string, error)
+	kmemRun        func(prog string, args ...string) (string, error)
+	kmemOff        bool
+	escClosers     map[fyne.CanvasObject]func()
+	kmemVer        kmemVersion
+	pcLock         *pcLock
+	pcPassRefresh  func()
+	pcBox          *fyne.Container
+	pcsBtn         *widget.Button
+	pcNote         map[string]string
+	hsMu           sync.Mutex
+	lastHandoffs   []kmemHandoff
+	policy         handoffPolicy
+	policyAt       time.Time
+	policyBusy     bool
+	localModels    []string
+	localBusy      bool
+	fetchLocal     func(host string) []localInfo
+	fetchServer    func(localServerConf) []string
+	localAgain     bool
+	after          func(time.Duration, func())
+	toolbarRow     *fyne.Container
+	chipsBtn       *widget.Button
+	queueReflowing bool
+	modelBtn       *widget.Button
+	modeBtn        *widget.Button
+	toolbarBox     *fyne.Container
+	usagePaused    bool
+	pauseUntil     time.Time
+	pausedIDs      []string
+	pauseBanner    *fyne.Container
+	pauseText      *widget.Label
 	// kmem banner: the user's decisions (recycle bin, audit problems); kmembanner.go
 	kmemBanner     *fyne.Container
 	kmemBannerText *widget.Label
@@ -935,7 +938,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.note.Hide()
 	d.rcStatus = mutedText("", fontMeta)
 	d.rcStatus.Hide()
-	d.tasksBtn = newTasksButton(func() *deskSession { return d.current }, d.cmdTasks)
+	d.tasksBtn = newTasksButton(func() *deskSession { return d.current }, func(s *deskSession) { menuAbove(d.tasksBtn, d.taskItems(s)) })
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.reloadBtn = d.newRemoteReloadButton("Reload", func() *deskSession { return d.current })
 	d.headPad = canvas.NewRectangle(color.Transparent)
@@ -1000,12 +1003,20 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.sendBtn = widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.send(d.input.Text) })
 	d.sendBtn.Importance = widget.HighImportance
 	d.stt = newSpeech(d)
-	openAll := widget.NewButtonWithIcon("Open chips", theme.MenuDropDownIcon(), func() { d.setAllChips(true) })
-	openAll.Importance = widget.MediumImportance
-	closeAll := widget.NewButtonWithIcon("Collapse chips", theme.MenuDropUpIcon(), func() { d.setAllChips(false) })
-	closeAll.Importance = widget.MediumImportance
-	d.chipBtns = [2]*widget.Button{openAll, closeAll}
-	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, boxed(d.modelSel), boxed(d.modeSel), d.stt.langBtn, d.tasksBtn), container.NewHBox(openAll, closeAll))
+	d.chipsBtn = menuButton("Chips", theme.MenuDropUpIcon(), d.chipItems)
+	d.modelBtn = menuButton("", nil, func() []*fyne.MenuItem {
+		if d.current == nil {
+			return nil
+		}
+		return d.modelItems(d.current)
+	})
+	d.modeBtn = menuButton("", nil, func() []*fyne.MenuItem {
+		if d.current == nil {
+			return nil
+		}
+		return d.modeItems(d.current)
+	})
+	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.stt.langBtn, d.tasksBtn), d.chipsBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), container.New(fitRight{}, d.folder))
 	d.bottomBox = windowCentered(d.inputWidth, d.sidebarWidth, container.NewVBox(d.cmds.panel, inputCard, statsRow))
@@ -1055,6 +1066,8 @@ func (d *desk) updateChrome() {
 		d.modelSel.Disable()
 		d.modeSel.Disable()
 		d.backendBtn.Disable()
+		d.modelBtn.Disable()
+		d.modeBtn.Disable()
 		setText(d.stats, "")
 		return
 	}
@@ -1139,18 +1152,19 @@ func (d *desk) updateChrome() {
 		d.stopBtn.Disable()
 	}
 	setText(d.stats, statsLine(s))
-	if syncTasksButton(d.tasksBtn, s) && d.mainPane != nil {
-		labels := [2]string{"Open chips", "Collapse chips"}
-		for i, b := range d.chipBtns {
-			if b == nil {
-				continue
-			}
-			want := labels[i]
-			if d.tasksBtn.Visible() {
-				want = ""
-			}
-			b.SetText(want)
+	mirror := func(b *widget.Button, sel *widget.Select) {
+		if sel.Disabled() {
+			b.Disable()
+		} else {
+			b.Enable()
 		}
+	}
+	mirror(d.modelBtn, d.modelSel)
+	mirror(d.modeBtn, d.modeSel)
+	if d.syncBarButtons(s) && d.mainPane != nil {
+		relayoutTree(d.mainPane)
+	}
+	if syncTasksButton(d.tasksBtn, s) && d.mainPane != nil {
 		relayoutTree(d.mainPane)
 	}
 	if d.usage != nil {
@@ -2594,7 +2608,11 @@ func isRetry(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), retryPrefix)
 }
 
-var strongApproval = []string{"yes approve", "yes, approve", "yes i approve", "yes, i approve", "i approve", "approve all", "yes approved", "yes, approved", "plan approved"}
+// strongApproval: an approval at the start counts however long the message
+// goes on, unless the rest has a strongStop word ("Approve the plan with
+// the recommended options, also look at …" did not count, user 2026-11-22).
+var strongApproval = []string{"yes approve", "yes, approve", "yes i approve", "yes, i approve", "i approve", "approve all", "yes approved", "yes, approved", "plan approved",
+	"approve the plan", "approve this plan", "approve plan", "approved", "plan is approved", "yes, go ahead", "go ahead with the plan"}
 
 var strongStop = []string{"but", "don't", "dont", "do not", "not ", "wait", "instead", "hold", "stop", "except", "cancel", "skip", "don’t"}
 

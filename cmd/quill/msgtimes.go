@@ -135,7 +135,31 @@ func (v *chatView) withTime(o fyne.CanvasObject, t time.Time) fyne.CanvasObject 
 		return o
 	}
 	l := v.muted(v.d.msgTime(t), fontMeta)
-	return container.NewVBox(o, l)
+	return container.New(timeLayout{above: timeGapAbove, below: timeGapBelow}, o, l)
+}
+
+// The time sits close under its message, about a third of the way to the
+// next one (user 2026-11-22): a small gap above it, a larger one below.
+const (
+	timeGapAbove = -3
+	timeGapBelow = 6
+)
+
+// timeLayout stacks a message and its time with the given gaps.
+type timeLayout struct{ above, below float32 }
+
+func (l timeLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	a, b := objs[0].MinSize(), objs[1].MinSize()
+	return fyne.NewSize(max(a.Width, b.Width), a.Height+l.above+b.Height+l.below)
+}
+
+func (l timeLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	b := objs[1].MinSize()
+	h := size.Height - l.above - b.Height - l.below
+	objs[0].Resize(fyne.NewSize(size.Width, h))
+	objs[0].Move(fyne.NewPos(0, 0))
+	objs[1].Resize(fyne.NewSize(size.Width, b.Height))
+	objs[1].Move(fyne.NewPos(0, h+l.above))
 }
 
 // timeSettings: Settings → General → Message times.
@@ -173,18 +197,19 @@ func (d *desk) timeSettings() fyne.CanvasObject {
 	return container.NewVBox(show, container.NewBorder(nil, nil, widget.NewLabel("Format"), nil, format), preview)
 }
 
-// redrawChats re-renders the shown chats (after a display setting changed).
+// redrawChats re-renders the shown chats and drops the cached ones (after a
+// display setting changed), so the change shows at once everywhere; show()
+// alone would bring back the cached drawing.
 func (d *desk) redrawChats() {
-	views := []*chatView{d.chat}
-	for _, p := range d.panes {
-		views = append(views, p.view)
-	}
-	for _, v := range views {
-		if v == nil || v.s == nil {
+	for _, v := range d.allViews() {
+		if v == nil {
 			continue
 		}
-		s := v.s
-		v.s = nil
-		v.show(s)
+		v.cache = map[*deskSession]*sessView{}
+		v.order = nil
+		if s := v.s; s != nil {
+			v.s = nil
+			v.show(s)
+		}
 	}
 }

@@ -811,7 +811,7 @@ func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
 			if from > 0 {
 				parts = append(parts, text(run[:from]...))
 			}
-			parts = append(parts, container.New(fitCenter{natural: w}, text(run[from:to]...)))
+			parts = append(parts, newColumn(true, w, text(run[from:to]...)))
 			if to < len(run) {
 				parts = append(parts, text(run[to:]...))
 			}
@@ -829,7 +829,7 @@ func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
 		flush()
 		t := widget.NewRichText(l)
 		t.Wrapping = fyne.TextWrapWord
-		parts = append(parts, container.New(fitCenter{natural: balancedListWidth(l)}, t))
+		parts = append(parts, listColumn(l, t))
 	}
 	flush()
 	if len(parts) == 1 {
@@ -1936,7 +1936,7 @@ func parseChoices(line string) (string, []string, bool) {
 	opts := []string{a}
 	if strings.Contains(a, ", ") {
 		// "a, b, or c" and "a, b or c" both list three options.
-		opts = strings.Split(a, ", ")
+		opts = mergeContinuations(strings.Split(a, ", "))
 		// A lead-in before the first comma is not an option ("For the icon,
 		// use blue, green, or red?").
 		if len(opts) >= 2 && leadIn.MatchString(opts[0]) {
@@ -2097,8 +2097,13 @@ func (v *chatView) planAnswers(it *chat.Item, qs []planQ) map[int]planAnswer {
 	if ans == nil {
 		ans = map[int]planAnswer{}
 		for _, q := range qs {
-			if q.Kind == qSingle && q.Recommended >= 0 {
+			switch {
+			case q.Kind == qSingle && q.Recommended >= 0:
 				ans[q.ID] = planAnswer{Choice: q.Recommended}
+			case q.Kind == qYesNo && q.Recommended >= 0 && q.Recommended < 2:
+				// The recommended Yes or No is picked by default too.
+				yes := q.Recommended == 0
+				ans[q.ID] = planAnswer{Yes: &yes, Choice: -1}
 			}
 		}
 		v.planAns[it] = ans
@@ -2110,51 +2115,47 @@ func (v *chatView) planAnswers(it *chat.Item, qs []planQ) map[int]planAnswer {
 // options, any of them, or a text field).
 func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.CanvasObject {
 	box := container.NewVBox()
-	texts := make([]string, len(qs))
-	for i, q := range qs {
-		texts[i] = fmt.Sprintf("%d. %s", i+1, q.Text)
-	}
-	long, longW := -1, float32(0)
-	if v.d.center {
-		// An overlong question wraps in balanced lines, weighted against
-		// the other questions (as in centered lists).
-		long, longW = balancedLabel(texts, theme.Size(theme.SizeNameText))
-	}
+	// With centering on, the questions and their options are one centered
+	// column (left-aligned inside, like a list) that scales with the chat;
+	// an overlong question wraps balanced (balance.go).
+	size := theme.Size(theme.SizeNameText)
+	var lines []wrapText
 	for i, q := range qs {
 		q := q
-		l := widget.NewLabel(texts[i])
+		l := widget.NewLabel(fmt.Sprintf("%d. %s", i+1, q.Text))
 		l.Wrapping = fyne.TextWrapWord
-		var head fyne.CanvasObject = l
-		if i == long {
-			head = container.New(fitCenter{natural: longW}, l)
+		lines = append(lines, measureWords(l.Text, size, fyne.TextStyle{}))
+		labels := recommendedLabels(q)
+		for _, o := range labels {
+			lines = append(lines, measureWords(o, size, fyne.TextStyle{}))
 		}
 		var ctl fyne.CanvasObject
 		switch q.Kind {
 		case qYesNo:
-			r := widget.NewRadioGroup([]string{"Yes", "No"}, nil)
+			r := widget.NewRadioGroup(labels, nil)
 			r.Horizontal = true
 			if a, ok := ans[q.ID]; ok && a.Yes != nil {
-				r.Selected = map[bool]string{true: "Yes", false: "No"}[*a.Yes]
+				r.Selected = labels[map[bool]int{true: 0, false: 1}[*a.Yes]]
 			}
 			r.OnChanged = func(sel string) {
 				a := ans[q.ID]
 				if sel == "" {
 					a.Yes = nil
 				} else {
-					yes := sel == "Yes"
+					yes := sel == labels[0]
 					a.Yes = &yes
 				}
 				ans[q.ID] = a
 			}
 			ctl = r
 		case qSingle:
-			r := widget.NewRadioGroup(q.Options, nil)
-			if a, ok := ans[q.ID]; ok && a.Choice >= 0 && a.Choice < len(q.Options) {
-				r.Selected = q.Options[a.Choice]
+			r := widget.NewRadioGroup(labels, nil)
+			if a, ok := ans[q.ID]; ok && a.Choice >= 0 && a.Choice < len(labels) {
+				r.Selected = labels[a.Choice]
 			}
 			r.OnChanged = func(sel string) {
 				a := planAnswer{Choice: -1}
-				for j, o := range q.Options {
+				for j, o := range labels {
 					if o == sel {
 						a.Choice = j
 					}
@@ -2194,10 +2195,29 @@ func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.Can
 			e.OnChanged = func(t string) { ans[q.ID] = planAnswer{Text: t, Choice: -1} }
 			ctl = e
 		}
-		box.Add(container.NewVBox(head, ctl))
+		box.Add(container.NewVBox(l, ctl))
 	}
 	note := widget.NewLabel("Unanswered questions are sent as \"no answer\".")
 	note.SizeName = theme.SizeNameCaptionText
 	box.Add(note)
-	return box
+	if !v.d.center {
+		return box
+	}
+	// Labels and radio rows add their padding and the radio icon.
+	extra := 2*theme.Size(theme.SizeNameInnerPadding) + theme.Size(theme.SizeNameInlineIcon) + 2*theme.Padding()
+	return newColumn(true, func(avail float32) float32 { return groupWidth(avail, lines, extra) }, box)
+}
+
+// recommendedLabels: the option labels a question's radio buttons show,
+// with "(recommended)" after the recommended one (user 2026-11-22).
+func recommendedLabels(q planQ) []string {
+	opts := q.Options
+	if q.Kind == qYesNo {
+		opts = []string{"Yes", "No"}
+	}
+	out := append([]string(nil), opts...)
+	if q.Recommended >= 0 && q.Recommended < len(out) {
+		out[q.Recommended] += " (recommended)"
+	}
+	return out
 }

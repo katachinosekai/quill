@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -78,16 +79,38 @@ func (d *desk) drawQueue(v *chatView, s *deskSession) {
 		v.queueBox.Refresh()
 		return
 	}
+	head := func(t string) fyne.CanvasObject {
+		m := mutedText(t, fontMeta)
+		if d.center {
+			m.Alignment = fyne.TextAlignCenter
+		}
+		return m
+	}
 	if len(s.queue) > 0 {
-		rows = append(rows, mutedText("Queued, sent when Claude finishes · ↑ in an empty box edits the last one", fontMeta))
+		rows = append(rows, head("Queued, sent when Claude finishes · ↑ in an empty box edits the last one"))
 	}
 	if s.qedit != nil {
-		rows = append(rows, mutedText(fmt.Sprintf("Editing queued message %d · Enter saves it in place · ↓ or Esc puts it back unchanged", s.qedit.idx+1), fontMeta))
+		rows = append(rows, head(fmt.Sprintf("Editing queued message %d · Enter saves it in place · ↓ or Esc puts it back unchanged", s.qedit.idx+1)))
+	}
+	// With centering on, queued messages follow the chat's centering rules
+	// (user 2026-11-22): one centered column that scales with the chat,
+	// text centered and wrapped, an overlong message wrapped balanced.
+	var lines []wrapText
+	for _, q := range s.queue {
+		lines = append(lines, measureWords(oneLine(q, 160), theme.TextSize(), fyne.TextStyle{}))
+	}
+	col := func(avail float32) float32 {
+		return groupWidth(avail, lines, queueRowExtra())
 	}
 	for i, q := range s.queue {
 		i := i
 		l := widget.NewLabel(oneLine(q, 160))
 		l.Truncation = fyne.TextTruncateEllipsis
+		if d.center {
+			l.Truncation = fyne.TextTruncateOff
+			l.Wrapping = fyne.TextWrapWord
+			l.Alignment = fyne.TextAlignCenter
+		}
 		now := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.sendQueuedNow(s, i) })
 		now.Importance = widget.LowImportance
 		edit := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() { d.editQueued(s, i) })
@@ -101,7 +124,12 @@ func (d *desk) drawQueue(v *chatView, s *deskSession) {
 		})
 		del.Importance = widget.LowImportance
 		handle := container.NewCenter(sized(16, 16, widget.NewIcon(theme.MenuIcon())))
-		content := bg(colCard, 8, container.NewBorder(nil, nil, handle, container.NewHBox(now, edit, del), l))
+		var content fyne.CanvasObject = bg(colCard, 8, container.NewBorder(nil, nil, handle, container.NewHBox(now, edit, del), l))
+		if d.center {
+			c := newColumn(true, col, content)
+			c.Layout.(*colLayout).onWidth = d.queueReflow
+			content = c
+		}
 		var row *queueRow
 		q := q
 		row = newQueueRow(content, func(dy float32) {
@@ -125,6 +153,27 @@ func (d *desk) drawQueue(v *chatView, s *deskSession) {
 	if d.mainPane != nil {
 		relayout(d.mainPane)
 	}
+}
+
+// queueReflow lays the window out once more after a queued row's column
+// changed width, so wrapped rows get their new height (once per frame).
+func (d *desk) queueReflow() {
+	if d.queueReflowing || d.mainPane == nil {
+		return
+	}
+	d.queueReflowing = true
+	d.afterUI(0, func() {
+		d.queueReflowing = false
+		relayoutTree(d.mainPane)
+		canvas.Refresh(d.mainPane)
+	})
+}
+
+// queueRowExtra: what a queued row adds around its text (drag handle,
+// three icon buttons, label and card padding).
+func queueRowExtra() float32 {
+	btn := theme.IconInlineSize() + 2*theme.InnerPadding()
+	return 16 + 3*btn + 4*theme.Padding() + 2*theme.InnerPadding() + 2*8
 }
 
 func (d *desk) inputFor(s *deskSession) *sendEntry {

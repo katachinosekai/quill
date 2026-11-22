@@ -189,7 +189,7 @@ func newSpeech(d *desk) *speech {
 	sp.btn = widget.NewButtonWithIcon("", theme.MediaRecordIcon(), sp.click)
 	sp.btn.Importance = widget.LowImportance
 	sp.langBtn = widget.NewButton("Voice: "+strings.ToUpper(sp.lang()), func() {
-		d.pickLanguage(sp.lang(), func(code string) { sp.setLang(code) })
+		menuAbove(sp.langBtn, d.voiceItems())
 	})
 	sp.langBtn.Importance = widget.MediumImportance
 	sp.syncOff()
