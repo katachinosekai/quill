@@ -790,20 +790,53 @@ func (v *chatView) markdown(text string) fyne.CanvasObject {
 	if v.d.center {
 		return centeredBlocks(rt.Segments)
 	}
+	if hasLetteredRun(text) {
+		return blocks(rt.Segments, false)
+	}
 	return rt
 }
 
 func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
+	return blocks(segs, true)
+}
+
+// hasLetteredRun: the markdown has two or more lettered lines in a row
+// (blank lines between are fine).
+func hasLetteredRun(md string) bool {
+	prev := false
+	for _, l := range strings.Split(md, "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		cur := rawLettered.MatchString(l)
+		if cur && prev {
+			return true
+		}
+		prev = cur
+	}
+	return false
+}
+
+// blocks lays a message's blocks out: with center, paragraphs centered
+// (an overlong line balanced) and lists as centered columns; lettered
+// items (2+ in a row) as lists either way (letteredList).
+func blocks(segs []widget.RichTextSegment, center bool) fyne.CanvasObject {
 	var parts []fyne.CanvasObject
 	var run []widget.RichTextSegment
 	text := func(segs ...widget.RichTextSegment) *widget.RichText {
-		alignSegments(segs, fyne.TextAlignCenter)
+		if center {
+			alignSegments(segs, fyne.TextAlignCenter)
+		}
 		t := widget.NewRichText(segs...)
 		t.Wrapping = fyne.TextWrapWord
 		return t
 	}
 	plain := func(run []widget.RichTextSegment) {
 		if len(run) == 0 {
+			return
+		}
+		if !center {
+			parts = append(parts, text(run...))
 			return
 		}
 		if from, to, w, ok := balancedParagraph(run); ok {
@@ -843,7 +876,7 @@ func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
 				continue
 			}
 			plain(run[from:bounds[i][0]])
-			parts = append(parts, letteredColumn(run[bounds[i][0]:bounds[j-1][1]], lines[i:j]))
+			parts = append(parts, letteredList(run[bounds[i][0]:bounds[j-1][1]], bounds[i:j], bounds[i][0], lines[i:j], center))
 			from = bounds[j-1][1]
 			i = j
 		}
@@ -859,7 +892,11 @@ func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
 		flush()
 		t := widget.NewRichText(l)
 		t.Wrapping = fyne.TextWrapWord
-		parts = append(parts, listColumn(l, t))
+		if center {
+			parts = append(parts, listColumn(l, t))
+		} else {
+			parts = append(parts, t)
+		}
 	}
 	flush()
 	if len(parts) == 1 {

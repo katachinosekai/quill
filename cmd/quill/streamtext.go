@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -50,12 +51,12 @@ func (d *desk) animateText() bool {
 func splitParas(text string) (done []string, live string) {
 	inFence, start, pos := false, 0, 0
 	lines := strings.SplitAfter(text, "\n")
-	for _, l := range lines {
+	for i, l := range lines {
 		if strings.HasPrefix(strings.TrimSpace(l), "```") {
 			inFence = !inFence
 		}
 		pos += len(l)
-		if !inFence && strings.TrimSpace(l) == "" && strings.TrimSpace(text[pos:]) != "" {
+		if !inFence && strings.TrimSpace(l) == "" && strings.TrimSpace(text[pos:]) != "" && !betweenLettered(lines, i) {
 			if p := strings.TrimSpace(text[start:pos]); p != "" {
 				done = append(done, p)
 			}
@@ -63,6 +64,24 @@ func splitParas(text string) (done []string, live string) {
 		}
 	}
 	return done, strings.TrimLeft(text[start:], "\n")
+}
+
+// rawLettered: a markdown line that starts a lettered item ("a. ",
+// "**b)** ").
+var rawLettered = regexp.MustCompile(`^\s*(?:\*\*)?[a-hA-H][.)](?:\*\*)?\s`)
+
+// betweenLettered: blank line i sits between two lettered lines, which
+// stay one list (blank lines between items are fine, as in Quill Android).
+func betweenLettered(lines []string, i int) bool {
+	p := i - 1
+	for p >= 0 && strings.TrimSpace(lines[p]) == "" {
+		p--
+	}
+	n := i + 1
+	for n < len(lines) && strings.TrimSpace(lines[n]) == "" {
+		n++
+	}
+	return p >= 0 && n < len(lines) && rawLettered.MatchString(lines[p]) && rawLettered.MatchString(lines[n])
 }
 
 // streamCut: the offset where the growing last paragraph starts (0 = none
@@ -179,6 +198,12 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 // parent fix in third_party/fyne/widget/richtext.go).
 func (v *chatView) drawStream(st *streamView, iv *itemView) {
 	done, live := splitParas(st.it.Text[:st.pos])
+	if len(done) < st.done {
+		// A paragraph counted as finished joined the next one (a lettered
+		// item followed by another after a blank line): draw them again.
+		st.box.Objects = []fyne.CanvasObject{st.live}
+		st.done = 0
+	}
 	if len(done) > st.done {
 		objs := st.box.Objects[:len(st.box.Objects)-1]
 		for _, p := range done[st.done:] {

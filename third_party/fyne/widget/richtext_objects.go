@@ -233,6 +233,10 @@ func (i *ImageSegment) Unselect() {
 type ListSegment struct {
 	Items   []RichTextSegment
 	Ordered bool
+	// Markers, when set, are the items' markers as written ("a.", "b)");
+	// Quill uses them for lettered lists. Empty entries fall back to the
+	// bullet or number.
+	Markers []string
 
 	// startIndex is the starting number - 1 (If it is ordered). Unordered lists
 	// ignore startIndex.
@@ -276,6 +280,9 @@ func (l *ListSegment) Segments() []RichTextSegment {
 			if l.Ordered {
 				txt = strconv.Itoa(j) + "."
 				j++
+			}
+			if i < len(l.Markers) && l.Markers[i] != "" {
+				txt = l.Markers[i]
 			}
 			indentation := strings.Repeat(" ", l.indentationLevel*4)
 			style := RichTextStyleStrong

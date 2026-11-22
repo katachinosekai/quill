@@ -283,21 +283,69 @@ func balancedParagraph(run []widget.RichTextSegment) (from, to int, width func(a
 	}, true
 }
 
-// letteredLine: a line that starts like a lettered list item.
-var letteredLine = regexp.MustCompile(`^\s*[a-hA-H][.)]\s`)
+// letteredLine: a drawn line that starts like a lettered list item.
+var letteredLine = regexp.MustCompile(`^\s*[a-hA-H][.)]\s+`)
 
-// letteredColumn lays consecutive lettered lines out like a list (rule
-// f5c0dd9): left-aligned, so their markers line up, in a column centered
-// as a whole that scales with the chat (groupWidth).
-func letteredColumn(segs []widget.RichTextSegment, lines []string) fyne.CanvasObject {
-	alignSegments(segs, fyne.TextAlignLeading)
-	t := widget.NewRichText(segs...)
-	t.Wrapping = fyne.TextWrapWord
-	size := msgTextSize()
-	words := make([]wrapText, len(lines))
-	for i, l := range lines {
-		words[i] = measureWords(l, size, fyne.TextStyle{})
+// letteredList lays out lettered items as a real list (rule f5c0dd9, as
+// Quill Android 0.9.24 does): fyne's list with the letters as written
+// ("a.", "b)") as markers (ListSegment.Markers, a Quill patch in
+// third_party/fyne), so items get list spacing and a hanging indent like a
+// numbered list. With center the list is a centered column that scales with
+// the chat (listColumn); otherwise it is left-aligned. segs are the items'
+// segments (bounds index lines within the message's run, base is where
+// segs start).
+func letteredList(segs []widget.RichTextSegment, bounds [][2]int, base int, lines []string, center bool) fyne.CanvasObject {
+	l := &widget.ListSegment{}
+	for k, b := range bounds {
+		line := segs[b[0]-base : b[1]-base]
+		var item []widget.RichTextSegment
+		if p, ok := line[0].(*widget.ParagraphSegment); ok && len(line) == 1 {
+			item = p.Texts
+		} else {
+			item = line
+		}
+		// The paragraph's closing (empty, block) segment ends the item.
+		for len(item) > 0 {
+			if t, ok := item[len(item)-1].(*widget.TextSegment); ok && !t.Inline() && strings.TrimSpace(t.Text) == "" {
+				item = item[:len(item)-1]
+				continue
+			}
+			break
+		}
+		lead := letteredLine.FindString(lines[k])
+		item = dropRunes(item, len([]rune(lead)))
+		alignSegments(item, fyne.TextAlignLeading)
+		l.Items = append(l.Items, &widget.ParagraphSegment{Texts: item})
+		l.Markers = append(l.Markers, strings.TrimSpace(lead))
 	}
-	pad := 2*msgTheme{}.Size(theme.SizeNameInnerPadding) + balanceSlack
-	return newColumn(true, func(avail float32) float32 { return groupWidth(avail, words, pad) }, t)
+	t := widget.NewRichText(l)
+	t.Wrapping = fyne.TextWrapWord
+	if center {
+		return listColumn(l, t)
+	}
+	return t
+}
+
+// dropRunes removes the first n characters of the leading text segments.
+func dropRunes(segs []widget.RichTextSegment, n int) []widget.RichTextSegment {
+	for len(segs) > 0 && n > 0 {
+		t, ok := segs[0].(*widget.TextSegment)
+		if !ok {
+			break
+		}
+		r := []rune(t.Text)
+		if len(r) <= n && t.Inline() {
+			n -= len(r)
+			segs = segs[1:]
+			continue
+		}
+		t.Text = strings.TrimLeft(string(r[min(n, len(r)):]), " ")
+		n = 0
+	}
+	if len(segs) > 0 {
+		if t, ok := segs[0].(*widget.TextSegment); ok {
+			t.Text = strings.TrimLeft(t.Text, " ")
+		}
+	}
+	return segs
 }
