@@ -141,6 +141,9 @@ func (s *Scanner) Scan() ([]Info, error) {
 	res := out[:0]
 	for i, o := range out {
 		if keep[i] {
+			if t := desktopTitle(o.Path); t != "" {
+				o.Title, o.Named = t, true
+			}
 			res = append(res, o)
 		}
 	}
@@ -203,7 +206,8 @@ func (fs *fileScan) feed() error {
 		return err
 	}
 	info := &fs.info
-	r := bufio.NewReaderSize(f, 1<<20)
+	r := getReader(f)
+	defer readerPool.Put(r)
 	for {
 		line, err := r.ReadBytes('\n')
 		if err == io.EOF {
@@ -347,7 +351,8 @@ func abandoned(path string) map[string]bool {
 	children := map[string][]string{}
 	results := map[string]bool{}
 	last := ""
-	r := bufio.NewReaderSize(f, 1<<20)
+	r := getReader(f)
+	defer readerPool.Put(r)
 	for {
 		line, err := r.ReadBytes('\n')
 		var rec struct {
@@ -471,4 +476,42 @@ func (t Tokens) Add(o Tokens) Tokens {
 
 func (t Tokens) Total() int64 {
 	return t.In + t.Out + t.CacheRead + t.CacheWrite
+}
+
+// desktopTitle: the title the Claude desktop app gave a Code-tab session, kept
+// next to its transcript as <session>/custom-title.json ({"customTitle":…};
+// seen on Windows 2026-11-22). "" when there is none.
+func desktopTitle(transcriptPath string) string {
+	if transcriptPath == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(strings.TrimSuffix(transcriptPath, ".jsonl"), "custom-title.json"))
+	if err != nil || len(b) > 4096 {
+		return ""
+	}
+	var t struct {
+		CustomTitle string `json:"customTitle"`
+	}
+	if json.Unmarshal(b, &t) != nil {
+		return ""
+	}
+	return strings.TrimSpace(t.CustomTitle)
+}
+
+// DesktopScratch: the folder is a Claude desktop app scratch workspace
+// (%APPDATA%\Claude\scratch-workspaces\…), not a project of the user's.
+func DesktopScratch(cwd string) bool {
+	c := strings.ToLower(strings.ReplaceAll(cwd, "\\", "/"))
+	return strings.Contains(c, "/claude/scratch-workspaces/") || strings.Contains(c, "-claude-scratch-workspaces-")
+}
+
+// readerPool reuses the 1 MB read buffers: every scan of a grown transcript
+// made a new one (600 MB of garbage for a start-up scan of 500 sessions,
+// 2026-11-22). ReadBytes copies each line out, so reuse is safe.
+var readerPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 1<<20) }}
+
+func getReader(f io.Reader) *bufio.Reader {
+	r := readerPool.Get().(*bufio.Reader)
+	r.Reset(f)
+	return r
 }

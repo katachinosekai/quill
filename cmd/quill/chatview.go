@@ -45,6 +45,11 @@ type itemView struct {
 // itemSig changes whenever an item's shown content does. The text is hashed,
 // not just measured: a finished reply can replace the streamed text with one
 // of the same length, and the phone API's revs must not miss that.
+// itemSigCheap: itemSig without the text hash.
+func itemSigCheap(it *chat.Item) string {
+	return fmt.Sprintf("%d|%d|%t|%t|%t|%d|%d|%d|%d", it.Kind, len(it.Text), it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, len(it.Diff))
+}
+
 func itemSig(it *chat.Item) string {
 	h := fnv.New64a()
 	h.Write([]byte(it.Text))

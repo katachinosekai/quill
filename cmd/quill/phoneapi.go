@@ -375,6 +375,7 @@ type itemTrack struct {
 	queueSig string
 	ptr      map[int]*chat.Item
 	sig      map[int]string
+	cheap    map[int]string // itemSigCheap, to skip hashing items that didn't change
 	irev     map[int]int
 }
 
@@ -382,8 +383,12 @@ func (t *itemTrack) reset(c *chat.Conversation) {
 	t.conv = c
 	t.epoch++
 	t.lastSeq = 0
-	t.ptr, t.sig, t.irev = map[int]*chat.Item{}, map[int]string{}, map[int]int{}
+	t.ptr, t.sig, t.irev, t.cheap = map[int]*chat.Item{}, map[int]string{}, map[int]int{}, map[int]string{}
 }
+
+// sigHashRecent: the newest items are always hashed (a reply can be
+// replaced by one of the same length while it is finishing).
+const sigHashRecent = 20
 
 func (t *itemTrack) update(s *deskSession) {
 	c := s.conv
@@ -411,7 +416,15 @@ func (t *itemTrack) update(s *deskSession) {
 			return
 		}
 	}
-	for _, it := range items[start:] {
+	recent := len(items) - sigHashRecent
+	for i, it := range items[start:] {
+		// Older items: only when length or flags changed is the text hashed
+		// (hashing 400 long replies on every scan cost 1.5 ms per session).
+		cheap := itemSigCheap(it)
+		if start+i < recent && t.cheap[it.Seq] == cheap && t.sig[it.Seq] != "" {
+			continue
+		}
+		t.cheap[it.Seq] = cheap
 		sig := itemSig(it)
 		if t.sig[it.Seq] != sig {
 			t.rev++

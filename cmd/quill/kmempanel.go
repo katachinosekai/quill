@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/katachinosekai/quill/internal/transcript"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -462,8 +465,14 @@ func (p *kmemPanel) memoryTab() fyne.CanvasObject {
 			d.do(func() { p.setMemText(firstNonEmpty(strings.TrimSpace(out), "Nothing found.")) })
 		}()
 	}
+	auto := widget.NewButtonWithIcon("Claude's auto memory (this project)", theme.DocumentIcon(), func() {
+		p.memTopic = ""
+		p.topics.UnselectAll()
+		p.setMemText(autoMemoryText(d.cwdOf(currentID(d))))
+	})
+	auto.Importance = widget.LowImportance
 	right := container.NewBorder(nil, container.NewHBox(p.memIDs, pin, unpin, toBin), nil, nil, container.NewVScroll(p.memText))
-	split := container.NewHSplit(container.NewBorder(search, nil, nil, nil, p.topics), right)
+	split := container.NewHSplit(container.NewBorder(container.NewVBox(search, auto), nil, nil, nil, p.topics), right)
 	split.Offset = 0.32
 	return split
 }
@@ -503,4 +512,44 @@ func (p *kmemPanel) setMemText(t string) {
 	p.memIDs.Options = factIDs(t)
 	p.memIDs.ClearSelected()
 	p.memIDs.Refresh()
+}
+
+func currentID(d *desk) string {
+	if d.current != nil {
+		return d.current.id
+	}
+	return ""
+}
+
+// autoMemoryText shows Claude Code's own auto memory for a project folder
+// (~/.claude/projects/<folder>/memory/MEMORY.md and the files next to it),
+// read only, so both kinds of memory are visible in one place.
+func autoMemoryText(cwd string) string {
+	if cwd == "" {
+		return "Open a session first: its project's auto memory is shown here."
+	}
+	dir := filepath.Join(transcript.DefaultRoot(), transcript.Sanitize(cwd), "memory")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "No auto memory for " + folderLabel(cwd) + " (" + tildePath(dir) + " doesn't exist). Claude Code writes it when auto memory is on for this project."
+	}
+	var b strings.Builder
+	b.WriteString("Claude's auto memory for " + folderLabel(cwd) + " (read only; " + tildePath(dir) + ")\n\n")
+	files := []string{"MEMORY.md"}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && e.Name() != "MEMORY.md" {
+			files = append(files, e.Name())
+		}
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			continue
+		}
+		if len(data) > 64<<10 {
+			data = append(data[:64<<10], []byte("\n… (cut)")...)
+		}
+		b.WriteString("── " + f + " ──\n" + strings.TrimSpace(string(data)) + "\n\n")
+	}
+	return strings.TrimSpace(b.String())
 }

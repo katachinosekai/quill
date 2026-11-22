@@ -1060,7 +1060,7 @@ func (d *desk) updateChrome() {
 	}
 	title, _, st := d.rowText(s.id)
 	setLabel(d.title, title)
-	sub := tildePath(s.cwd)
+	sub := folderLabel(s.cwd)
 	if st != stNone {
 		sub += "  ·  " + st.String()
 	}

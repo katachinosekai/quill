@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/katachinosekai/quill/internal/transcript"
 	"os"
 	"path/filepath"
 	"sort"
@@ -104,11 +105,32 @@ func (d *desk) projectOf(id string) string {
 			return w
 		}
 	}
+	if transcript.DesktopScratch(d.cwdOf(id)) {
+		return desktopScratchLabel
+	}
 	title, _, _ := d.rowText(id)
 	if w := firstWord(title); w != "" && !strings.EqualFold(w, "New") {
 		return w
 	}
 	return "Sessions"
+}
+
+const desktopScratchLabel = "Claude desktop app (scratch)"
+
+// folderLabel: how a session's folder is shown; a Claude desktop app scratch
+// workspace gets a name instead of its long AppData path.
+func folderLabel(cwd string) string {
+	if transcript.DesktopScratch(cwd) {
+		return desktopScratchLabel
+	}
+	return tildePath(cwd)
+}
+
+func (d *desk) cwdOf(id string) string {
+	if s := d.sessions[id]; s != nil && s.cwd != "" {
+		return s.cwd
+	}
+	return d.infos[id].Cwd
 }
 
 func (d *desk) setProject(id, project string) {
