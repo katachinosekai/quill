@@ -315,6 +315,7 @@ type desk struct {
 	phoneSync     *phoneSync
 	buildChk      *widget.Check // Settings → General "Ask before building", kept in line by settingsChanged
 	coordChk      *widget.Check // Settings → General "Coordinate with subagents"
+	featureDlg    dialog.Dialog // the open feature questions dialog (featureask.go)
 	phoneFileBtn  *widget.Button
 	phoneFileOff  *widget.Button
 	settingsSlot  *fyne.Container
@@ -519,13 +520,14 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		}
 	})
 	buildChk.Checked = d.buildGateOn()
-	coordChk := widget.NewCheck("Coordinate with subagents (Online only: the chat stays free, features go to subagents)", func(on bool) {
-		if on != d.app.Preferences().BoolWithFallback(prefCoordinator, true) {
-			d.app.Preferences().SetBool(prefCoordinator, on)
+	coordChk := widget.NewCheck(coordinatorTitle, func(on bool) {
+		if on != prefBool(d.app.Preferences(), prefCoordinator) {
+			setUserPref(d.app.Preferences(), prefCoordinator, on)
 			d.settingsChanged()
 		}
 	})
-	coordChk.Checked = d.app.Preferences().BoolWithFallback(prefCoordinator, true)
+	coordChk.Checked = prefBool(d.app.Preferences(), prefCoordinator)
+	coordNote := caption(coordinatorExplain + "\n" + coordinatorOnline)
 	d.buildChk, d.coordChk = buildChk, coordChk
 	newSessions := d.newSessionModelSetting()
 	sttChk := widget.NewCheck("Speech to text (the mic and Voice buttons under the message box)", func(on bool) {
@@ -561,7 +563,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	_ = roBtn
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
-	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, animChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Typing"), sttChk, d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
+	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, coordNote, animChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Typing"), sttChk, d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance

@@ -27,7 +27,7 @@ var phoneSettingPrefs = map[string]string{"buildGate": prefBuildGate, "coordinat
 func (d *desk) phoneSettings() map[string]any {
 	return map[string]any{
 		"buildGate":   d.buildGateOn(),
-		"coordinator": d.app.Preferences().BoolWithFallback(prefCoordinator, true),
+		"coordinator": prefBool(d.app.Preferences(), prefCoordinator),
 	}
 }
 
@@ -91,7 +91,7 @@ func (a *phoneAPI) setSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for k, on := range in {
-			a.d.app.Preferences().SetBool(phoneSettingPrefs[k], on)
+			setUserPref(a.d.app.Preferences(), phoneSettingPrefs[k], on)
 		}
 		a.d.settingsChanged()
 		out = map[string]any{"v": 1, "settings": a.d.phoneSettings()}

@@ -290,6 +290,7 @@ func (d *desk) setupAtStart() {
 				return
 			}
 			d.setupIfMissing()
+			d.askFeatureQuestionsWhenReady()
 		})
 	}()
 }

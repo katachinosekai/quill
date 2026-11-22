@@ -390,6 +390,27 @@ Body `{}`. Same as "Resume now" on the pause banner. Response `{"v": 1, "usage":
 
 Body: `{"buildGate": false}`, `{"coordinator": true}`, or both; booleans only. Sets the Quill Desktop Settings → General switches (the checkboxes follow) and sends a `settings` stream change. Response `{"v": 1, "settings": {"buildGate": false, "coordinator": true}}`. `400 bad_request` for an empty object, an unknown key or a value that isn't `true`/`false`; `403 control_off` as for every control write.
 
+### GET /phone/settings/questions
+
+Quill Desktop's open feature questions (since 2026-11-22). Updates keep every setting; only new, changed or removed features that need the user's input ask, once each, and Quill Android can answer them too. Empty until the Welcome was completed on the PC. Response, oldest first:
+
+```json
+{"v": 1, "questions": [
+  {"id": "coordinator", "kind": "New", "title": "Coordinate with subagents", "question": "How should Claude work?",
+   "text": "Claude splits your requests ...\nOnline sessions only (Claude models); local models work alone.",
+   "choices": ["Coordinate with subagents (recommended)", "One session does everything"], "recommended": 0}
+]}
+```
+
+- `kind`: `New`, `Changed`, `Removed` (show it as a tag) or `Notice` (empty `choices`: an OK only).
+- `text`: what the feature does, or for `Changed`/`Removed` what changes or goes away and what happens to the current setting; lines split by `\n`.
+- `recommended`: index into `choices`; preselect it.
+- "Later" is the phone's own: just don't answer.
+
+### POST /phone/settings/answer
+
+Body `{"id": "coordinator", "choice": 0}` (`choice` is an index into `choices`; omit it for a `Notice`). Saves the choice and marks the question answered on both sides (an open dialog on the PC drops it); a `settings` stream change follows. Response: the remaining questions as in `GET /phone/settings/questions`. `400 bad_request` for a body without `id`, `404 not_found` for a question that isn't open or a choice out of range, `403 control_off` as for every control write.
+
 ### POST /phone/sessions/new
 
 Body: `{"folder": "/home/user/Projects/demo", "backend": "online", "model": "opus", "mode": "default"}`. `folder` must be one of `/phone/folders`. Response: `{"v": 1, "session": {...}}`.

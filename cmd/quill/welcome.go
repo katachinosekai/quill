@@ -14,10 +14,11 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// Welcome (user 2026-11-21): seven questions on a new install, before the
-// Setup checks. Online or local model, the speech-to-text language, plan
-// first or not, kmem or Claude's auto memory, and Quill's default kmem rules
-// (beginner) or none (advanced). Shown once;
+// Welcome (user 2026-11-21): questions on a new install, before the Setup
+// checks. Online or local model, the speech-to-text language, plan first or
+// not, the "New" feature questions (featureask.go: coordinate with subagents
+// or one session, ...), kmem or Claude's auto memory, and Quill's default kmem rules (beginner) or none
+// (advanced). Shown once;
 // Settings → Setup → "Run welcome again" opens it later.
 
 const (
@@ -44,6 +45,7 @@ type welcomeChoices struct {
 	Lang       string // "" = speech to text off
 	Rules      bool
 	PlanFirst  bool
+	Features   map[string]int // feature question id → choice index
 	KmemMemory bool
 	Remote     string   // "" or "skip", or a vpnOption id
 	Typing     []string // the typing help picked (welcomeAutocorrect, welcomeAutoFormat)
@@ -139,6 +141,13 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 	} else {
 		done = append(done, "Claude works without a plan step.")
 	}
+	for _, q := range featureQuestions {
+		if i, ok := c.Features[q.ID]; ok && d.answerFeatureQuestion(q.ID, i) {
+			done = append(done, q.Question+" "+strings.TrimSuffix(q.Choices[i].Label, " (recommended)")+".")
+		}
+	}
+	d.markFeatureQuestionsAnswered() // new users are never asked them again
+	d.settingsChanged()
 	if c.KmemMemory {
 		p.SetString(memoryModeKey, memoryModeKmem)
 		done = append(done, "Sessions use kmem memory.")
@@ -163,7 +172,7 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 	return done
 }
 
-// showWelcome asks the three questions; after runs when it closes.
+// showWelcome asks the questions; after runs when it closes.
 func (d *desk) showWelcome(after func()) {
 	model := widget.NewRadioGroup([]string{welcomeOnline, welcomeLocal}, nil)
 	model.SetSelected(welcomeOnline)
@@ -211,6 +220,26 @@ func (d *desk) showWelcome(after func()) {
 		plan.SetSelected(welcomeAsk)
 	}
 
+	n := 3 // questions 1-3 come first, then the "New" feature questions
+	num := func(t string) *widget.Label { n++; return boldLabel(strconv.Itoa(n) + ". " + t) }
+	var featureParts []fyne.CanvasObject
+	featureRadios := map[string]*widget.RadioGroup{}
+	for _, q := range featureQuestions {
+		if q.Kind != featureNew || q.Retired || len(q.Choices) == 0 {
+			continue
+		}
+		title := num(q.Question)
+		q.Question = ""
+		r, objs := featureQuestionForm(q)
+		featureRadios[q.ID] = r
+		featureParts = append(append(append(featureParts, title), objs...), widget.NewSeparator())
+	}
+	memTitle := num("Memory for your sessions:")
+	memNum := n
+	rulesTitle := num("Shared rules for your sessions (kmem)")
+	typingTitle := num("Typing help in the message box")
+	remoteTitle := num("Reach Quill from outside your home network (phone, other PCs)?")
+
 	mem := widget.NewRadioGroup([]string{welcomeKmem, welcomeAutoMem}, nil)
 	mem.SetSelected(welcomeAutoMem)
 	if d.kmemMemory() || d.app.Preferences().String(memoryModeKey) != memoryModeClaude && bundledKmemDir() != "" {
@@ -253,7 +282,7 @@ func (d *desk) showWelcome(after func()) {
 	syncRulesNote := func() {
 		text := baseRulesNote
 		if mem.Selected == welcomeAutoMem && !rules.Disabled() && rules.Selected == welcomeRules {
-			text += " The rules are kmem's: they work best with kmem memory (question 4)."
+			text += " The rules are kmem's: they work best with kmem memory (question " + strconv.Itoa(memNum) + ")."
 		}
 		rulesNote.SetText(text)
 	}
@@ -264,7 +293,7 @@ func (d *desk) showWelcome(after func()) {
 	showRules.Importance = widget.LowImportance
 
 	body := container.NewVBox(
-		caption("Seven quick choices. All of them can be changed later in Settings."),
+		caption(strconv.Itoa(n)+" quick choices. All of them can be changed later in Settings."),
 		widget.NewSeparator(),
 		boldLabel("1. Which model should new sessions use?"), model, localNote,
 		widget.NewSeparator(),
@@ -272,15 +301,22 @@ func (d *desk) showWelcome(after func()) {
 		widget.NewSeparator(),
 		boldLabel("3. Before Claude changes files or runs commands:"), plan,
 		widget.NewSeparator(),
-		boldLabel("4. Memory for your sessions:"), mem, memNote,
-		widget.NewSeparator(),
-		container.NewBorder(nil, nil, nil, showRules, boldLabel("5. Shared rules for your sessions (kmem)")), rules, rulesNote,
-		widget.NewSeparator(),
-		boldLabel("6. Typing help in the message box"), typing,
-		widget.NewSeparator(),
-		boldLabel("7. Reach Quill from outside your home network (phone, other PCs)?"), remote,
-		caption("Optional. A VPN lets Quill for Android reach this PC from anywhere; Setup installs and connects it next."),
 	)
+	for _, o := range featureParts {
+		body.Add(o)
+	}
+	for _, o := range []fyne.CanvasObject{
+		memTitle, mem, memNote,
+		widget.NewSeparator(),
+		container.NewBorder(nil, nil, nil, showRules, rulesTitle), rules, rulesNote,
+		widget.NewSeparator(),
+		typingTitle, typing,
+		widget.NewSeparator(),
+		remoteTitle, remote,
+		caption("Optional. A VPN lets Quill for Android reach this PC from anywhere; Setup installs and connects it next."),
+	} {
+		body.Add(o)
+	}
 	dlg := dialog.NewCustomConfirm("Welcome to Quill Desktop", "Done", "Skip", container.NewVScroll(body), func(ok bool) {
 		if !ok {
 			d.app.Preferences().SetBool(prefWelcomeSeen, true)
@@ -290,6 +326,7 @@ func (d *desk) showWelcome(after func()) {
 				Lang:       byName[voice.Selected],
 				Rules:      rules.Selected == welcomeRules && !rules.Disabled(),
 				PlanFirst:  plan.Selected == welcomeAsk,
+				Features:   featureAnswers(featureRadios),
 				KmemMemory: mem.Selected == welcomeKmem,
 				Remote:     remoteID(remote.Selected),
 				Typing:     append([]string{}, typing.Selected...),
@@ -368,4 +405,12 @@ func (d *desk) newSessionModelSetting() fyne.CanvasObject {
 	}
 	return container.NewVBox(container.NewBorder(nil, nil, widget.NewLabel("New sessions use"), nil, sel),
 		caption("Each session can still switch with the Online/Local button under the message box."))
+}
+
+func featureAnswers(radios map[string]*widget.RadioGroup) map[string]int {
+	out := map[string]int{}
+	for id, r := range radios {
+		out[id] = indexOf(r.Options, r.Selected)
+	}
+	return out
 }

@@ -114,6 +114,10 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.stream(w, r)
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "items":
 		a.items(w, r, parts[1])
+	case r.Method == http.MethodGet && path == "settings/questions":
+		a.featureQuestionsRoute(w)
+	case r.Method == http.MethodPost && path == "settings/answer":
+		a.featureAnswer(w, r)
 	case r.Method == http.MethodPost && path == "settings":
 		a.setSettings(w, r)
 	case r.Method == http.MethodPost && path == "unlock":
