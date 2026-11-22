@@ -226,7 +226,7 @@ func (d *desk) pauseForUsage(used int, resets int64) {
 		at = d.pauseUntil.Local().Format("15:04")
 	}
 	d.pausedIDs = nil
-	for _, s := range d.runningSessions() {
+	for _, s := range d.pausable() {
 		if s.conv.Busy || s.conv.Background() > 0 {
 			d.pausedIDs = append(d.pausedIDs, s.id)
 			d.sendTo(s, fmt.Sprintf(pauseMessage, used, at))
@@ -234,6 +234,16 @@ func (d *desk) pauseForUsage(used int, resets int64) {
 	}
 	d.showPauseBanner(fmt.Sprintf("Paused near the usage limit (%d%% of the 5-hour window). Queued messages and automatic actions wait until %s.", used, at))
 	d.alert(d.current, "finished", fmt.Sprintf("Quill paused sessions: 5-hour usage at %d%%", used))
+}
+
+// pausable: the running sessions a usage pause covers. The kmem window's
+// assistant counts only while the window shows it (docs/design/kmem-window.md §4 #14).
+func (d *desk) pausable() []*deskSession {
+	out := d.runningVisible()
+	if s := d.kmemWin.session(); s != nil && s.running() && isHiddenSession(s) {
+		out = append(out, s)
+	}
+	return out
 }
 
 func (d *desk) checkResume() {
@@ -263,7 +273,7 @@ func (d *desk) resumeFromPause() {
 			d.sendTo(s, resumeMessage)
 		}
 	}
-	for _, s := range d.runningSessions() {
+	for _, s := range d.pausable() {
 		if d.idleForQueue(s) {
 			d.flushQueue(s)
 		}

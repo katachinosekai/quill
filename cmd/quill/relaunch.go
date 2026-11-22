@@ -276,6 +276,9 @@ func (d *desk) compactInto(ns *deskSession, oldID, path, title string, conv *cha
 
 func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
 	id := old.id
+	if isHiddenSession(old) {
+		return d.replaceHidden(old, title)
+	}
 	place := d.placement(id)
 	ns := d.addSession(old.cwd, old.model, old.mode, false)
 	d.org.Titles[ns.id] = title
@@ -315,6 +318,25 @@ func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
 	default:
 		d.syncTabs()
 		d.refreshSidebar()
+	}
+	return ns
+}
+
+// replaceHidden: context rotation of the kmem window's assistant. The new
+// session stays hidden (no tab, no placement) and takes the old one's place
+// in the window (docs/design/kmem-window.md §4 #22).
+func (d *desk) replaceHidden(old *deskSession, title string) *deskSession {
+	ns := d.addSession(old.cwd, old.model, old.mode, false)
+	d.markHidden(ns)
+	if title != "" {
+		d.org.Titles[ns.id] = title
+	}
+	d.saveOrg()
+	if w := d.kmemWin; w != nil && w.s == old {
+		w.s = ns
+		if w.view != nil {
+			w.view.show(ns)
+		}
 	}
 	return ns
 }

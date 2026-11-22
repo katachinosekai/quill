@@ -64,6 +64,9 @@ func (d *desk) loadOrg() {
 	if d.org.Kmem == nil {
 		d.org.Kmem = map[string]string{}
 	}
+	if d.org.Hidden == nil {
+		d.org.Hidden = map[string]bool{}
+	}
 	for id, place := range d.org.Place {
 		var n int
 		if _, err := fmt.Sscanf(d.org.Titles[id], "New session %d", &n); err == nil && place == placeActive {

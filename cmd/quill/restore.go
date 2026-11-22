@@ -48,7 +48,7 @@ func (d *desk) saveSessions(st *restoreState) {
 		m := sessMeta{Cwd: s.cwd, Model: s.model, Mode: s.mode, Persisted: s.persisted, KmemNew: s.kmemNew, KmemPick: s.pickPending,
 			RotateAsk: s.rotateAsk, RotateTried: s.rotateTried, LastClaude: s.lastClaude, RestoreMode: s.restoreMode,
 			RetryCmd: s.retryCmd, RetryRules: s.retryRules, RetryDest: s.retryDest, CompactFrom: s.compactFrom, RotateNo: s.rotateNo,
-			Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, ForkOf: s.forkOf}
+			Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, ForkOf: s.forkOf, Hidden: isHiddenSession(s)}
 		if ks := s.kmemSave; ks != nil {
 			m.KmemSave = &savedKmem{Name: ks.name, Asked: ks.asked, Spare: ks.spare, End: ks.end}
 		}
@@ -92,6 +92,9 @@ func (d *desk) restoreSessions(st *restoreState) {
 		s.chrome, s.addDirs, s.resumeAt, s.forkOf = m.Chrome, m.AddDirs, m.ResumeAt, m.ForkOf
 		if k := m.KmemSave; k != nil {
 			s.kmemSave = &kmemSave{name: k.Name, asked: k.Asked, spare: k.Spare, end: k.End}
+		}
+		if m.Hidden {
+			d.markHidden(s)
 		}
 	}
 	for id, text := range st.Drafts {

@@ -51,6 +51,9 @@ func (d *desk) saveTabs() {
 }
 
 func (d *desk) addTab(id string) {
+	if d.hiddenID(id, "") {
+		return // the kmem window's assistant never gets a tab
+	}
 	for _, t := range d.tabs {
 		if t == id {
 			d.syncTabs()
@@ -126,8 +129,8 @@ func (d *desk) purgeEmpty(id string) {
 func (d *desk) deleteEmptySessions() int {
 	var ids []string
 	for id := range d.sessions {
-		if d.current != nil && d.current.id == id {
-			continue
+		if d.current != nil && d.current.id == id || d.hiddenID(id, "") {
+			continue // its history is in kmem, not a tab
 		}
 		if d.isEmptySession(id) {
 			ids = append(ids, id)
@@ -272,7 +275,7 @@ func (d *desk) syncTabs() {
 	var chips []*tabChip
 	seen := map[string]bool{}
 	for _, id := range d.tabs {
-		if d.session(id) == nil {
+		if d.session(id) == nil || d.hiddenID(id, "") {
 			continue
 		}
 		id := id

@@ -214,6 +214,9 @@ func (d *desk) projectNames() []string {
 // liveSession: open in a tab, or a running Quill session (not one held by a
 // terminal elsewhere).
 func (d *desk) liveSession(id string) bool {
+	if d.hiddenID(id, "") {
+		return false // the kmem window's assistant (docs/design/kmem-window.md §4)
+	}
 	for _, t := range d.tabs {
 		if t == id && !d.staleTab(id) {
 			return true

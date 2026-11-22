@@ -225,26 +225,26 @@ type desk struct {
 	kmemNeedsNow  kmemNeeds
 	kmemBinSetBtn *widget.Button
 	kmemBinNow    *binView
-	verLine       *verLine         // kmem version under the message box; kmemverline.go
-	kmemWin       *kmemWindow      // the kmem operations window, nil while closed; kmemwindow*.go
+	verLine       *verLine    // kmem version under the message box; kmemverline.go
+	kmemWin       *kmemWindow // the kmem operations window, nil while closed; kmemwindow*.go
 	statsRow      *fyne.Container
-	controlFn      func(s *deskSession, req map[string]any) (json.RawMessage, error)
-	pingLocal      func(host string) bool
-	localWindows   map[string]int
-	warnedOllama   bool
-	backendBtn     *widget.Button
-	app            fyne.App
-	win            fyne.Window
-	cfg            config
-	scanner        *transcript.Scanner
-	finder         *live.Finder
-	center         bool
-	sessions       map[string]*deskSession
-	infos          map[string]transcript.Info
-	order          []transcript.Info
-	terms          map[string]live.Process
-	current        *deskSession
-	ownPIDs        sync.Map
+	controlFn     func(s *deskSession, req map[string]any) (json.RawMessage, error)
+	pingLocal     func(host string) bool
+	localWindows  map[string]int
+	warnedOllama  bool
+	backendBtn    *widget.Button
+	app           fyne.App
+	win           fyne.Window
+	cfg           config
+	scanner       *transcript.Scanner
+	finder        *live.Finder
+	center        bool
+	sessions      map[string]*deskSession
+	infos         map[string]transcript.Info
+	order         []transcript.Info
+	terms         map[string]live.Process
+	current       *deskSession
+	ownPIDs       sync.Map
 
 	rows          []sideRow
 	rowCaps       map[string]string
@@ -336,6 +336,13 @@ type desk struct {
 	pendingSeen   map[*chat.Item]bool
 	pendingChrome bool
 	pendingFor    *deskSession
+	// The kmem window's per-frame chat batch (queueWinUI).
+	winPending    []*chat.Item
+	winPendingFor *deskSession
+	winFlushTimer *time.Timer
+	// kmemQuitFlow, when set (kmemassist.go), saves and stops the kmem
+	// window's assistant before quitting and then calls done.
+	kmemQuitFlow  func(done func())
 	lastTyped     time.Time
 	stt           *speech
 	autoRC        bool
@@ -475,7 +482,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		d.autoRC = on
 		d.app.Preferences().SetBool("autoRemoteControl", on)
 		if on {
-			for _, s := range d.runningSessions() {
+			for _, s := range d.runningVisible() {
 				if !s.rcOn {
 					d.autoRemote(s)
 				}
@@ -485,7 +492,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	rcChk.Checked = d.autoRC
 	rcLocalChk := widget.NewCheck("Remote Control for local sessions (relayed through claude.ai)", func(on bool) {
 		d.app.Preferences().SetBool("rcLocal", on)
-		for _, s := range d.runningSessions() {
+		for _, s := range d.runningVisible() {
 			if !isLocal(s.model) {
 				continue
 			}
@@ -830,7 +837,7 @@ func (d *desk) rebuildRows() {
 	seen := map[string]bool{}
 	var entries []sideEntry
 	add := func(id, cwd string, last time.Time) {
-		if seen[id] || !d.liveSession(id) {
+		if seen[id] || d.hiddenID(id, cwd) || !d.liveSession(id) {
 			return
 		}
 		seen[id] = true
@@ -1283,6 +1290,11 @@ func (d *desk) open(id string) {
 	if s == nil {
 		return
 	}
+	if d.hiddenID(id, s.cwd) {
+		// The kmem window's assistant never gets a tab (docs/design/kmem-window.md §4).
+		d.openKmemWindow()
+		return
+	}
 	if r := s.remote; r != nil && r.fetched != r.rev {
 		defer r.link.fetchItems(s)
 	}
@@ -1506,6 +1518,8 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		d.queueUI(s, items)
 	} else if p := d.paneFor(s); p != nil {
 		p.queue(items)
+	} else if v := d.viewFor(s); v != nil {
+		d.queueWinUI(s, items)
 	}
 	if ev.Type == "rate_limit_event" {
 		d.setRateLimit(ev.RateLimit)
@@ -1514,6 +1528,8 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	if urgent {
 		if d.current == s {
 			d.flushUI()
+		} else if d.kmemWin.session() == s {
+			d.flushWinUI()
 		}
 		d.refreshSidebarSoon()
 	}
@@ -1561,6 +1577,47 @@ func (d *desk) flushUI() {
 	}
 }
 
+// queueWinUI batches the kmem window's chat updates per frame, like queueUI
+// does for the main chat.
+func (d *desk) queueWinUI(s *deskSession, items []*chat.Item) {
+	if d.winPendingFor != s {
+		d.flushWinUI()
+		d.winPendingFor = s
+	}
+	d.winPending = append(d.winPending, items...)
+	if d.winFlushTimer == nil {
+		d.winFlushTimer = time.AfterFunc(uiFrame, func() { d.do(d.flushWinUI) })
+	}
+}
+
+func (d *desk) flushWinUI() {
+	if d.winFlushTimer != nil {
+		d.winFlushTimer.Stop()
+		d.winFlushTimer = nil
+	}
+	items, owner := d.winPending, d.winPendingFor
+	d.winPending, d.winPendingFor = nil, nil
+	if owner == nil || len(items) == 0 {
+		return
+	}
+	if v := d.viewFor(owner); v != nil && v != d.chat && v.s == owner {
+		v.update(dedupItems(items))
+	}
+}
+
+// dedupItems drops repeats, keeping the first position of each item.
+func dedupItems(items []*chat.Item) []*chat.Item {
+	seen := make(map[*chat.Item]bool, len(items))
+	out := items[:0:0]
+	for _, it := range items {
+		if !seen[it] {
+			seen[it] = true
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	d.ownPIDs.Delete(p.PID())
 	if s.proc != p {
@@ -1592,6 +1649,8 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	if d.current == s {
 		d.chat.update(items)
 		d.updateChrome()
+	} else if v := d.viewFor(s); v != nil {
+		v.update(items)
 	}
 	d.refreshSidebar()
 	d.trySwap()
@@ -1778,6 +1837,8 @@ func (d *desk) chatFor(s *deskSession, items []*chat.Item) {
 		d.chat.update(items)
 	} else if p := d.paneFor(s); p != nil {
 		p.view.update(items)
+	} else if v := d.viewFor(s); v != nil {
+		v.update(items)
 	}
 }
 
@@ -1952,10 +2013,15 @@ func (d *desk) notify(s *deskSession, msg string) {
 	it := s.conv.AddNotice(msg)
 	if d.current == s {
 		d.chat.update([]*chat.Item{it})
+	} else if v := d.viewFor(s); v != nil {
+		v.update([]*chat.Item{it})
 	}
 }
 
 func (d *desk) autoRemote(s *deskSession) {
+	if isHiddenSession(s) {
+		return // the kmem window's assistant never gets Remote Control
+	}
 	if !d.autoRC || s.proc == nil || isLocal(s.model) && !d.rcForLocal() {
 		return
 	}
@@ -2034,6 +2100,53 @@ func (d *desk) runningSessions() []*deskSession {
 		}
 	}
 	return out
+}
+
+// runningVisible: running sessions other than the kmem window's assistant
+// (docs/design/kmem-window.md §4 #4).
+func (d *desk) runningVisible() []*deskSession {
+	var out []*deskSession
+	for _, s := range d.runningSessions() {
+		if !isHiddenSession(s) && !d.org.Hidden[s.id] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// hiddenID: id (with working folder cwd, may be empty) is a kmem window
+// assistant session, by its flag, the org's Hidden list or its folder.
+func (d *desk) hiddenID(id, cwd string) bool {
+	if d.org.Hidden[id] || isKmemWindowDir(cwd) || isHiddenSession(d.sessions[id]) {
+		return true
+	}
+	info, ok := d.infos[id]
+	return ok && isKmemWindowDir(info.Cwd)
+}
+
+// markHidden makes s the kmem window's assistant: flagged, and remembered in
+// the org so its id stays out of the sidebar after it ends.
+func (d *desk) markHidden(s *deskSession) {
+	if s == nil {
+		return
+	}
+	s.hidden = true
+	if d.org.Hidden == nil {
+		d.org.Hidden = map[string]bool{}
+	}
+	if !d.org.Hidden[s.id] {
+		d.org.Hidden[s.id] = true
+		d.saveOrgQuiet()
+	}
+	for i, t := range d.tabs {
+		if t == s.id {
+			d.tabs = append(d.tabs[:i:i], d.tabs[i+1:]...)
+			d.saveTabs()
+			d.tabSig = ""
+			d.syncTabs()
+			break
+		}
+	}
 }
 
 func (d *desk) refresh() {
@@ -2126,21 +2239,45 @@ func (d *desk) confirmQuit() {
 		d.app.Quit()
 		return
 	}
-	msg := fmt.Sprintf("%d session(s) are still running in this app. Closing stops them (their conversations are saved and can be resumed).", len(running))
+	msg := quitMessage(len(d.runningVisible()), len(running)-len(d.runningVisible()))
 	dialog.ShowCustomConfirm("Stop running sessions?", "Stop and quit", "Cancel", widget.NewLabel(msg), func(ok bool) {
 		if !ok {
 			return
 		}
 		prog := dialog.NewCustomWithoutButtons("Stopping sessions...", widget.NewProgressBarInfinite(), d.win)
 		prog.Show()
-		go func() {
-			d.stopAll(running)
-			d.do(func() {
-				prog.Hide()
-				d.app.Quit()
-			})
-		}()
+		stop := func() {
+			go func() {
+				d.stopAll(d.runningSessions())
+				d.do(func() {
+					prog.Hide()
+					d.app.Quit()
+				})
+			}()
+		}
+		if d.kmemQuitFlow != nil && len(running) > len(d.runningVisible()) {
+			// The kmem assistant saves its handoff first (§5, bounded by its 60 s cap).
+			d.kmemQuitFlow(func() { d.do(stop) })
+			return
+		}
+		stop()
 	}, d.win)
+}
+
+// quitMessage: the quit confirmation for visible running sessions and the
+// kmem window's assistant (hidden, 0 or 1).
+func quitMessage(visible, hidden int) string {
+	var msg string
+	if visible > 0 {
+		msg = fmt.Sprintf("%d session(s) are still running in Quill Desktop. Closing stops them (their conversations are saved and can be resumed).", visible)
+	}
+	if hidden > 0 {
+		if msg != "" {
+			msg += "\n"
+		}
+		msg += "The kmem assistant is running too; it will save its handoff first."
+	}
+	return msg
 }
 
 func (d *desk) stopAll(list []*deskSession) {
@@ -2359,6 +2496,9 @@ func (d *desk) allViews() []*chatView {
 	}
 	for _, p := range d.panes {
 		out = append(out, p.view)
+	}
+	if w := d.kmemWin; w != nil && w.view != nil {
+		out = append(out, w.view)
 	}
 	return out
 }

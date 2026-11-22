@@ -22,11 +22,20 @@ func (d *desk) handoffOwner(name string, self *deskSession) *deskSession {
 		for _, t := range d.tabs {
 			open = open || t == id
 		}
-		if open || s != nil && s.running() {
+		if open || s != nil && (s.running() || s == d.kmemWin.session()) {
 			return d.session(id)
 		}
 	}
 	return nil
+}
+
+// ownerLabel: where a live handoff runs, for resume lists.
+func (d *desk) ownerLabel(owner *deskSession) string {
+	if isHiddenSession(owner) {
+		return "live in the kmem window"
+	}
+	title, _, _ := d.rowText(owner.id)
+	return "open in tab " + title
 }
 
 func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
@@ -66,8 +75,7 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 				label := h.Name + " · saved " + h.Saved.Local().Format("Jan 2 15:04")
 				var b *widget.Button
 				if owner := d.handoffOwner(h.Name, s); owner != nil {
-					title, _, _ := d.rowText(owner.id)
-					b = widget.NewButton(label+" · open in tab "+title, func() { d.open(owner.id) })
+					b = widget.NewButton(label+" · "+d.ownerLabel(owner), func() { d.open(owner.id) })
 					b.Importance = widget.LowImportance
 				} else {
 					b = widget.NewButton(label, func() { d.pickResume(s, h.Name) })

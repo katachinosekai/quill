@@ -34,7 +34,13 @@ func (d *desk) watchFocus() {
 }
 
 func (d *desk) seen(s *deskSession) bool {
-	if !d.foreground || d.hidden {
+	if !d.foreground {
+		return false
+	}
+	if s != nil && d.kmemWin.session() == s {
+		return true // shown in the open kmem window (its own window, so not tied to d.hidden)
+	}
+	if d.hidden {
 		return false
 	}
 	if d.current == s {
@@ -87,8 +93,15 @@ var alertTitles = map[string]string{
 }
 
 func (d *desk) alert(s *deskSession, kind, body string) {
-	title, _, _ := d.rowText(s.id)
 	body = clip(body, 200)
+	if isHiddenSession(s) {
+		// The kmem window's assistant: desktop only, never the phone (§4 #25).
+		if d.notifyOn() && !d.seen(s) {
+			d.desktopNotify(s.id, "kmem assistant"+alertTitles[kind], body)
+		}
+		return
+	}
+	title, _, _ := d.rowText(s.id)
 	d.phoneEvent(s.id, kind, title, body)
 	if !d.notifyOn() || d.seen(s) {
 		return
@@ -177,6 +190,10 @@ func (d *desk) startNotifier() {
 				continue
 			}
 			d.do(func() {
+				if d.hiddenID(sid, "") {
+					d.openKmemWindow() // raises the kmem window
+					return
+				}
 				d.showWindow()
 				if d.session(sid) != nil {
 					d.open(sid)

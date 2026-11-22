@@ -397,7 +397,7 @@ func (d *desk) keepSession(s *deskSession) {
 		return
 	}
 	in, out, h := s.proc.Keep()
-	hs := handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL}
+	hs := handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL, Hidden: isHiddenSession(s)}
 	hs.savePending(s)
 	kc := d.keeper
 	go func() { _ = kc.send(keeperMsg{Op: "hold", Session: hs, Handle: h}, in, out) }()

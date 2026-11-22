@@ -23,6 +23,7 @@ func TestKmemWindowStubs(t *testing.T) {
 		if w.session() != nil {
 			t.Fatal("nil-safe")
 		}
+		s.hidden = false // a hidden session opens the kmem window, not a tab
 		other := h.d.createSession(h.proj, "default", "default")
 		h.d.open(s.id)
 		if h.d.viewFor(s) != h.d.chat {

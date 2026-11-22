@@ -203,6 +203,7 @@ func (d *desk) trySwap() {
 	st.Max, st.X, st.Y = windowPlacement(d.win)
 	st.Split = d.saveSplit()
 	st.ScrollY = d.chat.scroll.Offset.Y
+	st.KmemWin = d.kmemWin != nil // hot reload keeps the assistant and reopens the window (§14 #8)
 	running := d.runningSessions()
 	type meta struct {
 		s  *deskSession
@@ -210,7 +211,7 @@ func (d *desk) trySwap() {
 	}
 	var metas []meta
 	for _, s := range running {
-		hs := handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL}
+		hs := handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL, Hidden: isHiddenSession(s)}
 		hs.savePending(s)
 		metas = append(metas, meta{s, hs})
 	}
@@ -365,6 +366,9 @@ func (d *desk) applyRestore(st *restoreState) {
 			d.sessions[hs.ID] = s
 		}
 		s.model, s.mode = hs.Model, hs.Mode
+		if hs.Hidden {
+			d.markHidden(s) // before reattach: no tab, no Remote Control
+		}
 		if info, ok := d.infos[hs.ID]; ok {
 			if conv, err := transcript.Load(info.Path); err == nil && conv != nil {
 				s.conv, s.loaded, s.loadedMod = conv, true, info.ModTime
@@ -389,6 +393,9 @@ func (d *desk) applyRestore(st *restoreState) {
 	d.resumeInterrupted(st)
 	if len(st.Running) > 0 || len(st.Handed) > 0 || len(st.Meta) > 0 {
 		d.refreshSidebar()
+	}
+	if st.KmemWin {
+		d.openKmemWindow()
 	}
 	defer d.restoreSplit(st.Split)
 	if st.Session == "" {

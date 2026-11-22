@@ -233,7 +233,7 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 			continue
 		}
 		for _, id := range g.ids {
-			if strings.HasPrefix(id, remotePrefix) {
+			if strings.HasPrefix(id, remotePrefix) || d.hiddenID(id, "") {
 				continue
 			}
 			if _, ok := group[id]; !ok {
@@ -243,7 +243,7 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 		}
 	}
 	for _, id := range d.tabs {
-		if d.staleTab(id) || strings.HasPrefix(id, remotePrefix) {
+		if d.staleTab(id) || strings.HasPrefix(id, remotePrefix) || d.hiddenID(id, "") {
 			continue
 		}
 		if _, ok := group[id]; !ok {
@@ -356,10 +356,14 @@ func (a *phoneAPI) knownFolders() []map[string]string {
 		out = append(out, map[string]string{"path": p, "name": filepath.Base(p)})
 	}
 	for _, s := range a.d.sessions {
-		add(s.cwd)
+		if !a.d.hiddenID(s.id, s.cwd) {
+			add(s.cwd)
+		}
 	}
 	for _, info := range a.d.order {
-		add(info.Cwd)
+		if !a.d.hiddenID(info.ID, info.Cwd) {
+			add(info.Cwd)
+		}
 	}
 	return out
 }
@@ -468,7 +472,7 @@ func (a *phoneAPI) scan() {
 		}
 	}
 	for id := range a.tracks {
-		if d.sessions[id] == nil {
+		if d.sessions[id] == nil || d.hiddenID(id, "") {
 			delete(a.tracks, id)
 		}
 	}
@@ -731,8 +735,8 @@ func (a *phoneAPI) preload(id string) bool {
 	a.ui(func() {
 		info, known := a.d.infos[id]
 		s := a.d.sessions[id]
-		if !known && s == nil {
-			found = false
+		if !known && s == nil || a.d.hiddenID(id, "") {
+			found = false // the kmem window's assistant is not on the phone
 			return
 		}
 		if known && (s == nil || !s.loaded && !s.running()) {

@@ -29,7 +29,7 @@ func (d *desk) rcName(id string) (name, base string) {
 
 func (d *desk) syncRCNames() {
 	for _, s := range d.sessions {
-		if !s.rcOn || s.proc == nil || !s.running() {
+		if !s.rcOn || s.proc == nil || !s.running() || isHiddenSession(s) {
 			continue
 		}
 		name, base := d.rcName(s.id)
