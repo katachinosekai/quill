@@ -1974,6 +1974,33 @@ var leadIn = regexp.MustCompile(`(?i)^(?:for|in|on|to|with|as|if|when|after|befo
 // maxOptionWords: longer unmarked options make no buttons (labels stay short).
 const maxOptionWords = 16
 
+// lastQOutsideParens: the index of the last "?" outside parentheses, or -1.
+func lastQOutsideParens(s string) int {
+	depth, at := 0, -1
+	for i, r := range s {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case '?':
+			if depth == 0 {
+				at = i
+			}
+		}
+	}
+	return at
+}
+
+var yesWord, noWord = regexp.MustCompile(`(?i)^\W*yes\b`), regexp.MustCompile(`(?i)^\W*no\b`)
+
+// yesNoOptions: a "Yes, …" / "No, …" pair.
+func yesNoOptions(a, b string) bool {
+	return yesWord.MatchString(a) && noWord.MatchString(b)
+}
+
 func parseChoices(line string) (string, []string, bool) {
 	clean := strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(line), "#>*-_ "))
 	q := strings.LastIndex(clean, "?")
@@ -1988,7 +2015,13 @@ func parseChoices(line string) (string, []string, bool) {
 	}
 	// Asides in parentheses explain an option; the button shows just the
 	// option ("option 1 (Quill's paired PCs)" → "Option 1").
-	ask := strings.TrimSpace(parenAside.ReplaceAllString(clean[:q], ""))
+	// "Where should it live? Inside (recommended) or linked?": the options
+	// are the sentence after the question (user 2026-11-22).
+	body := clean[:q]
+	if p := lastQOutsideParens(body); p >= 0 {
+		body = strings.TrimSpace(listLead.ReplaceAllString(strings.TrimSpace(body[p+1:]), ""))
+	}
+	ask := strings.TrimSpace(parenAside.ReplaceAllString(body, ""))
 	sep := ", or "
 	i := strings.LastIndex(ask, sep)
 	if i < 0 {
@@ -2016,7 +2049,11 @@ func parseChoices(line string) (string, []string, bool) {
 		return "", nil, false
 	}
 	opts := []string{a}
-	if strings.Contains(a, ", ") {
+	// "Yes, 2 subagents (recommended) or no, I'll do it myself?" is two
+	// options: commas inside a yes/no pair don't split it.
+	if yesNoOptions(a, b) {
+		// keep a whole
+	} else if strings.Contains(a, ", ") {
 		// "a, b, or c" and "a, b or c" both list three options.
 		opts = mergeContinuations(strings.Split(a, ", "))
 		// A lead-in before the first comma is not an option ("For the icon,

@@ -62,3 +62,32 @@ func TestProposalsGetTheCard(t *testing.T) {
 		}
 	}
 }
+
+// Options on the line after their question (user 2026-11-22: no plan card for
+// "1. Can I run steps 1–6?\nYes (recommended) or no?").
+func TestApprovalWithOptionsOnNextLine(t *testing.T) {
+	for text, want := range map[string]bool{
+		"Plan.\n\n**1. Can I run steps 1–6?**\nYes (recommended) or no?":                                          true,
+		"Plan.\n\n1. Can I run steps 1–5? Yes (recommended) or no?":                                               true,
+		"Plan.\n\nCan I run steps 1–3? Yes (recommended) or no?":                                                  true,
+		"Plan.\n\n1. Where should it live?\nInside the window (recommended) or a linked session?":                 false,
+		"Plan.\n\n1. Can B carry out its plan?\nApprove as is (recommended), approve with changes, or stop?":      true,
+		"Plan.\n\n1. Where should it live?\nInside the window (recommended) or a linked session\n2. Can I run steps 1–2?\nYes (recommended) or no": true,
+	} {
+		c := New()
+		c.AddUser("hi")
+		c.Items = append(c.Items, &Item{Kind: Assistant, Text: text})
+		if got := c.AsksApproval(); got != want {
+			t.Errorf("AsksApproval(%q) = %v, want %v", text, got, want)
+		}
+		if !c.AsksQuestion() {
+			t.Errorf("AsksQuestion(%q) = false", text)
+		}
+	}
+	if got := JoinOptionLines("1. Can I run steps 1–6?\nYes (recommended) or no"); got != "1. Can I run steps 1–6? Yes (recommended) or no?" {
+		t.Fatalf("joined: %q", got)
+	}
+	if got := JoinOptionLines("Done.\nThis or that is fine.\n2. Next?\n3. Or not?"); got != "Done.\nThis or that is fine.\n2. Next?\n3. Or not?" {
+		t.Fatalf("only an unnumbered options line right under a question joins: %q", got)
+	}
+}

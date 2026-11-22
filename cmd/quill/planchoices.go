@@ -88,8 +88,18 @@ func recommendedOption(sentence string, n int) int {
 	if q := strings.LastIndex(ask, "?"); q >= 0 {
 		ask = ask[:q]
 	}
+	if p := lastQOutsideParens(ask); p >= 0 {
+		ask = ask[p+1:] // the options sentence after its question
+	}
 	segs := splitOutsideParens(ask, ", or ")
-	if len(segs) < 2 {
+	if n == 2 && len(segs) < 2 {
+		if yn := splitOutsideParens(ask, " or "); len(yn) == 2 && yesNoOptions(yn[0], yn[1]) {
+			segs = yn
+		}
+	}
+	if len(segs) == 2 && n == 2 && yesNoOptions(segs[0], segs[1]) {
+		// "Yes, x (recommended), or no, y": keep the pair whole
+	} else if len(segs) < 2 {
 		segs = splitOutsideParens(ask, " or ")
 	} else {
 		head := mergeContinuations(splitOutsideParens(segs[0], ", "))

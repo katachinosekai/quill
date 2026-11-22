@@ -32,6 +32,15 @@ func TestPlanQuestions(t *testing.T) {
 		{"Plan:\n1. a\n\nQuestions:\n1. Do you approve steps 1–6? Yes (recommended) or no?\n2. Animation style: fade in each finished paragraph plus smooth reveal of the last one (recommended), typing effect character by character, or fade only?\n3. Should \"Animate new text\" start on (recommended) or off?",
 			"single[Fade in each finished paragraph plus smooth reveal of the last one|Typing effect character by character|Fade only]*Fade in each finished paragraph plus smooth reveal of the last one ; single[\"Animate new text\" start on|Off]*\"Animate new text\" start on"},
 		{"```\nwhat? or this?\n```\n**Approve this plan?**", ""},
+		// User 2026-11-22: a question and its options on one line, bold.
+		{"Plan.\n\n**1. Where should the chat live? Inside the window (recommended) or a linked session?**\n**2. Which model should it use? Same as new sessions (recommended), a cheaper model set separately, or none (no assistant)?**\n**3. Should I use 2 subagents? Yes, 2 subagents (recommended) or no, I'll do it myself?**",
+			"single[Inside the window|A linked session]*Inside the window ; single[Same as new sessions|A cheaper model set separately|None]*Same as new sessions ; single[Yes, 2 subagents|No, I'll do it myself]*Yes, 2 subagents"},
+		// … and on the next line, without a "?".
+		{"Plan.\n\n1. Where should the chat live?\nInside the window (recommended) or a linked session\n2. Can I run steps 1–5?\nYes (recommended) or no",
+			"single[Inside the window|A linked session]*Inside the window"},
+		// A quoted example in prose above the numbered questions isn't one.
+		{"The card split it: the problem is a question and its options on one line: \"Where…? A or B?\".\nAlso see \"why? because\".\n\n1. Should I fix it? Yes (recommended) or no?",
+			"yesno*Yes"},
 	} {
 		if got := qsSummary(planQuestions(c.text)); got != c.want {
 			t.Errorf("%q\n got: %s\nwant: %s", c.text[:min(60, len(c.text))], got, c.want)

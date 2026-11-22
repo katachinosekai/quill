@@ -88,6 +88,7 @@ type deskSession struct {
 	releaseTasks   []string // kmem task releases Quill asked for after a rewind (allowed for that turn)
 	runAll         bool
 	runAllNext     bool
+	agentGrants    map[string]bool // subagents an approved plan started, by tool_use_id, until they finish
 	queue          []string
 	lastSent       string
 	inTurn         bool
@@ -1544,6 +1545,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	}
 	s.conv.Busy = false
 	s.inTurn, s.planWait = false, false
+	s.agentGrants = nil // the process and its subagents are gone
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
 		msg := "Claude process exited: " + err.Error()
@@ -2430,6 +2432,18 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		if s.runAll || d.kmemSaveAllowed(s, it.Request) || d.kmemResumeAllowed(s, it.Request) || kmemReleaseAllowed(s, it.Request) {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
+				if s.runAll && isAgentTool(it.Request) {
+					grantAgent(s, it.Request.ToolUseID)
+				}
+			}
+			return nil
+		}
+		// An approved plan covers the subagents it started (user 2026-11-22):
+		// a call that comes while this session's own turn is over can only be
+		// theirs, so it goes ahead until they all finish.
+		if !s.inTurn && len(s.agentGrants) > 0 {
+			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
+				it.PermState = chat.PermAutoAllowed
 			}
 			return nil
 		}
@@ -2454,8 +2468,19 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			s.planWait = true
 		}
 	case ev.Type == "user" && d.planFirst:
+		// A subagent's own messages, peer messages and background-task
+		// notifications are not the user: they neither approve nor end an
+		// approved plan (Kmem Lock Audit, 2026-11-22: they re-armed the gate
+		// between steps). A finished subagent's grant ends.
+		if ev.ParentToolUseID != nil {
+			return nil
+		}
 		for _, it := range items {
 			if it.Kind != chat.User {
+				continue
+			}
+			if notFromUser(it.Text) {
+				endAgentGrants(s, it.Text)
 				continue
 			}
 			if approvesPlan(s, it.Text) {
@@ -2607,6 +2632,11 @@ func coversPlan(s *deskSession, text string) bool {
 func approvesPlan(s *deskSession, text string) bool {
 	if isPlanGo(text) {
 		return true
+	}
+	// A quick-choice pick of the approval question's Yes ("I pick the first
+	// option: Yes."; user 2026-11-22: picking Yes didn't count).
+	if opt, ok := choicePick(text); ok && isApproval(opt) {
+		return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
 	}
 	if approves(text) {
 		return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
@@ -2762,5 +2792,48 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 	d.sendTo(s, msg)
 	if !s.running() {
 		s.runAll = false
+	}
+}
+
+var (
+	choicePickRe = regexp.MustCompile(`^I pick the \w+ option: (.+?)\.?$`)
+	toolUseIDRe  = regexp.MustCompile(`<tool-use-id>([^<\s]+)</tool-use-id>`)
+)
+
+// choicePick: the option of a quick-choice reply (choiceReply).
+func choicePick(text string) (string, bool) {
+	m := choicePickRe.FindStringSubmatch(strings.TrimSpace(text))
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// notFromUser: text Claude Code puts in a user turn that the user didn't
+// write (peer messages, channel messages, scheduled triggers, background-task
+// notifications, system reminders).
+func notFromUser(text string) bool {
+	t := strings.TrimSpace(text)
+	return chat.Automated(t) || strings.HasPrefix(t, "<task-notification") || strings.HasPrefix(t, "<system-reminder")
+}
+
+func isAgentTool(r *protocol.ControlRequest) bool {
+	return r != nil && (r.ToolName == "Agent" || r.ToolName == "Task")
+}
+
+func grantAgent(s *deskSession, id string) {
+	if id == "" {
+		return
+	}
+	if s.agentGrants == nil {
+		s.agentGrants = map[string]bool{}
+	}
+	s.agentGrants[id] = true
+}
+
+// endAgentGrants: a task notification names the subagent that finished.
+func endAgentGrants(s *deskSession, text string) {
+	for _, m := range toolUseIDRe.FindAllStringSubmatch(text, -1) {
+		delete(s.agentGrants, m[1])
 	}
 }

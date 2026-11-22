@@ -30,7 +30,7 @@ var readOnlyCommands = map[string]bool{
 }
 
 var argChecked = map[string]bool{
-	"sed": true, "find": true, "git": true, "sort": true, "tree": true, "rg": true, "file": true, "uniq": true,
+	"kmem": true, "sed": true, "find": true, "git": true, "sort": true, "tree": true, "rg": true, "file": true, "uniq": true,
 	"awk": true, "journalctl": true, "date": true,
 }
 
@@ -429,6 +429,8 @@ func readOnlySegment(seg []shWord, extra [][]string) bool {
 				return false
 			}
 		}
+	case "kmem":
+		return readOnlyKmem(args)
 	case "git":
 		for len(args) > 0 && strings.HasPrefix(args[0], "-") {
 			switch {
@@ -545,4 +547,39 @@ func (d *desk) readOnlyDialog() {
 	}, d.win)
 	dlg.Resize(fyne.NewSize(560, 380))
 	dlg.Show()
+}
+
+// readOnlyKmem: kmem commands that only read (Kmem Lock Audit, 2026-11-22:
+// `kmem brief`, `get`, `find`, `show` needed a plan). "kmem fixed TOPIC" sets
+// a mark (kmem 1.7.0), so only the bare "kmem fixed" list counts; "kmem
+// rules" only marks the rules read. Commands with --as are left to the kmem
+// gates, which know the session's own name.
+func readOnlyKmem(args []string) bool {
+	// "--as NAME" reads as another session (it marks rules and briefs read
+	// for that name); the kmem gates decide those by the session's own name.
+	if len(args) == 0 || args[0] == "--as" {
+		return false
+	}
+	var words []string
+	for _, a := range args {
+		if a != "--json" {
+			words = append(words, a)
+		}
+	}
+	if len(words) == 0 {
+		return false
+	}
+	switch words[0] {
+	case "brief", "get", "find", "show", "context", "recall", "topics", "version", "help", "rules":
+		return true
+	case "fixed":
+		return len(words) == 1
+	case "task":
+		return len(words) >= 2 && words[1] == "list"
+	case "handoff":
+		return len(words) >= 2 && (words[1] == "get" || words[1] == "list" || words[1] == "resolve" || words[1] == "policy" && len(words) == 2)
+	case "trash":
+		return len(words) >= 2 && words[1] == "list"
+	}
+	return false
 }

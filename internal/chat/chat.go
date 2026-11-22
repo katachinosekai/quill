@@ -176,6 +176,36 @@ func lastQuestion(line string) string {
 	return strings.TrimLeft(q, "*_ ")
 }
 
+// optionsLine: a line that lists a question's options ("Yes (recommended) or
+// no?", "Approve as is (recommended), approve with changes, or stop").
+var optionsLine = regexp.MustCompile(`(?i)\bor\b`)
+
+// JoinOptionLines puts an options line back on the question line above it
+// ("1. Can I run steps 1–6?\nYes (recommended) or no?" → one line), so the
+// question and its options are read together (user 2026-11-22: options on
+// their own line got no card). The options line must follow the question
+// directly, not be numbered itself, and gets a "?" if it has none.
+func JoinOptionLines(text string) string {
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if n := len(out); n > 0 && t != "" && !numberedQ.MatchString(t) && optionsLine.MatchString(t) && len(strings.Fields(t)) <= 30 {
+			prev := strings.TrimRight(strings.TrimSpace(out[n-1]), "*_ ")
+			if strings.HasSuffix(prev, "?") {
+				opt := strings.TrimSpace(strings.Trim(t, "*_ "))
+				if !strings.HasSuffix(opt, "?") {
+					opt = strings.TrimRight(opt, ".!") + "?"
+				}
+				out[n-1] = prev + " " + opt
+				continue
+			}
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}
+
 // AsksApproval: the turn's last text ends in a question asking to approve,
 // or in a proposal of work (see approvalAsk).
 func (c *Conversation) AsksApproval() bool {
@@ -187,9 +217,14 @@ func (c *Conversation) AsksApproval() bool {
 		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
 			continue
 		}
-		t := strings.TrimRight(strings.TrimSpace(it.Text), "*_ ")
+		t := strings.TrimRight(strings.TrimSpace(JoinOptionLines(it.Text)), "*_ ")
 		last := t[strings.LastIndex(t, "\n")+1:]
 		if strings.HasSuffix(t, "?") && asksToApprove(lastQuestion(last)) {
+			return true
+		}
+		// "Can I run steps 1–6? Yes (recommended) or no?": the options
+		// sentence follows the approval question on its line.
+		if q := firstQuestion(numberedQ.ReplaceAllString(last, "")); q != "" && asksToApprove(q) && strings.HasSuffix(t, "?") {
 			return true
 		}
 		// The approval question can be followed by a note on the same line
@@ -227,7 +262,7 @@ func asksToApprove(q string) bool {
 // ClosingApproval: the approval question among the numbered question lines
 // that end a message ("1. Do you approve steps 1–6? …", "2. …?"), or "".
 func ClosingApproval(text string) string {
-	lines := strings.Split(strings.TrimRight(strings.TrimSpace(text), "*_ "), "\n")
+	lines := strings.Split(strings.TrimRight(strings.TrimSpace(JoinOptionLines(text)), "*_ "), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := strings.TrimSpace(lines[i])
 		if l == "" {
@@ -243,6 +278,23 @@ func ClosingApproval(text string) string {
 	}
 	return ""
 }
+
+// firstQuestion: the sentence that ends at the first "?" of line (quotes and
+// parentheses blanked), or "".
+func firstQuestion(line string) string {
+	i := strings.Index(line, "?")
+	if i < 0 {
+		return ""
+	}
+	q := quotedSpans.ReplaceAllString(line[:i], " ")
+	if m := sentenceEnd.FindAllStringIndex(q, -1); len(m) > 0 {
+		q = q[m[len(m)-1][1]:]
+	}
+	return strings.TrimLeft(q, "*_ ")
+}
+
+// AsksToApprove: a question sentence that asks to go ahead with a plan.
+func AsksToApprove(q string) bool { return asksToApprove(q) }
 
 // lastQuestionOf: the first question sentence of s (quotes blanked).
 func lastQuestionOf(s string) string {
@@ -264,7 +316,7 @@ func (c *Conversation) AsksQuestion() bool {
 		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
 			continue
 		}
-		t := strings.TrimSpace(it.Text)
+		t := strings.TrimSpace(JoinOptionLines(it.Text))
 		return strings.Contains(t[strings.LastIndex(t, "\n")+1:], "?")
 	}
 	return false

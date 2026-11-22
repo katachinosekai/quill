@@ -43,6 +43,7 @@ var (
 	letterItem   = regexp.MustCompile(`^\s*[-*+]?\s*(?:\*\*)?([a-h])[.)](?:\*\*)?\s+(?:\*\*)?(.+)$`)
 	multiAsk     = regexp.MustCompile(`(?i)\bwhich of\b|\bpick any\b|\bany of\b|\bwhich ones?\b|\bselect any\b`)
 	yesNoStart   = regexp.MustCompile(`(?i)^(?:and |also |then |so )?(?:should|shall|do|does|did|can|could|will|would|is|are|was|may|want|ok|okay)\b`)
+	stepsAsk     = regexp.MustCompile(`(?i)\b(?:run|carry out|make|do|start)\b.*\b(?:steps?|changes?) \d`)
 	approveOnly  = regexp.MustCompile(`(?i)^(?:and |so )?(?:do you |would you |can you )?(?:approve|ok to run|go ahead|proceed)\b|\bapprove (?:steps?|the plan|this plan|it|all|both|these|them|[a-z]+ \d)`)
 )
 
@@ -50,7 +51,7 @@ var (
 // approval itself. Fewer than one useful question returns nil (the plain
 // card, or the single-choice card from planChoices, is used then).
 func planQuestions(text string) []planQ {
-	lines := strings.Split(text, "\n")
+	lines := strings.Split(chat.JoinOptionLines(text), "\n")
 	// Lettered items ("a. …", "- **b.** …") are the options a "which of"
 	// question offers.
 	var letters []string
@@ -93,14 +94,26 @@ func planQuestions(text string) []planQ {
 		c := codeOrURL.ReplaceAllString(l, " ")
 		clean[i] = c
 		t := strings.TrimSpace(strings.Trim(strings.TrimSpace(mdNoise.Replace(c)), "*_ "))
-		if t == "" || strings.Contains(t, "?") || strings.HasSuffix(t, ":") || strings.HasPrefix(t, "#") || letterItem.MatchString(mdNoise.Replace(l)) {
+		// A "?" only inside quotes is an example in prose, not a question
+		// (user 2026-11-22: a quoted "Where…? A or B?" became card questions).
+		asks := strings.Contains(qQuoted.ReplaceAllString(t, " "), "?")
+		if t == "" || asks || strings.HasSuffix(t, ":") || strings.HasPrefix(t, "#") || letterItem.MatchString(mdNoise.Replace(l)) {
 			continue
 		}
 		start = i + 1
 	}
+	// When the closing block has numbered questions, they are the questions:
+	// question-like prose above the first one is not.
+	for i := start; i < len(lines); i++ {
+		if qNumLead.MatchString(mdNoise.Replace(lines[i])) && strings.Contains(lines[i], "?") {
+			start = i
+			break
+		}
+	}
 	var out []planQ
 	seen := map[string]bool{}
-	for _, l := range lines[start:] {
+	lineOf := -1 // the line of the last question in out
+	for li, l := range lines[start:] {
 		if !strings.Contains(l, "?") {
 			continue
 		}
@@ -121,10 +134,21 @@ func planQuestions(text string) []planQ {
 			seen[key] = true
 			// "Yes (recommended) or no?" after a question answers how to read
 			// that question: it is a yes/no with a default, not a new one.
-			if _, opts, ok := parseChoices(sent); ok && isYesNoPair(opts) && (afterApproval || len(out) > 0 && out[len(out)-1].Num == num) {
+			// Likewise "Inside (recommended) or linked?" after "Where should
+			// it live?" on the same line gives that question its options.
+			if _, opts, ok := parseChoices(sent); ok && (afterApproval || len(out) > 0 && out[len(out)-1].Num == num && lineOf == li) {
 				if !afterApproval {
 					prev := &out[len(out)-1]
-					prev.Kind, prev.Options, prev.Recommended = qYesNo, []string{"Yes", "No"}, recommendedOption(sent, 2)
+					for i, o := range opts {
+						opts[i] = dropQuestionWord(o)
+					}
+					if isYesNoPair(opts) {
+						prev.Kind, prev.Options, prev.Recommended = qYesNo, []string{"Yes", "No"}, recommendedOption(sent, 2)
+					} else if len(opts) == 2 && yesNoOptions(opts[0], opts[1]) {
+						prev.Kind, prev.Options, prev.Recommended = qSingle, opts, recommendedOption(sent, 2)
+					} else if prev.Kind == qText || prev.Kind == qYesNo {
+						prev.Kind, prev.Options, prev.Recommended = qSingle, opts, recommendedOption(sent, len(opts))
+					}
 				}
 				afterApproval = false
 				continue
@@ -137,6 +161,7 @@ func planQuestions(text string) []planQ {
 			}
 			q.ID, q.Num = len(out)+1, num
 			out = append(out, q)
+			lineOf = li
 		}
 	}
 	return out
@@ -197,7 +222,8 @@ func classifyQuestion(sent string, letters []string) (planQ, bool) {
 	// ("Do you approve steps 1–3, or should I change something first?" is
 	// still the approval); a question joined to it ("…steps 1–7, and do you
 	// also want X?") stays.
-	if approveOnly.MatchString(strings.TrimSpace(bare)) {
+	// "Can I run steps 1–5?" asks to go ahead too (chat's approval words).
+	if approveOnly.MatchString(strings.TrimSpace(bare)) || yesNoStart.MatchString(strings.TrimSpace(bare)) && chat.AsksToApprove(bare) && stepsAsk.MatchString(bare) {
 		for _, sep := range []string{", and ", "; and ", ", also ", " and also "} {
 			if i := strings.LastIndex(q.Text, sep); i > 0 {
 				if rest := strings.TrimSpace(q.Text[i+len(sep):]); len(rest) > 3 && !approveOnly.MatchString(rest) {
