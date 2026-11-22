@@ -2020,6 +2020,11 @@ func parseChoices(line string) (string, []string, bool) {
 	if q < 0 {
 		return "", nil, false
 	}
+	// Inline lettered options ("…, or pick from: a) x, b) y?") are a multi
+	// question's (planquestions.go), not buttons.
+	if inlineLetterOpts(clean) != nil {
+		return "", nil, false
+	}
 	// Options marked "(option 1)", "(option 2)" or "(A)", "(B)" get those
 	// labels, however long they are (user 2026-11-21, Zomboid Networking 2).
 	var marks []string
@@ -2232,6 +2237,8 @@ func (v *chatView) planAnswers(it *chat.Item, qs []planQ) map[int]planAnswer {
 			switch {
 			case q.Kind == qSingle && q.Recommended >= 0:
 				ans[q.ID] = planAnswer{Choice: q.Recommended}
+			case q.Kind == qMulti && len(q.RecommendedPicks) > 0:
+				ans[q.ID] = planAnswer{Picks: append([]int(nil), q.RecommendedPicks...), Choice: -1}
 			case q.Kind == qYesNo && q.Recommended >= 0 && q.Recommended < 2:
 				// The recommended Yes or No is picked by default too.
 				yes := q.Recommended == 0

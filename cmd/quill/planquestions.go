@@ -31,6 +31,9 @@ type planQ struct {
 	Kind        planQKind `json:"kind"`
 	Options     []string  `json:"options,omitempty"`
 	Recommended int       `json:"recommended"` // -1 = none
+	// RecommendedPicks: a multi question's options picked as the
+	// recommendation ("All of a–e (recommended)" picks every one).
+	RecommendedPicks []int `json:"recommendedPicks,omitempty"`
 
 	// line, end: the original lines of the plan text the question is on
 	// (end exclusive), for showing its control in place (planoverlay.go).
@@ -46,6 +49,10 @@ var (
 	listLead     = regexp.MustCompile(`^\s*(?:[-*+]\s+|\d+[.)]\s+|[a-hA-H][.)]\s+)?`)
 	letterItem   = regexp.MustCompile(`^\s*[-*+]?\s*(?:\*\*)?([a-h])[.)](?:\*\*)?\s+(?:\*\*)?(.+)$`)
 	multiAsk     = regexp.MustCompile(`(?i)\bwhich of\b|\bpick any\b|\bany of\b|\bwhich ones?\b|\bselect any\b`)
+	// inlineLetter: an inline lettered option's mark ("pick from: a) x, b) y"),
+	// not "(a)" (optionMark's) or a word ending in a letter.
+	inlineLetter = regexp.MustCompile(`(?:^|[\s,;:])([a-h])\)\s+`)
+	allRecommend = regexp.MustCompile(`(?i)\ball\b[^,;?]{0,24}\(\s*recommended\s*\)`)
 	yesNoStart   = regexp.MustCompile(`(?i)^(?:and |also |then |so )?(?:should|shall|do|does|did|can|could|will|would|is|are|was|may|want|ok|okay)\b`)
 	stepsAsk     = regexp.MustCompile(`(?i)\b(?:run|carry out|make|do|start)\b.*\b(?:steps?|changes?) \d`)
 	approveOnly  = regexp.MustCompile(`(?i)^(?:and |so )?(?:do you |would you |can you )?(?:approve|ok to run|go ahead|proceed)\b|\bapprove (?:steps?|the plan|this plan|it|all|both|these|them|[a-z]+ \d)`)
@@ -67,6 +74,10 @@ func planQuestions(text string) []planQ {
 			continue
 		}
 		if inFence {
+			continue
+		}
+		if inl := inlineLetterOpts(mdNoise.Replace(l)); inl != nil {
+			letters = inl // "Optional parts: a) x, b) y, c) z."
 			continue
 		}
 		if m := letterItem.FindStringSubmatch(mdNoise.Replace(l)); m != nil {
@@ -141,6 +152,15 @@ func planQuestions(text string) []planQ {
 			// that question: it is a yes/no with a default, not a new one.
 			// Likewise "Inside (recommended) or linked?" after "Where should
 			// it live?" on the same line gives that question its options.
+			// "Which parts should be built? All of a–e (recommended), or pick
+			// from: a) x, b) y, …?": the second sentence gives the first its
+			// options, any of them (Quill Android 2026-11-22).
+			if opts := inlineLetterOpts(sent); opts != nil && !afterApproval && len(out) > 0 && out[len(out)-1].Num == num && lineOf == li && (out[len(out)-1].Kind == qText || out[len(out)-1].Kind == qYesNo) {
+				prev := &out[len(out)-1]
+				prev.Kind, prev.Options, prev.Recommended = qMulti, opts, -1
+				prev.RecommendedPicks = allPicks(sent, len(opts))
+				continue
+			}
 			if _, opts, ok := parseChoices(sent); ok && (afterApproval || len(out) > 0 && out[len(out)-1].Num == num && lineOf == li) {
 				if !afterApproval {
 					prev := &out[len(out)-1]
@@ -223,6 +243,10 @@ func questionSentences(line string) []string {
 func classifyQuestion(sent string, letters []string) (planQ, bool) {
 	q := planQ{Text: strings.TrimSpace(strings.TrimRight(sent, "*_ ")), Recommended: -1}
 	bare := qQuoted.ReplaceAllString(q.Text, " ")
+	if opts := inlineLetterOpts(q.Text); opts != nil {
+		q.Kind, q.Options, q.RecommendedPicks = qMulti, opts, allPicks(q.Text, len(opts))
+		return q, true
+	}
 	if multiAsk.MatchString(bare) && len(letters) >= 2 {
 		q.Kind, q.Options = qMulti, letters
 		return q, true
@@ -261,6 +285,65 @@ func classifyQuestion(sent string, letters []string) (planQ, bool) {
 	}
 	q.Kind = qText
 	return q, true
+}
+
+// inlineLetterOpts: the lettered options listed inline in s ("pick from:
+// a) local check, b) guardrails?" or "a) x b) y c) z"), as "a: local check",
+// or nil. They follow a colon or start s, or there are at least three.
+func inlineLetterOpts(s string) []string {
+	ms := inlineLetter.FindAllStringSubmatchIndex(s, -1)
+	type mark struct{ start, text int }
+	var run []mark
+	for _, m := range ms {
+		if s[m[2]] == byte('a'+len(run)) {
+			run = append(run, mark{m[2], m[1]})
+		}
+	}
+	if len(run) < 2 {
+		return nil
+	}
+	before := strings.TrimRight(strings.TrimSpace(mdNoise.Replace(s[:run[0].start])), "*_ ")
+	if before != "" && !strings.HasSuffix(before, ":") && len(run) < 3 {
+		return nil
+	}
+	var out []string
+	for i, r := range run {
+		end := len(s)
+		if i+1 < len(run) {
+			end = run[i+1].start
+		}
+		o := strings.TrimSpace(s[r.text:end])
+		if i+1 == len(run) {
+			o = strings.TrimSpace(strings.TrimSuffix(o, "?"))
+		}
+		for _, tail := range []string{" and", " or"} {
+			o = strings.TrimSpace(strings.TrimSuffix(o, tail))
+		}
+		o = strings.TrimSpace(strings.TrimRight(o, ",;.?*_ "))
+		for _, cut := range []string{" (", " — ", ": "} {
+			if c := strings.Index(o, cut); c > 0 {
+				o = strings.TrimSpace(o[:c])
+			}
+		}
+		if o == "" {
+			return nil
+		}
+		out = append(out, string(s[r.start])+": "+shortLabel(o, 50))
+	}
+	return out
+}
+
+// allPicks: every option index when s recommends all of them ("All of a–e
+// (recommended)", "all (recommended)"), else nil.
+func allPicks(s string, n int) []int {
+	if !allRecommend.MatchString(s) {
+		return nil
+	}
+	picks := make([]int, n)
+	for i := range picks {
+		picks[i] = i
+	}
+	return picks
 }
 
 func isYesNoPair(opts []string) bool {

@@ -47,6 +47,7 @@ func fixtureDesk(t *testing.T) (*desk, fyne.Window) {
 	a.Settings().SetTheme(deskTheme{})
 	w := test.NewWindow(nil)
 	d := newDesk(a, w, config{ProjectsRoot: root, SessionsDir: sessions, ClaudeBin: "false"})
+	stubKmem(d)
 	gateUI(t, d)
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1280, 820))

@@ -21,6 +21,7 @@ func TestRealTranscriptProbe(t *testing.T) {
 	w := test.NewWindow(nil)
 	defer w.Close()
 	d := newDesk(a, w, config{ProjectsRoot: t.TempDir(), SessionsDir: t.TempDir(), ClaudeBin: "false"})
+	stubKmem(d)
 	w.SetContent(d.build())
 	w.Resize(fyne.NewSize(1400, 900))
 	conv, err := transcript.Load(path)
@@ -53,7 +54,8 @@ func TestRealSidebarProbe(t *testing.T) {
 	a.Settings().SetTheme(deskTheme{})
 	w := test.NewWindow(nil)
 	defer w.Close()
-	d := newDesk(a, w, config{ProjectsRoot: transcript.DefaultRoot(), SessionsDir: t.TempDir(), ClaudeBin: "false"})
+	d := newDesk(a, w, config{ProjectsRoot: realTranscriptRoot, SessionsDir: t.TempDir(), ClaudeBin: "false"})
+	stubKmem(d)
 	d.do = func(f func()) { f() }
 	d.doWait = d.do
 	w.SetContent(d.build())

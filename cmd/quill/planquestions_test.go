@@ -68,3 +68,45 @@ func TestPlanGoAnswersText(t *testing.T) {
 		t.Fatal("the reply is an approval")
 	}
 }
+
+// Quill Android 2026-11-22: inline lettered options after a colon were a
+// text box; they are a multi question, "All of a–e (recommended)" picking all.
+func TestPlanQuestionsInlineLetters(t *testing.T) {
+	const line = "1. Which parts should be built? All of a–e (recommended), or pick from: a) local check, b) remember home network, c) hardware-key proof, d) screen lock replaces the password, e) guardrails?"
+	for _, c := range []struct {
+		text, want string
+		picks      int
+	}{
+		{line + "\n\n**Do you approve steps 1–4?**",
+			"multi[a: local check|b: remember home network|c: hardware-key proof|d: screen lock replaces the password|e: guardrails]", 5},
+		{"Plan.\n\n1. Which should I add? All (recommended), or pick from: a) a log, b) a badge?",
+			"multi[a: a log|b: a badge]", 2},
+		{"Plan.\n\n1. Which extras should I add? a) a log b) a badge c) a sound?",
+			"multi[a: a log|b: a badge|c: a sound]", 0},
+		{"Plan.\n\n1. Pick any of a–c: a) a log, b) a badge, or c) a sound?",
+			"multi[a: a log|b: a badge|c: a sound]", 0},
+		{"Optional parts: a) a log, b) a badge, c) a sound.\n\n1. Which should I add, pick any of a–c?",
+			"multi[a: a log|b: a badge|c: a sound]", 0},
+		{"Optional parts:\na) a log\nb) a badge\nc) a sound\n\n1. Which should I add, pick any of a–c?",
+			"multi[a: a log|b: a badge|c: a sound]", 0},
+	} {
+		qs := planQuestions(c.text)
+		if got := qsSummary(qs); got != c.want {
+			t.Errorf("%q\n got: %s\nwant: %s", c.text[:min(60, len(c.text))], got, c.want)
+			continue
+		}
+		if len(qs[0].RecommendedPicks) != c.picks {
+			t.Errorf("%q: recommended picks %v, want %d", c.text[:min(60, len(c.text))], qs[0].RecommendedPicks, c.picks)
+		}
+	}
+	if opts, rec := planChoices(line); opts != nil || rec != -1 {
+		t.Errorf("planChoices(%q) = %q, %d; want no buttons", line, opts, rec)
+	}
+	// The card picks every checkbox to start with.
+	qs := planQuestions(line)
+	v := &chatView{}
+	ans := v.planAnswers(nil, qs)
+	if got := ans[qs[0].ID].Picks; len(got) != 5 || got[0] != 0 || got[4] != 4 {
+		t.Errorf("starting picks %v, want all 5", got)
+	}
+}

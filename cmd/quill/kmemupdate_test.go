@@ -78,11 +78,15 @@ func TestBundledKmemIsCurrent(t *testing.T) {
 	if bundled == "" || bundledKmemVersion(filepath.Join("..", "..", "third_party", "kmem")) != bundled {
 		t.Fatalf("third_party/kmem: script %q and VERSION disagree", bundled)
 	}
-	p, err := exec.LookPath("kmem")
-	if err != nil {
+	// The user's own kmem (found before the tests' isolation, desk_test.go),
+	// read from its files: tests never run the real kmem.
+	p, home := realKmemPath, realHome
+	if p == "" {
 		t.Skip("kmem not installed")
 	}
-	home, _ := os.UserHomeDir()
+	if _, err := os.Stat(filepath.Join(home, ".local", "share", "kmem", "rollout.json")); err != nil && kmemScriptVersion(p) == "" {
+		t.Skip("the installed kmem's version needs running it")
+	}
 	if installed := installedKmemVersion(home, p); installed != "" && versionLess(bundled, installed) {
 		t.Fatalf("third_party/kmem is %s but kmem %s is installed: run make kmem-sync", bundled, installed)
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -37,7 +38,62 @@ func TestMain(m *testing.M) {
 		fakeclaude.Run()
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	os.Exit(runIsolated(m))
+}
+
+// realTranscriptRoot: the user's transcripts, for the opt-in real probes;
+// realHome, realKmemPath: the user's home and kmem, read (never run) by
+// TestBundledKmemIsCurrent.
+var realTranscriptRoot, realHome, realKmemPath string
+
+// runIsolated runs the tests away from the real kmem and its live store
+// (Kmem Lock Audit 2026-11-22: test desks ran ~/.local/bin/kmem thousands
+// of times, as the running Claude session): a temporary HOME, no session
+// variables, and a "kmem" first on PATH that only records that it ran, which
+// fails the run.
+func runIsolated(m *testing.M) int {
+	realTranscriptRoot = transcript.DefaultRoot()
+	realHome, _ = os.UserHomeDir()
+	realKmemPath, _ = exec.LookPath("kmem")
+	tmp, err := os.MkdirTemp("", "quill-test-home-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer os.RemoveAll(tmp)
+	home := filepath.Join(tmp, "home")
+	bin := filepath.Join(tmp, "bin")
+	calls := filepath.Join(tmp, "kmem-calls")
+	for _, dir := range []string{home, bin} {
+		os.MkdirAll(dir, 0o755)
+	}
+	for _, k := range []string{"CLAUDE_CODE_SESSION_ID", "KMEM_SESSION", "KMEM_CS", "KMEM_HOOK_INPUT", "KMEM_CONFIG", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"} {
+		os.Unsetenv(k)
+	}
+	os.Setenv("HOME", home)
+	if runtime.GOOS != "windows" {
+		script := "#!/bin/sh\necho \"kmem $*\" >> '" + calls + "'\nexit 1\n"
+		os.WriteFile(filepath.Join(bin, "kmem"), []byte(script), 0o755)
+		os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+	code := m.Run()
+	if b, err := os.ReadFile(calls); err == nil && len(b) > 0 {
+		fmt.Fprintf(os.Stderr, "FAIL: tests ran kmem %d times; stub d.kmemRun (stubKmem) instead:\n%s", strings.Count(string(b), "\n"), b)
+		return 1
+	}
+	return code
+}
+
+// stubKmem: a test desk's kmem, which never runs a program. It reports the
+// kmem API Quill Desktop speaks, as an installed kmem would, and fails
+// everything else; tests that need kmem output set their own d.kmemRun.
+func stubKmem(d *desk) {
+	d.kmemRun = func(prog string, args ...string) (string, error) {
+		if prog == "kmem" && len(args) >= 1 && args[0] == "version" {
+			return fmt.Sprintf(`{"api":%d,"version":"0.0.0-test"}`, kmemAPI), nil
+		}
+		return "", fmt.Errorf("kmem is stubbed in tests")
+	}
 }
 
 var uiMu sync.Mutex
@@ -108,6 +164,7 @@ func newHarness(t *testing.T) *harness {
 	h.w = test.NewWindow(nil)
 	t.Cleanup(h.w.Close)
 	h.d = newDesk(a, h.w, config{ProjectsRoot: projects, SessionsDir: sessions, ClaudeBin: exe})
+	stubKmem(h.d)
 	uiMu.Unlock()
 	h.d.planFirst = false
 	h.d.kmemOff = true
