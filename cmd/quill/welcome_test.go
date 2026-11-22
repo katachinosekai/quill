@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 )
 
 func TestWelcomeChoices(t *testing.T) {
@@ -38,6 +40,49 @@ func TestWelcomeChoices(t *testing.T) {
 		h.d.stt.setLang("fr")
 		if p.Bool(prefSTTOff) || !h.d.stt.btn.Visible() {
 			t.Fatal("picking a language turns speech to text on again")
+		}
+		h.d.applyWelcome(welcomeChoices{Lang: "en", PlanFirst: true, KmemMemory: true})
+		if !h.d.planFirst || !p.Bool("planFirst") || p.String(memoryModeKey) != memoryModeKmem {
+			t.Fatal("ask first and kmem memory are set")
+		}
+		h.d.applyWelcome(welcomeChoices{Lang: "en", PlanFirst: false, KmemMemory: false})
+		if h.d.planFirst || p.Bool("planFirst") || p.String(memoryModeKey) != memoryModeClaude {
+			t.Fatal("let Claude work and auto memory are set")
+		}
+	})
+}
+
+// Skip only marks the Welcome as seen; every setting stays as it was.
+func TestWelcomeSkipChangesNothing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KMEM_CONFIG", "")
+	h := newHarness(t)
+	h.ui(func() {
+		p := h.d.app.Preferences()
+		p.SetBool(prefWelcomeSeen, false)
+		before := map[string]string{"newModel": p.String("newModel"), "sttLang": p.String("sttLang"), memoryModeKey: p.String(memoryModeKey)}
+		planBefore, offBefore := h.d.planFirst, p.Bool(prefSTTOff)
+		h.d.showWelcome(nil)
+		var skip *widget.Button
+		deepWalk(h.w.Canvas().Overlays().Top(), func(o fyne.CanvasObject) {
+			if b, ok := o.(*widget.Button); ok && b.Text == "Skip" {
+				skip = b
+			}
+		})
+		if skip == nil {
+			t.Fatal("the Welcome has a Skip button")
+		}
+		test.Tap(skip)
+		for k, v := range before {
+			if p.String(k) != v {
+				t.Errorf("Skip changed %s: %q -> %q", k, v, p.String(k))
+			}
+		}
+		if h.d.planFirst != planBefore || p.Bool(prefSTTOff) != offBefore || !p.Bool(prefWelcomeSeen) {
+			t.Fatal("Skip keeps plan first and speech to text, and marks the Welcome seen")
+		}
+		if _, err := os.Stat(filepath.Join(homeDir(), ".local", "share", "kmem", "RULES.md")); err == nil {
+			t.Fatal("Skip installs no rules")
 		}
 	})
 }

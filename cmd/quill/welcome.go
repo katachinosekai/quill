@@ -14,9 +14,10 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// Welcome (user 2026-11-21): three questions on a new install, before the
-// Setup checks. Online or local model, the speech-to-text language, and
-// Quill's default kmem rules (beginner) or none (advanced). Shown once;
+// Welcome (user 2026-11-21): five questions on a new install, before the
+// Setup checks. Online or local model, the speech-to-text language, plan
+// first or not, kmem or Claude's auto memory, and Quill's default kmem rules
+// (beginner) or none (advanced). Shown once;
 // Settings → Setup → "Run welcome again" opens it later.
 
 const (
@@ -27,6 +28,10 @@ const (
 	welcomeRules    = "Default rules (recommended for beginners)"
 	welcomeNoRules  = "No rules (advanced: write your own, or none)"
 	welcomeVoiceOff = "Off (no speech to text)"
+	welcomeAsk      = "Ask me first: Claude shows a plan and waits for my OK (recommended for beginners)"
+	welcomeLetWork  = "Let Claude work: no plan step (advanced)"
+	welcomeKmem     = "kmem: shared memory, handoffs and tasks (recommended with the default rules)"
+	welcomeAutoMem  = "Claude's auto memory: a MEMORY.md per folder"
 )
 
 // welcomeChoices is what the user picked; applyWelcome turns it into settings.
@@ -35,6 +40,8 @@ type welcomeChoices struct {
 	LocalModel string
 	Lang       string // "" = speech to text off
 	Rules      bool
+	PlanFirst  bool
+	KmemMemory bool
 }
 
 // freshInstall: no tabs saved and Setup never shown, so Quill has not been
@@ -120,6 +127,20 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 			done = append(done, "Installed Quill's default kmem rules at "+tildePath(path)+".")
 		}
 	}
+	d.planFirst = c.PlanFirst
+	p.SetBool("planFirst", c.PlanFirst)
+	if c.PlanFirst {
+		done = append(done, "Claude asks before running anything (plan first).")
+	} else {
+		done = append(done, "Claude works without a plan step.")
+	}
+	if c.KmemMemory {
+		p.SetString(memoryModeKey, memoryModeKmem)
+		done = append(done, "Sessions use kmem memory.")
+	} else {
+		p.SetString(memoryModeKey, memoryModeClaude)
+		done = append(done, "Sessions use Claude's auto memory.")
+	}
 	p.SetBool(prefWelcomeSeen, true)
 	return done
 }
@@ -166,26 +187,58 @@ func (d *desk) showWelcome(after func()) {
 		voice.SetSelected(languageName(want) + " (" + want + ")")
 	}
 
+	plan := widget.NewRadioGroup([]string{welcomeAsk, welcomeLetWork}, nil)
+	plan.SetSelected(welcomeLetWork)
+	if d.planFirst {
+		plan.SetSelected(welcomeAsk)
+	}
+
+	mem := widget.NewRadioGroup([]string{welcomeKmem, welcomeAutoMem}, nil)
+	mem.SetSelected(welcomeAutoMem)
+	if d.kmemMemory() || d.app.Preferences().String(memoryModeKey) != memoryModeClaude && bundledKmemDir() != "" {
+		mem.SetSelected(welcomeKmem)
+	}
+	memNote := caption("")
+	memNote.Wrapping = fyne.TextWrapWord
+	if !d.kmemAvailable() {
+		memNote.SetText("kmem isn't set up yet; Setup offers it right after this.")
+	}
+
 	rules := widget.NewRadioGroup([]string{welcomeRules, welcomeNoRules}, nil)
 	rules.SetSelected(welcomeRules)
 	rulesNote := caption("Shared rules every Claude session follows: start with kmem brief, claim tasks, save handoffs, git safety in shared folders.")
 	rulesNote.Wrapping = fyne.TextWrapWord
+	baseRulesNote := rulesNote.Text
 	if p := kmemRulesPath(homeDir()); fileExists(p) {
 		rules.SetSelected(welcomeNoRules)
 		rules.Disable()
-		rulesNote.SetText("You already have kmem rules (" + tildePath(p) + "); Quill leaves them as they are.")
+		baseRulesNote = "You already have kmem rules (" + tildePath(p) + "); Quill leaves them as they are."
 	}
+	syncRulesNote := func() {
+		text := baseRulesNote
+		if mem.Selected == welcomeAutoMem && !rules.Disabled() && rules.Selected == welcomeRules {
+			text += " The rules are kmem's: they work best with kmem memory (question 4)."
+		}
+		rulesNote.SetText(text)
+	}
+	mem.OnChanged = func(string) { syncRulesNote() }
+	rules.OnChanged = func(string) { syncRulesNote() }
+	syncRulesNote()
 	showRules := widget.NewButton("Show rules", d.showDefaultRules)
 	showRules.Importance = widget.LowImportance
 
 	body := container.NewVBox(
-		caption("Three quick choices. All of them can be changed later in Settings."),
+		caption("Five quick choices. All of them can be changed later in Settings."),
 		widget.NewSeparator(),
 		boldLabel("1. Which model should new sessions use?"), model, localNote,
 		widget.NewSeparator(),
 		boldLabel("2. Which language do you speak for speech to text?"), voice,
 		widget.NewSeparator(),
-		container.NewBorder(nil, nil, nil, showRules, boldLabel("3. Shared rules for your sessions (kmem)")), rules, rulesNote,
+		boldLabel("3. Before Claude changes files or runs commands:"), plan,
+		widget.NewSeparator(),
+		boldLabel("4. Memory for your sessions:"), mem, memNote,
+		widget.NewSeparator(),
+		container.NewBorder(nil, nil, nil, showRules, boldLabel("5. Shared rules for your sessions (kmem)")), rules, rulesNote,
 	)
 	dlg := dialog.NewCustomConfirm("Welcome to Quill Desktop", "Done", "Skip", container.NewVScroll(body), func(ok bool) {
 		if !ok {
@@ -193,8 +246,10 @@ func (d *desk) showWelcome(after func()) {
 		} else {
 			done := d.applyWelcome(welcomeChoices{
 				Local: model.Selected == welcomeLocal, LocalModel: local,
-				Lang:  byName[voice.Selected],
-				Rules: rules.Selected == welcomeRules && !rules.Disabled(),
+				Lang:       byName[voice.Selected],
+				Rules:      rules.Selected == welcomeRules && !rules.Disabled(),
+				PlanFirst:  plan.Selected == welcomeAsk,
+				KmemMemory: mem.Selected == welcomeKmem,
 			})
 			d.notifyWelcome(done)
 		}
