@@ -1677,6 +1677,9 @@ func (d *desk) sendTo(s *deskSession, text string) {
 			d.chatFor(s, s.conv.CancelPlans())
 		}
 	}
+	if s.resumeNext == "" {
+		s.resumeNext = d.firstTurnKmemName(s, text)
+	}
 	if s.resumeNext != "" || !isRetry(text) {
 		s.resumeAs, s.resumeNext = s.resumeNext, ""
 	}

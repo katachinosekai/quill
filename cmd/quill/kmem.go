@@ -328,10 +328,45 @@ func (d *desk) kmemSaveAllowed(s *deskSession, r *protocol.ControlRequest) bool 
 // sendResume sends Quill's own resume-from-handoff prompt. Until the next
 // message is sent, plan-first lets the session's read-only kmem startup
 // commands through even when they carry `--as <its kmem name>`, as the
-// prompt asks. New tabs and messages typed by the user are not affected.
+// prompt asks. A session's first message opens the same exception (see
+// firstTurnKmemName); later messages typed by the user are not affected.
 func (d *desk) sendResume(s *deskSession, name, prompt string) {
 	s.resumeNext = name
 	d.sendTo(s, prompt)
+}
+
+var (
+	kmemNameQuoted = regexp.MustCompile(`kmem\s+(?:name|--as[ =])\s*"([^"\n]+)"`)
+	kmemNameBare   = regexp.MustCompile(`kmem\s+--as[ =]([^\s"'` + "`" + `;&|)]+)`)
+)
+
+// kmemNameIn finds the kmem name a session's first message asks it to use
+// (`kmem name "X"`, `kmem --as "X"`, `kmem --as X`), or "".
+func kmemNameIn(text string) string {
+	if m := kmemNameQuoted.FindStringSubmatch(text); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	if m := kmemNameBare.FindStringSubmatch(text); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// firstTurnKmemName is the kmem name whose read-only startup commands may
+// skip plan-first during a session's first turn (user 2026-11-22: load kmem
+// on any fresh session, not only on Quill's resume prompt): the session's
+// own kmem name, else the one its first message names. "" once the session
+// has had a user message.
+func (d *desk) firstTurnKmemName(s *deskSession, text string) string {
+	for _, it := range s.conv.Items {
+		if it.Kind == chat.User {
+			return ""
+		}
+	}
+	if k := d.org.Kmem[s.id]; k != "" {
+		return k
+	}
+	return kmemNameIn(text)
 }
 
 func (d *desk) kmemResumeAllowed(s *deskSession, r *protocol.ControlRequest) bool {
