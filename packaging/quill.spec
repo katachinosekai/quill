@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.21
+Version:        0.1.22
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -74,6 +74,15 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.22-1
+- A session that runs out of memory (a game or build it started) no longer takes Quill Desktop and the other sessions down: each Claude session runs in its own systemd scope
+- Message times under each message (Settings: on/off, the system's 12/24-hour format or your own pattern with a preview)
+- Message box: auto formatting next to autocorrect (capital letters, — dashes, Shift+Enter list continuation; Backspace undoes it); the Welcome asks about both
+- Setup and Welcome: optional remote access through a VPN (Tailscale, NetBird, ZeroTier, Headscale, WireGuard, or Claude Code Remote Control only); skipped by default
+- Settings cover every Welcome choice (new-session model, speech to text on/off)
+- Plan cards: fixes from a two-model review (questions, numbering, options, approvals); plans are asked to number their questions by Quill itself
+- kmem 1.6.2 bundled; renaming a tab records who renamed the handoff
+- Bundles Quill for Android 0.9.19
 * Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.21-1
 - Replies are formatted while they stream in (no raw ** or # any more): finished paragraphs fade in, the last one is revealed word by word; Settings → General → "Animate new text" turns the animation off
 - Plan cards find the approval question among a plan's numbered closing questions, so such plans get the card (with a control for each question)
