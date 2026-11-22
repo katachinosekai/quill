@@ -256,6 +256,7 @@ Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "qu
   "modes": {"online": ["default", "acceptEdits", "plan", "auto"], "local": ["default", "acceptEdits", "plan"]},
   "projects": ["Quill", "Zomboid"],
   "actions": ["rename", "resume", "end", "delete", "project"],
+  "settings": {"buildGate": true, "coordinator": true},
   "sessions": []
 }
 ```
@@ -265,6 +266,7 @@ Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "qu
 - `cursor` is the stream position to pass to `/phone/stream` next.
 - `projects`: the project names in the sidebar, for the "Project" picker (the user may also type a new one). `actions`: the session-menu endpoints this Quill Desktop supports; older builds leave it out, so the phone shows only the options listed.
 - `usage.fiveHour` / `usage.week` are left out when unknown. `usage.credits` is the same text as Quill Desktop's usage panel ("not reported" when the plan reports none); `todayTokens` / `weekTokens` are the token sums of all sessions for today and the last 7 days.
+- `settings`: two Quill Desktop Settings → General switches. `buildGate` is "Ask before building" (the plan card before a build), `coordinator` is "Coordinate with subagents" (the setting itself; Quill Desktop still uses the coordinator only for Online models). Both default to `true`. Quill Android changes them with `POST /phone/settings`.
 
 ### GET /phone/folders
 
@@ -314,17 +316,20 @@ Returns at once when something changed after `cursor`, otherwise after `wait` se
   "boot": "9f0c...",
   "cursor": 5530,
   "reset": false,
+  "settings": {"buildGate": true, "coordinator": true},
   "changes": [
     {"type": "session", "session": {}},
     {"type": "removed", "id": "77aa..."},
     {"type": "order", "ids": ["3f2a...", "77aa..."]},
     {"type": "usage", "usage": {}},
-    {"type": "control", "control": false}
+    {"type": "control", "control": false},
+    {"type": "settings", "settings": {"buildGate": false, "coordinator": true}}
   ]
 }
 ```
 
 - A `session` change carries the whole Session object; its `epoch`/`rev` tell the phone whether to fetch items (only for the session on screen; others just update their row). `usage` is shaped as in `/phone/sessions`.
+- Every reply carries the current `settings` (as in `/phone/sessions`); a `settings` change comes when either switch changed, on the PC or from a device.
 - `reset: true` (cursor too old, or a different `boot`): the phone refetches `/phone/sessions`.
 - At most one stream per phone; a second one ends the first with an empty reply. Revoking a phone ends its stream with `403`.
 
@@ -380,6 +385,10 @@ The desktop's right-click session menu (revised 2026-11-21). A tab, its Claude s
 ### POST /phone/usage/resume
 
 Body `{}`. Same as "Resume now" on the pause banner. Response `{"v": 1, "usage": {...}}`.
+
+### POST /phone/settings
+
+Body: `{"buildGate": false}`, `{"coordinator": true}`, or both; booleans only. Sets the Quill Desktop Settings → General switches (the checkboxes follow) and sends a `settings` stream change. Response `{"v": 1, "settings": {"buildGate": false, "coordinator": true}}`. `400 bad_request` for an empty object, an unknown key or a value that isn't `true`/`false`; `403 control_off` as for every control write.
 
 ### POST /phone/sessions/new
 

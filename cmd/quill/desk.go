@@ -307,6 +307,8 @@ type desk struct {
 	settingsDlg   dialog.Dialog
 	tasksBtn      *tasksChip
 	phoneSync     *phoneSync
+	buildChk      *widget.Check // Settings → General "Ask before building", kept in line by settingsChanged
+	coordChk      *widget.Check // Settings → General "Coordinate with subagents"
 	phoneFileBtn  *widget.Button
 	phoneFileOff  *widget.Button
 	settingsSlot  *fyne.Container
@@ -496,10 +498,21 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		d.app.Preferences().SetBool("planFirst", on)
 	})
 	planChk.Checked = d.planFirst
-	buildChk := widget.NewCheck("Ask before building (plan card: more features, debug, secure, or build)", func(on bool) { d.app.Preferences().SetBool(prefBuildGate, on) })
+	buildChk := widget.NewCheck("Ask before building (plan card: more features, debug, secure, or build)", func(on bool) {
+		if on != d.buildGateOn() {
+			d.app.Preferences().SetBool(prefBuildGate, on)
+			d.settingsChanged()
+		}
+	})
 	buildChk.Checked = d.buildGateOn()
-	coordChk := widget.NewCheck("Coordinate with subagents (Online only: the chat stays free, features go to subagents)", func(on bool) { d.app.Preferences().SetBool(prefCoordinator, on) })
+	coordChk := widget.NewCheck("Coordinate with subagents (Online only: the chat stays free, features go to subagents)", func(on bool) {
+		if on != d.app.Preferences().BoolWithFallback(prefCoordinator, true) {
+			d.app.Preferences().SetBool(prefCoordinator, on)
+			d.settingsChanged()
+		}
+	})
 	coordChk.Checked = d.app.Preferences().BoolWithFallback(prefCoordinator, true)
+	d.buildChk, d.coordChk = buildChk, coordChk
 	newSessions := d.newSessionModelSetting()
 	sttChk := widget.NewCheck("Speech to text (the mic and Voice buttons under the message box)", func(on bool) {
 		d.app.Preferences().SetBool(prefSTTOff, !on)

@@ -48,6 +48,7 @@ type phoneAPI struct {
 	lastIDs  string
 	lastUse  string
 	lastCtl  map[string]bool
+	lastSet  string
 }
 
 type apiChange struct {
@@ -111,6 +112,8 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.stream(w, r)
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "items":
 		a.items(w, r, parts[1])
+	case r.Method == http.MethodPost && path == "settings":
+		a.setSettings(w, r)
 	case r.Method == http.MethodPost && (path == "unlock" || path == "unlock/touch"):
 		a.unlockAPI(w, r, path, folders.PhoneID(r))
 	case r.Method == http.MethodPost:
@@ -336,7 +339,7 @@ func (a *phoneAPI) sessions(w http.ResponseWriter, phone string) {
 			"v": 1, "boot": a.boot, "cursor": cursor, "usage": a.usage(), "sessions": list, "control": a.control(phone),
 			"models":   map[string]any{"online": modelChoices, "local": a.d.localModelList()},
 			"modes":    map[string]any{"online": modeChoices, "local": localModes},
-			"projects": a.projects(), "actions": menuActions,
+			"projects": a.projects(), "actions": menuActions, "settings": a.d.phoneSettings(),
 		}
 	})
 	folders.WriteJSON(w, http.StatusOK, body)
@@ -484,6 +487,14 @@ func (a *phoneAPI) scan() {
 		a.lastUse = string(ub)
 		changes = append(changes, map[string]any{"type": "usage", "usage": json.RawMessage(ub)})
 	}
+	sb, _ := json.Marshal(d.phoneSettings())
+	if string(sb) != a.lastSet {
+		first := a.lastSet == ""
+		a.lastSet = string(sb)
+		if !first {
+			changes = append(changes, map[string]any{"type": "settings", "settings": json.RawMessage(sb)})
+		}
+	}
 	for _, p := range d.phones() {
 		c := a.control(p.ID)
 		if old, ok := a.lastCtl[p.ID]; !ok || old != c {
@@ -586,7 +597,7 @@ func (a *phoneAPI) stream(w http.ResponseWriter, r *http.Request) {
 	if reset {
 		changes = []map[string]any{}
 	}
-	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "boot": a.boot, "cursor": next, "reset": reset, "changes": changes})
+	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "boot": a.boot, "cursor": next, "reset": reset, "changes": changes, "settings": a.d.phoneSettings()})
 }
 
 var apiKinds = map[chat.Kind]string{chat.User: "user", chat.Assistant: "assistant", chat.Tool: "tool", chat.Permission: "permission",
