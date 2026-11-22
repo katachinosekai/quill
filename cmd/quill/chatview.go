@@ -634,6 +634,12 @@ func blankItem(it *chat.Item) bool {
 	return false
 }
 
+// emptyObj: a rendered item that draws nothing (an empty container).
+func emptyObj(o fyne.CanvasObject) bool {
+	c, ok := o.(*fyne.Container)
+	return ok && len(c.Objects) == 0
+}
+
 func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 	iv.sig = itemSig(it)
 	if !blankItem(it) && !iv.holder.Visible() {
@@ -647,8 +653,16 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 		v.refreshStream(it, iv)
 	} else {
 		iv.st = nil
-		iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, v.render(it, iv))}
-		iv.holder.Refresh()
+		o := v.render(it, iv)
+		if emptyObj(o) {
+			// Nothing to show (a tool call while chips are hidden, a later
+			// tool in a run, an auto-allowed permission): no row, no padding.
+			iv.holder.Objects = nil
+			iv.holder.Hide()
+		} else {
+			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, o)}
+			iv.holder.Refresh()
+		}
 	}
 	if h := iv.holder.MinSize().Height; h != iv.height {
 		iv.height = h

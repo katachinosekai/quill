@@ -30,6 +30,7 @@ func TestBlankItemsTakeNoRow(t *testing.T) {
 		tool = append(tool, tl)
 		text = append(text, s.conv.AddNotice("still here"))
 		all := append(append(append(append([]*chat.Item{}, blank...), live...), tool...), text...)
+		h.d.setShowChips(true) // tool rows show with chips; hidden chips: TestHiddenChipsTakeNoSpace
 		h.d.chat.update(all)
 		for _, it := range blank {
 			if iv := h.d.chat.views[it.Seq]; iv == nil || iv.holder.Visible() || iv.holder.MinSize().Height != 0 {
