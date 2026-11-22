@@ -191,6 +191,7 @@ func CachedFontFace(style fyne.TextStyle, source fyne.Resource, o fyne.CanvasObj
 func ClearFontCache() {
 	fontCache.Clear()
 	fontCustomCache.Clear()
+	parsedFonts.Range(func(k, _ any) bool { parsedFonts.Delete(k); return true })
 
 	runBufferMut.Lock()
 	clear(shapeCache)
@@ -224,13 +225,32 @@ func DrawStringOffset(dst draw.Image, s string, color color.Color, f shaping.Fon
 	})
 }
 
+// parsedFonts holds each font resource parsed once (Quill patch, 2026-11-22):
+// fontCache is keyed by theme scope, and every ThemeOverride (Quill puts
+// one around each chat message) is its own scope, so each one parsed the
+// theme, fallback and emoji fonts again: 1.3 GB of duplicate font tables
+// after a few hours, and a garbage collector that never stopped.
+var parsedFonts sync.Map // fontKey -> *font.Face
+
+type fontKey struct {
+	name string
+	size int
+}
+
 func loadMeasureFont(data fyne.Resource) *font.Face {
-	loaded, err := font.ParseTTF(bytes.NewReader(data.Content()))
+	content := data.Content()
+	key := fontKey{data.Name(), len(content)}
+	if f, ok := parsedFonts.Load(key); ok {
+		return f.(*font.Face)
+	}
+	loaded, err := font.ParseTTF(bytes.NewReader(content))
 	if err != nil {
 		fyne.LogError("font load error", err)
 		return nil
 	}
-
+	if f, dup := parsedFonts.LoadOrStore(key, loaded); dup {
+		return f.(*font.Face)
+	}
 	return loaded
 }
 

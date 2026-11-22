@@ -2030,6 +2030,7 @@ func (d *desk) watch(ctx context.Context) {
 	go d.usageLoop(ctx)
 	go d.watchUpdates(ctx)
 	go d.watchKmemBanner(ctx)
+	go watchMemoryLimit(ctx)
 	go d.chat.followGuard(ctx)
 	go d.fetchCommands()
 	d.refreshAccount()
