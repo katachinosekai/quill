@@ -643,7 +643,7 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 		iv.st = nil
 		iv.holder.Objects = nil
 		iv.holder.Hide()
-	} else if it.Kind == chat.Assistant && it.Streaming {
+	} else if streaming(it, iv) {
 		v.refreshStream(it, iv)
 	} else {
 		iv.st = nil
@@ -714,9 +714,9 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 			return msgText(v.markdown(closeOpenMarkdown(it.Text)))
 		}
 		if body, card := v.choiceCard(it); card != nil {
-			return container.NewVBox(msgText(v.markdown(body)), card)
+			return container.NewVBox(msgText(v.markdownBlocks(body)), card)
 		}
-		md := msgText(v.markdown(it.Text))
+		md := msgText(v.markdownBlocks(it.Text))
 		if p := v.mediaPreviews(it.Text); p != nil {
 			return container.NewVBox(md, p)
 		}

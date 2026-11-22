@@ -80,7 +80,7 @@ func TestStreamingReplyIsFormatted(t *testing.T) {
 		if strings.Contains(shown, "**") || strings.Contains(shown, "## ") || strings.Contains(shown, "`") {
 			t.Fatalf("raw markup on screen while streaming:\n%s", shown)
 		}
-		limit := int(time.Since(start)/streamEvery) + 3
+		limit := int(time.Since(start)/streamTick) + len(full)/3 + 3
 		if st.renders > limit {
 			t.Fatalf("live paragraph redrawn %d times in %v (limit %d)", st.renders, time.Since(start), limit)
 		}

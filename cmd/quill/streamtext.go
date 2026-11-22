@@ -1,65 +1,107 @@
 package main
 
 import (
-	"image/color"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 
 	"github.com/katachinosekai/quill/internal/chat"
 )
 
-// Streaming replies are formatted while they arrive (user 2026-11-21): the
-// paragraphs that are complete are rendered once and fade in; the growing
-// last paragraph is rendered with its open markup closed for now
-// (closeOpenMarkdown) and revealed smoothly. It is redrawn at most every
-// streamEvery. When the reply ends the whole text is rendered as before, so
-// the finished message looks exactly as it always did.
+// Streaming replies (user 2026-11-21, made smooth 2026-11-22): a reply is
+// laid out paragraph by paragraph, the same way while it streams and after
+// it ends (markdownBlocks), so nothing re-flows when it finishes. Finished
+// paragraphs are rendered once and never redrawn or faded again; the
+// growing last paragraph is rendered with its open markup closed for now.
+// With "Animate new text" on, one timer per reply reveals the text at a
+// steady pace, whole words at a time, speeding up gently when the model is
+// ahead and never more than a few words per frame; off, text appears as it
+// arrives.
 
 const (
 	prefAnimateText = "animateText"
-	streamEvery     = 100 * time.Millisecond
-	streamFade      = 150 * time.Millisecond
-	streamReveal    = 120 * time.Millisecond
+	streamTick      = 16 * time.Millisecond // ~60 frames a second
+	revealMinRate   = 2                     // characters per frame at least
+	revealCatchUp   = 12                    // frames to close the gap, roughly
+	revealMaxStep   = 24                    // characters per frame at most
 )
 
 type streamView struct {
 	it       *chat.Item
-	box      *fyne.Container // finished blocks, then live
+	box      *fyne.Container // finished paragraphs, then live
 	live     *fyne.Container // the growing last paragraph
-	done     int             // bytes of it.Text rendered as finished blocks
-	shown    string          // the live text currently drawn
-	last     time.Time       // last live redraw
-	pending  bool            // a throttled redraw is scheduled
-	reveal   *fyne.Animation
-	renders  int // live redraws (tests)
+	done     int             // finished paragraphs drawn
+	pos      int             // bytes of it.Text revealed
+	shown    string          // the live paragraph as drawn
+	ticking  bool
 	animated bool
+	renders  int // live redraws (tests)
 }
 
 func (d *desk) animateText() bool {
 	return d.app.Preferences().BoolWithFallback(prefAnimateText, true)
 }
 
-// streamCut: where the finished paragraphs end, at the last blank line
-// outside a code fence (0 = nothing finished yet).
-func streamCut(text string) int {
-	cut, inFence, pos := 0, false, 0
+// splitParas cuts text at blank lines outside code fences. The last part is
+// the paragraph still growing (it can be empty).
+func splitParas(text string) (done []string, live string) {
+	inFence, start, pos := false, 0, 0
 	lines := strings.SplitAfter(text, "\n")
-	for i, l := range lines {
+	for _, l := range lines {
 		if strings.HasPrefix(strings.TrimSpace(l), "```") {
 			inFence = !inFence
 		}
 		pos += len(l)
-		// A blank line that has more text after it closes a paragraph.
-		if !inFence && strings.TrimSpace(l) == "" && i > 0 && strings.TrimSpace(text[pos:]) != "" {
+		if !inFence && strings.TrimSpace(l) == "" && strings.TrimSpace(text[pos:]) != "" {
+			if p := strings.TrimSpace(text[start:pos]); p != "" {
+				done = append(done, p)
+			}
+			start = pos
+		}
+	}
+	return done, strings.TrimLeft(text[start:], "\n")
+}
+
+// streamCut: the offset where the growing last paragraph starts (0 = none
+// finished yet).
+func streamCut(text string) int {
+	inFence, cut, pos := false, 0, 0
+	for _, l := range strings.SplitAfter(text, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "```") {
+			inFence = !inFence
+		}
+		pos += len(l)
+		if !inFence && strings.TrimSpace(l) == "" && pos > len(l) && strings.TrimSpace(text[pos:]) != "" {
 			cut = pos
 		}
 	}
 	return cut
+}
+
+// markdownBlocks lays out a reply paragraph by paragraph (the same layout a
+// streaming reply has).
+func (v *chatView) markdownBlocks(text string) fyne.CanvasObject {
+	done, live := splitParas(strings.TrimRight(text, "\n"))
+	box := container.NewVBox()
+	for _, p := range done {
+		box.Add(v.markdown(p))
+	}
+	if strings.TrimSpace(live) != "" {
+		box.Add(v.markdown(live))
+	}
+	if len(box.Objects) == 1 {
+		return box.Objects[0]
+	}
+	return box
+}
+
+// streaming: this reply is still drawn by refreshStream (it is streaming,
+// or its reveal is still catching up).
+func streaming(it *chat.Item, iv *itemView) bool {
+	return it.Kind == chat.Assistant && (it.Streaming || iv.st != nil && iv.st.it == it && iv.st.pos < len(it.Text))
 }
 
 // refreshStream draws a streaming assistant reply (UI thread).
@@ -72,84 +114,85 @@ func (v *chatView) refreshStream(it *chat.Item, iv *itemView) {
 		iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, msgText(st.box))}
 		iv.holder.Refresh()
 	}
-	text := it.Text
-	if cut := streamCut(text); cut > st.done {
-		block := strings.TrimSpace(text[st.done:cut])
-		st.done = cut
-		st.shown = ""
-		if block != "" {
-			obj := v.markdown(block)
-			if st.animated {
-				obj = v.fadeIn(obj)
-			}
-			objs := st.box.Objects[:len(st.box.Objects)-1]
-			st.box.Objects = append(append(objs, obj), st.live)
-			st.box.Refresh()
-		}
+	if !st.animated {
+		st.pos = len(it.Text)
+		v.drawStream(st, iv)
+		return
 	}
-	v.redrawLive(st, iv)
+	if !st.ticking {
+		st.ticking = true
+		go v.revealLoop(st, iv)
+	}
 }
 
-// redrawLive draws the live paragraph now, or once streamEvery has passed.
-func (v *chatView) redrawLive(st *streamView, iv *itemView) {
-	if wait := streamEvery - time.Since(st.last); wait > 0 {
-		if !st.pending {
-			st.pending = true
-			time.AfterFunc(wait, func() {
-				v.d.do(func() {
-					st.pending = false
-					if iv.st == st && st.it.Streaming {
-						v.redrawLive(st, iv)
-					}
-				})
-			})
-		}
-		return
-	}
-	tail := strings.TrimLeft(st.it.Text[min(st.done, len(st.it.Text)):], "\n")
-	if tail == st.shown {
-		return
-	}
-	st.last = time.Now()
-	from := st.shown
-	if !st.animated || !strings.HasPrefix(tail, from) || len(tail)-len(from) < 4 {
-		v.drawLive(st, iv, tail)
-		return
-	}
-	// Smooth reveal: the new words appear over streamReveal instead of all
-	// at once.
-	if st.reveal != nil {
-		st.reveal.Stop()
-	}
-	st.reveal = fyne.NewAnimation(streamReveal, func(f float32) {
-		if iv.st != st {
+// revealLoop advances the reveal at a steady pace until it has caught up
+// with a finished reply.
+func (v *chatView) revealLoop(st *streamView, iv *itemView) {
+	t := time.NewTicker(streamTick)
+	defer t.Stop()
+	for range t.C {
+		stop := false
+		v.d.do(func() {
+			if iv.st != st {
+				stop = true
+				return
+			}
+			text := st.it.Text
+			if st.pos < len(text) {
+				gap := len(text) - st.pos
+				step := min(max(revealMinRate, gap/revealCatchUp), revealMaxStep)
+				n := min(st.pos+step, len(text))
+				// Whole words, and never in the middle of a character.
+				if sp := strings.IndexAny(text[n:], " \n"); sp >= 0 && sp <= revealMaxStep {
+					n += sp
+				} else if sp < 0 && !st.it.Streaming {
+					n = len(text)
+				}
+				for n < len(text) && !utf8.RuneStart(text[n]) {
+					n++
+				}
+				st.pos = n
+				v.drawStream(st, iv)
+			}
+			if st.pos >= len(text) {
+				// Caught up: stop ticking (no idle timer while Claude
+				// thinks); the next text starts it again.
+				st.ticking = false
+				stop = true
+				if !st.it.Streaming {
+					v.refreshItem(st.it, iv) // the finished reply, same layout
+				}
+			}
+		})
+		if stop {
 			return
 		}
-		n := len(from) + int(f*float32(len(tail)-len(from)))
-		if f >= 1 {
-			n = len(tail)
-		} else if sp := strings.IndexAny(tail[n:], " \n"); sp >= 0 {
-			n += sp // whole words only
-		} else {
-			n = len(tail)
-		}
-		if part := tail[:n]; part != st.shown {
-			v.drawLive(st, iv, part)
-		}
-	})
-	st.reveal.Curve = fyne.AnimationEaseOut
-	st.reveal.Start()
+	}
 }
 
-func (v *chatView) drawLive(st *streamView, iv *itemView, text string) {
-	st.shown = text
-	st.renders++
-	if strings.TrimSpace(text) == "" {
-		st.live.Objects = nil
-	} else {
-		st.live.Objects = []fyne.CanvasObject{v.markdown(closeOpenMarkdown(text))}
+// drawStream shows st.it.Text[:st.pos]: new finished paragraphs are added
+// once, the live paragraph is redrawn when it changed.
+func (v *chatView) drawStream(st *streamView, iv *itemView) {
+	done, live := splitParas(st.it.Text[:st.pos])
+	if len(done) > st.done {
+		objs := st.box.Objects[:len(st.box.Objects)-1]
+		for _, p := range done[st.done:] {
+			objs = append(objs, v.markdown(p))
+		}
+		st.box.Objects = append(objs, st.live)
+		st.done = len(done)
+		st.box.Refresh()
 	}
-	st.live.Refresh()
+	if live != st.shown {
+		st.shown = live
+		st.renders++
+		if strings.TrimSpace(live) == "" {
+			st.live.Objects = nil
+		} else {
+			st.live.Objects = []fyne.CanvasObject{v.markdown(closeOpenMarkdown(live))}
+		}
+		st.live.Refresh()
+	}
 	if h := iv.holder.MinSize().Height; h != iv.height {
 		iv.height = h
 		relayout(v.box)
@@ -157,24 +200,4 @@ func (v *chatView) drawLive(st *streamView, iv *itemView, text string) {
 			v.scrollBottom()
 		}
 	}
-}
-
-// fadeIn shows obj under a cover in the chat's background colour that
-// clears over streamFade.
-func (v *chatView) fadeIn(obj fyne.CanvasObject) fyne.CanvasObject {
-	bg := theme.Color(theme.ColorNameBackground)
-	r, g, b, _ := bg.RGBA()
-	base := color.NRGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), 0xff}
-	cover := canvas.NewRectangle(base)
-	a := fyne.NewAnimation(streamFade, func(f float32) {
-		c := base
-		c.A = uint8((1 - f) * 255)
-		cover.FillColor = c
-		cover.Refresh()
-		if f >= 1 {
-			cover.Hide()
-		}
-	})
-	a.Start()
-	return container.NewStack(obj, cover)
 }
