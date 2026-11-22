@@ -102,7 +102,7 @@ func TestNewTabKmemCard(t *testing.T) {
 	mu.Lock()
 	renamed := false
 	for _, c := range calls {
-		renamed = renamed || c == "kmem handoff rename quill quill-2 --as quill"
+		renamed = renamed || c == "kmem handoff rename quill quill-2 --as Quill Desktop/quill"
 	}
 	if !renamed {
 		t.Fatalf("a saved handoff is renamed in kmem: %v", calls)

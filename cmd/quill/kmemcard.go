@@ -149,7 +149,7 @@ func (d *desk) renameKmem(id, old, next string) {
 		var err error
 		if saved {
 			var out string
-			out, err = d.runKmem("kmem", "handoff", "rename", old, next, "--as", old) // --as: history names the session, not "unknown"
+			out, err = d.runKmem("kmem", "handoff", "rename", old, next, "--as", "Quill Desktop/"+old) // --as: kmem history shows "by Quill Desktop/OLD at <time>", not "unknown"
 			if err != nil {
 				err = fmt.Errorf("%s", strings.TrimSpace(out))
 			}
