@@ -578,6 +578,16 @@ type textRenderer struct {
 // codeInlineText returns the text inside an inline-code container, identified by
 // its codeInlineLayout, or a bare *canvas.Text as-is. It returns false for any
 // other object.
+// isCodeBox: obj is an inline-code container (background + text).
+func isCodeBox(obj fyne.CanvasObject) bool {
+	c, ok := obj.(*fyne.Container)
+	if !ok {
+		return false
+	}
+	_, ok = c.Layout.(*codeInlineLayout)
+	return ok
+}
+
 func codeInlineText(obj fyne.CanvasObject) (*canvas.Text, bool) {
 	switch o := obj.(type) {
 	case *canvas.Text:
@@ -936,8 +946,14 @@ func (r *textRenderer) layoutRow(texts []fyne.CanvasObject, align fyne.TextAlign
 	case fyne.TextAlignTrailing:
 		spare += innerPadding
 		first := texts[0]
-		first.Resize(fyne.NewSize(first.Size().Width+spare, height))
-		setAlign(first, fyne.TextAlignTrailing)
+		if isCodeBox(first) {
+			// Quill: an inline-code box draws its text at its left edge,
+			// so widening it would leave the code at the row's start.
+			first.Move(first.Position().Add(fyne.NewPos(spare, 0)))
+		} else {
+			first.Resize(fyne.NewSize(first.Size().Width+spare, height))
+			setAlign(first, fyne.TextAlignTrailing)
+		}
 
 		for _, text := range texts[1:] {
 			text.Move(text.Position().Add(fyne.NewPos(spare, 0)))
@@ -946,11 +962,18 @@ func (r *textRenderer) layoutRow(texts []fyne.CanvasObject, align fyne.TextAlign
 		spare += innerPadding
 		pad := spare / 2
 		first := texts[0]
-		first.Resize(fyne.NewSize(first.Size().Width+pad, height))
-		setAlign(first, fyne.TextAlignTrailing)
+		if isCodeBox(first) {
+			// Quill: move the code box (see the trailing case) instead.
+			first.Move(first.Position().Add(fyne.NewPos(pad, 0)))
+		} else {
+			first.Resize(fyne.NewSize(first.Size().Width+pad, height))
+			setAlign(first, fyne.TextAlignTrailing)
+		}
 		last := texts[len(texts)-1]
-		last.Resize(fyne.NewSize(last.Size().Width+pad, height))
-		setAlign(last, fyne.TextAlignLeading)
+		if !isCodeBox(last) {
+			last.Resize(fyne.NewSize(last.Size().Width+pad, height))
+			setAlign(last, fyne.TextAlignLeading)
+		}
 
 		for _, text := range texts[1:] {
 			text.Move(text.Position().Add(fyne.NewPos(pad, 0)))
