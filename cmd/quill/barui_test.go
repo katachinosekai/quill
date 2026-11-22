@@ -226,6 +226,11 @@ func TestPlanQuestionsScreenshot(t *testing.T) {
 		if n := len(columns(form)); n != 1 {
 			t.Fatalf("centering on: the questions are %d columns, want 1", n)
 		}
+		h.d.center = false
+		if n := len(columns(h.d.chat.planQuestionForm(qs, ans))); n != 0 {
+			t.Fatalf("centering off: the questions stay left-aligned, got %d columns", n)
+		}
+		h.d.center = true
 		var picked []string
 		deepWalk(form, func(o fyne.CanvasObject) {
 			if r, ok := o.(*widget.RadioGroup); ok && r.Selected != "" {

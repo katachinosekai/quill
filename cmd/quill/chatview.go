@@ -802,7 +802,7 @@ func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
 		t.Wrapping = fyne.TextWrapWord
 		return t
 	}
-	flush := func() {
+	plain := func(run []widget.RichTextSegment) {
 		if len(run) == 0 {
 			return
 		}
@@ -818,6 +818,36 @@ func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
 		} else {
 			parts = append(parts, text(run...))
 		}
+	}
+	flush := func() {
+		if len(run) == 0 {
+			return
+		}
+		// Lettered lines ("a. …", "b) …") aren't markdown lists, but rule
+		// f5c0dd9 treats them as one: two or more in a row are one
+		// left-aligned block, centered as a column like a list.
+		bounds, lines, ok := paragraphLines(run)
+		if !ok {
+			plain(run)
+			run = nil
+			return
+		}
+		from := 0
+		for i := 0; i < len(lines); {
+			j := i
+			for j < len(lines) && letteredLine.MatchString(lines[j]) {
+				j++
+			}
+			if j-i < 2 {
+				i = max(j, i+1)
+				continue
+			}
+			plain(run[from:bounds[i][0]])
+			parts = append(parts, letteredColumn(run[bounds[i][0]:bounds[j-1][1]], lines[i:j]))
+			from = bounds[j-1][1]
+			i = j
+		}
+		plain(run[from:])
 		run = nil
 	}
 	for _, seg := range segs {

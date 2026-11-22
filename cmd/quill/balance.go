@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -280,4 +281,23 @@ func balancedParagraph(run []widget.RichTextSegment) (from, to int, width func(a
 		}
 		return b + balanceSlack + pad
 	}, true
+}
+
+// letteredLine: a line that starts like a lettered list item.
+var letteredLine = regexp.MustCompile(`^\s*[a-hA-H][.)]\s`)
+
+// letteredColumn lays consecutive lettered lines out like a list (rule
+// f5c0dd9): left-aligned, so their markers line up, in a column centered
+// as a whole that scales with the chat (groupWidth).
+func letteredColumn(segs []widget.RichTextSegment, lines []string) fyne.CanvasObject {
+	alignSegments(segs, fyne.TextAlignLeading)
+	t := widget.NewRichText(segs...)
+	t.Wrapping = fyne.TextWrapWord
+	size := msgTextSize()
+	words := make([]wrapText, len(lines))
+	for i, l := range lines {
+		words[i] = measureWords(l, size, fyne.TextStyle{})
+	}
+	pad := 2*msgTheme{}.Size(theme.SizeNameInnerPadding) + balanceSlack
+	return newColumn(true, func(avail float32) float32 { return groupWidth(avail, words, pad) }, t)
 }
