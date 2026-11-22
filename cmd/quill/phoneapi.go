@@ -772,6 +772,14 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 		folders.WriteError(w, http.StatusBadRequest, "bad_request", "epoch and since go together; numbers only")
 		return
 	}
+	var have map[int]haveText
+	if q.Get("delta") == "1" {
+		var err error
+		if have, err = parseHave(q.Get("have")); err != nil {
+			folders.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
 	var body map[string]any
 	found := a.preload(id)
 	if !found {
@@ -789,9 +797,11 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 		items := s.conv.Items
 		open := openChoiceItem(s.conv)
 		reset := false
+		incremental := false
 		var pick []*chat.Item
 		switch {
 		case hasEpoch && epoch == t.epoch && since <= t.rev:
+			incremental = true
 			for _, it := range items {
 				if t.irev[it.Seq] > since {
 					pick = append(pick, it)
@@ -812,7 +822,11 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		out := []map[string]any{}
 		for _, it := range pick {
-			out = append(out, a.item(s, it, t.irev[it.Seq], open))
+			m := a.item(s, it, t.irev[it.Seq], open)
+			if h, ok := have[it.Seq]; ok && incremental {
+				textDelta(m, it, h)
+			}
+			out = append(out, m)
 		}
 		hasMore := len(pick) > 0 && len(items) > 0 && pick[0] != items[0]
 		queue := []map[string]any{}

@@ -186,12 +186,17 @@ type Server struct {
 }
 
 func Listen(cert tls.Certificate, port int, phones []Phone) (*Server, error) {
-	ln, err := tls.Listen("tcp", net.JoinHostPort("", strconv.Itoa(port)), &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+	// h2 first: phones that speak HTTP/2 share one connection for all
+	// requests (user 2026-11-22); others keep HTTP/1.1.
+	ln, err := tls.Listen("tcp", net.JoinHostPort("", strconv.Itoa(port)), &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12, NextProtos: []string{"h2", "http/1.1"}})
 	if err != nil {
 		return nil, err
 	}
 	s := &Server{idem: newIdemStore(), phones: append([]Phone(nil), phones...), revoked: make(chan struct{}), ln: ln, Port: ln.Addr().(*net.TCPAddr).Port, boot: newBoot(), next: 1, wake: make(chan struct{}), eventsOn: true}
-	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 8 << 10}
+	// IdleTimeout keeps a phone's connection open between requests (without
+	// it, ReadTimeout's 10 s closed it); long replies get more write time
+	// in ServeHTTP (slowReply).
+	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: idleTimeout, MaxHeaderBytes: 8 << 10}
 	go s.srv.Serve(ln)
 	return s, nil
 }
@@ -216,7 +221,34 @@ func (s *Server) Close() error {
 	return s.srv.Close()
 }
 
+// Slow links (user 2026-11-22): a 238 KB items page took 11 s on EDGE, past
+// the 10 s WriteTimeout; the session list and items pages get slowWrite.
+const (
+	idleTimeout = 90 * time.Second
+	slowWrite   = 60 * time.Second
+)
+
+// slowReply: the replies that can be large (session list, items pages).
+func slowReply(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	if r.URL.Path == "/phone/sessions" {
+		return true
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/phone/"), "/")
+	return len(parts) == 3 && parts[0] == "session" && parts[2] == "items"
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if slowReply(r) {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(slowWrite))
+	}
+	if acceptsGzip(r) && !liveEndpoint(r.URL.Path) {
+		g := &gzipWriter{ResponseWriter: w}
+		defer g.finish()
+		w = g
+	}
 	phone := strings.HasPrefix(r.URL.Path, "/phone/")
 	if phone {
 		if r.Method != http.MethodGet && r.Method != http.MethodPost {

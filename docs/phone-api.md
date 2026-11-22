@@ -10,6 +10,7 @@ Status of this document: agreed shape (kmem fe1c74f). Any change after the first
 - Every request sends `X-Quill-Key: <phone key>` (see Pairing). A missing, unknown or revoked key gets `403 forbidden` on every endpoint.
 - Every successful response object has `"v": 1`. New fields can appear in any response without a version bump; the phone ignores fields it doesn't know and treats unknown enum values as the closest neutral case (unknown status = `idle`, unknown item kind = `notice`, unknown request state = `cancelled`).
 - Times are Unix milliseconds (`...Ms`). Optional fields are left out rather than sent as `null`.
+- Transport (2026-11-22, for slow links): the server offers HTTP/2 (ALPN `h2`, then `http/1.1`) and keeps idle connections open 90 s, so the phone can reuse one connection. Replies of 1 KiB or more are gzipped (`Content-Encoding: gzip`, `Vary: Accept-Encoding`) when the request sends `Accept-Encoding: gzip`; smaller replies and requests without it are unchanged. `/events` and `/phone/stream` are never compressed. `/phone/sessions` and `/phone/session/{id}/items` may take up to 60 s to send (other replies 10 s).
 - Text fields hold Markdown the way Quill shows it; the phone renders it.
 - Request bodies are capped at 64 KiB (`413 too_large`).
 - Writes are limited to 10 per second per phone (`429 rate_limited` with `Retry-After` seconds).
@@ -279,6 +280,7 @@ Query:
 | `epoch` + `since` | changes after rev `since` in epoch `epoch` |
 | `before` | `limit` items with `seq < before` (paging back) |
 | `limit` | default 200, max 500 |
+| `delta=1` + `have` | with `epoch` + `since` only: streaming deltas, see below |
 
 Response:
 
@@ -298,6 +300,7 @@ Response:
 - `items`: Item objects, ascending `seq`. `queue`: the full current queue (Queue entries).
 - With `epoch` + `since`: `items` holds every item whose `rev > since`, whole. When `epoch` is not the current one, or `since` is older than the server can answer, the response is the latest window with `reset: true`; the phone replaces its list.
 - `hasMore`: older items exist before the first one returned.
+- Streaming deltas (opt-in, 2026-11-22): with `delta=1`, `have=<seq>:<n>:<crc>[,<seq>:<n>:<crc>...]` (at most 16 entries) names items the phone already holds: `n` is the number of Unicode code points it has of that item's `text`, `crc` the CRC-32 (IEEE, as in `java.util.zip.CRC32`, hex) of those `n` code points as UTF-8. When such an `assistant` or `thinking` item comes back in an `epoch` + `since` reply and the phone's copy is a prefix of the current text, the item carries `"textFrom": n`, `"text"`: only the code points after `n`, and `"textLen"`: the whole text's length in code points; the phone appends. Otherwise (other kinds, `n` = 0, `n` longer than the text, crc mismatch, or the full window) the item comes whole without `textFrom`. A malformed `have` gets `400 bad_request`.
 
 ### GET /phone/stream
 
