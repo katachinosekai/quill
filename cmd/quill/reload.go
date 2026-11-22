@@ -106,13 +106,22 @@ func (d *desk) watchBinary(ctx context.Context) {
 			return
 		case <-t.C:
 			if b.changed() {
-				d.do(func() {
-					d.swapTo = b.path
-					d.trySwap()
-				})
+				d.do(func() { d.binaryChanged(b.path) })
 			}
 		}
 	}
+}
+
+// binaryChanged: Quill's program file was replaced. Only a switch the user
+// asked for (Update, Restart into it) happens by itself; otherwise the update
+// line asks (user 2026-11-21: never update on its own).
+func (d *desk) binaryChanged(path string) {
+	if !d.swapOK {
+		d.offerBuild(path)
+		return
+	}
+	d.swapTo = path
+	d.trySwap()
 }
 
 type handedSession struct {

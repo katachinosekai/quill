@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -32,6 +33,7 @@ type writeBody struct {
 	Action    string              `json:"action"`
 	Answers   map[string][]string `json:"answers"`
 	Index     *int                `json:"index"`
+	Choice    *int                `json:"choice"` // approvePlan: index into the plan item's request.choices
 	Folder    string              `json:"folder"`
 	Backend   string              `json:"backend"`
 	Model     string              `json:"model"`
@@ -207,7 +209,15 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		if !pending {
 			return nil, stale("the plan is no longer pending")
 		}
-		d.answerPlan(s, it, in.Action == "approvePlan")
+		choice := ""
+		if in.Choice != nil {
+			opts, _ := planChoices(planQuestion(s.conv, it))
+			if in.Action != "approvePlan" || *in.Choice < 0 || *in.Choice >= len(opts) {
+				return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", fmt.Sprintf("choice %d is not one of the plan's %d choices", *in.Choice, len(opts))}
+			}
+			choice = opts[*in.Choice]
+		}
+		d.answerPlanWith(s, it, in.Action == "approvePlan", choice)
 		if in.Action == "rejectPlan" && strings.TrimSpace(in.Text) != "" {
 			a.send(s, in.Text)
 		}

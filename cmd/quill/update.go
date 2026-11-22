@@ -4,30 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/theme"
-	"fyne.io/fyne/v2/widget"
-
 	"github.com/katachinosekai/quill/internal/updater"
 )
 
 const updateEvery = 6 * time.Hour
-
-func (d *desk) updateButton() fyne.CanvasObject {
-	d.updBtn = widget.NewButtonWithIcon("", theme.DownloadIcon(), d.showUpdate)
-	d.updBtn.Importance = widget.HighImportance
-	d.updBtn.Hide()
-	return d.updBtn
-}
 
 func (d *desk) updateKind() (updater.Kind, string) {
 	exe, err := os.Executable()
@@ -60,68 +46,11 @@ func (d *desk) watchUpdates(ctx context.Context) {
 			r, err := updater.Latest(cctx, updater.Client())
 			cancel()
 			if err == nil && updater.Newer(r.Tag, version) {
-				d.do(func() {
-					d.updRelease = r
-					d.updBtn.SetText("Update to " + strings.TrimPrefix(r.Tag, "v"))
-					d.updBtn.Show()
-				})
+				d.do(func() { d.offerRelease(r) })
 			}
 		}
 		timer.Reset(updateEvery)
 	}
-}
-
-func (d *desk) showUpdate() {
-	r := d.updRelease
-	if r == nil {
-		return
-	}
-	kind, appImage := d.updateKind()
-	notes := widget.NewLabel(oneLineKeep(r.Body, 2000))
-	notes.Wrapping = fyne.TextWrapWord
-	scroll := container.NewVScroll(notes)
-	scroll.SetMinSize(fyne.NewSize(520, 260))
-	how := "The AppImage file is replaced and Quill restarts into it; your sessions are handed over."
-	if kind == updater.KindRPM {
-		how = "The new package is installed with dnf (your system asks for your password), then Quill switches to it; your sessions are handed over."
-	}
-	info := widget.NewLabel("Quill " + strings.TrimPrefix(r.Tag, "v") + " is available (you have " + version + "). " + how +
-		" The download must match Quill's release signature, or nothing is installed.")
-	info.Wrapping = fyne.TextWrapWord
-	bar := widget.NewProgressBar()
-	bar.Hide()
-	status := widget.NewLabel("")
-	status.Wrapping = fyne.TextWrapWord
-	var dlg dialog.Dialog
-	update := widget.NewButtonWithIcon("Update", theme.DownloadIcon(), nil)
-	update.Importance = widget.HighImportance
-	page := widget.NewButton("Release page", func() {
-		if u, err := url.Parse(r.Page); err == nil && u.Scheme == "https" && u.Host == "github.com" {
-			d.app.OpenURL(u)
-		}
-	})
-	later := widget.NewButton("Later", func() { dlg.Hide() })
-	update.OnTapped = func() {
-		update.Disable()
-		bar.Show()
-		status.SetText("Checking the release signature...")
-		go func() {
-			err := d.applyUpdate(r, kind, appImage, func(f float64) { d.do(func() { bar.SetValue(f) }) }, func(s string) { d.do(func() { status.SetText(s) }) })
-			d.do(func() {
-				if err != nil {
-					update.Enable()
-					status.SetText("Not updated: " + err.Error())
-					return
-				}
-				dlg.Hide()
-				d.updBtn.Hide()
-			})
-		}()
-	}
-	body := container.NewBorder(info, container.NewVBox(bar, status, container.NewHBox(update, page, later)), nil, nil, scroll)
-	dlg = dialog.NewCustomWithoutButtons("Update Quill", body, d.win)
-	dlg.Resize(fyne.NewSize(600, 480))
-	dlg.Show()
 }
 
 func oneLineKeep(s string, n int) string {

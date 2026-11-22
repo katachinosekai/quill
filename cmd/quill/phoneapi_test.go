@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/katachinosekai/quill/internal/chat"
 )
 
 type apiClient struct {
@@ -289,6 +291,40 @@ func TestPhoneAPIWrites(t *testing.T) {
 	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]string{"requestId": "nope", "action": "allow"}); code != 404 {
 		t.Fatalf("unknown request: %d %v", code, m)
 	}
+
+	// Plan items carry the options of their approval question; approvePlan
+	// with a choice sends the same text as the desktop card's button.
+	var plan *chat.Item
+	h.ui(func() {
+		s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, Text: "Plan:\n1. a\n2. b\n\n**Should it ship as v0.1.18 (recommended), or replace the v0.1.17 files?**"})
+		plan = s.conv.AddPlan()
+	})
+	_, items, _ := a.do("GET", base+"/items?limit=20", "", nil)
+	var preq map[string]any
+	for _, x := range items["items"].([]any) {
+		if xm := x.(map[string]any); int(xm["seq"].(float64)) == plan.Seq {
+			preq, _ = xm["request"].(map[string]any)
+		}
+	}
+	choices, _ := preq["choices"].([]any)
+	if len(choices) != 2 || choices[0] != "Ship as v0.1.18" || preq["recommended"] != float64(0) {
+		t.Fatalf("plan request carries choices and the recommended index: %v", preq)
+	}
+	pid, _ := preq["id"].(string)
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]any{"requestId": pid, "action": "approvePlan", "choice": 5}); code != 422 {
+		t.Fatalf("a choice out of range is refused: %d %v", code, m)
+	}
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]any{"requestId": pid, "action": "approvePlan", "choice": 1}); code != 200 {
+		t.Fatalf("approvePlan with a choice: %d %v", code, m)
+	}
+	h.eventually("approval with the choice sent", func() bool {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.User && it.Text == planGoWith("Replace the v0.1.17 files") {
+				return true
+			}
+		}
+		return false
+	})
 
 	h.ui(func() { s.queue = []string{"first", "second"} })
 	if code, m, _ := a.do("POST", base+"/queue/delete", key(), map[string]any{"index": 0, "text": "other"}); code != 409 || errCode(m) != "stale" {

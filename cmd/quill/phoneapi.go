@@ -630,6 +630,14 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 			text := s.conv.PlanText(it)
 			m["text"] = text
 			req["steps"] = planSteps(text)
+			// The options the approval question offers, parsed here so every
+			// client shows the same Approve buttons (planchoices.go).
+			if opts, rec := planChoices(planQuestion(s.conv, it)); len(opts) > 0 {
+				req["choices"] = opts
+				if rec >= 0 {
+					req["recommended"] = rec
+				}
+			}
 		case it.Kind == chat.Rotate:
 		case isQuestion(it):
 			req["tool"] = it.ToolName

@@ -329,10 +329,16 @@ type desk struct {
 	planFirst     bool
 	collapseChips bool
 	hideChips     bool
-	updBtn        *widget.Button
 	sizesCard     fyne.CanvasObject
 	usageRow      fyne.CanvasObject
 	updRelease    *updater.Release
+	// update line (updline.go): never update or restart without the user
+	updLine       *fyne.Container
+	updText       *widget.Label
+	updActs       *fyne.Container
+	updating      bool
+	swapOK        bool   // the user asked for the switch (Update / Restart into it)
+	pendingBuild  string // a new build on disk waiting for the user
 	rules         sortRules
 	centerAll     *widget.Check
 	centerChecks  []*widget.Check
@@ -923,13 +929,13 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.reloadBtn = d.newRemoteReloadButton("Reload", func() *deskSession { return d.current })
 	d.headPad = canvas.NewRectangle(color.Transparent)
-	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.updateButton()), container.NewCenter(d.reloadBtn), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
+	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.reloadBtn), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
 		layout.NewSpacer())
 	d.bookRow = d.buildBookmarks()
 	d.tabRow = d.buildTabs()
 	d.usage = newUsagePanel(d)
 	d.usageRow = d.usage.buildStrip()
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildKmemBanner(), d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildKmemBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
@@ -2670,7 +2676,7 @@ func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice str
 		return
 	}
 	if s.remote != nil {
-		d.remotePlan(s, it, ok)
+		d.remotePlan(s, it, ok, choice)
 		return
 	}
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {

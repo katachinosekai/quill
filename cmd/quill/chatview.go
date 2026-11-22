@@ -1616,7 +1616,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		}
 		var opts []string
 		rec := -1
-		if owner != nil && owner.remote == nil {
+		if owner != nil {
 			opts, rec = planChoices(title.Text)
 		}
 		switch {
