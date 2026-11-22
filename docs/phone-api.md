@@ -233,7 +233,7 @@ Assistant items with a choice card add:
 
 First call after pairing and after each app start. Body: `{"name": "Pixel 8", "app": "0.9.4"}`. Sets the phone's display name in Quill's phone list and its last-seen time.
 
-Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15"}`. `control` says whether writes are allowed for this phone right now. `quill` is the Quill Desktop version (`"dev"` in local builds). Needs an Idempotency-Key like every POST, but is allowed while control is off.
+Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15", "unlock": true, "lanUnlock": false}`. `control` says whether writes are allowed for this phone right now. `unlock`: this device must unlock before anything else works (see "Device lock and unlock"). `lanUnlock`: right now this device may unlock with its hardware key instead of the password (home-network unlock); older Quill Desktop builds leave it out (treat as `false`). `quill` is the Quill Desktop version (`"dev"` in local builds). Needs an Idempotency-Key like every POST, but is allowed while control is off.
 
 ### GET /phone/sessions
 
@@ -416,6 +416,39 @@ Reads work for every paired phone, as today. Writes (every POST except `/phone/h
 - the phone's own control switch in the phone list (on by default once the global setting is on).
 
 Otherwise: `403 control_off`. When either changes, streams get a `control` change.
+
+## Device lock and unlock
+
+Every paired device must unlock with Quill Desktop's device password unless its Password switch (Quill Desktop → Devices) is off. Until it does, every request except `POST /phone/hello`, `POST /phone/unlock` and `POST /phone/unlock/challenge` gets `401 locked`. The pinned certificate and the pairing key (`X-Quill-Key`) stay mandatory for all of them; a changed certificate fingerprint means pairing again.
+
+### POST /phone/unlock {password}
+
+`{"password": "..."}` → `{"token": "<64 hex>", "idleMin": 15, "needed": true}`. Send the token as `X-Quill-Unlock` on every later request. It expires after `idleMin` minutes without a write (`POST /phone/unlock/touch` counts as one). Wrong password: `403 wrong_password`; after 5 failures in a row: `403 locked_out` for 15 minutes; no password set on the PC: `403 no_password`. With the Password switch off: `{"token": "", "needed": false}`.
+
+### Home-network unlock (no password, hardware-key proof)
+
+When Quill Android is on the trusted home network, it can unlock with a signature from its hardware-backed key instead of the password. All of these must hold, else the password is needed (`hello` says `"lanUnlock": false`):
+
+- the device is a phone (its first hello did not say `quill-desktop`; never PCs), its Password switch is on and a device password is set;
+- its switch "No password on this home network" in Quill Desktop → Devices is on (off by default; Linux only, elsewhere the switch is greyed out);
+- it registered a key (`/phone/unlock/key`) from a password-unlocked session;
+- its last password unlock was less than 30 days ago and the device password hasn't changed since;
+- the request comes from one of Quill Desktop's own directly connected subnets (IPv4 or IPv6): never a VPN (100.64.0.0/10, the Tailscale IPv6 range, interfaces `wg*`, `tun*`, `zt*`, `tailscale*`, point-to-point links), never loopback, link-local or Quill Desktop's own address. The phone's SSID/BSSID count for nothing;
+- that subnet is the remembered home network and its IPv4 default gateway still has the remembered MAC address (read from `/proc/net/route` and `/proc/net/arp`). The home network is remembered when the switch is turned on (from the address the phone was last seen at) or, if that wasn't a home network, at the next password unlock from one. When it changes, the waiver is off until the next password unlock, which remembers the new one.
+
+After each key unlock Quill Desktop shows "Phone X unlocked without a password from <ip>" with **Revoke** (switch off, key dropped, the phone's session ends).
+
+**POST /phone/unlock/key** `{"publicKey": "<base64 SubjectPublicKeyInfo DER, EC P-256>"}` → `{"v": 1, "ok": true, "lanUnlock": false}`. Only with the `X-Quill-Unlock` token of a password unlock (not one from a key unlock): else `403 password_session_required`; PCs get `403 not_a_phone`; another curve or a bad encoding `400 bad_request`. Registering again replaces the key. Register it after a password unlock (Android Keystore: `getPublic().getEncoded()`, standard base64).
+
+**POST /phone/unlock/challenge** `{}` → `{"v": 1, "nonce": "<43 chars base64url>", "expiresMs": 1795250060000, "ttlMs": 60000}`. Works while locked. Single use, 32 random bytes, valid 60 s (`expiresMs` is Quill Desktop's clock), bound to this device; at most 4 open per device. `403 lan_unlock_off` when the home-network unlock doesn't apply right now; `403 locked_out` during a lock-out.
+
+**POST /phone/unlock** `{"nonce": "...", "sig": "<base64 DER ECDSA signature>"}` (instead of `{password}`; sending both is `400`). The signature is ECDSA P-256 with SHA-256 (Android `SHA256withECDSA`) over the UTF-8 bytes of
+
+```
+quill-unlock-v1|<deviceId>|<nonce>|<fingerprint>
+```
+
+`<deviceId>` is `phoneId` from hello (the pairing link's `i`), `<nonce>` exactly as received, `<fingerprint>` the pinned certificate's SHA-256 in lowercase hex (the pairing link's `fp`, 64 chars). Success: `{"token": "...", "idleMin": 15, "needed": true, "method": "key"}`. Bad signature: `403 bad_signature`; unknown, used, expired or another device's nonce: `403 bad_nonce`; both count toward the same 5-try lock-out as wrong passwords (`403 locked_out`). `403 lan_unlock_off` if the conditions stopped holding (not counted).
 
 ## Pairing and per-phone keys
 

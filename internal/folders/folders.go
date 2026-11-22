@@ -208,8 +208,8 @@ func (s *Server) Set(data []byte) {
 }
 
 // SetGate decides, per request of a known device, whether it is unlocked.
-// /phone/hello and /phone/unlock always pass (a device must be able to
-// introduce itself and unlock); everything else of a locked device, the
+// /phone/hello, /phone/unlock and /phone/unlock/challenge always pass (a
+// device must be able to introduce itself and unlock); everything else of a locked device, the
 // folders file, events and usage included, gets 401 "locked".
 func (s *Server) SetGate(g func(id string, r *http.Request) (bool, string)) {
 	s.mu.Lock()
@@ -274,7 +274,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if seen != nil {
 		seen(id)
 	}
-	if gate != nil && r.URL.Path != "/phone/hello" && r.URL.Path != "/phone/unlock" {
+	if gate != nil && r.URL.Path != "/phone/hello" && r.URL.Path != "/phone/unlock" && r.URL.Path != "/phone/unlock/challenge" {
 		if ok, msg := gate(id, r); !ok {
 			WriteError(w, http.StatusUnauthorized, "locked", msg)
 			return

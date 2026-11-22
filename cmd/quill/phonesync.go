@@ -373,7 +373,11 @@ func (d *desk) updatePhoneList() {
 		}
 		lock := widget.NewCheck("Password", func(on bool) { d.setDeviceLock(ph.ID, on) })
 		lock.Checked = ph.NeedsUnlock()
-		rows = append(rows, container.NewBorder(nil, nil, nil, container.NewHBox(lock, revoke), widget.NewLabel(ph.Name+" · "+seen)))
+		right := container.NewHBox(lock, revoke)
+		if ph.Kind == "phone" {
+			right.Objects = append([]fyne.CanvasObject{d.lanUnlockCheck(ph)}, right.Objects...)
+		}
+		rows = append(rows, container.NewBorder(nil, nil, nil, right, widget.NewLabel(ph.Name+" · "+seen)))
 	}
 	if len(rows) == 0 {
 		rows = append(rows, mutedText("No paired devices", fontMeta))

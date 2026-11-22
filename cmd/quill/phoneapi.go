@@ -49,6 +49,8 @@ type phoneAPI struct {
 	lastUse  string
 	lastCtl  map[string]bool
 	lastSet  string
+
+	lan *lanMem // home-network unlock (phoneunlock.go)
 }
 
 type apiChange struct {
@@ -60,7 +62,7 @@ func newPhoneAPI(d *desk, s *folders.Server) *phoneAPI {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	a := &phoneAPI{d: d, server: s, boot: hex.EncodeToString(b), next: 1, wake: make(chan struct{}), stop: make(chan struct{}), streams: map[string]chan struct{}{},
-		tracks: map[string]*itemTrack{}, lastSess: map[string]string{}, lastCtl: map[string]bool{}}
+		tracks: map[string]*itemTrack{}, lastSess: map[string]string{}, lastCtl: map[string]bool{}, lan: newLanMem()}
 	go a.loop()
 	return a
 }
@@ -114,8 +116,14 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.items(w, r, parts[1])
 	case r.Method == http.MethodPost && path == "settings":
 		a.setSettings(w, r)
-	case r.Method == http.MethodPost && (path == "unlock" || path == "unlock/touch"):
+	case r.Method == http.MethodPost && path == "unlock":
+		a.unlockRoute(w, r, folders.PhoneID(r))
+	case r.Method == http.MethodPost && path == "unlock/touch":
 		a.unlockAPI(w, r, path, folders.PhoneID(r))
+	case r.Method == http.MethodPost && path == "unlock/challenge":
+		a.unlockChallenge(w, r, folders.PhoneID(r))
+	case r.Method == http.MethodPost && path == "unlock/key":
+		a.unlockKey(w, r, folders.PhoneID(r))
 	case r.Method == http.MethodPost:
 		a.write(w, r, path, parts)
 	default:
@@ -149,7 +157,8 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	phone := folders.PhoneID(r)
-	var ctl, unlock bool
+	ip, snap := lanRemoteAddr(r), lanSnapshot()
+	var ctl, unlock, lan bool
 	a.ui(func() {
 		list := a.d.phones()
 		changed := false
@@ -177,8 +186,9 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 			a.d.updatePhoneList()
 		}
 		ctl = a.control(phone)
+		lan = a.lanHello(phone, ip, snap)
 	})
-	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock})
+	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan})
 }
 
 type apiSession struct {
