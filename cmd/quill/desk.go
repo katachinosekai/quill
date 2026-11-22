@@ -271,6 +271,7 @@ type desk struct {
 	chatHost      *fyne.Container
 	chatDropHL    *canvas.Rectangle
 	viewBtn       *widget.Button
+	viewBox       *fyne.Container
 	groups        []bookGroup
 	tabs          []string
 	tabBar        *fyne.Container

@@ -2399,7 +2399,8 @@ func TestSplitKeepsQueueAndToolbarPlacement(t *testing.T) {
 			t.Fatal("in split view Settings sits in the first pane's gap above its message box")
 		}
 		last := h.d.panes[len(h.d.panes)-1].slot.Objects
-		if last[len(last)-1] != fyne.CanvasObject(h.d.viewBtn) {
+		// The view button sits in its stop-button-sized box (viewBox).
+		if last[len(last)-1] != fyne.CanvasObject(h.d.viewBox) || h.d.viewBox.Objects[0] != fyne.CanvasObject(h.d.viewBtn) {
 			t.Fatal("and the view button in the last pane's gap")
 		}
 		var empty *pane

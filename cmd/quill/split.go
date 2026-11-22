@@ -567,7 +567,38 @@ func (d *desk) splitButtons() fyne.CanvasObject {
 	d.viewBtn = widget.NewButtonWithIcon("", theme.GridIcon(), d.showViewMenu)
 	d.viewBtn.Importance = widget.MediumImportance
 	d.syncSplitButtons()
-	return d.viewBtn
+	d.viewBox = container.New(&stopSized{d: d}, d.viewBtn)
+	return d.viewBox
+}
+
+// stopSized gives the split-view button the stop button's size and, in
+// single view, the message card's inner padding on the right, so it sits
+// straight above the stop button (user 2026-11-22).
+type stopSized struct{ d *desk }
+
+func (l *stopSized) btn() fyne.Size {
+	if l.d.stopBtn == nil {
+		return fyne.NewSize(36, 36)
+	}
+	return l.d.stopBtn.MinSize()
+}
+
+func (l *stopSized) inset() float32 {
+	if l.d.split() {
+		return 0
+	}
+	return theme.Padding()
+}
+
+func (l *stopSized) MinSize([]fyne.CanvasObject) fyne.Size {
+	b := l.btn()
+	return fyne.NewSize(b.Width+l.inset(), b.Height)
+}
+
+func (l *stopSized) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	b := l.btn()
+	objs[0].Resize(b)
+	objs[0].Move(fyne.NewPos(size.Width-l.inset()-b.Width, (size.Height-b.Height)/2))
 }
 
 func (d *desk) showViewMenu() {
