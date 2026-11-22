@@ -73,6 +73,9 @@ func (d *desk) listenInstance(path string) {
 				switch cmdLine {
 				case "show":
 					d.do(d.showWindow)
+				case "kmem-window":
+					// `quill --kmem-window` (the Monday check-in timer, docs/design/kmem-window.md §10).
+					d.do(d.openKmemWindow)
 				case "profile":
 					go writeProfile()
 				case "heap":

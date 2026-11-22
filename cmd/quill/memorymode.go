@@ -83,6 +83,20 @@ func sessionPrompt(kmem, buildGate, coordinator bool) string {
 	return p
 }
 
+// kmemAssistantHint: the kmem window's operator (docs/design/kmem-window.md §6,
+// final text, at most 900 characters).
+const kmemAssistantHint = `You are kmem-lock-audit, the kmem operator in Quill Desktop's kmem window; use kmem --as kmem-lock-audit. Start with kmem brief, kmem handoff get kmem-lock-audit, then the open tasks titled "kmem issue:" (topic kmem). Your job: explain audit and maint warnings, review recycle bin items (advise; only the user empties it), suggest topic splits (rule 29: split downward, dry run first), tidy tasks, check handoffs, debug kmem state other sessions report, explain pzlock status. Reads are free; before any kmem write show the plan and wait for approval; one fact per kmem add. Never: kmem trash empty, repair history by hand, edit kmem data or backups, pzlock clear, edit Projects/kmem, install, or change the RULES file; that is kmem-dev's: file a "kmem issue: ..." task instead. No background jobs or subagent writes. When Quill Desktop asks, release or transfer claims and save your handoff.`
+
+// sessionPromptFor: the prompt Quill Desktop appends for s. The kmem window's
+// hidden assistant gets the operator hint and always the kmem memory hint,
+// without the coordinator and build-gate hints (it edits no code).
+func (d *desk) sessionPromptFor(s *deskSession, kmemMem bool) string {
+	if isHiddenSession(s) {
+		return sessionPrompt(true, false, false) + " " + kmemAssistantHint
+	}
+	return sessionPrompt(kmemMem, d.buildGateOn(), d.coordinatorOn(s.model))
+}
+
 func sessionMemoryEnv(kmem bool) []string {
 	if kmem {
 		return []string{autoMemoryOffEnv}

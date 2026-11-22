@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2/widget"
@@ -310,6 +311,61 @@ func (d *desk) checkOllama(model string) error {
 		return fmt.Errorf("Ollama isn't running at %s (GameMode stops it while a game runs). Start it or switch this session to Online", host)
 	}
 	return nil
+}
+
+// localModelUsesTools: the kmem window's assistant needs tools, so a local
+// model must list "tools" in Ollama's /api/show capabilities
+// (docs/design/kmem-window.md §5). Cached per model for 24 h. Models on other
+// local servers, an Ollama without a capabilities list and an Ollama that
+// doesn't answer count as usable (checkOllama reports a missing Ollama).
+func localModelUsesTools(model string) bool {
+	if !strings.HasPrefix(model, session.LocalPrefix) {
+		return true
+	}
+	toolProbeMu.Lock()
+	c, ok := toolProbeCache[model]
+	toolProbeMu.Unlock()
+	if ok && time.Since(c.at) < toolProbeTTL {
+		return c.tools
+	}
+	tools, known := ollamaToolProbe(session.OllamaHost(), session.LocalModel(model))
+	if !known {
+		return true
+	}
+	toolProbeMu.Lock()
+	toolProbeCache[model] = toolProbe{tools: tools, at: time.Now()}
+	toolProbeMu.Unlock()
+	return tools
+}
+
+type toolProbe struct {
+	tools bool
+	at    time.Time
+}
+
+var (
+	toolProbeMu    sync.Mutex
+	toolProbeCache = map[string]toolProbe{}
+	toolProbeTTL   = 24 * time.Hour
+	// ollamaToolProbe asks Ollama whether a model uses tools; known is false
+	// when Ollama didn't answer.
+	ollamaToolProbe = fetchOllamaTools
+)
+
+func fetchOllamaTools(host, name string) (tools, known bool) {
+	body, _ := json.Marshal(map[string]string{"model": name})
+	req, err := http.NewRequest(http.MethodPost, host+"/api/show", bytes.NewReader(body))
+	if err != nil {
+		return false, false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	var show struct {
+		Capabilities *[]string `json:"capabilities"`
+	}
+	if !ollamaJSON(&http.Client{Timeout: 3 * time.Second}, req, &show) {
+		return false, false
+	}
+	return show.Capabilities == nil || contains(*show.Capabilities, "tools"), true
 }
 
 type boxedTheme struct{ deskTheme }

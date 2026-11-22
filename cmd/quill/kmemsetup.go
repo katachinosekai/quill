@@ -336,7 +336,7 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 	if !d.kmemAvailable() {
 		d.kmemBinSetBtn.Disable()
 	}
-	return container.NewVBox(status, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.defaultRulesSettings(),
+	return container.NewVBox(status, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.kmemAssistSetting(), widget.NewSeparator(), d.defaultRulesSettings(),
 		widget.NewSeparator(), caption("Facts and tasks sessions moved to kmem's recycle bin: review, restore, or delete them for good."), d.kmemBinSetBtn)
 }
 
@@ -368,4 +368,63 @@ func (d *desk) kmemSetupDialog(after func()) {
 	}, d.win)
 	dlg.Resize(fyne.NewSize(560, 320))
 	dlg.Show()
+}
+
+// The model of the kmem window's assistant (docs/design/kmem-window.md §9):
+// "" follows the New sessions model, "off" leaves the window panels-only.
+const (
+	prefKmemAssistModel = "kmemAssistModel"
+	kmemAssistOff       = "off"
+	optAssistSame       = "Same as New sessions (default)"
+	optAssistOff        = "Off"
+)
+
+// kmemAssistModel: the model the assistant starts with, or kmemAssistOff.
+func (d *desk) kmemAssistModel() string {
+	p := d.app.Preferences()
+	if v := p.String(prefKmemAssistModel); v != "" {
+		return v
+	}
+	return p.StringWithFallback("newModel", "default")
+}
+
+// kmemAssistOptions: Same as New sessions, Off, the Claude models and the
+// local models that are listed (plus the saved choice if no longer listed).
+func (d *desk) kmemAssistOptions() []string {
+	opts := append([]string{optAssistSame, optAssistOff}, claudeModels...)
+	opts = append(opts, d.localModels...)
+	if cur := d.app.Preferences().String(prefKmemAssistModel); cur != "" && cur != kmemAssistOff && !contains(opts, cur) {
+		opts = append(opts, cur)
+	}
+	return opts
+}
+
+func (d *desk) kmemAssistSetting() fyne.CanvasObject {
+	prefs := d.app.Preferences()
+	sel := widget.NewSelect(d.kmemAssistOptions(), nil)
+	switch cur := prefs.String(prefKmemAssistModel); cur {
+	case "":
+		sel.SetSelected(optAssistSame)
+	case kmemAssistOff:
+		sel.SetSelected(optAssistOff)
+	default:
+		sel.SetSelected(cur)
+	}
+	sel.OnChanged = func(v string) {
+		switch v {
+		case optAssistSame:
+			prefs.SetString(prefKmemAssistModel, "")
+		case optAssistOff:
+			prefs.SetString(prefKmemAssistModel, kmemAssistOff)
+		case "":
+			return
+		default:
+			prefs.SetString(prefKmemAssistModel, v)
+		}
+	}
+	if !d.kmemAvailable() {
+		sel.Disable()
+	}
+	return container.NewVBox(boldLabel("kmem assistant"), sel,
+		caption("The model of kmem-lock-audit, the operator in Quill Desktop's kmem window. A local model must be able to use tools. Off: the window shows its panels only. A change applies the next time the window opens."))
 }
