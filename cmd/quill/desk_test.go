@@ -102,22 +102,19 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{t: t, proj: proj, argsOut: filepath.Join(root, "args"), termPID: term.Process.Pid}
 	t.Setenv("CLAUDE_DESK_FAKE", "1")
 	t.Setenv("FAKE_ARGS_OUT", h.argsOut)
+	uiMu.Lock()
 	a := test.NewTempApp(t)
 	a.Settings().SetTheme(deskTheme{})
 	h.w = test.NewWindow(nil)
 	t.Cleanup(h.w.Close)
 	h.d = newDesk(a, h.w, config{ProjectsRoot: projects, SessionsDir: sessions, ClaudeBin: exe})
+	uiMu.Unlock()
 	h.d.planFirst = false
 	h.d.kmemOff = true
 	h.d.fetchLocal = func(string) []localInfo { return nil }
 	h.d.pingLocal = func(string) bool { return true }
 	h.d.compactor = func(context.Context, string, string) (string, error) { return "Goal: test brief", nil }
-	h.d.do = func(f func()) {
-		uiMu.Lock()
-		defer uiMu.Unlock()
-		f()
-	}
-	h.d.doWait = h.d.do
+	gateUI(t, h.d)
 	h.ui(func() {
 		h.w.SetContent(h.d.build())
 		h.w.Resize(fyne.NewSize(1280, 860))
@@ -160,6 +157,29 @@ func newHarness(t *testing.T) *harness {
 	})
 	h.d.refresh()
 	return h
+}
+
+// gateUI runs a test desk's UI work under uiMu and drops it once the test
+// has ended (its cleanup runs after the desk's own shutdown cleanups, which
+// still need it). fyne's theme-override stack is global and unsynchronised:
+// a finished test's background work (stream reveal, timers) laying out its
+// old desk while the next test builds one made theme lookups return nil
+// (TestDeskWithFixtures panicked now and then, 2026-11-22).
+func gateUI(t *testing.T, d *desk) {
+	done := false
+	d.do = func(f func()) {
+		uiMu.Lock()
+		defer uiMu.Unlock()
+		if !done {
+			f()
+		}
+	}
+	d.doWait = d.do
+	t.Cleanup(func() {
+		uiMu.Lock()
+		done = true
+		uiMu.Unlock()
+	})
 }
 
 func (h *harness) ui(f func()) {
