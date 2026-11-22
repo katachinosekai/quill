@@ -39,6 +39,7 @@ func (d *desk) layoutButtons() fyne.CanvasObject {
 	d.pcsBtn = d.pcsButton()
 	d.refreshPCsButton()
 	d.kmemBtn.Importance = widget.MediumImportance
+	d.kmemBtnBox = d.kmemButtonWithBubble()
 	return d.layoutBtn
 }
 
@@ -134,7 +135,7 @@ func (d *desk) closeSettings() {
 }
 
 func (d *desk) viewToolbar() fyne.CanvasObject {
-	d.toolbarRow = container.NewHBox(d.settingsBtn, d.kmemBtn, d.pcsBtn, layout.NewSpacer(), d.splitButtons())
+	d.toolbarRow = container.NewHBox(d.settingsBtn, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.splitButtons())
 	return d.toolbarRow
 }
 
@@ -149,7 +150,7 @@ func (d *desk) placeToolbar() {
 		}
 	}
 	if !d.split() {
-		d.toolbarRow.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtn, d.pcsBtn, layout.NewSpacer(), d.viewBox}
+		d.toolbarRow.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.viewBox}
 		d.toolbarRow.Refresh()
 		if d.toolbarBox != nil {
 			d.toolbarBox.Show()
@@ -162,10 +163,10 @@ func (d *desk) placeToolbar() {
 		d.toolbarBox.Hide()
 	}
 	first, last := d.panes[0], d.panes[len(d.panes)-1]
-	first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtn, d.pcsBtn}
+	first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtnBox, d.pcsBtn}
 	last.slot.Objects = append(last.slot.Objects, layout.NewSpacer(), d.viewBox)
 	if first == last {
-		first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtn, d.pcsBtn, layout.NewSpacer(), d.viewBox}
+		first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.viewBox}
 	}
 	first.slot.Layout = layout.NewHBoxLayout()
 	last.slot.Layout = layout.NewHBoxLayout()

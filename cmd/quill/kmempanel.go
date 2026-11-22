@@ -104,8 +104,7 @@ type kmemPanel struct {
 	d                      *desk
 	dlg                    dialog.Dialog
 	tabs                   *container.AppTabs
-	over, hand, tasks, bin *fyne.Container
-	binWin                 dialog.Dialog // the open bin item window (tests)
+	over, hand, tasks      *fyne.Container
 	topics                 *widget.List
 	topicList              []kmemTopic
 	topicShown             []kmemTopic
@@ -129,13 +128,12 @@ func (d *desk) showKmemPanel() {
 func (d *desk) newKmemPanel() *kmemPanel {
 	p := &kmemPanel{d: d}
 	loading := func() *fyne.Container { return container.NewVBox(widget.NewLabel("Loading from kmem...")) }
-	p.over, p.hand, p.tasks, p.bin = loading(), loading(), loading(), loading()
+	p.over, p.hand, p.tasks = loading(), loading(), loading()
 	p.tabs = container.NewAppTabs(
 		container.NewTabItem("Overview", container.NewVScroll(p.over)),
 		container.NewTabItem("Handoffs", container.NewVScroll(p.hand)),
 		container.NewTabItem("Tasks", container.NewVScroll(p.tasks)),
 		container.NewTabItem("Memory", p.memoryTab()),
-		container.NewTabItem("Recycle bin", container.NewVScroll(p.bin)),
 	)
 	d.kmemPanelNow = p
 	return p
@@ -184,22 +182,13 @@ func (p *kmemPanel) reload() {
 		}
 		d.kmemJSON(&hs, "handoff", "list")
 		var ts struct {
-			Tasks []struct {
-				ID     string  `json:"id"`
-				Prio   int     `json:"prio"`
-				Status string  `json:"status"`
-				Title  string  `json:"title"`
-				Topic  string  `json:"topic"`
-				Owner  *string `json:"owner"`
-			} `json:"tasks"`
+			Tasks []kmemTask `json:"tasks"`
 		}
 		d.kmemJSON(&ts, "task", "list")
-		binOut, _ := d.runKmem("kmem", "trash", "list")
 		topics := parseTopics(topicsOut)
-		bin := parseBin(binOut)
-		needBin, audit := kmemNeeds(brief.Brief)
+		needs := parseKmemNeeds(brief.Brief, ts.Tasks)
 		d.do(func() {
-			d.setKmemBanner(needBin, audit)
+			d.setKmemNeeds(needs)
 			// Overview
 			var big []string
 			for _, t := range topics {
@@ -207,11 +196,11 @@ func (p *kmemPanel) reload() {
 					big = append(big, fmt.Sprintf("%s (%d KB)", t.Name, t.KB))
 				}
 			}
-			ov := []fyne.CanvasObject{boldLabel("kmem brief"), wrapLabel(strings.TrimSpace(firstNonEmpty(brief.Brief, "kmem didn't answer.")))}
+			ov := append(p.waitingRows(needs), boldLabel("kmem brief"), wrapLabel(strings.TrimSpace(firstNonEmpty(brief.Brief, "kmem didn't answer."))))
 			if len(big) > 0 {
 				ov = append(ov, widget.NewSeparator(), boldLabel("Sections over 8 KB (maintenance asks to split them)"), wrapLabel(strings.Join(big, ", ")))
 			}
-			ov = append(ov, widget.NewSeparator(), caption(fmt.Sprintf("%d topics, %d handoffs, %d open tasks, %d item(s) in the recycle bin.", len(topics), len(hs.Handoffs), len(ts.Tasks), len(bin))))
+			ov = append(ov, widget.NewSeparator(), caption(fmt.Sprintf("%d topics, %d handoffs, %d open tasks, %d item(s) in the recycle bin (Settings → General → Memory (kmem)).", len(topics), len(hs.Handoffs), len(ts.Tasks), needs.Bin)))
 			setBox(p.over, ov...)
 			// Handoffs
 			var hrows []fyne.CanvasObject
@@ -269,121 +258,49 @@ func (p *kmemPanel) reload() {
 			// Memory topics
 			p.topicList = topics
 			p.filterTopics("")
-			// Recycle bin
-			p.fillBin(bin)
 		})
 	}()
 }
 
-func (p *kmemPanel) fillBin(bin []binItem) {
-	empty := widget.NewButtonWithIcon("Empty bin...", theme.DeleteIcon(), p.emptyBin)
-	empty.Importance = widget.DangerImportance
-	rows := []fyne.CanvasObject{
-		caption("Facts and tasks moved to the bin are hidden everywhere. Click an item to read it in full and why it is in the bin, and to restore or delete it. Deleting is kmem's final purge: it blanks the text in kmem's history and backups and cannot be undone; only you can do it, in a terminal where kmem asks you to type the confirmation."),
+// waitingRows: "Waiting for you" at the top of Overview, one row per thing
+// the kmem button's bubble counts; nothing while kmem asks for nothing.
+func (p *kmemPanel) waitingRows(n kmemNeeds) []fyne.CanvasObject {
+	if n.Count() == 0 {
+		return nil
 	}
-	if len(bin) == 0 {
-		rows = append(rows, widget.NewLabel("The recycle bin is empty."))
-		empty.Disable()
-	}
-	for _, it := range bin {
-		it := it
-		label := "[" + it.ID + "] " + it.binMeta() + "  ·  " + oneLine(firstNonEmpty(it.binReason(), it.Preview), 90)
-		row := widget.NewButton(label, func() { p.showBinItem(it) })
-		row.Alignment = widget.ButtonAlignLeading
-		row.Importance = widget.LowImportance
-		rows = append(rows, row)
-	}
-	rows = append(rows, widget.NewSeparator(), container.NewHBox(layout.NewSpacer(), empty))
-	setBox(p.bin, rows...)
-}
-
-// showBinItem opens one bin item in its own window: the full reason and
-// text (scrolling when long), with Restore and Delete for good.
-func (p *kmemPanel) showBinItem(it binItem) {
 	d := p.d
-	text := wrapLabel("Loading the full text from kmem…")
-	body := container.NewVBox(
-		boldLabel("["+it.ID+"] "+it.binMeta()),
-		widget.NewSeparator(),
-		boldLabel("Why it is in the bin"),
-		wrapLabel(firstNonEmpty(it.binReason(), "(no reason given)")),
-		widget.NewSeparator(),
-		boldLabel("Full text"),
-		text,
-	)
-	go func() {
-		out, err := d.runKmem("kmem", "show", it.ID)
-		d.do(func() {
-			if err != nil || strings.TrimSpace(out) == "" {
-				text.SetText(firstNonEmpty(it.Preview, "(kmem didn't return the text)"))
-				return
-			}
-			text.SetText(strings.TrimSpace(out))
-		})
-	}()
-	var win dialog.Dialog
-	restore := widget.NewButtonWithIcon("Restore", theme.ContentUndoIcon(), func() {
-		go func() {
-			out, err := d.runKmem("kmem", "trash", "restore", it.ID)
-			d.do(func() {
-				if err != nil {
-					dialog.ShowError(fmt.Errorf("kmem: %s", oneLine(firstNonEmpty(strings.TrimSpace(out), err.Error()), 300)), d.win)
-					return
-				}
-				win.Hide()
-				p.reload()
-			})
-		}()
-	})
-	purge := widget.NewButtonWithIcon("Delete for good...", theme.DeleteIcon(), func() {
-		dialog.ShowConfirm("Delete ["+it.ID+"] for good?",
-			"A terminal opens and runs kmem's final purge for this item (kmem trash empty "+it.ID+"). kmem asks you to type the confirmation there. Purged text is gone for good, also from backups.",
-			func(ok bool) {
-				if !ok {
-					return
-				}
-				cmd := terminalCmd(firstNonEmpty(kmemBin(), "kmem"), it.ID)
-				if err := cmd.Start(); err != nil {
-					dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty %s` in a terminal yourself", err, it.ID), d.win)
-					return
-				}
-				go func() {
-					_ = cmd.Wait()
-					d.do(func() {
-						win.Hide()
-						p.reload()
-					})
-				}()
-			}, d.win)
-	})
-	purge.Importance = widget.DangerImportance
-	closeBtn := widget.NewButton("Close", func() { win.Hide() })
-	content := container.NewBorder(nil, container.NewHBox(restore, purge, layout.NewSpacer(), closeBtn), nil, nil, container.NewVScroll(body))
-	win = dialog.NewCustomWithoutButtons("Recycle bin item", content, d.win)
-	win.Resize(fyne.NewSize(720, 520))
-	win.Show()
-	p.binWin = win
-}
-
-func (p *kmemPanel) emptyBin() {
-	d := p.d
-	dialog.ShowConfirm("Empty the recycle bin?",
-		"A terminal opens and runs kmem's final purge (kmem trash empty). kmem lists what will be purged and asks you to type the confirmation there. Purged text is gone for good, also from backups.",
-		func(ok bool) {
-			if !ok {
-				return
-			}
-			path := firstNonEmpty(kmemBin(), "kmem")
-			cmd := terminalCmd(path)
-			if err := cmd.Start(); err != nil {
-				dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty` in a terminal yourself", err), d.win)
-				return
-			}
-			go func() {
-				_ = cmd.Wait()
-				d.do(p.reload)
-			}()
-		}, d.win)
+	row := func(text string, btn *widget.Button) fyne.CanvasObject {
+		if btn == nil {
+			return wrapLabel(text)
+		}
+		btn.Importance = widget.LowImportance
+		return container.NewBorder(nil, nil, nil, btn, wrapLabel(text))
+	}
+	rows := []fyne.CanvasObject{boldLabel(fmt.Sprintf("Waiting for you (%d)", n.Count()))}
+	if n.Bin > 0 {
+		rows = append(rows, row(fmt.Sprintf("%d item(s) in the recycle bin wait for you to restore or delete them.", n.Bin),
+			widget.NewButtonWithIcon("Review bin", theme.DeleteIcon(), d.showBinDialog)))
+	}
+	if n.Audit != "" {
+		rows = append(rows, row("kmem audit found problems (only you decide how to repair them): "+n.Audit, nil))
+	}
+	if n.Maint > 0 {
+		var open *widget.Button
+		if n.MaintReport != "" {
+			report := n.MaintReport
+			open = widget.NewButtonWithIcon("Open report", theme.FileTextIcon(), func() { d.openPath(report) })
+		}
+		rows = append(rows, row(fmt.Sprintf("Daily maintenance has %d warning(s).", n.Maint), open))
+	}
+	if len(n.UserTasks) > 0 {
+		var titles []string
+		for _, t := range n.UserTasks {
+			titles = append(titles, "["+t.ID+"] "+oneLine(t.Title, 120))
+		}
+		rows = append(rows, row(fmt.Sprintf("%d task(s) wait for you: %s", len(n.UserTasks), strings.Join(titles, "; ")),
+			widget.NewButtonWithIcon("Tasks", theme.ListIcon(), func() { p.tabs.SelectIndex(kmemTabTasks) })))
+	}
+	return append(rows, widget.NewSeparator())
 }
 
 func (p *kmemPanel) showHandoff(name string) {

@@ -35,10 +35,8 @@ func TestBinItemWindow(t *testing.T) {
 		return exec.Command("true")
 	}
 	defer func() { terminalCmd = oldTerm }()
-	var p *kmemPanel
 	h.ui(func() {
-		p = h.d.newKmemPanel()
-		p.showBinItem(it)
+		h.d.newBinView().showBinItem(it)
 	})
 	h.eventually("text loaded", func() bool {
 		return strings.Contains(labelsIn([]fyne.CanvasObject{h.w.Canvas().Overlays().Top()}), "needs a scroll")

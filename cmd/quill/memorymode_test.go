@@ -28,11 +28,17 @@ func TestMemoryModeUsesKmem(t *testing.T) {
 }
 
 func TestSessionPromptAndEnv(t *testing.T) {
-	if !strings.HasPrefix(sessionPrompt(false), quillPromptHint) || !strings.Contains(sessionPrompt(false), "(recommended)") || sessionMemoryEnv(false) != nil {
+	if !strings.HasPrefix(sessionPrompt(false, false), quillPromptHint) || !strings.Contains(sessionPrompt(false, false), "(recommended)") || sessionMemoryEnv(false) != nil {
 		t.Fatal("claude mode must keep the plain hint and env")
 	}
-	p := sessionPrompt(true)
-	if !strings.HasPrefix(p, quillPromptHint) || !strings.Contains(p, "kmem brief") {
+	if strings.Contains(sessionPrompt(false, false), buildGateHint) || strings.Contains(sessionPrompt(true, false), buildGateHint) {
+		t.Fatal("build gate off must leave out the hint")
+	}
+	if !strings.Contains(sessionPrompt(false, true), buildGateHint) {
+		t.Fatal("build gate on must add the hint")
+	}
+	p := sessionPrompt(true, true)
+	if !strings.HasPrefix(p, quillPromptHint) || !strings.Contains(p, "kmem brief") || !strings.Contains(p, buildGateHint) {
 		t.Fatalf("kmem prompt: %q", p)
 	}
 	if !slices.Equal(sessionMemoryEnv(true), []string{autoMemoryOffEnv}) {
@@ -41,6 +47,17 @@ func TestSessionPromptAndEnv(t *testing.T) {
 	args := strings.Join(session.Options{Prompt: p}.Args(), "\n")
 	if !strings.Contains(args, "--append-system-prompt\n"+p) {
 		t.Fatal("prompt not passed to claude")
+	}
+}
+
+func TestBuildGatePreference(t *testing.T) {
+	d := newHarness(t).d
+	if !d.buildGateOn() {
+		t.Fatal("ask before building must default to on")
+	}
+	d.app.Preferences().SetBool(prefBuildGate, false)
+	if d.buildGateOn() {
+		t.Fatal("turned off in settings must stay off")
 	}
 }
 

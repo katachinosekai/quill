@@ -215,12 +215,13 @@ type desk struct {
 	pausedIDs      []string
 	pauseBanner    *fyne.Container
 	pauseText      *widget.Label
-	// kmem banner: the user's decisions (recycle bin, audit problems); kmembanner.go
-	kmemBanner     *fyne.Container
-	kmemBannerText *widget.Label
-	kmemBinBtn     *widget.Button
-	kmemAuditBtn   *widget.Button
-	kmemBtns       *fyne.Container
+	// kmem button bubble: what kmem asks the user for (bin, audit, maint,
+	// user tasks); kmembadge.go. The bin dialog: kmembin.go.
+	kmemBubble    *bubble
+	kmemBtnBox    fyne.CanvasObject
+	kmemNeedsNow  kmemNeeds
+	kmemBinSetBtn *widget.Button
+	kmemBinNow    *binView
 	controlFn      func(s *deskSession, req map[string]any) (json.RawMessage, error)
 	pingLocal      func(host string) bool
 	localWindows   map[string]int
@@ -492,6 +493,8 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		d.app.Preferences().SetBool("planFirst", on)
 	})
 	planChk.Checked = d.planFirst
+	buildChk := widget.NewCheck("Ask before building (plan card: more features, debug, secure, or build)", func(on bool) { d.app.Preferences().SetBool(prefBuildGate, on) })
+	buildChk.Checked = d.buildGateOn()
 	newSessions := d.newSessionModelSetting()
 	sttChk := widget.NewCheck("Speech to text (the mic and Voice buttons under the message box)", func(on bool) {
 		d.app.Preferences().SetBool(prefSTTOff, !on)
@@ -526,7 +529,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	_ = roBtn
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
-	d.setGeneral = container.NewVBox(planChk, animChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Typing"), sttChk, d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
+	d.setGeneral = container.NewVBox(planChk, buildChk, animChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Typing"), sttChk, d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
@@ -949,7 +952,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.tabRow = d.buildTabs()
 	d.usage = newUsagePanel(d)
 	d.usageRow = d.usage.buildStrip()
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildKmemBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
@@ -1399,7 +1402,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		return err
 	}
 	kmemMem := d.kmemMemory()
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: sessionPrompt(kmemMem),
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: sessionPrompt(kmemMem, d.buildGateOn()),
 		Env: append(append(d.localEnv(s.model), checkpointEnv), sessionMemoryEnv(kmemMem)...)}
 	d.warnInsecureOllama(s)
 	if s.persisted {
@@ -2047,7 +2050,7 @@ func (d *desk) watch(ctx context.Context) {
 	go d.glowLoop(ctx)
 	go d.usageLoop(ctx)
 	go d.watchUpdates(ctx)
-	go d.watchKmemBanner(ctx)
+	go d.watchKmemNeeds(ctx)
 	go watchMemoryLimit(ctx)
 	go d.chat.followGuard(ctx)
 	go d.fetchCommands()

@@ -72,24 +72,45 @@ func TestKmemPanel(t *testing.T) {
 		h.d.showKmemPanel()
 		p = h.d.kmemPanelNow
 	})
-	h.eventually("panel loaded", func() bool { return len(p.bin.Objects) > 2 && len(p.hand.Objects) > 1 })
+	h.eventually("panel loaded", func() bool { return len(p.hand.Objects) > 1 && strings.Contains(labelsIn(p.over.Objects), "rules: read") })
+	var b *binView
 	h.ui(func() {
 		over := labelsIn(p.over.Objects)
 		if !strings.Contains(over, "quill/decisions (13 KB)") || !strings.Contains(over, "rules: read") {
 			t.Fatalf("overview shows the brief and oversized sections: %s", over)
 		}
+		if !strings.Contains(over, "Waiting for you (1)") || !strings.Contains(over, "1 item(s) in the recycle bin") {
+			t.Fatalf("overview lists what kmem waits on the user for: %s", over)
+		}
+		for _, ti := range p.tabs.Items {
+			if strings.Contains(ti.Text, "bin") {
+				t.Fatal("the recycle bin moved to Settings; no bin tab in the kmem panel")
+			}
+		}
 		if !strings.Contains(labelsIn(p.hand.Objects), "old-work") || !strings.Contains(labelsIn(p.tasks.Objects), "Do it") {
 			t.Fatal("handoffs and tasks are listed")
 		}
-		row := buttonContaining(p.bin.Objects, "f467b16")
+		review := buttonIn(p.over.Objects, "Review bin")
+		if review == nil {
+			t.Fatal("Waiting for you has Review bin")
+		}
+		test.Tap(review)
+		b = h.d.kmemBinNow
+		if b == nil {
+			t.Fatal("Review bin opens the bin dialog")
+		}
+	})
+	h.eventually("bin loaded", func() bool { return len(b.box.Objects) > 2 })
+	h.ui(func() {
+		row := buttonContaining(b.box.Objects, "f467b16")
 		if row == nil {
 			t.Fatal("the bin lists its items as rows to click")
 		}
-		if buttonIn(p.bin.Objects, "Restore") != nil {
+		if buttonIn(b.box.Objects, "Restore") != nil {
 			t.Fatal("no buttons in the list rows; they are in the item's window")
 		}
 		test.Tap(row)
-		if p.binWin == nil {
+		if b.item == nil {
 			t.Fatal("clicking a row opens the item's window")
 		}
 	})
@@ -115,7 +136,7 @@ func TestKmemPanel(t *testing.T) {
 		return strings.Contains(strings.Join(calls, "|"), "trash restore f467b16")
 	})
 	h.ui(func() {
-		p.emptyBin()
+		b.emptyBin()
 		confirmTopDialog(t, h)
 	})
 	h.eventually("terminal opened", func() bool { return len(started) == 1 })

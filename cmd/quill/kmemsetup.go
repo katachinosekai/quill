@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -329,7 +330,14 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 	}
 	btn.OnTapped = func() { d.kmemSetupDialog(refresh) }
 	refresh()
-	return container.NewVBox(status, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.defaultRulesSettings())
+	d.kmemBinSetBtn = widget.NewButtonWithIcon(binButtonText(d.kmemNeedsNow.Bin), theme.DeleteIcon(), d.showBinDialog)
+	d.kmemBinSetBtn.Importance = widget.LowImportance
+	d.kmemBinSetBtn.Alignment = widget.ButtonAlignLeading
+	if !d.kmemAvailable() {
+		d.kmemBinSetBtn.Disable()
+	}
+	return container.NewVBox(status, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.defaultRulesSettings(),
+		widget.NewSeparator(), caption("Facts and tasks sessions moved to kmem's recycle bin: review, restore, or delete them for good."), d.kmemBinSetBtn)
 }
 
 // kmemSetupDialog copies the bundled kmem and adds its hooks (after asking).

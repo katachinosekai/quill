@@ -45,8 +45,22 @@ func (d *desk) kmemMemory() bool {
 // 2026-11-22).
 const planFormatHint = "When a plan or proposal ends with questions for the user, number them, one per line (\"1. …?\", \"2. …?\"), put each question's options in its line (\"A or B?\", \"yes or no?\", \"pick any of a–d?\") and mark a recommended option \"(recommended)\"; Quill's plan card turns each into its own buttons, checkboxes or text field."
 
-func sessionPrompt(kmem bool) string {
+// buildGateHint: no build after every change (the user waited on one build per
+// feature); ask with a plan card instead (user 2026-11-22). Settings → General
+// "Ask before building" (prefBuildGate, on by default) turns it off.
+const buildGateHint = "Don't build (compile, package, release or rebuild dist/) after each change until the user asks for a build. When a build would be next, end with a plan card question: add more features, debug, secure, or build? Mark the one you recommend."
+
+const prefBuildGate = "buildGate"
+
+func (d *desk) buildGateOn() bool {
+	return d.app.Preferences().BoolWithFallback(prefBuildGate, true)
+}
+
+func sessionPrompt(kmem, buildGate bool) string {
 	p := quillPromptHint + " " + planFormatHint
+	if buildGate {
+		p += " " + buildGateHint
+	}
 	if kmem {
 		return p + " " + kmemMemoryHint
 	}
