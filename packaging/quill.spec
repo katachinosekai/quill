@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.24
+Version:        0.1.25
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -74,6 +74,17 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.25-1
+- Claude can coordinate with subagents: asked at startup (Welcome, or once after updating); Settings keeps the choice
+- Updates keep your settings; only new, changed or removed features that need your input ask, once each, in one dialog (also answerable from Quill Android)
+- Hints: ask before building; coordinate with subagents (the chat stays free, features go to subagents); plan-first covers subagents
+- The kmem window, with the kmem assistant (kmem-lock-audit): it runs in the background from start with both developer and operator roles; closing the kmem window only hides it; dot on the kmem button; Stop assistant in the window
+- kmem bubble replaces the banner, the recycle bin moves to Settings; kmem version under the message box, with a coloured "update"
+- Hidden chips leave no blank space
+- Plan card: options on the next line, approval by quick-choice Yes, numbered questions answered in the reply, a Show as written toggle, inline lettered options are checkboxes
+- Portrait: tokens and context % in the session list rows
+- Replies stream character by character
+- Phone: settings API for Quill Android; password-free unlock on the trusted home network with hardware-key proof
 * Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.24-1
 - Smoother streaming: one paragraph layout, no blink, a steady reveal, and text keeps the message font size while it streams
 - Centered text scales with the window: an overlong line wraps into even lines, wide lists are capped at 75% of the chat, and lists, lettered lists ("a.", "b)") and plan questions line up as one centered column (left-aligned with centering off)
