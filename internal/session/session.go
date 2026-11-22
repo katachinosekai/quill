@@ -229,7 +229,8 @@ func Start(opts Options, onEvent func(*protocol.Event)) (*Process, error) {
 	if bin == "" {
 		bin = "claude"
 	}
-	cmd := exec.Command(bin, opts.Args()...)
+	runBin, runArgs := scoped(bin, opts.Args())
+	cmd := exec.Command(runBin, runArgs...)
 	cmd.Dir = opts.Cwd
 	cmd.Env = append(append(os.Environ(), LocalEnv(opts.Model)...), opts.Env...)
 	cmd.SysProcAttr = childAttr()
