@@ -495,6 +495,8 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	planChk.Checked = d.planFirst
 	buildChk := widget.NewCheck("Ask before building (plan card: more features, debug, secure, or build)", func(on bool) { d.app.Preferences().SetBool(prefBuildGate, on) })
 	buildChk.Checked = d.buildGateOn()
+	coordChk := widget.NewCheck("Coordinate with subagents (Online only: the chat stays free, features go to subagents)", func(on bool) { d.app.Preferences().SetBool(prefCoordinator, on) })
+	coordChk.Checked = d.app.Preferences().BoolWithFallback(prefCoordinator, true)
 	newSessions := d.newSessionModelSetting()
 	sttChk := widget.NewCheck("Speech to text (the mic and Voice buttons under the message box)", func(on bool) {
 		d.app.Preferences().SetBool(prefSTTOff, !on)
@@ -529,7 +531,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	_ = roBtn
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
-	d.setGeneral = container.NewVBox(planChk, buildChk, animChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Typing"), sttChk, d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
+	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, animChk, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Typing"), sttChk, d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
@@ -1402,7 +1404,7 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		return err
 	}
 	kmemMem := d.kmemMemory()
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: sessionPrompt(kmemMem, d.buildGateOn()),
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: sessionPrompt(kmemMem, d.buildGateOn(), d.coordinatorOn(s.model)),
 		Env: append(append(d.localEnv(s.model), checkpointEnv), sessionMemoryEnv(kmemMem)...)}
 	d.warnInsecureOllama(s)
 	if s.persisted {

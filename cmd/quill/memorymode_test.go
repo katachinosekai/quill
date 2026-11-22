@@ -28,17 +28,20 @@ func TestMemoryModeUsesKmem(t *testing.T) {
 }
 
 func TestSessionPromptAndEnv(t *testing.T) {
-	if !strings.HasPrefix(sessionPrompt(false, false), quillPromptHint) || !strings.Contains(sessionPrompt(false, false), "(recommended)") || sessionMemoryEnv(false) != nil {
+	if !strings.HasPrefix(sessionPrompt(false, false, false), quillPromptHint) || !strings.Contains(sessionPrompt(false, false, false), "(recommended)") || sessionMemoryEnv(false) != nil {
 		t.Fatal("claude mode must keep the plain hint and env")
 	}
-	if strings.Contains(sessionPrompt(false, false), buildGateHint) || strings.Contains(sessionPrompt(true, false), buildGateHint) {
+	if strings.Contains(sessionPrompt(false, false, false), buildGateHint) || strings.Contains(sessionPrompt(true, false, false), buildGateHint) {
 		t.Fatal("build gate off must leave out the hint")
 	}
-	if !strings.Contains(sessionPrompt(false, true), buildGateHint) {
+	if !strings.Contains(sessionPrompt(false, true, false), buildGateHint) {
 		t.Fatal("build gate on must add the hint")
 	}
-	p := sessionPrompt(true, true)
-	if !strings.HasPrefix(p, quillPromptHint) || !strings.Contains(p, "kmem brief") || !strings.Contains(p, buildGateHint) {
+	p := sessionPrompt(true, true, true)
+	if strings.Contains(sessionPrompt(true, true, false), coordinatorHint) {
+		t.Fatal("coordinator off must leave out the hint")
+	}
+	if !strings.HasPrefix(p, quillPromptHint) || !strings.Contains(p, "kmem brief") || !strings.Contains(p, buildGateHint) || !strings.Contains(p, coordinatorHint) {
 		t.Fatalf("kmem prompt: %q", p)
 	}
 	if !slices.Equal(sessionMemoryEnv(true), []string{autoMemoryOffEnv}) {
@@ -57,6 +60,20 @@ func TestBuildGatePreference(t *testing.T) {
 	}
 	d.app.Preferences().SetBool(prefBuildGate, false)
 	if d.buildGateOn() {
+		t.Fatal("turned off in settings must stay off")
+	}
+}
+
+func TestCoordinatorPreference(t *testing.T) {
+	d := newHarness(t).d
+	if !d.coordinatorOn("default") || !d.coordinatorOn("claude-opus-5-5") {
+		t.Fatal("online sessions coordinate by default")
+	}
+	if d.coordinatorOn("ollama:qwen3:8b") {
+		t.Fatal("local models work alone")
+	}
+	d.app.Preferences().SetBool(prefCoordinator, false)
+	if d.coordinatorOn("default") {
 		t.Fatal("turned off in settings must stay off")
 	}
 }

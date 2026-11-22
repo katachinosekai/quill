@@ -56,10 +56,26 @@ func (d *desk) buildGateOn() bool {
 	return d.app.Preferences().BoolWithFallback(prefBuildGate, true)
 }
 
-func sessionPrompt(kmem, buildGate bool) string {
+// coordinatorHint: the session the user chats with coordinates; feature work
+// goes to subagents (user 2026-11-22). Online (Claude) sessions only: local
+// models rarely run subagents well. Subagents never see Quill Desktop's
+// appended prompt, so they don't re-delegate. Settings → General
+// "Coordinate with subagents" (prefCoordinator, on by default) turns it off.
+const coordinatorHint = "You coordinate; subagents do the feature work. Stay free to answer the user at once. For each feature, fix or improvement the user asks for, design the split, then give the design and implementation to a subagent (one per feature, each in its own git worktree and branch, with the kmem briefing when kmem is on), running in the background. Relay every question you or a subagent has to the user as numbered plan card questions, and pass the answers back. Review, merge and test each result yourself. Small lookups and answers you do directly."
+
+const prefCoordinator = "coordinator"
+
+func (d *desk) coordinatorOn(model string) bool {
+	return !isLocal(model) && d.app.Preferences().BoolWithFallback(prefCoordinator, true)
+}
+
+func sessionPrompt(kmem, buildGate, coordinator bool) string {
 	p := quillPromptHint + " " + planFormatHint
 	if buildGate {
 		p += " " + buildGateHint
+	}
+	if coordinator {
+		p += " " + coordinatorHint
 	}
 	if kmem {
 		return p + " " + kmemMemoryHint
