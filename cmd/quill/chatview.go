@@ -1611,11 +1611,11 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		rec := -1
 		var qs []planQ
 		if owner != nil {
-			qs = planQuestions(planItemText(owner, it))
+			qs = planItemQuestions(owner, it)
 			opts, rec = planChoices(title.Text)
 		}
 		switch {
-		case len(qs) > 1 || len(qs) == 1 && qs[0].Kind != qSingle:
+		case len(qs) > 0:
 			// Several questions, or one that isn't a pick between options:
 			// a control for each, all answers go with Approve.
 			ans := v.planAnswers(it, qs)
@@ -1865,6 +1865,8 @@ var parenAside = regexp.MustCompile(`\s*\([^)]*\)`)
 // optionMark: "(option 1)", "(Option B)", "(choice 2)", "(A)", "(2)".
 var optionMark = regexp.MustCompile(`(?i)\((?:option|choice)\s+(\w{1,3})\)|\(([A-D1-4])\)`)
 
+var leadIn = regexp.MustCompile(`(?i)^(?:for|in|on|to|with|as|if|when|after|before|about|regarding|by|from|at)\b`)
+
 // maxOptionWords: longer unmarked options make no buttons (labels stay short).
 const maxOptionWords = 16
 
@@ -1910,8 +1912,14 @@ func parseChoices(line string) (string, []string, bool) {
 		return "", nil, false
 	}
 	opts := []string{a}
-	if sep == ", or " && strings.Contains(a, ", ") {
+	if strings.Contains(a, ", ") {
+		// "a, b, or c" and "a, b or c" both list three options.
 		opts = strings.Split(a, ", ")
+		// A lead-in before the first comma is not an option ("For the icon,
+		// use blue, green, or red?").
+		if len(opts) >= 2 && leadIn.MatchString(opts[0]) {
+			opts = opts[1:]
+		}
 	}
 	opts = append(opts, b)
 	if len(opts) > 4 || strings.Contains(b, " or ") {

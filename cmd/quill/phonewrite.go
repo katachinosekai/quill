@@ -216,7 +216,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 			if in.Action != "approvePlan" {
 				return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", "planAnswers go with approvePlan"}
 			}
-			qs := planQuestions(planItemText(s, it))
+			qs := planItemQuestions(s, it)
 			ans, err := parsePlanAnswers(qs, in.PlanAnswers)
 			if err != nil {
 				return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", err.Error()}

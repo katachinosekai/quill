@@ -181,13 +181,13 @@ func (c *Conversation) AsksApproval() bool {
 		}
 		t := strings.TrimRight(strings.TrimSpace(it.Text), "*_ ")
 		last := t[strings.LastIndex(t, "\n")+1:]
-		if strings.HasSuffix(t, "?") && approvalAsk.MatchString(quotedSpans.ReplaceAllString(last, " ")) {
+		if strings.HasSuffix(t, "?") && asksToApprove(lastQuestion(last)) {
 			return true
 		}
 		// The approval question can be followed by a note on the same line
 		// ("Do you approve steps 1–3? Your approval also covers …."; user
 		// 2026-11-21: a typed "Yes" to that was not taken as approval).
-		if q := lastQuestion(last); q != "" && approvalAsk.MatchString(q) {
+		if q := lastQuestion(last); q != "" && asksToApprove(q) {
 			return true
 		}
 		// Rule 28 (user 2026-11-21): a plan ends with its questions numbered,
@@ -202,6 +202,20 @@ func (c *Conversation) AsksApproval() bool {
 
 var numberedQ = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?\d+[.)]\s+`)
 
+// openAsk: questions that ask for information, not for a go ahead ("How
+// would you like me to proceed?", "Why did step 3 fail?", "Did the approval
+// dialog look right?"; two-model review 2026-11-22).
+var openAsk = regexp.MustCompile(`(?i)^\W*(?:and |so |also )?(?:which|what|why|how|where|when|who|whose|did|does)\b`)
+
+// asksToApprove: a question sentence that asks to go ahead with a plan.
+func asksToApprove(q string) bool {
+	q = strings.TrimSpace(quotedSpans.ReplaceAllString(q, " "))
+	if q == "" || openAsk.MatchString(q) {
+		return false
+	}
+	return approvalAsk.MatchString(q)
+}
+
 // ClosingApproval: the approval question among the numbered question lines
 // that end a message ("1. Do you approve steps 1–6? …", "2. …?"), or "".
 func ClosingApproval(text string) string {
@@ -215,7 +229,7 @@ func ClosingApproval(text string) string {
 			return ""
 		}
 		q := strings.TrimSpace(strings.Trim(numberedQ.ReplaceAllString(l, ""), "*_ "))
-		if lq := lastQuestionOf(q); lq != "" && approvalAsk.MatchString(lq) {
+		if lq := lastQuestionOf(q); lq != "" && asksToApprove(lq) {
 			return q
 		}
 	}

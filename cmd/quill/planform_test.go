@@ -65,7 +65,7 @@ func TestPlanCardQuestionForm(t *testing.T) {
 		ans := h.d.chat.planAns[plan]
 		sent = planGoAnswers(planQuestions(planItemText(h.d.sessions[editsID], plan)), ans)
 	})
-	for _, want := range []string{"→ v0.1.20 ship now.", "Should rule 21 stay as it is? → no.", "→ a: Plan-first; c: Pair a phone.", "→ Welcome to Quill."} {
+	for _, want := range []string{"→ v0.1.20 ship now.", "Should rule 21 stay as it is? → no.", "→ a: Plan-first; c: Pair a phone.", "→ \"Welcome to Quill\"."} {
 		if !strings.Contains(sent, want) {
 			t.Errorf("Approve's message lacks %q:\n%s", want, sent)
 		}

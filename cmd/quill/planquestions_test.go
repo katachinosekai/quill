@@ -9,7 +9,7 @@ func qsSummary(qs []planQ) string {
 	var out []string
 	for _, q := range qs {
 		s := string(q.Kind)
-		if len(q.Options) > 0 {
+		if len(q.Options) > 0 && q.Kind != qYesNo {
 			s += "[" + strings.Join(q.Options, "|") + "]"
 		}
 		if q.Recommended >= 0 {

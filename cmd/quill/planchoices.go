@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 )
 
@@ -24,6 +25,11 @@ func planChoices(question string) ([]string, int) {
 	}
 	for i := len(sentences) - 1; i >= 0; i-- {
 		sent := sentences[i]
+		// "Do you approve steps 1–3, or should I change something first?" is
+		// the approval, not a pick between two things to approve.
+		if approveOnly.MatchString(strings.TrimSpace(qQuoted.ReplaceAllString(sent, " "))) {
+			continue
+		}
 		_, opts, ok := parseChoices(sent)
 		if !ok {
 			continue
@@ -76,7 +82,7 @@ func recommendedOption(sentence string, n int) int {
 	}
 	rec := -1
 	for i, s := range segs {
-		if strings.Contains(strings.ToLower(s), "recommend") {
+		if isRecommended(s) {
 			if rec >= 0 {
 				return -1 // more than one: no clear recommendation
 			}
@@ -118,4 +124,17 @@ func splitOutsideParens(s, sep string) []string {
 		prev = c + len(sep)
 	}
 	return append(out, s[prev:])
+}
+
+var recommendedWord = regexp.MustCompile(`(?i)(not\s+)?\brecommended\b`)
+
+// isRecommended: the option is marked "recommended" (not "not recommended",
+// not a "recommendation").
+func isRecommended(s string) bool {
+	for _, m := range recommendedWord.FindAllStringSubmatch(s, -1) {
+		if m[1] == "" {
+			return true
+		}
+	}
+	return false
 }

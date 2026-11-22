@@ -632,7 +632,7 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 			req["steps"] = planSteps(text)
 			// The options the approval question offers, parsed here so every
 			// client shows the same Approve buttons (planchoices.go).
-			if qs := planQuestions(planItemText(s, it)); len(qs) > 1 || len(qs) == 1 && qs[0].Kind != qSingle {
+			if qs := planItemQuestions(s, it); len(qs) > 0 {
 				req["questions"] = qs
 			}
 			if opts, rec := planChoices(planQuestion(s.conv, it)); len(opts) > 0 {

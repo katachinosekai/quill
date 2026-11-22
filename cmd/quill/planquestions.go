@@ -26,6 +26,7 @@ const (
 
 type planQ struct {
 	ID          int       `json:"id"`
+	Num         int       `json:"num,omitempty"` // the question's own number in the plan ("2." → 2), 0 = none
 	Text        string    `json:"text"`
 	Kind        planQKind `json:"kind"`
 	Options     []string  `json:"options,omitempty"`
@@ -33,7 +34,9 @@ type planQ struct {
 }
 
 var (
-	qSentenceEnd = regexp.MustCompile(`[.!:]\s+`) // not the dots in 1.3.7
+	qSentenceEnd = regexp.MustCompile(`[.!]\s+`) // not the dots in 1.3.7, not "Topic: …"
+	codeOrURL    = regexp.MustCompile("`[^`]*`|https?://\\S+")
+	qNumLead     = regexp.MustCompile(`^\s*(?:[-*+]\s+)?(?:\*\*)?(\d+)[.)]\s+`)
 	qQuoted      = regexp.MustCompile("\"[^\"]*\"|“[^”]*”|`[^`]*`|\\([^)]*\\)")
 	fenceLine    = regexp.MustCompile("^\\s*```")
 	listLead     = regexp.MustCompile(`^\s*(?:[-*+]\s+|\d+[.)]\s+|[a-hA-H][.)]\s+)?`)
@@ -61,6 +64,9 @@ func planQuestions(text string) []planQ {
 			continue
 		}
 		if m := letterItem.FindStringSubmatch(mdNoise.Replace(l)); m != nil {
+			if m[1] == "a" {
+				letters = nil // a new list starts: the one closest to the question counts
+			}
 			opt := strings.TrimSpace(strings.TrimRight(m[2], "*_ "))
 			if c := strings.IndexAny(opt, ":(—,"); c > 0 {
 				opt = strings.TrimSpace(opt[:c])
@@ -68,33 +74,68 @@ func planQuestions(text string) []planQ {
 			letters = append(letters, m[1]+": "+shortLabel(opt, 50))
 		}
 	}
-	var out []planQ
-	seen := map[string]bool{}
+	// Questions for the user come from the end of the plan: the lines after
+	// the last plain line (a plan step, a sentence), not a "?" inside a step,
+	// code or a URL. Lettered items and headings ("Questions:") don't end it.
+	clean := make([]string, len(lines))
+	start := 0
 	inFence = false
-	for _, l := range lines {
+	for i, l := range lines {
 		if fenceLine.MatchString(l) {
 			inFence = !inFence
+			start = i + 1
 			continue
 		}
-		if inFence || !strings.Contains(l, "?") {
+		if inFence {
+			start = i + 1
 			continue
 		}
-		clean := strings.TrimSpace(mdNoise.Replace(l))
-		clean = strings.TrimSpace(listLead.ReplaceAllString(clean, ""))
-		clean = strings.TrimSpace(strings.TrimLeft(clean, "#>*_ "))
-		for _, sent := range questionSentences(clean) {
+		c := codeOrURL.ReplaceAllString(l, " ")
+		clean[i] = c
+		t := strings.TrimSpace(strings.Trim(strings.TrimSpace(mdNoise.Replace(c)), "*_ "))
+		if t == "" || strings.Contains(t, "?") || strings.HasSuffix(t, ":") || strings.HasPrefix(t, "#") || letterItem.MatchString(mdNoise.Replace(l)) {
+			continue
+		}
+		start = i + 1
+	}
+	var out []planQ
+	seen := map[string]bool{}
+	for _, l := range lines[start:] {
+		if !strings.Contains(l, "?") {
+			continue
+		}
+		num := 0
+		if m := qNumLead.FindStringSubmatch(mdNoise.Replace(l)); m != nil {
+			fmt.Sscan(m[1], &num)
+		}
+		line := codeOrURL.ReplaceAllString(l, " ")
+		line = strings.TrimSpace(mdNoise.Replace(line))
+		line = strings.TrimSpace(listLead.ReplaceAllString(line, ""))
+		line = strings.TrimSpace(strings.TrimLeft(line, "#>*_ "))
+		afterApproval := false
+		for _, sent := range questionSentences(line) {
 			key := strings.ToLower(sent)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
+			// "Yes (recommended) or no?" after a question answers how to read
+			// that question: it is a yes/no with a default, not a new one.
+			if _, opts, ok := parseChoices(sent); ok && isYesNoPair(opts) && (afterApproval || len(out) > 0 && out[len(out)-1].Num == num) {
+				if !afterApproval {
+					prev := &out[len(out)-1]
+					prev.Kind, prev.Options, prev.Recommended = qYesNo, []string{"Yes", "No"}, recommendedOption(sent, 2)
+				}
+				afterApproval = false
+				continue
+			}
+			afterApproval = false
 			q, ok := classifyQuestion(sent, letters)
 			if !ok {
-				// The approval sentence: what follows on its line ("Yes
-				// (recommended) or no?") belongs to it, not a new question.
-				break
+				afterApproval = true // the approval itself: the card's main button
+				continue
 			}
-			q.ID = len(out) + 1
+			q.ID, q.Num = len(out)+1, num
 			out = append(out, q)
 		}
 	}
@@ -117,8 +158,10 @@ func questionSentences(line string) []string {
 		case '?':
 			if depth == 0 {
 				s := strings.TrimSpace(line[start : i+1])
-				// The sentence starts after the last ". " / "! " / ": " before it.
-				if m := qSentenceEnd.FindAllStringIndex(s[:len(s)-1], -1); len(m) > 0 {
+				// The sentence starts after the last ". " / "! " outside
+				// parentheses ("(as in option B: the safe path)" stays whole).
+				body := qQuoted.ReplaceAllStringFunc(s[:len(s)-1], func(m string) string { return strings.Repeat("x", len(m)) })
+				if m := qSentenceEnd.FindAllStringIndex(body, -1); len(m) > 0 {
 					s = strings.TrimSpace(s[m[len(m)-1][1]:])
 				}
 				if s != "?" && len(s) > 3 {
@@ -138,19 +181,10 @@ func classifyQuestion(sent string, letters []string) (planQ, bool) {
 		q.Kind, q.Options = qMulti, letters
 		return q, true
 	}
-	if _, opts, ok := parseChoices(q.Text); ok {
-		for i, o := range opts {
-			opts[i] = dropQuestionWord(o)
-		}
-		if isYesNoPair(opts) {
-			q.Kind = qYesNo
-			return q, true
-		}
-		q.Kind, q.Options, q.Recommended = qSingle, opts, recommendedOption(q.Text, len(opts))
-		return q, true
-	}
-	// The approval itself is the card's main button, not a question here; a
-	// question joined to it ("…steps 1–7, and do you also want X?") stays.
+	// The approval itself is the card's main button, not a question here
+	// ("Do you approve steps 1–3, or should I change something first?" is
+	// still the approval); a question joined to it ("…steps 1–7, and do you
+	// also want X?") stays.
 	if approveOnly.MatchString(strings.TrimSpace(bare)) {
 		for _, sep := range []string{", and ", "; and ", ", also ", " and also "} {
 			if i := strings.LastIndex(q.Text, sep); i > 0 {
@@ -163,8 +197,19 @@ func classifyQuestion(sent string, letters []string) (planQ, bool) {
 		}
 		return q, false
 	}
+	if _, opts, ok := parseChoices(q.Text); ok {
+		for i, o := range opts {
+			opts[i] = dropQuestionWord(o)
+		}
+		if isYesNoPair(opts) {
+			q.Kind, q.Options, q.Recommended = qYesNo, []string{"Yes", "No"}, recommendedOption(q.Text, 2)
+			return q, true
+		}
+		q.Kind, q.Options, q.Recommended = qSingle, opts, recommendedOption(q.Text, len(opts))
+		return q, true
+	}
 	if yesNoStart.MatchString(strings.TrimSpace(bare)) {
-		q.Kind = qYesNo
+		q.Kind, q.Options = qYesNo, []string{"Yes", "No"}
 		return q, true
 	}
 	q.Kind = qText
@@ -222,12 +267,17 @@ func planGoAnswers(qs []planQ, ans map[int]planAnswer) string {
 					val = "none"
 				}
 			case qText:
-				if t := strings.TrimSpace(a.Text); t != "" {
-					val = t
+				// One line, so an answer can't look like more answers.
+				if t := strings.Join(strings.Fields(a.Text), " "); t != "" {
+					val = "\"" + t + "\""
 				}
 			}
 		}
-		fmt.Fprintf(&b, " %d. %s → %s.", i+1, shortLabel(q.Text, 90), val)
+		n := i + 1
+		if q.Num > 0 {
+			n = q.Num
+		}
+		fmt.Fprintf(&b, " %d. %s → %s.", n, shortLabel(q.Text, 90), val)
 	}
 	return b.String()
 }
@@ -286,6 +336,9 @@ func parsePlanAnswers(qs []planQ, raw map[string]json.RawMessage) (map[int]planA
 			return nil, fmt.Errorf("no plan question %s", k)
 		}
 		a := planAnswer{Choice: -1}
+		if strings.TrimSpace(string(v)) == "null" {
+			return nil, fmt.Errorf("question %s: leave it out instead of null", k)
+		}
 		switch q.Kind {
 		case qYesNo:
 			var yn string
@@ -302,10 +355,15 @@ func parsePlanAnswers(qs []planQ, raw map[string]json.RawMessage) (map[int]planA
 			if json.Unmarshal(v, &a.Picks) != nil {
 				return nil, fmt.Errorf("question %s needs a list of option indexes", k)
 			}
+			seenPick := map[int]bool{}
 			for _, p := range a.Picks {
 				if p < 0 || p >= len(q.Options) {
 					return nil, fmt.Errorf("question %s: option %d is out of range", k, p)
 				}
+				if seenPick[p] {
+					return nil, fmt.Errorf("question %s: option %d is picked twice", k, p)
+				}
+				seenPick[p] = true
 			}
 			if a.Picks == nil {
 				a.Picks = []int{}
@@ -318,4 +376,37 @@ func parsePlanAnswers(qs []planQ, raw map[string]json.RawMessage) (map[int]planA
 		out[q.ID] = a
 	}
 	return out, nil
+}
+
+// planItemQuestions: the questions a plan card shows for this plan item.
+// The card's own question (its title, the approval) is left out: a
+// proposal like "Should I ship 1.3.7 now?" is answered by Approve itself, and
+// a pick in it ("…v0.1.18 (recommended), or …?") by planChoices' buttons.
+func planItemQuestions(s *deskSession, it *chat.Item) []planQ {
+	// Only when the title has no explicit approval ("Do you approve…?") is
+	// its question the approval itself.
+	own := ""
+	title := planQuestion(s.conv, it)
+	explicit := false
+	sents := questionSentences(strings.TrimSpace(strings.Trim(mdNoise.Replace(title), "*_ ")))
+	for _, q := range sents {
+		explicit = explicit || approveOnly.MatchString(strings.TrimSpace(qQuoted.ReplaceAllString(q, " ")))
+	}
+	if !explicit && len(sents) > 0 {
+		own = normQ(sents[len(sents)-1])
+	}
+	var out []planQ
+	for _, q := range planQuestions(planItemText(s, it)) {
+		if own != "" && normQ(q.Text) == own {
+			continue
+		}
+		q.ID = len(out) + 1
+		out = append(out, q)
+	}
+	return out
+}
+
+func normQ(s string) string {
+	s = strings.ToLower(mdNoise.Replace(s))
+	return strings.TrimSpace(strings.Trim(listLead.ReplaceAllString(strings.TrimSpace(s), ""), "*_ "))
 }
