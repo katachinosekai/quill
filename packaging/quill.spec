@@ -1,4 +1,8 @@
 %global debug_package %{nil}
+# No LTO: Fedora's default -flto objects (whisper.cpp, built through cgo) carry
+# .gnu.debuglto_ sections that cgo's LDFLAGS check rejects (fedora:44 with
+# redhat-rpm-config 344, 2026-11-22).
+%global _lto_cflags %{nil}
 
 Name:           quill
 Version:        0.1.20
