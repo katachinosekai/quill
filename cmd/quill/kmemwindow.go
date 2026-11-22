@@ -10,7 +10,7 @@ import (
 // The kmem operations window (docs/design/kmem-window.md §3, user
 // 2026-11-22): a second fyne window opened by the toolbar's kmem button. The
 // left side is the kmem panel (Overview, Handoffs, Tasks, Memory); the right
-// side is the chat of the kmem operator, kmem-lock-audit, which the assistant
+// side is the chat of the kmem assistant, kmem-lock-audit, which the assistant
 // lifecycle (kmemassist.go) puts there through setChat, or a one-line reason
 // through setChatReason when the window runs panels-only. Wayland allows no
 // positioning, so only the size and the split are remembered.
@@ -25,10 +25,10 @@ const (
 	kmemWinDefaultSplit = 0.45
 )
 
-// kmemWindowOpenHook runs after the window is shown (the assistant starts
-// there); kmemWindowCloseHook runs after d.kmemWin is cleared, while w still
-// holds the session and view (the assistant saves its handoff there). Both
-// run on the UI thread.
+// kmemWindowOpenHook runs after the window is shown (the running assistant's
+// chat goes there, or it starts); kmemWindowCloseHook runs after d.kmemWin is
+// cleared (closing only hides the assistant: it keeps running). Both run on
+// the UI thread.
 var kmemWindowOpenHook, kmemWindowCloseHook func(d *desk, w *kmemWindow)
 
 // kmemChatOffReason is the right side until the assistant puts its chat there.

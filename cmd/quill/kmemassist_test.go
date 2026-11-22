@@ -62,6 +62,7 @@ func assistSetup(t *testing.T) (*harness, *kmemAssistStub, *winRec) {
 	k := &kmemAssistStub{saved: map[string]time.Time{}}
 	h.d.kmemRun = k.run
 	h.d.kmemOff = false
+	h.ui(func() { h.d.app.Preferences().SetString(memoryModeKey, memoryModeKmem) })
 	rec := &winRec{}
 	oldChat, oldReason, oldWith, oldPre := kmemWinSetChat, kmemWinSetChatReason, kmemWinSetChatReasonWith, kmemWinSetPrefill
 	oldWait, oldPoll, oldTick, oldSigned := kmemWinSaveWait, kmemWinSavePoll, kmemWinTick, kmemAssistSignedIn
@@ -105,6 +106,23 @@ func closeAssist(h *harness, w *kmemWindow) {
 	})
 }
 
+// stopAssist presses the window's "Stop assistant".
+func stopAssist(h *harness) {
+	h.ui(func() { h.d.kmemAssistStopNow(h.d.assist()) })
+}
+
+func resumeCalls(k *kmemAssistStub) int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	n := 0
+	for _, c := range k.calls {
+		if strings.HasPrefix(c, "kmem-resume") {
+			n++
+		}
+	}
+	return n
+}
+
 func lastUser(s *deskSession) string {
 	for i := len(s.conv.Items) - 1; i >= 0; i-- {
 		if s.conv.Items[i].Kind == chat.User {
@@ -137,9 +155,16 @@ func TestKmemAssistantHint(t *testing.T) {
 	if n := len([]rune(kmemAssistantHint)); n > 900 {
 		t.Fatalf("the operator hint is at most 900 characters: %d", n)
 	}
-	for _, want := range []string{"kmem --as kmem-lock-audit", `"kmem issue:"`, "rule 29", "kmem trash empty", "pzlock clear", "release or transfer claims"} {
+	for _, want := range []string{"kmem --as kmem-lock-audit", `"kmem issue:"`, "rule 29", "release or transfer claims",
+		"developer and operator", "Projects/kmem", "install.sh", "kmem-guard", "rollouts", "RULES file", "pzlock code", "backlog", "user's approval before any write or release",
+		"Never: kmem trash empty, hand repair of history/kmem data/backups, pzlock clear", "always run in the background", "SendMessage", "safe points"} {
 		if !strings.Contains(kmemAssistantHint, want) {
 			t.Fatalf("hint names %q", want)
+		}
+	}
+	for _, gone := range []string{"kmem-dev", "No background jobs", "kmem window"} {
+		if strings.Contains(kmemAssistantHint, gone) {
+			t.Fatalf("hint drops %q", gone)
 		}
 	}
 	h := newHarness(t)
@@ -244,7 +269,7 @@ func TestKmemAssistCrashNote(t *testing.T) {
 	}
 }
 
-func TestKmemAssistOpenAndSavedClose(t *testing.T) {
+func TestKmemAssistOpenHideAndStop(t *testing.T) {
 	h, k, rec := assistSetup(t)
 	k.save(kmemAssistName, time.Now().Add(-2*time.Hour))
 	h.ui(func() {
@@ -252,6 +277,8 @@ func TestKmemAssistOpenAndSavedClose(t *testing.T) {
 	})
 	w := &kmemWindow{}
 	s := openAssist(h, w)
+	var chatObj fyne.CanvasObject
+	var view *chatView
 	h.ui(func() {
 		if !s.hidden || s.cwd != kmemWindowDir() || !strings.HasPrefix(s.cwd, os.Getenv("HOME")) {
 			t.Fatalf("a hidden session in the window folder: hidden %v cwd %q", s.hidden, s.cwd)
@@ -272,7 +299,7 @@ func TestKmemAssistOpenAndSavedClose(t *testing.T) {
 				break
 			}
 		}
-		if !strings.HasPrefix(first, "RESUME "+kmemAssistName) || !strings.Contains(first, `"kmem issue:"`) || s.resumeAs != kmemAssistName {
+		if !strings.HasPrefix(first, "RESUME "+kmemAssistName) || !strings.Contains(first, `"kmem issue:"`) || !strings.Contains(first, "always-running") || s.resumeAs != kmemAssistName {
 			t.Fatalf("the resume prompt with resumeNext: %q (as %q)", first, s.resumeAs)
 		}
 		if !hasNotice(s, "The last session ended without saving") {
@@ -284,14 +311,55 @@ func TestKmemAssistOpenAndSavedClose(t *testing.T) {
 		if a.input.Text != "Explain the audit line" || len(s.conv.Items) != n {
 			t.Fatal("a prefill fills the input and never sends")
 		}
+		chatObj, view = rec.chat, a.view
 	})
+
+	// Closing the window only hides it: no save, no stop.
 	closeAssist(h, w)
+	time.Sleep(3 * kmemWinSaveWait)
 	h.ui(func() {
-		if s.kmemSave == nil || !s.kmemSave.end || h.d.assist().state != asSaving {
-			t.Fatal("closing asks for the save")
+		a := h.d.assist()
+		if a.state != asLive || !s.running() || s.kmemSave != nil || a.choice != nil || h.d.org.Ended[s.id] || h.d.kmemAssistChatOn() {
+			t.Fatalf("hidden, still running, nothing asked: %v", a.state)
+		}
+		if m := lastUser(s); strings.Contains(m, "handoff save") || strings.Contains(m, "stop what you are doing") {
+			t.Fatalf("no save asked: %q", m)
+		}
+		if !h.d.kmemAssistRunning() || runningHidden(h.d) != 1 {
+			t.Fatal("it runs on")
+		}
+		h.d.kmemAssistSend("still there?")
+	})
+	h.eventually("it still answers", func() bool {
+		it := lastItem(s)
+		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "still there?")
+	})
+
+	// Reopening shows the same session in the same chat (unsent text kept).
+	h.ui(func() {
+		h.d.assist().input.SetText("half typed")
+		w2 := &kmemWindow{}
+		h.d.kmemWin = w2
+		h.d.kmemAssistOpen(w2)
+		a := h.d.assist()
+		if a.s != s || w2.s != s || w2.view != view || a.view != view || rec.chat != chatObj || a.input.Text != "half typed" || runningHidden(h.d) != 1 {
+			t.Fatal("reopen reuses the session and its chat")
+		}
+		if resumeCalls(k) != 1 {
+			t.Fatal("no second start")
+		}
+		a.input.SetText("")
+		w = w2
+	})
+
+	// Stop assistant: the save-and-stop flow; the window stays open.
+	stopAssist(h)
+	h.ui(func() {
+		if s.kmemSave == nil || !s.kmemSave.end || h.d.assist().state != asSaving || h.d.kmemAssistChatOn() {
+			t.Fatal("Stop assistant asks for the save")
 		}
 		if m := lastUser(s); !strings.Contains(m, "handoff save kmem-lock-audit") || !strings.Contains(m, "task transfer ID kmem-lock-audit") || !strings.Contains(m, "48 h") {
-			t.Fatalf("the close message: %q", m)
+			t.Fatalf("the stop message: %q", m)
 		}
 	})
 	k.save(kmemAssistName, time.Now().Add(time.Minute))
@@ -303,6 +371,26 @@ func TestKmemAssistOpenAndSavedClose(t *testing.T) {
 		if !hasNotice(s, "Saved kmem handoff “kmem-lock-audit”") {
 			t.Fatal("the save is reported")
 		}
+		if !strings.Contains(rec.reason, "is stopped") || rec.button != "Start assistant" || h.d.kmemAssistRunning() {
+			t.Fatalf("the window says it is stopped: %q", rec.reason)
+		}
+		// Closing and reopening doesn't start it again; Start assistant does.
+		h.d.kmemWin = nil
+		h.d.kmemAssistClose(w)
+		h.d.kmemWin = w
+		h.d.kmemAssistOpen(w)
+		if h.d.assist().state != asClosed || rec.button != "Start assistant" {
+			t.Fatal("stays stopped after Stop assistant")
+		}
+		h.d.kmemAssistBoot()
+		if h.d.assist().state != asClosed {
+			t.Fatal("boot doesn't undo the user's stop")
+		}
+		rec.tap()
+	})
+	h.eventually("Start assistant starts a fresh session", func() bool {
+		a := h.d.assist()
+		return a.s != nil && a.s != s && a.s.running() && a.state == asLive && !a.userStopped
 	})
 }
 
@@ -310,13 +398,13 @@ func TestKmemAssistTimeoutChoices(t *testing.T) {
 	h, k, _ := assistSetup(t)
 	w := &kmemWindow{}
 	s := openAssist(h, w)
-	closeAssist(h, w)
+	stopAssist(h)
 	h.eventually("asks after the deadline", func() bool { return h.d.assist().choice != nil })
 	h.ui(func() {
 		a := h.d.assist()
 		h.d.kmemAssistChoose(a, 1)
 		if !a.untilSaved || a.state != asSaving || !s.running() {
-			t.Fatal("keeps running hidden")
+			t.Fatal("keeps running until saved")
 		}
 	})
 	time.Sleep(3 * kmemWinSaveWait)
@@ -328,25 +416,25 @@ func TestKmemAssistTimeoutChoices(t *testing.T) {
 	k.save(kmemAssistName, time.Now().Add(time.Minute))
 	h.eventually("stopped once saved", func() bool { return h.d.assist().state == asClosed && !s.running() })
 
-	// Reopening while it asks keeps the session.
+	// Keep it running cancels the stop.
+	h.ui(func() { h.d.assist().userStopped = false })
 	s2 := openAssist(h, w)
 	if s2 == s {
-		t.Fatal("each open starts a fresh session")
+		t.Fatal("a fresh session after a stop")
 	}
 	k.save(kmemAssistName, time.Now().Add(-time.Hour))
-	closeAssist(h, w)
+	stopAssist(h)
 	h.eventually("asks again", func() bool { return h.d.assist().choice != nil })
 	h.ui(func() {
-		h.d.kmemWin = w
-		h.d.kmemAssistOpen(w)
 		a := h.d.assist()
-		if a.state != asLive || a.s != s2 || s2.kmemSave != nil || a.choice != nil || w.s != s2 {
-			t.Fatal("reopening keeps it running in the window")
+		h.d.kmemAssistChoose(a, 2)
+		if a.state != asLive || a.s != s2 || s2.kmemSave != nil || a.choice != nil || a.userStopped || !h.d.kmemAssistRunning() {
+			t.Fatal("Keep it running keeps it")
 		}
 	})
 
 	// Stop without saving.
-	closeAssist(h, w)
+	stopAssist(h)
 	h.eventually("asks", func() bool { return h.d.assist().choice != nil })
 	h.ui(func() { h.d.kmemAssistChoose(h.d.assist(), 0) })
 	h.eventually("stopped", func() bool { return h.d.assist().state == asClosed && !s2.running() })
@@ -358,15 +446,30 @@ func TestKmemAssistTimeoutChoices(t *testing.T) {
 }
 
 func TestKmemAssistQuit(t *testing.T) {
-	h, _, _ := assistSetup(t)
+	h, k, _ := assistSetup(t)
 	w := &kmemWindow{}
+
+	// With the window closed, Quit still saves and stops it.
+	s0 := openAssist(h, w)
+	closeAssist(h, w)
+	quitDone := false
+	h.ui(func() {
+		h.d.kmemAssistQuit(func() { quitDone = true })
+		if s0.kmemSave == nil || !strings.Contains(lastUser(s0), "handoff save kmem-lock-audit") {
+			t.Fatal("Quit asks the hidden assistant to save")
+		}
+	})
+	k.save(kmemAssistName, time.Now().Add(time.Minute))
+	h.eventually("saved, stopped, then Quit goes on", func() bool { return quitDone && !s0.running() })
+
+	k.save(kmemAssistName, time.Now().Add(-time.Hour))
 	s := openAssist(h, w)
 	done := false
 	h.ui(func() { h.d.kmemAssistQuit(func() { done = true }) })
 	h.eventually("Quit stops it after the deadline without asking", func() bool { return done && !s.running() })
 	h.ui(func() {
-		if h.d.assist().choice != nil || !hasNotice(s, "did not save") {
-			t.Fatal("no question on Quit; the failure is noted")
+		if h.d.assist().choice != nil || !hasNotice(s, "did not save") || h.d.assist().state != asClosed || runningHidden(h.d) != 0 {
+			t.Fatal("no question on Quit; the failure is noted; nothing restarts")
 		}
 		done = false
 		h.d.kmemAssistQuit(func() { done = true })
@@ -380,22 +483,23 @@ func TestKmemAssistReopenWhileSaving(t *testing.T) {
 	h, k, rec := assistSetup(t)
 	w := &kmemWindow{}
 	s := openAssist(h, w)
+	stopAssist(h)
 	closeAssist(h, w)
 	h.ui(func() {
 		h.d.kmemWin = w
 		h.d.kmemAssistOpen(w)
-		if !h.d.assist().pendingOpen || !strings.Contains(rec.reason, "still saving") || runningHidden(h.d) != 1 {
-			t.Fatal("reopening while saving waits; no second process")
+		a := h.d.assist()
+		if a.state != asSaving || rec.chat == nil || w.s != s || runningHidden(h.d) != 1 || h.d.kmemAssistChatOn() {
+			t.Fatal("reopening while saving shows the save; no second process")
 		}
 	})
 	k.save(kmemAssistName, time.Now().Add(time.Minute))
-	h.eventually("a fresh session after the stop", func() bool {
-		a := h.d.assist()
-		if runningHidden(h.d) > 1 {
-			t.Fatal("never two assistants")
-		}
-		return a.s != s && a.s != nil && a.s.running() && a.state == asLive && !s.running()
+	h.eventually("stopped, not restarted", func() bool {
+		return h.d.assist().state == asClosed && !s.running() && strings.Contains(rec.reason, "is stopped")
 	})
+	if runningHidden(h.d) != 0 {
+		t.Fatal("never restarted by itself")
+	}
 }
 
 func TestKmemAssistPanelsOnly(t *testing.T) {
@@ -480,20 +584,20 @@ func TestKmemAssistElsewhereMovesIn(t *testing.T) {
 	})
 }
 
-func TestKmemAssistMidTurnClose(t *testing.T) {
+func TestKmemAssistMidTurnStop(t *testing.T) {
 	h, k, _ := assistSetup(t)
 	w := &kmemWindow{}
 	s := openAssist(h, w)
 	h.ui(func() { h.d.kmemAssistSend("slow") })
 	h.eventually("mid-turn", func() bool { return s.conv.Busy })
-	closeAssist(h, w)
+	stopAssist(h)
 	h.eventually("interrupted, then asked to save", func() bool {
 		return strings.Contains(lastUser(s), "stop what you are doing now")
 	})
 	// The fake reads the next message only after an interrupt.
 	h.eventually("the turn was stopped and the close message answered", func() bool {
 		it := lastItem(s)
-		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "echo: Quill Desktop is closing the kmem window")
+		return it != nil && it.Kind == chat.Assistant && strings.Contains(it.Text, "echo: Quill Desktop is stopping the kmem assistant")
 	})
 	k.save(kmemAssistName, time.Now().Add(time.Minute))
 	h.eventually("saved and stopped", func() bool { return h.d.assist().state == asClosed && !s.running() })
@@ -508,5 +612,111 @@ func TestKmemWindowIPC(t *testing.T) {
 	}
 	if sendCommand(path, "kmem-windows") {
 		t.Fatal("unknown verbs are not")
+	}
+}
+
+func TestKmemAssistBoot(t *testing.T) {
+	h, k, rec := assistSetup(t)
+	argsOut := filepath.Join(t.TempDir(), "args")
+	t.Setenv("FAKE_ARGS_OUT", argsOut)
+	h.ui(func() {
+		if h.d.kmemRunDot == nil || h.d.kmemRunDot.Visible() {
+			t.Fatal("the kmem button has a dot, off while nothing runs")
+		}
+		h.d.kmemAssistBoot()
+	})
+	var s *deskSession
+	h.eventually("it starts with Quill Desktop, no window", func() bool {
+		a := h.d.assist()
+		s = a.s
+		return s != nil && a.state == asLive && s.running() && !s.conv.Busy
+	})
+	h.ui(func() {
+		a := h.d.assist()
+		if h.d.kmemWin != nil || a.w != nil || rec.chat != nil || !s.hidden || !h.d.kmemRunDot.Visible() {
+			t.Fatal("hidden, no window, the dot shows")
+		}
+		h.d.kmemAssistBoot()
+		if a.s != s || runningHidden(h.d) != 1 {
+			t.Fatal("never two")
+		}
+	})
+	// Peer name: other sessions see kmem-lock-audit, not the folder name.
+	b, err := os.ReadFile(argsOut)
+	if err != nil || !strings.Contains(string(b), "--name "+kmemPeerName) || kmemPeerName != "kmem-lock-audit" {
+		t.Fatalf("the hidden session is named for its peers: %q %v", b, err)
+	}
+	h.ui(func() {
+		tab := h.d.createSession(h.proj, "default", "default")
+		if strings.Contains(strings.Join(h.d.processOptions(tab).Args(), " "), "--name") {
+			t.Fatal("tabs keep Claude's own name")
+		}
+	})
+	// Hot reload with the window closed: the next desk adopts the handed-over
+	// session and doesn't open the window.
+	h.ui(func() {
+		kmemAssistsMu.Lock()
+		delete(kmemAssists, h.d)
+		kmemAssistsMu.Unlock()
+		h.d.setKmemRunDot(false)
+		h.d.applyRestore(&restoreState{})
+		h.d.kmemAssistBoot()
+		a := h.d.assist()
+		if a.s != s || a.state != asLive || h.d.kmemWin != nil || runningHidden(h.d) != 1 || resumeCalls(k) != 1 || !h.d.kmemRunDot.Visible() {
+			t.Fatalf("adopted without a window: %v", a.state)
+		}
+	})
+	// The dot goes when it stops.
+	h.ui(func() { h.d.kmemAssistQuit(nil) })
+	k.save(kmemAssistName, time.Now().Add(time.Minute))
+	h.eventually("stopped", func() bool { return !s.running() && h.d.assist().state == asClosed })
+	h.ui(func() {
+		if h.d.kmemRunDot.Visible() {
+			t.Fatal("no dot once stopped")
+		}
+	})
+}
+
+func TestKmemAssistBootSkips(t *testing.T) {
+	h, k, rec := assistSetup(t)
+	h.ui(func() {
+		p := h.d.app.Preferences()
+		p.SetString(prefKmemAssistModel, kmemAssistOff)
+		h.d.kmemAssistBoot()
+		if h.d.assist().s != nil || h.d.assist().state != asPanels {
+			t.Fatal("model Off: nothing starts")
+		}
+		p.SetString(prefKmemAssistModel, "")
+		kmemAssistsMu.Lock()
+		delete(kmemAssists, h.d)
+		kmemAssistsMu.Unlock()
+		p.SetString(memoryModeKey, memoryModeClaude)
+		h.d.kmemAssistBoot()
+		if h.d.assist().state != asClosed {
+			t.Fatal("kmem memory off: nothing starts")
+		}
+		p.SetString(memoryModeKey, memoryModeKmem)
+	})
+	var tab *deskSession
+	h.ui(func() {
+		tab = h.d.createSession(h.proj, "default", "default")
+		h.d.org.Kmem[tab.id] = kmemAssistName
+		h.d.send("start")
+	})
+	h.eventually("the tab runs", func() bool { return tab.running() && !tab.conv.Busy })
+	h.ui(func() {
+		h.d.kmemAssistBoot()
+		if h.d.assist().state != asElsewhere || runningHidden(h.d) != 0 || h.d.kmemAssistRunning() {
+			t.Fatal("live in a tab: no second one")
+		}
+		w := &kmemWindow{}
+		h.d.kmemWin = w
+		h.d.kmemAssistOpen(w)
+		if rec.button != "Move it here" {
+			t.Fatalf("the window keeps its offer: %q", rec.reason)
+		}
+	})
+	if resumeCalls(k) != 0 {
+		t.Fatal("nothing resumed")
 	}
 }

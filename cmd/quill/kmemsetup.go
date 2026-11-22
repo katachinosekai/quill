@@ -426,5 +426,5 @@ func (d *desk) kmemAssistSetting() fyne.CanvasObject {
 		sel.Disable()
 	}
 	return container.NewVBox(boldLabel("kmem assistant"), sel,
-		caption("The model of kmem-lock-audit, the operator in Quill Desktop's kmem window. A local model must be able to use tools. Off: the window shows its panels only. A change applies the next time the window opens."))
+		caption("The model of kmem-lock-audit, Quill Desktop's kmem assistant (always running in the background). A local model must be able to use tools. Off: it doesn't run and the kmem window shows its panels only. A change applies the next time it starts."))
 }

@@ -83,13 +83,14 @@ func sessionPrompt(kmem, buildGate, coordinator bool) string {
 	return p
 }
 
-// kmemAssistantHint: the kmem window's operator (docs/design/kmem-window.md §6,
-// final text, at most 900 characters).
-const kmemAssistantHint = `You are kmem-lock-audit, the kmem operator in Quill Desktop's kmem window; use kmem --as kmem-lock-audit. Start with kmem brief, kmem handoff get kmem-lock-audit, then the open tasks titled "kmem issue:" (topic kmem). Your job: explain audit and maint warnings, review recycle bin items (advise; only the user empties it), suggest topic splits (rule 29: split downward, dry run first), tidy tasks, check handoffs, debug kmem state other sessions report, explain pzlock status. Reads are free; before any kmem write show the plan and wait for approval; one fact per kmem add. Never: kmem trash empty, repair history by hand, edit kmem data or backups, pzlock clear, edit Projects/kmem, install, or change the RULES file; that is kmem-dev's: file a "kmem issue: ..." task instead. No background jobs or subagent writes. When Quill Desktop asks, release or transfer claims and save your handoff.`
+// kmemAssistantHint: the always-running kmem assistant, kmem's developer and
+// operator in one session (docs/design/kmem-window.md §6, user 2026-11-22,
+// kmem fact fc6b73c; at most 900 characters).
+const kmemAssistantHint = `You are kmem-lock-audit, Quill Desktop's kmem developer and operator; use kmem --as kmem-lock-audit. Start: kmem brief, kmem handoff get kmem-lock-audit, open "kmem issue:" tasks (topic kmem). Operator: explain audit/maint warnings, review the recycle bin (only the user empties it), suggest splits (rule 29: split downward, dry run first), tidy tasks, check handoffs, debug reports. Developer: Projects/kmem, install.sh, launcher, kmem-guard, releases, rollouts, RULES file, pzlock code, backlog. Reads are free; show the plan and get the user's approval before any write or release; one fact per kmem add. Never: kmem trash empty, hand repair of history/kmem data/backups, pzlock clear. You always run in the background (background jobs, reviewer subagents ok); sessions reach you by SendMessage. Save at safe points; when Quill Desktop asks, release or transfer claims and save your handoff.`
 
-// sessionPromptFor: the prompt Quill Desktop appends for s. The kmem window's
-// hidden assistant gets the operator hint and always the kmem memory hint,
-// without the coordinator and build-gate hints (it edits no code).
+// sessionPromptFor: the prompt Quill Desktop appends for s. The hidden kmem
+// assistant gets its own hint and always the kmem memory hint, without the
+// coordinator and build-gate hints (its hint asks before every write).
 func (d *desk) sessionPromptFor(s *deskSession, kmemMem bool) string {
 	if isHiddenSession(s) {
 		return sessionPrompt(true, false, false) + " " + kmemAssistantHint

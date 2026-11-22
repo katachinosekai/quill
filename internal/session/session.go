@@ -34,6 +34,7 @@ type Options struct {
 	AddDirs   []string
 	ResumeAt  string
 	Prompt    string
+	Name      string // --name: the session's display name, which other sessions see as its peer name
 }
 
 func (o Options) Args() []string {
@@ -58,6 +59,9 @@ func (o Options) Args() []string {
 	}
 	if o.Mode != "" && o.Mode != "default" {
 		args = append(args, "--permission-mode", o.Mode)
+	}
+	if o.Name != "" {
+		args = append(args, "--name", o.Name)
 	}
 	switch o.Chrome {
 	case "on":

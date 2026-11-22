@@ -15,14 +15,18 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// The kmem window's assistant, kmem-lock-audit, the kmem operator
-// (docs/design/kmem-window.md §5, §9, §14). It runs only while the kmem
-// window is open: each open starts a fresh hidden session in kmemWindowDir()
-// that resumes from the operator's kmem handoff; closing asks it to release
-// or transfer its claims and save the handoff, waits up to kmemWinSaveWait
-// and then stops it. The window itself (left panels, sizes, keys) is
-// kmemwindow.go's; it calls kmemAssistOpen/kmemAssistClose through
-// kmemWindowOpenHook/kmemWindowCloseHook.
+// The kmem assistant, kmem-lock-audit: kmem's developer and operator in one
+// session (docs/design/kmem-window.md §5, §9, §14; user 2026-11-22, kmem fact
+// fc6b73c). It is the only always-running hidden background session: it
+// starts with Quill Desktop (kmemAssistBoot: kmem memory on, model not Off,
+// not live in a tab) as a hidden session in kmemWindowDir() that resumes from
+// its kmem handoff, and keeps running while the kmem window is closed (close
+// only hides the window; claims and background jobs go on). The window's
+// "Stop assistant" and Quit run the save-and-stop flow: release or transfer
+// claims, save the handoff, wait up to kmemWinSaveWait, stop. A hot reload
+// hands the process over (reload.go) and kmemAssistBoot adopts it. The window
+// itself (left panels, sizes, keys) is kmemwindow.go's; it calls
+// kmemAssistOpen/kmemAssistClose through kmemWindowOpenHook/kmemWindowCloseHook.
 
 // kmemAssistName is the operator's kmem name (kmemWinOperator in kmemwindow.go).
 const kmemAssistName = kmemWinOperator
@@ -36,6 +40,11 @@ var (
 	kmemWinSavePoll = 2 * time.Second  // how often the close flow reads `kmem handoff list`
 	kmemWinTick     = time.Second      // header refresh while the window is open
 )
+
+// kmemPeerName: the session name other Claude sessions see in ListAgents and
+// address with SendMessage (claude --name); without it they saw the folder
+// name plus a number ("kmem-window-51").
+const kmemPeerName = kmemAssistName
 
 // The kmem window's chat side (kmemwindow.go), wired at merge:
 // kmemWinSetChat = (*kmemWindow).setChat and so on. No-ops until then.
@@ -61,7 +70,7 @@ const (
 	asElsewhere             // kmem-lock-audit is live in a tab
 	asStarting              // the session is being started
 	asLive                  // running (or FAILED when its process is gone)
-	asSaving                // the window closed: waiting for the handoff save
+	asSaving                // Stop assistant or Quit: waiting for the handoff save
 	asStopping              // stopping the process
 )
 
@@ -71,24 +80,28 @@ func (st assistState) String() string {
 
 type kmemAssist struct {
 	state       assistState
-	w           *kmemWindow  // the open window, nil while closed
+	w           *kmemWindow  // the open window, nil while closed (hidden)
 	s           *deskSession // the assistant session (the last one, once stopped)
-	gen         int          // bumped on every open and close: stale callbacks drop out
+	gen         int          // bumped on every window open and close: stale ticks drop out
+	run         int          // bumped on every probe and stop: stale lifecycle callbacks drop out
 	tickGen     int
 	reason      string
-	pendingOpen bool // the window was reopened while saving: start again after the stop
-	untilSaved  bool // the user chose to keep it running hidden until it saves
-	quit        bool // closing for Quit: no question on timeout
+	userStopped bool // the user pressed Stop assistant: opening the window doesn't start it
+	untilSaved  bool // the user chose to keep it running until it saves
+	quit        bool // stopping for Quit: no question on timeout
 	done        []func()
 	choice      dialog.Dialog
 	lastSave    time.Time
 
+	// The chat side, built once and shown again on every reopen.
+	chat     fyne.CanvasObject
 	view     *chatView
 	input    *sendEntry
 	stateLbl *widget.Label
 	modelLbl *widget.Label
 	note     *widget.Label
 	restart  *widget.Button
+	stopBtn  *widget.Button
 }
 
 var (
@@ -107,15 +120,15 @@ func (d *desk) assist() *kmemAssist {
 	return a
 }
 
-// kmemAssistStartNote follows the resume prompt on every open.
-const kmemAssistStartNote = "Quill Desktop opened the kmem window. After the brief and your handoff, list the open tasks titled \"kmem issue:\" (topic kmem) and propose a plan for each. " +
-	"Reclaim the tasks you transferred to kmem-lock-audit when the window last closed."
+// kmemAssistStartNote follows the resume prompt on every start.
+const kmemAssistStartNote = "Quill Desktop started you as its always-running kmem assistant. After the brief and your handoff, list the open tasks titled \"kmem issue:\" (topic kmem) and propose a plan for each. " +
+	"Reclaim the tasks you transferred to kmem-lock-audit when you last stopped."
 
-// kmemWindowCloseMessage asks the operator to stop, settle its claims (rule 19,
-// user 2026-11-22: release idle claims, transfer the rest with the 48 h lease)
-// and save its handoff at once.
-func kmemWindowCloseMessage() string {
-	return fmt.Sprintf("Quill Desktop is closing the kmem window: stop what you are doing now; this session is stopped once its kmem handoff is saved (Quill Desktop waits %s). "+
+// kmemAssistStopMessage asks the assistant to stop, settle its claims (rule
+// 19, user 2026-11-22: release idle claims, transfer the rest with the 48 h
+// lease) and save its handoff at once (Stop assistant, Quit).
+func kmemAssistStopMessage() string {
+	return fmt.Sprintf("Quill Desktop is stopping the kmem assistant: stop what you are doing now; this session is stopped once its kmem handoff is saved (Quill Desktop waits %s). "+
 		"First release the claims you are not actively working on (`kmem --as %[2]s task release ID`) and transfer the rest to yourself with the 48 h lease (`kmem --as %[2]s task transfer ID %[2]s`). "+
 		"Then run `kmem --as %[2]s handoff save %[2]s` with --pointer and --state lines for everything the next session needs, including the transferred task ids to reclaim; run it even if you saved recently, Quill Desktop checks the save time. "+
 		"It refuses until your claims, background jobs and uncommitted files are recorded. Don't start other work. Reply with one line once it is saved.", waitText(), kmemAssistName)
@@ -128,20 +141,32 @@ func waitText() string {
 	return kmemWinSaveWait.String()
 }
 
-// kmemAssistOpen: the kmem window w opened (kmemWindowOpenHook).
+// kmemAssistBoot starts the assistant with Quill Desktop (after a hot
+// reload's restore, so a handed-over session is adopted, never doubled). It
+// needs kmem memory on; the probe checks the model setting, sign-in and
+// whether kmem-lock-audit is live in a tab (then the window offers to move it
+// here and nothing starts).
+func (d *desk) kmemAssistBoot() {
+	a := d.assist()
+	if a.state != asClosed || a.userStopped || !d.kmemMemory() {
+		return
+	}
+	d.kmemAssistProbe(a)
+}
+
+// kmemAssistOpen: the kmem window w opened (kmemWindowOpenHook). A running
+// assistant shows its chat again; otherwise it starts (unless the user
+// stopped it).
 func (d *desk) kmemAssistOpen(w *kmemWindow) {
 	a := d.assist()
 	a.w = w
 	a.gen++
 	switch a.state {
 	case asSaving, asStopping:
-		if a.state == asSaving && (a.choice != nil || a.untilSaved) {
-			// It missed the save deadline and still runs: reopening keeps it.
-			d.kmemAssistKeep(a)
-			return
-		}
-		a.pendingOpen = true
-		d.kmemAssistReason(a, "kmem-lock-audit is still saving its handoff from the last time; it starts here once that is done.")
+		d.kmemAssistAttach(a) // the header shows the save
+		return
+	case asProbing:
+		d.kmemAssistReason(a, "Starting kmem-lock-audit...")
 		return
 	}
 	if a.s != nil && a.s.running() && !a.s.stopping {
@@ -149,7 +174,25 @@ func (d *desk) kmemAssistOpen(w *kmemWindow) {
 		d.kmemAssistAttach(a)
 		return
 	}
+	if a.s != nil && (a.state == asLive || a.state == asStarting) {
+		d.markEnded(a.s.id) // it exited while hidden: nothing to save
+		a.state = asClosed
+	}
+	if a.userStopped {
+		d.kmemAssistStoppedReason(a)
+		return
+	}
 	d.kmemAssistProbe(a)
+}
+
+// kmemAssistStoppedReason: the window's line after Stop assistant.
+func (d *desk) kmemAssistStoppedReason(a *kmemAssist) {
+	d.kmemAssistReasonWith(a, "kmem-lock-audit is stopped; its handoff keeps its work for the next start.", "Start assistant", func() {
+		if a.state == asClosed || a.state == asPanels {
+			a.userStopped = false
+			d.kmemAssistProbe(a)
+		}
+	})
 }
 
 // kmemAssistReason shows one line instead of the chat (no assistant).
@@ -180,7 +223,8 @@ const kmemAssistOffReason = "The kmem assistant is off (Settings → General →
 func (d *desk) kmemAssistProbe(a *kmemAssist) {
 	a.state = asProbing
 	a.reason = ""
-	gen, w := a.gen, a.w
+	a.run++
+	run := a.run
 	model := d.kmemAssistModel()
 	switch {
 	case !d.kmemAvailable():
@@ -196,9 +240,15 @@ func (d *desk) kmemAssistProbe(a *kmemAssist) {
 		d.kmemAssistReasonWith(a, "Claude Code is not signed in.", "Sign in", d.signIn)
 		return
 	}
-	if o := d.kmemAssistOwner(); o != nil && !isHiddenSession(o) {
-		d.kmemAssistElsewhere(a, o)
-		return
+	if o := d.kmemAssistOwner(); o != nil {
+		if !isHiddenSession(o) {
+			d.kmemAssistElsewhere(a, o)
+			return
+		}
+		if o.running() && !o.stopping {
+			d.kmemAssistAdopt(a, o) // handed over by a hot reload
+			return
+		}
 	}
 	d.kmemAssistReason(a, "Starting kmem-lock-audit...")
 	go func() {
@@ -221,7 +271,7 @@ func (d *desk) kmemAssistProbe(a *kmemAssist) {
 			prompt = d.resumePrompt(kmemAssistName)
 		}
 		d.do(func() {
-			if a.gen != gen || a.w != w || a.state != asProbing {
+			if a.run != run || a.state != asProbing {
 				return
 			}
 			if reason != "" {
@@ -244,9 +294,7 @@ func (d *desk) kmemAssistOwner() *deskSession {
 func (d *desk) kmemAssistStart(a *kmemAssist, model, prompt string, saved time.Time) {
 	if o := d.kmemAssistOwner(); o != nil {
 		if isHiddenSession(o) && o.running() && !o.stopping {
-			// Handed over by a hot reload: the window shows it again.
-			a.s, a.state = o, asLive
-			d.kmemAssistAttach(a)
+			d.kmemAssistAdopt(a, o)
 			return
 		}
 		if !isHiddenSession(o) {
@@ -281,6 +329,15 @@ func (d *desk) kmemAssistStart(a *kmemAssist, model, prompt string, saved time.T
 	d.sendResume(s, kmemAssistName, prompt+"\n\n"+kmemAssistStartNote)
 	a.state = asLive
 	d.kmemAssistRefresh(a)
+	d.kmemAssistDot()
+}
+
+// kmemAssistAdopt takes over a running hidden session (a hot reload handed
+// it over, with or without the window open).
+func (d *desk) kmemAssistAdopt(a *kmemAssist, s *deskSession) {
+	a.s, a.state = s, asLive
+	d.kmemAssistAttach(a)
+	d.kmemAssistDot()
 }
 
 // kmemAssistCrashNote: the first notice when the last session ended without
@@ -301,7 +358,7 @@ func kmemAssistCrashNote(started string, saved time.Time) string {
 func (d *desk) kmemAssistElsewhere(a *kmemAssist, o *deskSession) {
 	a.state = asElsewhere
 	title, _, _ := d.rowText(o.id)
-	d.kmemAssistReasonWith(a, fmt.Sprintf("kmem-lock-audit is live in the tab “%s”. Move it here: it saves its handoff there and resumes in this window.", title),
+	d.kmemAssistReasonWith(a, fmt.Sprintf("kmem-lock-audit is live in the tab “%s”. Move it here: it saves its handoff there and resumes as the background kmem assistant.", title),
 		"Move it here", func() { d.kmemAssistMoveIn(a, o) })
 }
 
@@ -312,12 +369,12 @@ func (d *desk) kmemAssistMoveIn(a *kmemAssist, o *deskSession) {
 	title, _, _ := d.rowText(o.id)
 	d.endAndSaveTo(o.id, placeInactive)
 	d.kmemAssistReason(a, fmt.Sprintf("Waiting for the tab “%s” to save its kmem handoff...", title))
-	d.kmemAssistWaitOwner(a, a.gen, o, title, time.Now().Add(3*kmemWinSaveWait))
+	d.kmemAssistWaitOwner(a, a.run, o, title, time.Now().Add(3*kmemWinSaveWait))
 }
 
-func (d *desk) kmemAssistWaitOwner(a *kmemAssist, gen int, o *deskSession, title string, deadline time.Time) {
+func (d *desk) kmemAssistWaitOwner(a *kmemAssist, run int, o *deskSession, title string, deadline time.Time) {
 	d.afterUI(kmemWinSavePoll, func() {
-		if a.gen != gen || a.state != asElsewhere {
+		if a.run != run || a.state != asElsewhere {
 			return
 		}
 		if d.kmemAssistOwner() == nil {
@@ -329,21 +386,25 @@ func (d *desk) kmemAssistWaitOwner(a *kmemAssist, gen int, o *deskSession, title
 				"Try again", func() { d.kmemAssistMoveIn(a, o) })
 			return
 		}
-		d.kmemAssistWaitOwner(a, gen, o, title, deadline)
+		d.kmemAssistWaitOwner(a, run, o, title, deadline)
 	})
 }
 
 // kmemAssistAttach shows the assistant's chat on the window's right side.
+// The chat is built once and shown again on every reopen (same view, same
+// unsent input); show(s) catches up on what happened while it was hidden.
 func (d *desk) kmemAssistAttach(a *kmemAssist) {
 	w, s := a.w, a.s
 	if w == nil || s == nil {
 		return
 	}
 	a.reason = ""
-	obj := d.kmemAssistChat(a)
+	if a.chat == nil {
+		a.chat = d.kmemAssistChat(a)
+	}
 	w.s, w.view = s, a.view
 	a.view.show(s)
-	kmemWinSetChat(w, obj)
+	kmemWinSetChat(w, a.chat)
 	kmemWinSetPrefill(w, d.kmemAssistPrefill)
 	d.kmemAssistRefresh(a)
 	if a.tickGen != a.gen {
@@ -355,7 +416,7 @@ func (d *desk) kmemAssistAttach(a *kmemAssist) {
 // kmemAssistChat: header, chat view, input with send and stop.
 func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 	a.view = newChatViewWith(d, func() float32 { return chatMaxWidth }, func() float32 { return 0 })
-	title := boldLabel(kmemAssistName + " · operator")
+	title := boldLabel(kmemAssistName + " · kmem assistant")
 	a.stateLbl = widget.NewLabel("")
 	a.modelLbl = caption("")
 	a.note = caption("")
@@ -368,9 +429,12 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 	save.Importance = widget.LowImportance
 	a.restart = widget.NewButtonWithIcon("Restart", theme.ViewRefreshIcon(), func() { d.kmemAssistRestart(a) })
 	a.restart.Hide()
+	// Stop assistant: the save-and-stop flow (closing the window only hides it).
+	a.stopBtn = widget.NewButton("Stop assistant", func() { d.kmemAssistStopNow(a) })
+	a.stopBtn.Importance = widget.LowImportance
 	head := container.NewVBox(
 		container.NewBorder(nil, nil, title, a.stateLbl),
-		container.NewBorder(nil, nil, nil, container.NewHBox(a.restart, save), a.modelLbl),
+		container.NewBorder(nil, nil, nil, container.NewHBox(a.restart, save, a.stopBtn), a.modelLbl),
 		widget.NewSeparator())
 	a.input = newSendEntry(d.kmemAssistSend)
 	a.input.hint = "Ask kmem-lock-audit..."
@@ -400,6 +464,10 @@ func (d *desk) kmemAssistRefresh(a *kmemAssist) {
 		st = "stopped: " + oneLine(s.failed, 80)
 	case failed:
 		st = "stopped"
+	case a.state == asSaving:
+		st = "● saving its handoff, then stopping"
+	case a.state == asStopping:
+		st = "● stopping"
 	case s.status() == stNone:
 		st = "● starting"
 	}
@@ -409,13 +477,18 @@ func (d *desk) kmemAssistRefresh(a *kmemAssist) {
 	} else {
 		a.restart.Hide()
 	}
+	if !failed && (a.state == asLive || a.state == asStarting) {
+		a.stopBtn.Show()
+	} else {
+		a.stopBtn.Hide()
+	}
 	src := "kmem assistant setting"
 	if d.app.Preferences().String(prefKmemAssistModel) == "" {
 		src = "New sessions"
 	}
 	m := "model: " + s.model + " (" + src + ")"
 	if want := d.kmemAssistModel(); want != s.model {
-		m += " · the new setting applies the next time the window opens"
+		m += " · the new setting applies the next time it starts"
 	}
 	setLabel(a.modelLbl, m)
 	if len(s.agentGrants) > 0 {
@@ -444,9 +517,13 @@ func (d *desk) kmemAssistTick(a *kmemAssist, gen int, every time.Duration) {
 
 // kmemAssistRestart (FAILED → Restart) starts a fresh session.
 func (d *desk) kmemAssistRestart(a *kmemAssist) {
-	if a.w == nil || a.s != nil && a.s.running() {
+	if a.w == nil || a.s != nil && a.s.running() || a.state == asSaving || a.state == asStopping || a.state == asProbing {
 		return
 	}
+	if a.s != nil && (a.state == asLive || a.state == asStarting) {
+		d.markEnded(a.s.id) // FAILED: nothing to save
+	}
+	a.userStopped = false
 	d.kmemAssistProbe(a)
 }
 
@@ -481,23 +558,37 @@ func (d *desk) kmemAssistSend(text string) {
 }
 
 // kmemAssistClose: the kmem window closed (X, Escape; kmemWindowCloseHook).
-// The window is gone at once; the save runs in the background.
+// Closing only hides it: the assistant keeps running with its claims and
+// background jobs, nothing is saved or stopped, and reopening shows the same
+// chat.
 func (d *desk) kmemAssistClose(w *kmemWindow) {
-	d.kmemAssistCloseThen(false, nil)
-}
-
-// kmemAssistQuit runs the close flow for Quit (bounded by kmemWinSaveWait, no
-// question on timeout) and calls done once the assistant is stopped.
-func (d *desk) kmemAssistQuit(done func()) {
-	d.kmemAssistCloseThen(true, done)
-}
-
-func (d *desk) kmemAssistCloseThen(quit bool, done func()) {
 	a := d.assist()
+	if a.w != w {
+		return
+	}
 	a.w = nil
-	a.gen++
-	a.pendingOpen = false
-	a.view, a.input, a.stateLbl = nil, nil, nil
+	a.gen++ // the header tick ends
+}
+
+// kmemAssistStopNow: the window's "Stop assistant" (the save-and-stop flow;
+// opening the window again doesn't restart it, "Start assistant" does).
+func (d *desk) kmemAssistStopNow(a *kmemAssist) {
+	if a.state != asLive && a.state != asStarting {
+		return
+	}
+	a.userStopped = true
+	d.kmemAssistSaveStop(false, nil)
+}
+
+// kmemAssistQuit runs the save-and-stop flow for Quit (bounded by
+// kmemWinSaveWait, no question on timeout) and calls done once the assistant
+// is stopped.
+func (d *desk) kmemAssistQuit(done func()) {
+	d.kmemAssistSaveStop(true, done)
+}
+
+func (d *desk) kmemAssistSaveStop(quit bool, done func()) {
+	a := d.assist()
 	if done != nil {
 		a.done = append(a.done, done)
 	}
@@ -509,12 +600,17 @@ func (d *desk) kmemAssistCloseThen(quit bool, done func()) {
 			d.kmemAssistStop(a, false)
 		}
 		return
-	case s == nil || !s.running() || s.stopping:
+	case s == nil || !s.running() || s.stopping || a.state != asLive && a.state != asStarting:
 		if s != nil && !s.running() && (a.state == asLive || a.state == asStarting) {
 			d.markEnded(s.id) // FAILED: nothing to save
 		}
+		a.run++ // a probe in flight starts nothing
 		a.state, a.quit = asClosed, false
+		d.kmemAssistDot()
 		d.kmemAssistFinished(a)
+		if a.w != nil && a.userStopped {
+			d.kmemAssistStoppedReason(a)
+		}
 		return
 	}
 	a.state = asSaving
@@ -522,11 +618,12 @@ func (d *desk) kmemAssistCloseThen(quit bool, done func()) {
 	asked := time.Now().Add(-2 * time.Second)
 	// prompt set: kmemAfterTurn leaves this save to the close flow below;
 	// kmemSaveAllowed still lets `kmem handoff save` through plan-first.
-	ks := &kmemSave{name: kmemAssistName, asked: asked, end: true, prompt: "kmem window close"}
+	ks := &kmemSave{name: kmemAssistName, asked: asked, end: true, prompt: "kmem assistant stop"}
 	s.kmemSave = ks
 	d.chatFor(s, s.conv.CancelPlans())
 	d.flashHint(d.folder, "kmem assistant: saving handoff...")
-	msg := kmemWindowCloseMessage()
+	msg := kmemAssistStopMessage()
+	d.kmemAssistRefresh(a)
 	if p := s.proc; s.inTurn || s.conv.Busy || p.Busy() {
 		// Mid-turn: stop at once, then ask for the save (user 2026-11-22).
 		go func() {
@@ -616,7 +713,7 @@ func (d *desk) kmemAssistAsk(a *kmemAssist) {
 		"kmem refuses the save until its claims, jobs and files are recorded, so it may still be working on that.", waitText(), d.kmemAssistLastSave(a)))
 	msg.Wrapping = fyne.TextWrapWord
 	var btns []fyne.CanvasObject
-	for i, label := range []string{"Stop without saving", "Keep running hidden until saved", "Reopen the kmem window"} {
+	for i, label := range []string{"Stop without saving", "Keep running until saved", "Keep it running"} {
 		n := i
 		btns = append(btns, widget.NewButton(label, func() { d.kmemAssistChoose(a, n) }))
 	}
@@ -626,8 +723,8 @@ func (d *desk) kmemAssistAsk(a *kmemAssist) {
 	dlg.Show()
 }
 
-// kmemAssistChoose: 0 stop without saving, 1 keep running hidden until
-// saved, 2 reopen the kmem window.
+// kmemAssistChoose: 0 stop without saving, 1 keep running until saved, 2 keep
+// it running (cancel the stop).
 func (d *desk) kmemAssistChoose(a *kmemAssist, n int) {
 	if a.choice != nil {
 		a.choice.Hide()
@@ -641,34 +738,30 @@ func (d *desk) kmemAssistChoose(a *kmemAssist, n int) {
 		d.kmemAssistStop(a, false)
 	case 1:
 		a.untilSaved = true
-		d.flashHint(d.folder, "kmem assistant: still running hidden until it saves its handoff.")
+		d.flashHint(d.folder, "kmem assistant: still running until it saves its handoff.")
 	case 2:
 		d.kmemAssistKeep(a)
 	}
 }
 
-// kmemAssistKeep cancels the close: the session goes on in the window.
+// kmemAssistKeep cancels the stop: the session goes on in the background.
 func (d *desk) kmemAssistKeep(a *kmemAssist) {
 	if a.choice != nil {
 		a.choice.Hide()
 		a.choice = nil
 	}
+	a.userStopped = false
 	s := a.s
 	if s == nil || !s.running() {
 		a.state = asClosed
-		if a.w != nil {
-			d.kmemAssistProbe(a)
-		}
+		d.kmemAssistProbe(a)
 		return
 	}
 	s.kmemSave = nil
 	a.state, a.untilSaved, a.quit = asLive, false, false
-	d.notify(s, "The kmem window is open again, so Quill Desktop no longer stops this session.")
-	if a.w != nil {
-		d.kmemAssistAttach(a)
-		return
-	}
-	d.openKmemWindow()
+	d.notify(s, "Quill Desktop no longer stops kmem-lock-audit; it keeps running in the background.")
+	d.kmemAssistAttach(a)
+	d.kmemAssistDot()
 }
 
 // kmemAssistStop is STOPPING: stop the process and mark the session ended
@@ -681,6 +774,8 @@ func (d *desk) kmemAssistStop(a *kmemAssist, saved bool) {
 	}
 	s.kmemSave = nil
 	a.state = asStopping
+	a.run++
+	d.kmemAssistRefresh(a)
 	note := "Saved kmem handoff “" + kmemAssistName + "”."
 	if !saved {
 		note = fmt.Sprintf("kmem-lock-audit did not save its handoff within %s; it was stopped. %s", waitText(), d.kmemAssistLastSave(a))
@@ -707,12 +802,24 @@ func (d *desk) kmemAssistStopped(a *kmemAssist, s *deskSession) {
 	if a.s != s || a.state != asStopping {
 		return
 	}
+	quit := a.quit
 	a.state, a.untilSaved, a.quit = asClosed, false, false
+	d.kmemAssistDot()
 	d.kmemAssistFinished(a)
-	if a.pendingOpen && a.w != nil {
-		a.pendingOpen = false
-		d.kmemAssistProbe(a)
+	if a.w != nil && !quit {
+		d.kmemAssistStoppedReason(a)
 	}
+}
+
+// kmemAssistRunning: the assistant's process runs (the kmem button's dot).
+func (d *desk) kmemAssistRunning() bool {
+	a := d.assist()
+	return a.s != nil && a.s.running() && !a.s.stopping && a.state != asClosed && a.state != asStopping
+}
+
+// kmemAssistDot shows the kmem button's dot while the assistant runs.
+func (d *desk) kmemAssistDot() {
+	d.setKmemRunDot(d.kmemAssistRunning())
 }
 
 func (d *desk) kmemAssistFinished(a *kmemAssist) {

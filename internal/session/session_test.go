@@ -175,8 +175,11 @@ func TestArgs(t *testing.T) {
 		}
 	}
 	args = strings.Join(Options{SessionID: "id1", Model: "default", Mode: "default"}.Args(), " ")
-	if !strings.Contains(args, "--session-id id1") || strings.Contains(args, "--model") || strings.Contains(args, "--permission-mode") {
+	if !strings.Contains(args, "--session-id id1") || strings.Contains(args, "--model") || strings.Contains(args, "--permission-mode") || strings.Contains(args, "--name") {
 		t.Error(args)
+	}
+	if a := (Options{SessionID: "id1", Name: "kmem-lock-audit"}).Args(); !strings.Contains(strings.Join(a, " "), "--name kmem-lock-audit") {
+		t.Errorf("the peer name: %v", a)
 	}
 	if u := NewUUID(); len(u) != 36 || u[14] != '4' {
 		t.Error(u)

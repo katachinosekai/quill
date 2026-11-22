@@ -12,10 +12,11 @@ Goals
   dedicated **kmem window**: a second fyne window, not the dialog that
   `showKmemPanel` (`kmempanel.go:116`) shows today.
 - Left side: Overview (with "Waiting for you"), Handoffs, Tasks, Memory.
-- Right side: the chat of the **kmem-lock-audit** assistant, the kmem
-  operator.
-- The assistant runs only while the window is open, and saves its kmem
-  handoff when the window closes.
+- Right side: the chat of the **kmem-lock-audit** assistant, kmem's
+  developer and operator.
+- The assistant runs in the background from Quill Desktop's start; closing
+  the window only hides it. "Stop assistant" and Quit save its kmem handoff
+  and stop it.
 - kmem stays self-reliant: the window works without any model (panels only).
 - Reports from other sessions while the window is closed are queued as kmem
   tasks and counted on the bubble.
@@ -23,28 +24,35 @@ Goals
 
 Non-goals
 
-- No kmem changes in Quill Desktop. New kmem features are requests to
-  kmem-dev.
+- No kmem changes in Quill Desktop. New kmem features are the assistant's
+  developer work (with the user's approval).
 - The recycle bin stays in Settings → General → Memory (kmem) (`kmembin.go`).
   The window links to it but does not embed it.
 - No window positioning or always-on-top. Wayland does not allow either.
 - No second kmem-lock-audit process. If one is live elsewhere, the window
   offers to open it.
-- kmem development (repo, releases, rollouts, installs, RULES file structure)
-  is out of scope for the window's assistant.
 
 ## 2. User decisions (2026-11-22)
 
+**Superseded in part (user 2026-11-22, kmem fact fc6b73c): one kmem
+assistant, both roles; the only always-running background session.**
+kmem-lock-audit keeps the developer role (Projects/kmem, install.sh,
+launcher and kmem-guard, releases and staged rollouts, RULES file structure,
+pzlock code, the kmem backlog) and the operator role; there is no kmem-dev.
+It starts with Quill Desktop and keeps running while the window is closed
+(close only hides the window). Decisions 2 and 5 below are replaced by this;
+§5, §6, §10 and §14 describe the current behaviour.
+
 1. The chat lives inside the kmem window.
-2. The assistant runs only while the window is open. Quill starts or resumes
-   it when the window opens. On close, Quill asks it to save handoff
-   `kmem-lock-audit`, waits up to 60 s, then stops it.
+2. ~~The assistant runs only while the window is open.~~ Replaced: it runs
+   from Quill Desktop's start until "Stop assistant" or Quit, which ask it to
+   save handoff `kmem-lock-audit`, wait up to 60 s, then stop it.
 3. Model = the "New sessions" model preference (`newModel`, `desk.go:1021`).
    Settings adds an "Off" option for the window's assistant.
 4. kmem stays self-reliant. With no usable model the window shows the panels
    only, and the chat area is replaced by a one-line reason.
-5. kmem development moves to a separate session named **kmem-dev**. The
-   window's kmem-lock-audit becomes the **operator**.
+5. ~~kmem development moves to a separate session named **kmem-dev**.~~
+   Replaced: kmem-lock-audit is both developer and operator.
 6. Reports that arrive while the window is closed become kmem tasks titled
    `kmem issue: …` with topic `kmem`. The bubble counts them
    (`parseKmemNeeds`), and the assistant handles them on its next run.
@@ -202,68 +210,83 @@ the list above is finite.
 
 ## 5. Lifecycle state machine
 
+One kmem assistant, both roles; the only always-running background session
+(user 2026-11-22, fc6b73c). The window and the assistant have separate
+lifetimes: the window only shows the assistant's chat.
+
 ```
-                 open window
+   Quill Desktop starts (kmemAssistBoot, after a reload's restore)
+   or the window opens while nothing runs (not after Stop assistant)
    CLOSED ─────────────────────────► PROBING
-     ▲                                  │ kmem missing / model Off / no sign-in /
-     │                                  │ Ollama tool-use probe fails
+     ▲                                  │ kmem memory off (boot only) / kmem missing /
+     │                                  │ model Off / no sign-in / Ollama tool-use probe fails
      │                                  ├──────────────► PANELS_ONLY (chat line shows reason)
-     │                                  │ kmem-lock-audit live elsewhere (handoffOwner, not hidden)
-     │                                  ├──────────────► ELSEWHERE ("Open it" / question 7)
+     │                                  │ kmem-lock-audit live in a tab (handoffOwner, not hidden)
+     │                                  ├──────────────► ELSEWHERE (window offers "Move it here")
+     │                                  │ hidden session handed over by a hot reload
+     │                                  ├──────────────► LIVE (adopted, nothing resumed)
      │                                  ▼
-     │                               STARTING  (ended hidden session known? resume it with
-     │                                  │       sendResume(resumePrompt) ; else new hidden
-     │                                  │       session + resume prompt; then "Handle open
-     │                                  │       'kmem issue:' tasks" is part of the prompt)
+     │                               STARTING  new hidden session + resume prompt
+     │                                  │       (+ "handle open 'kmem issue:' tasks")
      │                                  ▼
-     │          crash / exit          LIVE ◄────── context rotation (#22) keeps LIVE
+     │          crash / exit          LIVE ◄── window close/open only hide/show the chat
      │   ┌──────────────────────────────┤
-     │   ▼                              │ close window (X, Escape, Quit, reload-stop)
+     │   ▼                              │ Stop assistant (window) or Quit
      │ FAILED (header shows error,      ▼
-     │  [Restart]) ───────────────► SAVING   kmemSave{end:true, keep:false, hidden}
-     │                                  │    sendTo(kmemWindowCloseMessage); 60 s timer
-     │                                  │    kmemAfterTurn checks save time (existing)
+     │  [Restart]) ───────────────► SAVING   kmemSave{end:true}
+     │                                  │    sendTo(kmemAssistStopMessage); 60 s timer
      │            saved / 60 s / fail   ▼
-     └──────────────────────────────STOPPING  p.Stop(5 s); markEnded; window destroyed
+     └──────────────────────────────STOPPING  p.Stop(5 s); markEnded
 ```
 
 Details
 
-- **Opening while SAVING or STOPPING** (user reopened quickly): the window
-  waits for the stop and then resumes. It does not start a second process.
-- **Close is not blocked.** The window hides at once. A small non-modal note in
-  the main window's status line ("kmem assistant: saving handoff…") reports
-  the outcome.
+- **Start with Quill Desktop.** `watch` calls `kmemAssistBoot` after
+  `applyRestore`. It needs kmem memory on, the model setting not Off and the
+  probe passing. If kmem-lock-audit is live in a tab, nothing starts and the
+  window keeps its "Move it here" offer.
+- **Closing the window hides it.** Nothing is saved or stopped; claims,
+  background jobs and subagents go on. Reopening shows the same session in
+  the same chat view (unsent input kept); `chatView.show` catches up on what
+  happened while it was hidden.
+- **Run dot.** A small dot on the kmem button's bottom-right corner shows
+  while the assistant's process runs (`kmembadge.go`, `kmemAssistDot`).
+- **Stop assistant** (window header) runs the save-and-stop flow. The window
+  then says "kmem-lock-audit is stopped" with a "Start assistant" button;
+  reopening the window does not restart it, nor does anything else until
+  Quill Desktop starts again.
+- **The save is not blocking.** The header shows "saving its handoff, then
+  stopping"; the main window's status line reports the outcome.
   - On success: "Saved kmem handoff “kmem-lock-audit”."
-  - On timeout or failure: "kmem-lock-audit did not save its handoff within
-    60 s; it was stopped. The last save is from <time>." The handoff save may
+  - On timeout: a question with "Stop without saving", "Keep running until
+    saved" and "Keep it running" (cancels the stop). The handoff save may
     refuse while claims, jobs or uncommitted files are unrecorded, so the
     failure is shown, not swallowed (rule 24).
-- **Mid-turn close.** The close message is sent at once. `spare=1`, as in
-  `endAndSaveTo` (`kmem.go:493`), so the in-flight turn's result doesn't count
-  as a failure. The 60 s cap still applies. See open question 6.
-- **Pending plan card on close.** The save is pre-allowed: `kmemSaveAllowed`
-  (`kmem.go:321`) passes `kmem handoff save` while `s.kmemSave` is set. A
-  pending plan card is cancelled with "window closed".
-- **Claims on close (rule 19).** The close message also asks the operator to
-  release the claims it is not actively working on and to
-  `kmem task transfer ID kmem-lock-audit` (48 h lease) the rest. The next
-  open's resume prompt tells it to reclaim them. The operator holds no
-  long-lived claims.
-- **Background jobs and timers** die with the window. The hint forbids them
-  (long work goes to kmem-dev as a `kmem issue:` task).
-- **Crash or kill** (Quill crash, OOM, power):
-  - The keeper (#12) may hand the process back. If not, the next open resumes
-    from the last saved handoff.
-  - If `kmem handoff list` shows a save older than the last start (pref
-    `kmemWinStarted`), the window's first notice says: "The last session
-    ended without saving; working from the save of <time>."
-  - Auto-handoff checkpoints (`autohandoff.go`, at `safePoint`) also apply to
-    the hidden session, so a crash loses at most one stretch of work.
-- **Quit** (`confirmQuit`) runs the close flow for the hidden session (bounded
-  by the same 60 s) before exiting.
-- **Hot reload** runs the hand-over (#9): the process survives and the window
-  reopens.
+- **Mid-turn stop.** The turn is interrupted, then the stop message is sent.
+  The 60 s cap still applies.
+- **Pending plan card on stop.** The save is pre-allowed: `kmemSaveAllowed`
+  passes `kmem handoff save` while `s.kmemSave` is set; a pending plan card
+  is cancelled.
+- **Claims on stop (rule 19).** The stop message asks it to release the
+  claims it is not working on and `kmem task transfer ID kmem-lock-audit`
+  (48 h lease) the rest. The next start's prompt tells it to reclaim them.
+- **Background jobs** are fine: it is always running. It saves checkpoints at
+  safe points (its hint, and auto-handoff at `safePoint`).
+- **Crash or kill** (Quill crash, OOM, power): the keeper (#12) may hand the
+  process back. If not, the next start resumes from the last saved handoff;
+  if that save is older than the last start (pref `kmemWinStarted`), the
+  first notice says: "The last session ended without saving; working from the
+  save of <time>."
+- **Quit** (`confirmQuit` → `kmemQuitFlow`) runs the save-and-stop flow,
+  window open or not (bounded by the same 60 s, no question), then exits.
+- **Hot reload** hands the process over (#9) whether or not the window is
+  open. `restoreState.KmemWin` reopens the window only if it was open;
+  `kmemAssistBoot` adopts the handed-over hidden session either way.
+- **Peer name.** The hidden session starts with `claude --name
+  kmem-lock-audit` (`processOptions`), so other sessions see and message it
+  as kmem-lock-audit in ListAgents/SendMessage instead of the folder name plus
+  a number ("kmem-window-51"). `kmem issue:` tasks remain the fallback when it
+  isn't running.
 - **Ollama probe.** When the window model is local, Quill sends a one-shot
   `/api/show` request and checks that `capabilities` contains `tools`.
   - Missing → PANELS_ONLY with the reason line.
@@ -279,13 +302,14 @@ Details
     subagents for writes. The window shows "subagents running; messages now
     pause them" under the input while `len(s.agentGrants) > 0`.
 
-## 6. kmemAssistantHint (final text, 892 characters)
+## 6. kmemAssistantHint (final text, 894 characters)
 
-Appended to `sessionPrompt(...)` for the hidden session only, via a new
+Appended to `sessionPrompt(...)` for the hidden session only, via
 `sessionPromptFor(s)`. Coordinator and build-gate hints are off for it.
+Replaced 2026-11-22 (fc6b73c): both roles, always running, no kmem-dev.
 
 ```
-You are kmem-lock-audit, the kmem operator in Quill Desktop's kmem window; use kmem --as kmem-lock-audit. Start with kmem brief, kmem handoff get kmem-lock-audit, then the open tasks titled "kmem issue:" (topic kmem). Your job: explain audit and maint warnings, review recycle bin items (advise; only the user empties it), suggest topic splits (rule 29: split downward, dry run first), tidy tasks, check handoffs, debug kmem state other sessions report, explain pzlock status. Reads are free; before any kmem write show the plan and wait for approval; one fact per kmem add. Never: kmem trash empty, repair history by hand, edit kmem data or backups, pzlock clear, edit Projects/kmem, install, or change the RULES file; that is kmem-dev's: file a "kmem issue: ..." task instead. No background jobs or subagent writes. When Quill Desktop asks, release or transfer claims and save your handoff.
+You are kmem-lock-audit, Quill Desktop's kmem developer and operator; use kmem --as kmem-lock-audit. Start: kmem brief, kmem handoff get kmem-lock-audit, open "kmem issue:" tasks (topic kmem). Operator: explain audit/maint warnings, review the recycle bin (only the user empties it), suggest splits (rule 29: split downward, dry run first), tidy tasks, check handoffs, debug reports. Developer: Projects/kmem, install.sh, launcher, kmem-guard, releases, rollouts, RULES file, pzlock code, backlog. Reads are free; show the plan and get the user's approval before any write or release; one fact per kmem add. Never: kmem trash empty, hand repair of history/kmem data/backups, pzlock clear. You always run in the background (background jobs, reviewer subagents ok); sessions reach you by SendMessage. Save at safe points; when Quill Desktop asks, release or transfer claims and save your handoff.
 ```
 
 ## 7. Rules compliance
@@ -366,14 +390,22 @@ Settings → General → Memory (kmem) gains:
 - kmem not available → no assistant and no window chat. The kmem button
   behaves as today (information dialog).
 
-## 10. Role split: kmem-dev vs kmem-lock-audit
+## 10. Roles: one kmem assistant, both roles
 
-| | kmem-dev (new, normal tab session) | kmem-lock-audit (operator, kmem window) |
-|---|---|---|
-| Owns | Projects/kmem repo, install.sh, launcher, releases, staged rollouts (rollout.json, sandboxes, review packets), reviews, pzlock code, structural RULES file edits (rule content stays the user's), installs (rules 18/25) | audit + maint warnings, recycle bin review (user empties), split suggestions and follow-ups, task tidying, handoff checks, debugging reports, pzlock status explanations (rule 4), Monday check-in |
-| Backlog | tbba9ae (1.9.0 rule IDs + editions), t32b878, td12618, small handoff items | open `kmem issue:` tasks; td56c1c, t7a8638 at check-in |
-| Long work | yes (background jobs, rollouts) | no; files `kmem issue:` for kmem-dev |
-| Runs | when the user opens it | only while the kmem window is open |
+Superseded (user 2026-11-22, fc6b73c): there is no kmem-dev. kmem-lock-audit
+keeps both roles and is the only always-running background session.
+
+| | kmem-lock-audit (hidden, always running) |
+|---|---|
+| Developer | Projects/kmem repo, install.sh, launcher and kmem-guard, releases and staged rollouts (with background checks and reviewer subagents), structural RULES file edits (rule content stays the user's), pzlock code, the kmem backlog; writes and releases only after the user's approval |
+| Operator | audit + maint warnings, recycle bin review (user empties), split suggestions and follow-ups, task tidying, handoff checks, debugging reports, pzlock status explanations (rule 4), Monday check-in |
+| Never | kmem trash empty, hand repair of history, kmem data or backups, pzlock clear |
+| Long work | yes (background jobs, rollouts) |
+| Runs | from Quill Desktop's start until Stop assistant or Quit |
+| Reached by | SendMessage to kmem-lock-audit; `kmem issue:` tasks when it isn't running |
+
+The migration steps below were for the abandoned split; steps 1, 3, 4 and 8
+(kmem-dev) do not apply. Kept for history.
 
 Migration steps. These are for the user and the sessions named. Quill Desktop
 and this design do not run them.
@@ -528,6 +560,13 @@ Manual checks (user, KDE Wayland):
   closed operator. Question 2 and migration step 7 address it.
 
 ## 14. Decisions (user 2026-11-22: the recommended option for all ten)
+
+Superseded in part (user 2026-11-22, fc6b73c): one kmem assistant, both
+roles; the only always-running background session. Question 1 (role split)
+is void: there is no kmem-dev. Questions 5 and 6 now apply to "Stop
+assistant" and Quit instead of closing the window, which only hides it.
+Question 8: hot reload keeps the assistant whether or not the window is open
+and reopens the window only if it was open.
 
 Decided: role split after the 1.8.1 rollout; a kmem brief line (no new
 rule); the bubble counts every open "kmem issue:" task and a paused

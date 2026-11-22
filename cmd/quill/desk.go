@@ -222,6 +222,7 @@ type desk struct {
 	// kmem button bubble: what kmem asks the user for (bin, audit, maint,
 	// user tasks); kmembadge.go. The bin dialog: kmembin.go.
 	kmemBubble    *bubble
+	kmemRunDot    *canvas.Circle // the kmem assistant runs (kmembadge.go)
 	kmemBtnBox    fyne.CanvasObject
 	kmemNeedsNow  kmemNeeds
 	kmemBinSetBtn *widget.Button
@@ -1455,15 +1456,8 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		s.failed = err.Error()
 		return err
 	}
-	kmemMem := d.kmemMemory() || isHiddenSession(s)
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: d.sessionPromptFor(s, kmemMem),
-		Env: append(append(d.localEnv(s.model), checkpointEnv), sessionMemoryEnv(kmemMem)...)}
+	opts := d.processOptions(s)
 	d.warnInsecureOllama(s)
-	if s.persisted {
-		opts.Resume = s.id
-	} else {
-		opts.SessionID = s.id
-	}
 	s.failed = ""
 	s.stopping = false
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
@@ -1479,6 +1473,24 @@ func (d *desk) ensureProcess(s *deskSession) error {
 	d.adopt(s, p)
 	d.autoRemote(s)
 	return nil
+}
+
+// processOptions: how ensureProcess starts s's Claude process.
+func (d *desk) processOptions(s *deskSession) session.Options {
+	kmemMem := d.kmemMemory() || isHiddenSession(s)
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: d.sessionPromptFor(s, kmemMem),
+		Env: append(append(d.localEnv(s.model), checkpointEnv), sessionMemoryEnv(kmemMem)...)}
+	if s.persisted {
+		opts.Resume = s.id
+	} else {
+		opts.SessionID = s.id
+	}
+	if isHiddenSession(s) {
+		// Other sessions find the kmem assistant by this name (ListAgents,
+		// SendMessage), not by its folder ("kmem-window-51").
+		opts.Name = kmemPeerName
+	}
+	return opts
 }
 
 func (d *desk) adopt(s *deskSession, p *session.Process) {
@@ -1627,6 +1639,11 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	}
 	d.unkeepSession(s.id)
 	s.restarting = false
+	defer func() {
+		if isHiddenSession(s) {
+			d.kmemAssistDot()
+		}
+	}()
 	var items []*chat.Item
 	items = append(items, s.conv.CancelPending()...)
 	for _, it := range s.conv.Items {
@@ -2202,6 +2219,7 @@ func (d *desk) watch(ctx context.Context) {
 	}
 	d.do(d.pruneStaleTabs)
 	d.do(d.reopenLastTab)
+	d.do(d.kmemAssistBoot) // the always-running kmem assistant, after a reload's restore adopts its session
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
 	go d.usageLoop(ctx)

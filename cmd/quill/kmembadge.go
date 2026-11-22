@@ -115,7 +115,7 @@ func badgeText(c int) string {
 }
 
 // badgeLayout: the button fills the box; the bubble sits on its top-right
-// corner, half outside it.
+// corner, half outside it; the run dot (if any) on its bottom-right corner.
 type badgeLayout struct{}
 
 func (badgeLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
@@ -128,7 +128,15 @@ func (badgeLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	b := objs[1].MinSize()
 	objs[1].Resize(b)
 	objs[1].Move(fyne.NewPos(size.Width-b.Width*0.75, -b.Height*0.25))
+	if len(objs) > 2 {
+		objs[2].Resize(fyne.NewSize(kmemRunDotSize, kmemRunDotSize))
+		objs[2].Move(fyne.NewPos(size.Width-kmemRunDotSize-3, size.Height-kmemRunDotSize-3))
+	}
 }
+
+// kmemRunDotSize: the dot on the kmem button while the kmem assistant runs
+// (user 2026-11-22: it is always running in the background).
+const kmemRunDotSize = 7
 
 // bubble is the round count drawn over the kmem button.
 type bubble struct {
@@ -172,10 +180,25 @@ func (b *bubble) set(c int) {
 	b.box.Refresh()
 }
 
-// kmemButtonWithBubble wraps the toolbar's kmem button with its bubble.
+// kmemButtonWithBubble wraps the toolbar's kmem button with its bubble and
+// the kmem assistant's run dot.
 func (d *desk) kmemButtonWithBubble() fyne.CanvasObject {
 	d.kmemBubble = newBubble()
-	return container.New(badgeLayout{}, d.kmemBtn, d.kmemBubble.box)
+	d.kmemRunDot = canvas.NewCircle(colIdle)
+	d.kmemRunDot.Hidden = !d.kmemAssistRunning()
+	return container.New(badgeLayout{}, d.kmemBtn, d.kmemBubble.box, d.kmemRunDot)
+}
+
+// setKmemRunDot shows or hides the run dot (UI thread).
+func (d *desk) setKmemRunDot(on bool) {
+	if d.kmemRunDot == nil || d.kmemRunDot.Visible() == on {
+		return
+	}
+	if on {
+		d.kmemRunDot.Show()
+	} else {
+		d.kmemRunDot.Hide()
+	}
 }
 
 // setKmemNeeds updates the bubble and the Settings bin button (UI thread).
