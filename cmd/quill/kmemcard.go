@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -141,28 +142,55 @@ func (d *desk) syncTitleToKmem(id string) {
 
 func (d *desk) renameKmem(id, old, next string) {
 	go func() {
-		hs, _ := d.kmemHandoffList()
-		saved := false
-		for _, h := range hs {
-			saved = saved || h.Name == old
-		}
-		var err error
-		if saved {
-			var out string
-			out, err = d.runKmem("kmem", "handoff", "rename", old, next, "--as", "Quill Desktop/"+old) // --as: kmem history shows "by Quill Desktop/OLD at <time>", not "unknown"
-			if err != nil {
-				err = fmt.Errorf("%s", strings.TrimSpace(out))
+		// Always ask kmem: it moves a saved handoff and/or the config "sessions" label (kmem 1.6.3 moves a label even
+		// before the first save). "no handoff OLD" = nothing in kmem yet, so only the tab's link changes.
+		// --as: kmem history shows "by Quill Desktop/OLD at <time>", not "unknown".
+		out, err := d.runKmem("kmem", "handoff", "rename", old, next, "--as", "Quill Desktop/"+old, "--json")
+		labelFailed := false
+		if err != nil {
+			if msg := strings.TrimSpace(out); strings.Contains(msg, "no handoff "+old) {
+				err = nil
+			} else {
+				err = fmt.Errorf("%s", msg)
+			}
+		} else {
+			for _, line := range strings.Split(out, "\n") {
+				var r struct {
+					Config string `json:"config"`
+				}
+				if strings.HasPrefix(line, "{") && json.Unmarshal([]byte(line), &r) == nil {
+					labelFailed = r.Config == "error"
+				}
 			}
 		}
 		d.do(func() {
+			s := d.session(id)
 			if err != nil {
-				if s := d.session(id); s != nil {
+				if s != nil {
 					d.notify(s, "kmem rename failed: "+err.Error())
 				}
 				return
 			}
+			if labelFailed && s != nil {
+				d.notify(s, "kmem renamed the handoff but could not move its config label from "+old+" to "+next)
+			}
 			d.org.Kmem[id] = next
+			if p, ok := d.org.Projects[old]; ok && d.org.Projects[next] == "" && !d.kmemNameInUse(old) {
+				d.org.Projects[next] = p // the project set in Quill is keyed by kmem name
+				delete(d.org.Projects, old)
+			}
+			resetKmemSessions() // the label just moved; don't group by the cached old key for a minute
 			d.saveOrg()
 		})
 	}()
+}
+
+// kmemNameInUse: another tab still links to kmem name k.
+func (d *desk) kmemNameInUse(k string) bool {
+	for _, v := range d.org.Kmem {
+		if v == k {
+			return true
+		}
+	}
+	return false
 }

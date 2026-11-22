@@ -29,8 +29,20 @@ var (
 	kmemCfgMu   sync.Mutex
 	kmemCfgAt   time.Time
 	kmemCfgSess map[string]kmemSessionCfg
-	kmemCfgPath = func() string { return filepath.Join(homeDir(), ".config", "kmem", "config.json") }
+	kmemCfgPath = func() string {
+		if p := os.Getenv("KMEM_CONFIG"); p != "" { // same override as kmem itself
+			return p
+		}
+		return filepath.Join(homeDir(), ".config", "kmem", "config.json")
+	}
 )
+
+// resetKmemSessions drops the cached labels (after a rename moved one).
+func resetKmemSessions() {
+	kmemCfgMu.Lock()
+	kmemCfgSess = nil
+	kmemCfgMu.Unlock()
+}
 
 // kmemSessions reads the "sessions" labels from kmem's config (read-only,
 // cached for a minute).

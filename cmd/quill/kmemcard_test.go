@@ -24,8 +24,12 @@ func TestNewTabKmemCard(t *testing.T) {
 		switch {
 		case prog == "kmem" && len(args) > 1 && args[0] == "handoff" && args[1] == "list":
 			return "quill  3 items, saved " + saved + "\nnetworking  2 items, saved " + saved + "\n", nil
+		case prog == "kmem" && len(args) > 2 && args[0] == "handoff" && args[1] == "rename" && args[2] == "my-work":
+			return "no handoff my-work (kmem handoff list)", errors.New("exit status 1")
+		case prog == "kmem" && len(args) > 2 && args[0] == "handoff" && args[1] == "rename" && args[2] == "quill-2":
+			return `{"renamed": {"from": "quill-2", "to": "quill-3", "items": 3}, "config": "error", "api": 1}` + "\nkmem: could not write config\n", nil
 		case prog == "kmem" && len(args) > 1 && args[0] == "handoff" && args[1] == "rename":
-			return "renamed", nil
+			return `{"renamed": {"from": "quill", "to": "quill-2", "items": 3}, "config": "moved", "api": 1}`, nil
 		}
 		return "", errors.New("unexpected")
 	}
@@ -85,14 +89,41 @@ func TestNewTabKmemCard(t *testing.T) {
 			t.Fatal("a new kmem name renames the tab")
 		}
 	})
-	h.ui(func() { h.d.renameKmem(s.id, "my-work", "my-project") })
+	oldCfg := kmemCfgPath
+	kmemCfgPath = func() string { return t.TempDir() + "/none.json" }
+	defer func() { kmemCfgPath = oldCfg; resetKmemSessions() }()
+	h.ui(func() {
+		h.d.org.Projects = map[string]string{"my-work": "Proj X"}
+		kmemCfgMu.Lock()
+		kmemCfgSess, kmemCfgAt = map[string]kmemSessionCfg{"stale-sentinel": {}}, time.Now()
+		kmemCfgMu.Unlock()
+		h.d.renameKmem(s.id, "my-work", "my-project")
+	})
 	h.eventually("rename link", func() bool { return h.d.org.Kmem[s.id] == "my-project" })
+	h.ui(func() {
+		if h.d.org.Projects["my-project"] != "Proj X" || h.d.org.Projects["my-work"] != "" {
+			t.Fatalf("the project set in Quill follows the kmem name: %v", h.d.org.Projects)
+		}
+		for _, it := range s.conv.Items {
+			if strings.Contains(it.Text, "kmem rename failed") {
+				t.Fatal("no saved handoff and no label is not an error")
+			}
+		}
+	})
+	kmemCfgMu.Lock()
+	_, stale := kmemCfgSess["stale-sentinel"]
+	kmemCfgMu.Unlock()
+	if stale {
+		t.Fatal("a rename drops the cached config labels")
+	}
 	mu.Lock()
 	defer mu.Unlock()
+	asked := false
 	for _, c := range calls {
-		if strings.Contains(c, "handoff rename") {
-			t.Fatal("an unsaved handoff only changes the link; no kmem rename")
-		}
+		asked = asked || c == "kmem handoff rename my-work my-project --as Quill Desktop/my-work --json"
+	}
+	if !asked {
+		t.Fatalf("kmem is asked even without a saved handoff (it may still move a config label): %v", calls)
 	}
 	mu.Unlock()
 	// A saved handoff is renamed in kmem too; from then on Quill asks for saves
@@ -102,7 +133,7 @@ func TestNewTabKmemCard(t *testing.T) {
 	mu.Lock()
 	renamed := false
 	for _, c := range calls {
-		renamed = renamed || c == "kmem handoff rename quill quill-2 --as Quill Desktop/quill"
+		renamed = renamed || c == "kmem handoff rename quill quill-2 --as Quill Desktop/quill --json"
 	}
 	if !renamed {
 		t.Fatalf("a saved handoff is renamed in kmem: %v", calls)
@@ -112,4 +143,15 @@ func TestNewTabKmemCard(t *testing.T) {
 			t.Fatalf("saves use the current name: %q", m)
 		}
 	}
+	mu.Unlock()
+	h.ui(func() { h.d.renameKmem(r.id, "quill-2", "quill-3") })
+	h.eventually("label error reported", func() bool {
+		for _, it := range r.conv.Items {
+			if strings.Contains(it.Text, "could not move its config label from quill-2 to quill-3") {
+				return h.d.org.Kmem[r.id] == "quill-3"
+			}
+		}
+		return false
+	})
+	mu.Lock()
 }
