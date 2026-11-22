@@ -329,7 +329,7 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 	}
 	btn.OnTapped = func() { d.kmemSetupDialog(refresh) }
 	refresh()
-	return container.NewVBox(status, btn, d.memoryModeRadio(nil))
+	return container.NewVBox(status, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.defaultRulesSettings())
 }
 
 // kmemSetupDialog copies the bundled kmem and adds its hooks (after asking).
