@@ -88,7 +88,8 @@ type deskSession struct {
 	releaseTasks   []string // kmem task releases Quill asked for after a rewind (allowed for that turn)
 	runAll         bool
 	runAllNext     bool
-	agentGrants    map[string]bool // subagents an approved plan started, by tool_use_id, until they finish
+	agentGrants    map[string]agentGrant // subagents an approved plan started, by tool_use_id, until they finish
+	agentCalls     map[string]string     // tool_use_id of a granted subagent's call (nested agents too) -> its grant
 	queue          []string
 	lastSent       string
 	inTurn         bool
@@ -1575,7 +1576,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	}
 	s.conv.Busy = false
 	s.inTurn, s.planWait = false, false
-	s.agentGrants = nil // the process and its subagents are gone
+	s.agentGrants, s.agentCalls = nil, nil // the process and its subagents are gone
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
 		msg := "Claude process exited: " + err.Error()
@@ -2429,6 +2430,7 @@ const (
 )
 
 func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
+	trackAgentCalls(s, ev)
 	switch {
 	case ev.Type == "control_request" && ev.Request != nil && ev.Request.Subtype == "can_use_tool":
 		var it *chat.Item
@@ -2463,15 +2465,27 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 				if s.runAll && isAgentTool(it.Request) {
-					grantAgent(s, it.Request.ToolUseID)
+					grantAgent(s, it.Request)
 				}
 			}
 			return nil
 		}
-		// An approved plan covers the subagents it started (user 2026-11-22):
-		// a call that comes while this session's own turn is over can only be
-		// theirs, so it goes ahead until they all finish.
-		if !s.inTurn && len(s.agentGrants) > 0 {
+		// An approved plan covers the subagents it started (user 2026-11-22),
+		// tracked by subagent: a call made by one of them (or by an agent one
+		// of them started) goes ahead until it finishes, even while the user
+		// talks to this session meanwhile. The main session's own calls
+		// follow the gate below.
+		if grantedCall(s, it.Request.ToolUseID) {
+			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
+				it.PermState = chat.PermAutoAllowed
+			}
+			return nil
+		}
+		// Fallback for a call whose assistant event hasn't been seen yet (the
+		// stream sends the tool_use before its can_use_tool request, but
+		// don't count on it): while this session's own turn is over, a call
+		// can only be a subagent's.
+		if _, known := s.agentCalls[it.Request.ToolUseID]; !known && !s.inTurn && len(s.agentGrants) > 0 {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}
@@ -2851,19 +2865,117 @@ func isAgentTool(r *protocol.ControlRequest) bool {
 	return r != nil && (r.ToolName == "Agent" || r.ToolName == "Task")
 }
 
-func grantAgent(s *deskSession, id string) {
-	if id == "" {
+// agentGrant: a subagent an approved plan started. A background one ends
+// with its task notification, a foreground one with its tool result.
+type agentGrant struct {
+	background bool
+}
+
+// maxAgentCalls caps the calls remembered for live grants; past it, new
+// calls fall to the gate (asking is the safe side).
+const maxAgentCalls = 4096
+
+func grantAgent(s *deskSession, r *protocol.ControlRequest) {
+	if r == nil || r.ToolUseID == "" {
 		return
 	}
-	if s.agentGrants == nil {
-		s.agentGrants = map[string]bool{}
+	var in struct {
+		Background bool `json:"run_in_background"`
 	}
-	s.agentGrants[id] = true
+	json.Unmarshal(r.Input, &in)
+	if s.agentGrants == nil {
+		s.agentGrants = map[string]agentGrant{}
+	}
+	s.agentGrants[r.ToolUseID] = agentGrant{background: in.Background}
+}
+
+// grantFor: the live grant covering events whose parent is id: the grant
+// itself, or the grant a nested agent's call belongs to.
+func grantFor(s *deskSession, id string) (string, bool) {
+	if _, ok := s.agentGrants[id]; ok {
+		return id, true
+	}
+	if g, ok := s.agentCalls[id]; ok {
+		if _, live := s.agentGrants[g]; live {
+			return g, true
+		}
+	}
+	return "", false
+}
+
+// grantedCall: the call was made by a subagent under a live grant.
+func grantedCall(s *deskSession, id string) bool {
+	if id == "" {
+		return false
+	}
+	g, ok := s.agentCalls[id]
+	if !ok {
+		return false
+	}
+	_, live := s.agentGrants[g]
+	return live
+}
+
+// trackAgentCalls learns from the stream which calls belong to a granted
+// subagent: its assistant events carry the Agent call's tool_use_id as
+// parent, and their tool_use blocks are its calls (a nested agent's events
+// name the nested Agent call, which maps to the root grant). A foreground
+// grant ends when the main session gets its Agent call's result.
+func trackAgentCalls(s *deskSession, ev *protocol.Event) {
+	if len(s.agentGrants) == 0 || ev.Message == nil {
+		return
+	}
+	switch ev.Type {
+	case "assistant":
+		if !ev.IsSubagent() {
+			return
+		}
+		g, ok := grantFor(s, *ev.ParentToolUseID)
+		if !ok {
+			return
+		}
+		for _, b := range ev.Message.Blocks() {
+			if b.Type != "tool_use" || b.ID == "" || len(s.agentCalls) >= maxAgentCalls {
+				continue
+			}
+			if s.agentCalls == nil {
+				s.agentCalls = map[string]string{}
+			}
+			s.agentCalls[b.ID] = g
+		}
+	case "user":
+		if ev.IsSubagent() {
+			return
+		}
+		for _, b := range ev.Message.Blocks() {
+			if b.Type != "tool_result" {
+				continue
+			}
+			if gr, ok := s.agentGrants[b.ToolUseID]; ok && !gr.background {
+				endAgentGrant(s, b.ToolUseID)
+			}
+		}
+	}
+}
+
+// endAgentGrant ends a grant and forgets the calls made under it.
+func endAgentGrant(s *deskSession, id string) {
+	delete(s.agentGrants, id)
+	for c, g := range s.agentCalls {
+		if g == id {
+			delete(s.agentCalls, c)
+		}
+	}
+	if len(s.agentGrants) == 0 {
+		s.agentCalls = nil
+	}
 }
 
 // endAgentGrants: a task notification names the subagent that finished.
 func endAgentGrants(s *deskSession, text string) {
 	for _, m := range toolUseIDRe.FindAllStringSubmatch(text, -1) {
-		delete(s.agentGrants, m[1])
+		if _, ok := s.agentGrants[m[1]]; ok {
+			endAgentGrant(s, m[1])
+		}
 	}
 }

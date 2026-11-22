@@ -39,7 +39,7 @@ func TestApprovedPlanCoversItsSubagents(t *testing.T) {
 			t.Fatal("approved")
 		}
 		ag := gateCall(h, s, "a1", "Agent", `{"prompt":"do the feature","run_in_background":true}`, "toolu_agentA")
-		if ag.PermState != chat.PermAutoAllowed || !s.agentGrants["toolu_agentA"] {
+		if _, ok := s.agentGrants["toolu_agentA"]; ag.PermState != chat.PermAutoAllowed || !ok {
 			t.Fatalf("the approved plan starts its subagent and covers it: state %v grants %v proc %v runAll %v", ag.PermState, s.agentGrants, s.proc != nil, s.runAll)
 		}
 		// The turn ends with a question; the approval ends for this session.
@@ -65,6 +65,100 @@ func TestApprovedPlanCoversItsSubagents(t *testing.T) {
 		late := gateCall(h, s, "e2", "Edit", `{"file_path":"/tmp/wt/y.go"}`, "")
 		if late.PermState == chat.PermAutoAllowed {
 			t.Fatal("no grant, no approval: the gate asks")
+		}
+	})
+}
+
+// streamEvent parses a stream-json line the way the process reader does.
+func streamEvent(t *testing.T, line string) *protocol.Event {
+	t.Helper()
+	ev, err := protocol.ParseLine([]byte(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ev
+}
+
+// subagentToolUse: a subagent's assistant event with one tool_use block.
+func subagentToolUse(t *testing.T, h *harness, s *deskSession, parent, id, tool string) {
+	ev := streamEvent(t, `{"type":"assistant","message":{"id":"msg_`+id+`","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"`+id+`","name":"`+tool+`","input":{}}]},"parent_tool_use_id":"`+parent+`","session_id":"s1"}`)
+	h.d.planGate(s, ev, s.conv.Apply(ev))
+}
+
+// User 2026-11-22, "track by subagent": a granted subagent's calls go ahead
+// while the user talks to the session meanwhile; the session's own calls and
+// an ungranted subagent's calls still meet the gate.
+func TestGrantsTrackedBySubagent(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("hello")
+	})
+	h.eventually("a running, idle session", func() bool { return s.proc != nil && !s.conv.Busy })
+	h.ui(func() {
+		h.d.planFirst = true
+		s.inTurn = false
+		userEvent(h, s, planGoMessage, nil)
+		bg := gateCall(h, s, "a1", "Agent", `{"prompt":"do the feature","run_in_background":true}`, "toolu_agentBG")
+		fg := gateCall(h, s, "a2", "Agent", `{"prompt":"review it"}`, "toolu_agentFG")
+		if bg.PermState != chat.PermAutoAllowed || fg.PermState != chat.PermAutoAllowed || len(s.agentGrants) != 2 {
+			t.Fatalf("both subagents granted: %v %v %v", bg.PermState, fg.PermState, s.agentGrants)
+		}
+		// The turn ends; the user sends a message while they run: a new
+		// turn, and the approval is reset.
+		s.inTurn = false
+		userEvent(h, s, "how is it going?", nil)
+		if !s.inTurn || s.runAll {
+			t.Fatalf("a new user turn without approval: inTurn %v runAll %v", s.inTurn, s.runAll)
+		}
+		// (1) the granted subagent's calls still go ahead.
+		subagentToolUse(t, h, s, "toolu_agentBG", "toolu_bgEdit", "Edit")
+		if e := gateCall(h, s, "e1", "Edit", `{"file_path":"/tmp/wt/a.go"}`, "toolu_bgEdit"); e.PermState != chat.PermAutoAllowed {
+			t.Fatalf("a granted subagent's call mid-turn goes ahead: %v", e.PermState)
+		}
+		// (2) the main session's own call in this turn is gated.
+		if e := gateCall(h, s, "e2", "Edit", `{"file_path":"/tmp/wt/b.go"}`, "toolu_mainEdit"); e.PermState == chat.PermAutoAllowed {
+			t.Fatal("the session's own call follows the gate")
+		}
+		// (3) a subagent nobody granted is gated.
+		subagentToolUse(t, h, s, "toolu_agentOther", "toolu_otherEdit", "Edit")
+		if e := gateCall(h, s, "e3", "Edit", `{"file_path":"/tmp/wt/c.go"}`, "toolu_otherEdit"); e.PermState == chat.PermAutoAllowed {
+			t.Fatal("an ungranted subagent's call is gated")
+		}
+		// (5) a nested agent inherits its root grant.
+		subagentToolUse(t, h, s, "toolu_agentBG", "toolu_nested", "Agent")
+		if e := gateCall(h, s, "n1", "Agent", `{"prompt":"sub-step"}`, "toolu_nested"); e.PermState != chat.PermAutoAllowed {
+			t.Fatalf("the granted subagent starts a nested agent: %v", e.PermState)
+		}
+		subagentToolUse(t, h, s, "toolu_nested", "toolu_nestedBash", "Bash")
+		if e := gateCall(h, s, "n2", "Bash", `{"command":"go test ./..."}`, "toolu_nestedBash"); e.PermState != chat.PermAutoAllowed {
+			t.Fatalf("the nested agent's call inherits the grant: %v", e.PermState)
+		}
+		if s.agentCalls["toolu_nestedBash"] != "toolu_agentBG" {
+			t.Fatalf("nested call mapped to the root grant: %v", s.agentCalls)
+		}
+		// The foreground agent ends with its tool result; the background one doesn't.
+		subagentToolUse(t, h, s, "toolu_agentFG", "toolu_fgRead", "Bash")
+		res := streamEvent(t, `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_agentFG","type":"tool_result","content":"done"},{"tool_use_id":"toolu_agentBG","type":"tool_result","content":"Async agent launched"}]},"parent_tool_use_id":null,"session_id":"s1"}`)
+		h.d.planGate(s, res, s.conv.Apply(res))
+		if _, ok := s.agentGrants["toolu_agentFG"]; ok {
+			t.Fatal("the foreground agent's grant ends with its result")
+		}
+		if _, ok := s.agentCalls["toolu_fgRead"]; ok {
+			t.Fatal("its calls are forgotten")
+		}
+		if _, ok := s.agentGrants["toolu_agentBG"]; !ok {
+			t.Fatal("a background agent's launch result doesn't end its grant")
+		}
+		// (4) the notification ends the background grant; later calls are gated.
+		userEvent(h, s, "<task-notification>\n<task-id>x</task-id>\n<tool-use-id>toolu_agentBG</tool-use-id>\n<status>completed</status>\n</task-notification>", nil)
+		if len(s.agentGrants) != 0 || len(s.agentCalls) != 0 {
+			t.Fatalf("grant and its calls end: %v %v", s.agentGrants, s.agentCalls)
+		}
+		subagentToolUse(t, h, s, "toolu_agentBG", "toolu_lateEdit", "Edit")
+		if e := gateCall(h, s, "e4", "Edit", `{"file_path":"/tmp/wt/d.go"}`, "toolu_lateEdit"); e.PermState == chat.PermAutoAllowed {
+			t.Fatal("after the notification its calls are gated")
 		}
 	})
 }
