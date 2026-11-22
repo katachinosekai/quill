@@ -68,10 +68,16 @@ func TestKmemPanel(t *testing.T) {
 	}
 	defer func() { terminalCmd = oldTerm }()
 	var p *kmemPanel
+	var kw fyne.Window
 	h.ui(func() {
 		h.d.showKmemPanel()
 		p = h.d.kmemPanelNow
+		if h.d.kmemWin == nil || p == nil || p.w != h.d.kmemWin {
+			t.Fatal("the kmem button opens the kmem window with the panel on its left")
+		}
+		kw = h.d.kmemWin.win
 	})
+	defer h.ui(func() { h.d.kmemWin.close() })
 	h.eventually("panel loaded", func() bool { return len(p.hand.Objects) > 1 && strings.Contains(labelsIn(p.over.Objects), "rules: read") })
 	var b *binView
 	h.ui(func() {
@@ -115,12 +121,15 @@ func TestKmemPanel(t *testing.T) {
 		}
 	})
 	h.eventually("full reason and text in the window", func() bool {
-		all := labelsIn([]fyne.CanvasObject{h.w.Canvas().Overlays().Top()})
+		if h.w.Canvas().Overlays().Top() != nil {
+			t.Error("dialogs opened from the kmem window stay off the main window")
+		}
+		all := labelsIn([]fyne.CanvasObject{kw.Canvas().Overlays().Top()})
 		return strings.Contains(all, longWhy) && strings.Contains(all, "all the way to the end")
 	})
 	h.ui(func() {
 		var restore *widget.Button
-		deepWalk(h.w.Canvas().Overlays().Top(), func(o fyne.CanvasObject) {
+		deepWalk(kw.Canvas().Overlays().Top(), func(o fyne.CanvasObject) {
 			if b, ok := o.(*widget.Button); ok && b.Text == "Restore" {
 				restore = b
 			}
@@ -137,7 +146,7 @@ func TestKmemPanel(t *testing.T) {
 	})
 	h.ui(func() {
 		b.emptyBin()
-		confirmTopDialog(t, h)
+		confirmTopDialogOn(t, kw)
 	})
 	h.eventually("terminal opened", func() bool { return len(started) == 1 })
 	if !strings.HasSuffix(strings.TrimSpace(started[0]), "kmem") && strings.Contains(started[0], "f467b16") {
@@ -145,7 +154,7 @@ func TestKmemPanel(t *testing.T) {
 	}
 	h.ui(func() {
 		p.deleteHandoff("old-work", 3)
-		confirmTopDialog(t, h)
+		confirmTopDialogOn(t, kw)
 	})
 	h.eventually("handoff binned", func() bool {
 		mu.Lock()
@@ -199,7 +208,12 @@ func buttonIn(objs []fyne.CanvasObject, text string) *widget.Button {
 
 func confirmTopDialog(t *testing.T, h *harness) {
 	t.Helper()
-	ovs := h.w.Canvas().Overlays().List()
+	confirmTopDialogOn(t, h.w)
+}
+
+func confirmTopDialogOn(t *testing.T, w fyne.Window) {
+	t.Helper()
+	ovs := w.Canvas().Overlays().List()
 	if len(ovs) == 0 {
 		t.Fatal("no dialog open")
 	}

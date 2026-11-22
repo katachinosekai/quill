@@ -19,9 +19,11 @@ import (
 // 2026-11-22, replaces the kmem banner): items in the recycle bin, audit
 // problems (kmem rules 21 and 26), maintenance warnings, and tasks waiting for
 // the user (topic "user" or a title starting "USER:"). Audit problems and
-// maintenance warnings count once each. The kmem panel's Overview lists them
-// under "Waiting for you"; the recycle bin lives in Settings → General →
-// Memory (kmem).
+// maintenance warnings count once each. Since 2026-11-22 it also counts open
+// "kmem issue:" tasks other sessions filed for the kmem operator and a staged
+// rollout paused for the user (docs/design/kmem-window.md §8). The kmem
+// window's Overview lists them under "Waiting for you"; the recycle bin lives
+// in Settings → General → Memory (kmem).
 
 var kmemBannerEvery = 30 * time.Minute
 
@@ -46,6 +48,13 @@ type kmemNeeds struct {
 	Maint       int    // maintenance warnings
 	MaintReport string // the report file named in the brief
 	UserTasks   []kmemTask
+	Issues      []kmemTask // open "kmem issue:" tasks for the kmem operator
+	RolloutWait string     // a paused staged rollout ("stage: error"), or ""
+}
+
+// kmemIssue: a report from a session for the kmem operator (user 2026-11-22).
+func kmemIssue(t kmemTask) bool {
+	return t.Topic == "kmem" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(t.Title)), "kmem issue:")
 }
 
 // userTask: a task only the user can act on.
@@ -71,7 +80,12 @@ func parseKmemNeeds(brief string, tasks []kmemTask) kmemNeeds {
 		}
 	}
 	for _, t := range tasks {
-		if t.Status != "done" && userTask(t) {
+		if t.Status == "done" {
+			continue
+		}
+		if kmemIssue(t) {
+			n.Issues = append(n.Issues, t)
+		} else if userTask(t) {
 			n.UserTasks = append(n.UserTasks, t)
 		}
 	}
@@ -80,7 +94,10 @@ func parseKmemNeeds(brief string, tasks []kmemTask) kmemNeeds {
 
 // Count is the number on the bubble.
 func (n kmemNeeds) Count() int {
-	c := n.Bin + len(n.UserTasks)
+	c := n.Bin + len(n.UserTasks) + len(n.Issues)
+	if n.RolloutWait != "" {
+		c++
+	}
 	if n.Audit != "" {
 		c++
 	}
@@ -191,7 +208,33 @@ func (d *desk) readKmemNeeds() (kmemNeeds, bool) {
 		Tasks []kmemTask `json:"tasks"`
 	}
 	d.kmemJSON(&ts, "task", "list")
-	return parseKmemNeeds(brief.Brief, ts.Tasks), true
+	n := parseKmemNeeds(brief.Brief, ts.Tasks)
+	n.RolloutWait = d.readRolloutWait()
+	return n, true
+}
+
+// readRolloutWait: a staged rollout paused for the user, from `kmem rollout
+// status --json` ("paused": null or {t, stage, err}); "" when none or when
+// this kmem has no rollouts (background goroutine only).
+func (d *desk) readRolloutWait() string {
+	var r struct {
+		Paused *struct {
+			T     string `json:"t"`
+			Stage string `json:"stage"`
+			Err   string `json:"err"`
+		} `json:"paused"`
+	}
+	if !d.kmemJSON(&r, "rollout", "status") || r.Paused == nil {
+		return ""
+	}
+	var parts []string
+	if st := strings.TrimSpace(r.Paused.Stage); st != "" {
+		parts = append(parts, "stage "+st)
+	}
+	if e := strings.TrimSpace(r.Paused.Err); e != "" {
+		parts = append(parts, oneLine(e, 200))
+	}
+	return firstNonEmpty(strings.Join(parts, ": "), "paused")
 }
 
 // refreshKmemNeeds asks kmem in the background and updates the bubble.
@@ -227,10 +270,10 @@ const (
 	kmemTabTasks    = 2
 )
 
-// showKmemPanelTab opens the kmem panel on one of its tabs.
+// showKmemPanelTab opens (or raises) the kmem window on one of its tabs.
 func (d *desk) showKmemPanelTab(tab int) {
-	d.showKmemPanel()
-	if p := d.kmemPanelNow; p != nil && p.tabs != nil && tab < len(p.tabs.Items) {
-		p.tabs.SelectIndex(tab)
+	d.openKmemWindow()
+	if w := d.kmemWin; w != nil && w.panel != nil && w.panel.tabs != nil && tab >= 0 && tab < len(w.panel.tabs.Items) {
+		w.panel.tabs.SelectIndex(tab)
 	}
 }

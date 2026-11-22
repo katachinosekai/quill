@@ -15,28 +15,38 @@ import (
 // binView is kmem's recycle bin in its own dialog, opened from Settings →
 // General → Memory (kmem) and from the kmem panel's "Waiting for you" (user
 // 2026-11-22; it was a tab of the kmem panel). Restoring and emptying refresh
-// the kmem button's bubble and an open kmem panel.
+// the kmem button's bubble and an open kmem window.
 type binView struct {
-	d    *desk
-	box  *fyne.Container
-	dlg  dialog.Dialog
-	item dialog.Dialog // the open bin item window (tests)
+	d      *desk
+	parent fyne.Window // the window its dialogs open on
+	box    *fyne.Container
+	dlg    dialog.Dialog
+	item   dialog.Dialog // the open bin item window (tests)
 }
 
-func (d *desk) showBinDialog() {
+// showBinDialog opens the bin on the main window (Settings).
+func (d *desk) showBinDialog() { d.showBinDialogOn(d.win) }
+
+// showBinDialogOn opens the bin on parent (the kmem window when opened from
+// it; nil means the main window).
+func (d *desk) showBinDialogOn(parent fyne.Window) {
+	if parent == nil {
+		parent = d.win
+	}
 	if !d.kmemAvailable() {
-		dialog.ShowInformation("kmem", "kmem is not available on this computer. Set it up in Settings → General → Memory (kmem).", d.win)
+		dialog.ShowInformation("kmem", "kmem is not available on this computer. Set it up in Settings → General → Memory (kmem).", parent)
 		return
 	}
 	b := d.newBinView()
-	b.dlg = dialog.NewCustom("kmem recycle bin", "Close", container.NewVScroll(b.box), d.win)
+	b.parent = parent
+	b.dlg = dialog.NewCustom("kmem recycle bin", "Close", container.NewVScroll(b.box), parent)
 	b.dlg.Resize(fyne.NewSize(860, 560))
 	b.dlg.Show()
 	b.reload()
 }
 
 func (d *desk) newBinView() *binView {
-	b := &binView{d: d, box: container.NewVBox(widget.NewLabel("Loading from kmem..."))}
+	b := &binView{d: d, parent: d.win, box: container.NewVBox(widget.NewLabel("Loading from kmem..."))}
 	d.kmemBinNow = b
 	return b
 }
@@ -53,10 +63,11 @@ func (b *binView) reload() {
 	d.refreshKmemNeeds()
 }
 
-// changed: after a restore or purge, the bin, the bubble and an open panel.
+// changed: after a restore or purge, the bin, the bubble and an open kmem
+// window.
 func (b *binView) changed() {
 	b.reload()
-	if p := b.d.kmemPanelNow; p != nil && p.dlg != nil && p.dlg != b.dlg {
+	if p := b.d.kmemPanelNow; p != nil {
 		p.reload()
 	}
 }
@@ -113,7 +124,7 @@ func (b *binView) showBinItem(it binItem) {
 			out, err := d.runKmem("kmem", "trash", "restore", it.ID)
 			d.do(func() {
 				if err != nil {
-					dialog.ShowError(fmt.Errorf("kmem: %s", oneLine(firstNonEmpty(strings.TrimSpace(out), err.Error()), 300)), d.win)
+					dialog.ShowError(fmt.Errorf("kmem: %s", oneLine(firstNonEmpty(strings.TrimSpace(out), err.Error()), 300)), b.parent)
 					return
 				}
 				win.Hide()
@@ -130,7 +141,7 @@ func (b *binView) showBinItem(it binItem) {
 				}
 				cmd := terminalCmd(firstNonEmpty(kmemBin(), "kmem"), it.ID)
 				if err := cmd.Start(); err != nil {
-					dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty %s` in a terminal yourself", err, it.ID), d.win)
+					dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty %s` in a terminal yourself", err, it.ID), b.parent)
 					return
 				}
 				go func() {
@@ -140,12 +151,12 @@ func (b *binView) showBinItem(it binItem) {
 						b.changed()
 					})
 				}()
-			}, d.win)
+			}, b.parent)
 	})
 	purge.Importance = widget.DangerImportance
 	closeBtn := widget.NewButton("Close", func() { win.Hide() })
 	content := container.NewBorder(nil, container.NewHBox(restore, purge, layout.NewSpacer(), closeBtn), nil, nil, container.NewVScroll(body))
-	win = dialog.NewCustomWithoutButtons("Recycle bin item", content, d.win)
+	win = dialog.NewCustomWithoutButtons("Recycle bin item", content, b.parent)
 	win.Resize(fyne.NewSize(720, 520))
 	win.Show()
 	b.item = win
@@ -162,12 +173,12 @@ func (b *binView) emptyBin() {
 			path := firstNonEmpty(kmemBin(), "kmem")
 			cmd := terminalCmd(path)
 			if err := cmd.Start(); err != nil {
-				dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty` in a terminal yourself", err), d.win)
+				dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty` in a terminal yourself", err), b.parent)
 				return
 			}
 			go func() {
 				_ = cmd.Wait()
 				d.do(b.changed)
 			}()
-		}, d.win)
+		}, b.parent)
 }
