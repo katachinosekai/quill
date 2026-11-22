@@ -196,6 +196,7 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 		rows = append(rows, r)
 	}
 
+	rows = append(rows, d.remoteAccessRow(refresh))
 	r = setupRow{title: "Device password", optional: true}
 	if d.app.Preferences().String(prefPCPassword) != "" {
 		r.ok, r.state = true, "set (phones and other PCs ask for it)"

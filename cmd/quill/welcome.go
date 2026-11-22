@@ -14,7 +14,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// Welcome (user 2026-11-21): five questions on a new install, before the
+// Welcome (user 2026-11-21): six questions on a new install, before the
 // Setup checks. Online or local model, the speech-to-text language, plan
 // first or not, kmem or Claude's auto memory, and Quill's default kmem rules
 // (beginner) or none (advanced). Shown once;
@@ -32,6 +32,7 @@ const (
 	welcomeLetWork  = "Let Claude work: no plan step (advanced)"
 	welcomeKmem     = "kmem: shared memory, handoffs and tasks (recommended with the default rules)"
 	welcomeAutoMem  = "Claude's auto memory: a MEMORY.md per folder"
+	welcomeHomeOnly = "No: only on my home network"
 )
 
 // welcomeChoices is what the user picked; applyWelcome turns it into settings.
@@ -42,6 +43,7 @@ type welcomeChoices struct {
 	Rules      bool
 	PlanFirst  bool
 	KmemMemory bool
+	Remote     string // "" or "skip", or a vpnOption id
 }
 
 // freshInstall: no tabs saved and Setup never shown, so Quill has not been
@@ -141,6 +143,13 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 		p.SetString(memoryModeKey, memoryModeClaude)
 		done = append(done, "Sessions use Claude's auto memory.")
 	}
+	if o, ok := vpnByID(c.Remote); ok {
+		p.SetString(prefRemoteAccess, o.ID)
+		done = append(done, "Remote access: "+o.Name+" (Setup installs and connects it).")
+	} else {
+		p.SetString(prefRemoteAccess, "skip")
+		done = append(done, "Phones and other PCs connect on your home network only.")
+	}
 	p.SetBool(prefWelcomeSeen, true)
 	return done
 }
@@ -204,6 +213,16 @@ func (d *desk) showWelcome(after func()) {
 		memNote.SetText("kmem isn't set up yet; Setup offers it right after this.")
 	}
 
+	remoteNames := []string{welcomeHomeOnly}
+	for _, o := range vpnOptions {
+		remoteNames = append(remoteNames, o.Name)
+	}
+	remote := widget.NewSelect(remoteNames, nil)
+	remote.SetSelected(welcomeHomeOnly)
+	if o, ok := vpnByID(d.app.Preferences().String(prefRemoteAccess)); ok {
+		remote.SetSelected(o.Name)
+	}
+
 	rules := widget.NewRadioGroup([]string{welcomeRules, welcomeNoRules}, nil)
 	rules.SetSelected(welcomeRules)
 	rulesNote := caption("Shared rules every Claude session follows: start with kmem brief, claim tasks, save handoffs, git safety in shared folders.")
@@ -228,7 +247,7 @@ func (d *desk) showWelcome(after func()) {
 	showRules.Importance = widget.LowImportance
 
 	body := container.NewVBox(
-		caption("Five quick choices. All of them can be changed later in Settings."),
+		caption("Six quick choices. All of them can be changed later in Settings."),
 		widget.NewSeparator(),
 		boldLabel("1. Which model should new sessions use?"), model, localNote,
 		widget.NewSeparator(),
@@ -239,6 +258,9 @@ func (d *desk) showWelcome(after func()) {
 		boldLabel("4. Memory for your sessions:"), mem, memNote,
 		widget.NewSeparator(),
 		container.NewBorder(nil, nil, nil, showRules, boldLabel("5. Shared rules for your sessions (kmem)")), rules, rulesNote,
+		widget.NewSeparator(),
+		boldLabel("6. Reach Quill from outside your home network (phone, other PCs)?"), remote,
+		caption("Optional. A VPN lets Quill for Android reach this PC from anywhere; Setup installs and connects it next."),
 	)
 	dlg := dialog.NewCustomConfirm("Welcome to Quill Desktop", "Done", "Skip", container.NewVScroll(body), func(ok bool) {
 		if !ok {
@@ -250,8 +272,18 @@ func (d *desk) showWelcome(after func()) {
 				Rules:      rules.Selected == welcomeRules && !rules.Disabled(),
 				PlanFirst:  plan.Selected == welcomeAsk,
 				KmemMemory: mem.Selected == welcomeKmem,
+				Remote:     remoteID(remote.Selected),
 			})
 			d.notifyWelcome(done)
+			if remoteID(remote.Selected) != "" {
+				inner := after
+				after = func() {
+					d.remoteAccessDialog(nil)
+					if inner != nil {
+						inner()
+					}
+				}
+			}
 		}
 		if after != nil {
 			after()
@@ -272,4 +304,11 @@ func (d *desk) notifyWelcome(done []string) {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func remoteID(name string) string {
+	if o, ok := vpnByOptionName(name); ok {
+		return o.ID
+	}
+	return ""
 }

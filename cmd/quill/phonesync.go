@@ -240,8 +240,10 @@ func (d *desk) pairLink() string {
 			d.beginPairing()
 		}
 		pair.Hosts = folders.LocalHosts()
-		if n := tailscaleName(); n != "" {
-			pair.Hosts = append(pair.Hosts, n)
+		for _, n := range []string{tailscaleName(), netbirdName()} {
+			if n != "" {
+				pair.Hosts = append(pair.Hosts, n)
+			}
 		}
 		pair.Port = p.server.Port
 		pair.Key = p.pairing.key
