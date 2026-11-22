@@ -91,6 +91,7 @@ type deskSession struct {
 	runAllNext     bool
 	agentGrants    map[string]agentGrant // subagents an approved plan started, by tool_use_id, until they finish
 	agentCalls     map[string]string     // tool_use_id of a granted subagent's call (nested agents too) -> its grant
+	agentIDs       map[string]string     // agent id of a granted subagent (nested too) -> its grant
 	queue          []string
 	lastSent       string
 	inTurn         bool
@@ -1636,7 +1637,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	}
 	s.conv.Busy = false
 	s.inTurn, s.planWait = false, false
-	s.agentGrants, s.agentCalls = nil, nil // the process and its subagents are gone
+	s.agentGrants, s.agentCalls, s.agentIDs = nil, nil, nil // the process and its subagents are gone
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
 		msg := "Claude process exited: " + err.Error()
@@ -2618,9 +2619,15 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		// of them started) goes ahead until it finishes, even while the user
 		// talks to this session meanwhile. The main session's own calls
 		// follow the gate below.
-		if grantedCall(s, it.Request.ToolUseID) {
+		// A background subagent's events don't reach this stream, so its
+		// calls are known by the agent_id its requests carry (agent gap,
+		// 2026-11-22).
+		if g, ok := grantedRequest(s, it.Request); ok {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
+				if isAgentTool(it.Request) {
+					addAgentCall(s, it.Request.ToolUseID, g)
+				}
 			}
 			return nil
 		}
@@ -2647,6 +2654,9 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			d.approveNow(s)
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
+				if isAgentTool(it.Request) {
+					grantAgent(s, it.Request)
+				}
 			}
 			return nil
 		}
@@ -3019,17 +3029,61 @@ type agentGrant struct {
 const maxAgentCalls = 4096
 
 func grantAgent(s *deskSession, r *protocol.ControlRequest) {
-	if r == nil || r.ToolUseID == "" {
+	if r == nil {
+		return
+	}
+	grantAgentCall(s, r.ToolUseID, r.Input)
+}
+
+func grantAgentCall(s *deskSession, id string, input json.RawMessage) {
+	if id == "" {
 		return
 	}
 	var in struct {
 		Background bool `json:"run_in_background"`
 	}
-	json.Unmarshal(r.Input, &in)
+	json.Unmarshal(input, &in)
 	if s.agentGrants == nil {
 		s.agentGrants = map[string]agentGrant{}
 	}
-	s.agentGrants[r.ToolUseID] = agentGrant{background: in.Background}
+	s.agentGrants[id] = agentGrant{background: in.Background}
+}
+
+func addAgentCall(s *deskSession, id, g string) {
+	if id == "" || len(s.agentCalls) >= maxAgentCalls {
+		return
+	}
+	if s.agentCalls == nil {
+		s.agentCalls = map[string]string{}
+	}
+	s.agentCalls[id] = g
+}
+
+func addAgentID(s *deskSession, agent, g string) {
+	if agent == "" || len(s.agentIDs) >= maxAgentCalls {
+		return
+	}
+	if s.agentIDs == nil {
+		s.agentIDs = map[string]string{}
+	}
+	s.agentIDs[agent] = g
+}
+
+// grantedRequest: the request was made by a subagent under a live grant,
+// known by its call (seen in the stream) or by the agent_id it carries. The
+// session's own requests carry no agent_id.
+func grantedRequest(s *deskSession, r *protocol.ControlRequest) (string, bool) {
+	if g, ok := s.agentCalls[r.ToolUseID]; ok && r.ToolUseID != "" {
+		if _, live := s.agentGrants[g]; live {
+			return g, true
+		}
+	}
+	if g, ok := s.agentIDs[r.AgentID]; ok && r.AgentID != "" {
+		if _, live := s.agentGrants[g]; live {
+			return g, true
+		}
+	}
+	return "", false
 }
 
 // grantFor: the live grant covering events whose parent is id: the grant
@@ -3046,26 +3100,38 @@ func grantFor(s *deskSession, id string) (string, bool) {
 	return "", false
 }
 
-// grantedCall: the call was made by a subagent under a live grant.
-func grantedCall(s *deskSession, id string) bool {
-	if id == "" {
-		return false
-	}
-	g, ok := s.agentCalls[id]
-	if !ok {
-		return false
-	}
-	_, live := s.agentGrants[g]
-	return live
-}
-
 // trackAgentCalls learns from the stream which calls belong to a granted
 // subagent: its assistant events carry the Agent call's tool_use_id as
 // parent, and their tool_use blocks are its calls (a nested agent's events
 // name the nested Agent call, which maps to the root grant). A foreground
 // grant ends when the main session gets its Agent call's result.
+//
+// A background subagent's own events are not streamed to this session, so
+// its calls are learnt by agent id instead: the Agent call's launch result
+// (tool_use_result.agentId, or "agentId: …" in its text) and the
+// task_started event (task_id) name it, and its can_use_tool requests carry
+// it as agent_id.
+//
+// An Agent call the session makes while an approved plan is in force is
+// granted from its assistant event too: the CLI need not ask for it.
 func trackAgentCalls(s *deskSession, ev *protocol.Event) {
-	if len(s.agentGrants) == 0 || ev.Message == nil {
+	if ev.Type == "assistant" && !ev.IsSubagent() && s.runAll && ev.Message != nil {
+		for _, b := range ev.Message.Blocks() {
+			if b.Type == "tool_use" && (b.Name == "Agent" || b.Name == "Task") {
+				grantAgentCall(s, b.ID, b.Input)
+			}
+		}
+	}
+	if len(s.agentGrants) == 0 {
+		return
+	}
+	if ev.Type == "system" && ev.Subtype == "task_started" {
+		if g, ok := grantFor(s, ev.ToolUseID); ok {
+			addAgentID(s, ev.TaskID, g)
+		}
+		return
+	}
+	if ev.Message == nil {
 		return
 	}
 	switch ev.Type {
@@ -3077,21 +3143,36 @@ func trackAgentCalls(s *deskSession, ev *protocol.Event) {
 		if !ok {
 			return
 		}
+		addAgentID(s, ev.AgentID, g)
 		for _, b := range ev.Message.Blocks() {
-			if b.Type != "tool_use" || b.ID == "" || len(s.agentCalls) >= maxAgentCalls {
-				continue
+			if b.Type == "tool_use" {
+				addAgentCall(s, b.ID, g)
 			}
-			if s.agentCalls == nil {
-				s.agentCalls = map[string]string{}
-			}
-			s.agentCalls[b.ID] = g
 		}
 	case "user":
-		if ev.IsSubagent() {
-			return
-		}
+		var results []protocol.Block
 		for _, b := range ev.Message.Blocks() {
-			if b.Type != "tool_result" {
+			if b.Type == "tool_result" {
+				results = append(results, b)
+			}
+		}
+		for _, b := range results {
+			g, ok := grantFor(s, b.ToolUseID)
+			if !ok {
+				continue
+			}
+			// The launch result names the agent (a nested agent's too, when
+			// its parent's results are streamed).
+			if m := agentIDRe.FindSubmatch(b.Content); m != nil {
+				addAgentID(s, string(m[1]), g)
+			} else if len(results) == 1 {
+				var r struct {
+					AgentID string `json:"agentId"`
+				}
+				json.Unmarshal(ev.ToolUseResult, &r)
+				addAgentID(s, r.AgentID, g)
+			}
+			if ev.IsSubagent() {
 				continue
 			}
 			if gr, ok := s.agentGrants[b.ToolUseID]; ok && !gr.background {
@@ -3101,6 +3182,9 @@ func trackAgentCalls(s *deskSession, ev *protocol.Event) {
 	}
 }
 
+// agentIDRe: the agent id in an Agent call's launch result.
+var agentIDRe = regexp.MustCompile(`agentId: ([A-Za-z0-9_-]+)`)
+
 // endAgentGrant ends a grant and forgets the calls made under it.
 func endAgentGrant(s *deskSession, id string) {
 	delete(s.agentGrants, id)
@@ -3109,8 +3193,13 @@ func endAgentGrant(s *deskSession, id string) {
 			delete(s.agentCalls, c)
 		}
 	}
+	for a, g := range s.agentIDs {
+		if g == id {
+			delete(s.agentIDs, a)
+		}
+	}
 	if len(s.agentGrants) == 0 {
-		s.agentCalls = nil
+		s.agentCalls, s.agentIDs = nil, nil
 	}
 }
 

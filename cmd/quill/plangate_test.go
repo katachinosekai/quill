@@ -225,3 +225,90 @@ func TestReadOnlyKmem(t *testing.T) {
 		}
 	}
 }
+
+// gateRequest feeds a can_use_tool control_request line through the parser.
+func gateRequest(t *testing.T, h *harness, s *deskSession, line string) *chat.Item {
+	t.Helper()
+	ev := streamEvent(t, line)
+	perm := &chat.Item{Kind: chat.Permission, ToolName: ev.Request.ToolName, RequestID: ev.RequestID, Input: ev.Request.Input, Request: ev.Request}
+	s.conv.Items = append(s.conv.Items, perm)
+	h.d.planGate(s, ev, []*chat.Item{perm})
+	return perm
+}
+
+func feed(t *testing.T, h *harness, s *deskSession, line string) {
+	t.Helper()
+	ev := streamEvent(t, line)
+	h.d.planGate(s, ev, s.conv.Apply(ev))
+}
+
+// Agent gap (2026-11-22): a background subagent an approved plan started was
+// refused mid-run. Its own events never reach the parent's stream, so its
+// call was unknown, and the user had just answered a question (a new turn,
+// approval reset), so the idle fallback was off. The event order and shapes
+// are the real ones; ids and text are placeholders.
+func TestBackgroundSubagentKnownByAgentID(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("hello")
+	})
+	h.eventually("a running, idle session", func() bool { return s.proc != nil && !s.conv.Busy })
+	h.ui(func() {
+		h.d.planFirst = true
+		s.inTurn = false
+		userEvent(h, s, planGoMessage, nil)
+		// The approved turn launches A in the background (the CLI need not
+		// ask for an Agent call), then gets the immediate launch result.
+		feed(t, h, s, `{"type":"assistant","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[{"type":"tool_use","id":"toolu_agentA","name":"Agent","input":{"description":"part A","prompt":"do part A","run_in_background":true}}]},"parent_tool_use_id":null,"session_id":"s1"}`)
+		feed(t, h, s, `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_agentA","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully.\nagentId: agentPH1 (internal ID)\nThe agent is working in the background."}]}]},"parent_tool_use_id":null,"session_id":"s1","tool_use_result":{"isAsync":true,"status":"async_launched","agentId":"agentPH1","description":"part A"}}`)
+		// B is launched the same way but its id only shows in task_started.
+		feed(t, h, s, `{"type":"assistant","message":{"id":"msg_2","type":"message","role":"assistant","model":"m","content":[{"type":"tool_use","id":"toolu_agentB","name":"Agent","input":{"description":"part B","prompt":"do part B","run_in_background":true}}]},"parent_tool_use_id":null,"session_id":"s1"}`)
+		feed(t, h, s, `{"type":"system","subtype":"task_started","task_id":"agentPH2","tool_use_id":"toolu_agentB","description":"part B","session_id":"s1"}`)
+		if !s.agentGrants["toolu_agentA"].background || s.agentIDs["agentPH1"] != "toolu_agentA" || s.agentIDs["agentPH2"] != "toolu_agentB" {
+			t.Fatalf("grants and agent ids learnt: %v %v", s.agentGrants, s.agentIDs)
+		}
+		feed(t, h, s, `{"type":"result","subtype":"success","is_error":false,"result":"working","session_id":"s1"}`)
+		// Another subagent's notification ends only its own grant.
+		userEvent(h, s, "<task-notification>\n<task-id>agentPH9</task-id>\n<tool-use-id>toolu_other</tool-use-id>\n<status>completed</status>\n</task-notification>", nil)
+		// The user answers a question: a new turn without approval.
+		s.inTurn = false
+		userEvent(h, s, "I pick the first option: Yes.", nil)
+		if !s.inTurn || s.runAll {
+			t.Fatalf("mid-turn, approval reset: inTurn %v runAll %v", s.inTurn, s.runAll)
+		}
+		feed(t, h, s, `{"type":"assistant","message":{"id":"msg_3","type":"message","role":"assistant","model":"m","content":[{"type":"tool_use","id":"toolu_mainSend","name":"SendMessage","input":{"to":"x","message":"y"}}]},"parent_tool_use_id":null,"session_id":"s1"}`)
+		// A's Bash call arrives with no assistant event of A before it.
+		if e := gateRequest(t, h, s, `{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"go test ./cmd/x/ -run TestX -v"},"tool_use_id":"toolu_aBash","agent_id":"agentPH1"}}`); e.PermState != chat.PermAutoAllowed {
+			t.Fatalf("the granted background subagent's call mid-turn goes ahead: %v", e.PermState)
+		}
+		if e := gateRequest(t, h, s, `{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"Edit","input":{"file_path":"/tmp/wt/b.go"},"tool_use_id":"toolu_bEdit","agent_id":"agentPH2"}}`); e.PermState != chat.PermAutoAllowed {
+			t.Fatalf("B, known from task_started, goes ahead: %v", e.PermState)
+		}
+		// A nested agent A starts: its launch is allowed and its calls follow
+		// once its id is seen.
+		if e := gateRequest(t, h, s, `{"type":"control_request","request_id":"r3","request":{"subtype":"can_use_tool","tool_name":"Agent","input":{"prompt":"sub-step"},"tool_use_id":"toolu_nested","agent_id":"agentPH1"}}`); e.PermState != chat.PermAutoAllowed {
+			t.Fatalf("A starts a nested agent: %v", e.PermState)
+		}
+		feed(t, h, s, `{"type":"system","subtype":"task_started","task_id":"agentPH3","tool_use_id":"toolu_nested","session_id":"s1"}`)
+		if e := gateRequest(t, h, s, `{"type":"control_request","request_id":"r4","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"make"},"tool_use_id":"toolu_nBash","agent_id":"agentPH3"}}`); e.PermState != chat.PermAutoAllowed {
+			t.Fatalf("the nested agent inherits A's grant: %v", e.PermState)
+		}
+		// The session's own call and an unknown agent's call meet the gate.
+		if e := gateRequest(t, h, s, `{"type":"control_request","request_id":"r5","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm x"},"tool_use_id":"toolu_mainBash"}}`); e.PermState == chat.PermAutoAllowed {
+			t.Fatal("the session's own call follows the gate")
+		}
+		if e := gateRequest(t, h, s, `{"type":"control_request","request_id":"r6","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm y"},"tool_use_id":"toolu_xBash","agent_id":"agentUnknown"}}`); e.PermState == chat.PermAutoAllowed {
+			t.Fatal("an ungranted agent's call is gated")
+		}
+		// A's notification ends its grant and the ids under it.
+		userEvent(h, s, "<task-notification>\n<task-id>agentPH1</task-id>\n<tool-use-id>toolu_agentA</tool-use-id>\n<status>completed</status>\n</task-notification>", nil)
+		if _, ok := s.agentIDs["agentPH1"]; ok || s.agentIDs["agentPH3"] != "" || s.agentIDs["agentPH2"] != "toolu_agentB" {
+			t.Fatalf("A's ids end, B's stay: %v", s.agentIDs)
+		}
+		if e := gateRequest(t, h, s, `{"type":"control_request","request_id":"r7","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"late"},"tool_use_id":"toolu_aLate","agent_id":"agentPH1"}}`); e.PermState == chat.PermAutoAllowed {
+			t.Fatal("after its notification A's calls are gated")
+		}
+	})
+}

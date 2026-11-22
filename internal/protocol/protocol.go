@@ -110,6 +110,7 @@ type ControlRequest struct {
 	DecisionReason        string            `json:"decision_reason,omitempty"`
 	BlockedPath           string            `json:"blocked_path,omitempty"`
 	ToolUseID             string            `json:"tool_use_id,omitempty"`
+	AgentID               string            `json:"agent_id,omitempty"` // set when a subagent made the call
 	PermissionSuggestions []json.RawMessage `json:"permission_suggestions,omitempty"`
 }
 
@@ -154,6 +155,8 @@ type Event struct {
 	Errors          []string              `json:"errors,omitempty"`
 	ToolName        string                `json:"tool_name,omitempty"`
 	ToolUseID       string                `json:"tool_use_id,omitempty"`
+	TaskID          string                `json:"task_id,omitempty"`  // system task_* events
+	AgentID         string                `json:"agent_id,omitempty"` // a subagent's events
 	EstimatedTokens int                   `json:"estimated_tokens,omitempty"`
 	IsSidechain     bool                  `json:"isSidechain,omitempty"`
 	IsMeta          bool                  `json:"isMeta,omitempty"`
