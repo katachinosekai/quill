@@ -1837,7 +1837,8 @@ func planQuestion(c *chat.Conversation, plan *chat.Item) string {
 		}
 	}
 	text = strings.TrimSpace(text)
-	// With numbered closing questions (rule 28) the approval one is the title.
+	// With numbered closing questions (the planFormatHint format) the approval
+	// one is the title.
 	if q := chat.ClosingApproval(text); q != "" {
 		if q = strings.TrimSpace(strings.TrimRight(mdNoise.Replace(q), "*_ ")); len(q) <= 300 {
 			return q
