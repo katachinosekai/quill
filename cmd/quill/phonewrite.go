@@ -34,13 +34,16 @@ type writeBody struct {
 	Answers   map[string][]string `json:"answers"`
 	Index     *int                `json:"index"`
 	Choice    *int                `json:"choice"` // approvePlan: index into the plan item's request.choices
-	Folder    string              `json:"folder"`
-	Backend   string              `json:"backend"`
-	Model     string              `json:"model"`
-	Mode      string              `json:"mode"`
-	Title     *string             `json:"title"`
-	Project   *string             `json:"project"`
-	Old       bool                `json:"old"`
+	// approvePlan: answers to request.questions by id ("yes"/"no", option
+	// index, option indexes, or text)
+	PlanAnswers map[string]json.RawMessage `json:"planAnswers"`
+	Folder      string                     `json:"folder"`
+	Backend     string                     `json:"backend"`
+	Model       string                     `json:"model"`
+	Mode        string                     `json:"mode"`
+	Title       *string                    `json:"title"`
+	Project     *string                    `json:"project"`
+	Old         bool                       `json:"old"`
 }
 
 func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, parts []string) {
@@ -208,6 +211,18 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		}
 		if !pending {
 			return nil, stale("the plan is no longer pending")
+		}
+		if in.PlanAnswers != nil {
+			if in.Action != "approvePlan" {
+				return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", "planAnswers go with approvePlan"}
+			}
+			qs := planQuestions(planItemText(s, it))
+			ans, err := parsePlanAnswers(qs, in.PlanAnswers)
+			if err != nil {
+				return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", err.Error()}
+			}
+			d.answerPlanMsg(s, it, true, planGoAnswers(qs, ans))
+			break
 		}
 		choice := ""
 		if in.Choice != nil {

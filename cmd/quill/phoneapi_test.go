@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -325,6 +326,40 @@ func TestPhoneAPIWrites(t *testing.T) {
 		}
 		return false
 	})
+
+	// A plan with several questions: request.questions, and planAnswers.
+	var plan2 *chat.Item
+	h.ui(func() {
+		s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, InPlan: true, Text: "Plan:\n1. a\n\n- a. Plan-first\n- b. Memory\n\n1. Should rule 21 stay as it is?\n2. Which of a–b should I add?\n3. What should the title say?\n\n**Do you approve step 1?**"})
+		plan2 = s.conv.AddPlan()
+	})
+	_, items2, _ := a.do("GET", base+"/items?limit=40", "", nil)
+	var preq2 map[string]any
+	for _, x := range items2["items"].([]any) {
+		if xm := x.(map[string]any); int(xm["seq"].(float64)) == plan2.Seq {
+			preq2, _ = xm["request"].(map[string]any)
+		}
+	}
+	qsj, _ := preq2["questions"].([]any)
+	if len(qsj) != 3 || qsj[0].(map[string]any)["kind"] != "yesno" || qsj[1].(map[string]any)["kind"] != "multi" || qsj[2].(map[string]any)["kind"] != "text" {
+		t.Fatalf("plan request carries its questions: %v", preq2)
+	}
+	pid2, _ := preq2["id"].(string)
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]any{"requestId": pid2, "action": "approvePlan", "planAnswers": map[string]any{"1": 3}}); code != 422 {
+		t.Fatalf("a wrong answer type is refused: %d %v", code, m)
+	}
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]any{"requestId": pid2, "action": "approvePlan", "planAnswers": map[string]any{"1": "no", "2": []int{1}, "3": "Hello"}}); code != 200 {
+		t.Fatalf("approvePlan with planAnswers: %d %v", code, m)
+	}
+	h.eventually("approval with all answers sent", func() bool {
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.User && strings.HasPrefix(it.Text, planGoMessage) && strings.Contains(it.Text, "stay as it is? → no.") && strings.Contains(it.Text, "→ b: Memory.") && strings.Contains(it.Text, "→ Hello.") {
+				return true
+			}
+		}
+		return false
+	})
+	h.eventually("the approval's turn ends", func() bool { return !s.inTurn && !s.conv.Busy && len(s.queue) == 0 })
 
 	h.ui(func() { s.queue = []string{"first", "second"} })
 	if code, m, _ := a.do("POST", base+"/queue/delete", key(), map[string]any{"index": 0, "text": "other"}); code != 409 || errCode(m) != "stale" {

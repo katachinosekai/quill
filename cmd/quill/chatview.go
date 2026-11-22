@@ -77,6 +77,7 @@ type chatView struct {
 	glide         *fyne.Animation
 	live          *widget.Label
 	stepOpen      map[*chat.Item]bool
+	planAns       map[*chat.Item]map[int]planAnswer // plan card answers, kept across redraws
 	frame         *fyne.Container
 	inner         *fyne.Container
 	steps         bool
@@ -1616,10 +1617,19 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		}
 		var opts []string
 		rec := -1
+		var qs []planQ
 		if owner != nil {
+			qs = planQuestions(planItemText(owner, it))
 			opts, rec = planChoices(title.Text)
 		}
 		switch {
+		case len(qs) > 1 || len(qs) == 1 && qs[0].Kind != qSingle:
+			// Several questions, or one that isn't a pick between options:
+			// a control for each, all answers go with Approve.
+			ans := v.planAnswers(it, qs)
+			parts = append(parts, v.planQuestionForm(qs, ans))
+			run := glowButton("Approve plan & send answers", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), func() { v.d.answerPlanAnswers(owner, it, qs, ans) })
+			parts = append(parts, v.buttonRow(run, no))
 		case len(opts) > 0 && rec >= 0:
 			// The recommended answer goes with Approve; the others wait behind a link.
 			parts = append(parts, v.buttonRow(approve(opts[rec]), no))
@@ -2047,4 +2057,105 @@ func shortLabel(s string, n int) string {
 		return string(r[:n-1]) + "…"
 	}
 	return s
+}
+
+// planAnswers: the card's answers for this plan, with recommended options
+// picked to start with.
+func (v *chatView) planAnswers(it *chat.Item, qs []planQ) map[int]planAnswer {
+	if v.planAns == nil {
+		v.planAns = map[*chat.Item]map[int]planAnswer{}
+	}
+	ans := v.planAns[it]
+	if ans == nil {
+		ans = map[int]planAnswer{}
+		for _, q := range qs {
+			if q.Kind == qSingle && q.Recommended >= 0 {
+				ans[q.ID] = planAnswer{Choice: q.Recommended}
+			}
+		}
+		v.planAns[it] = ans
+	}
+	return ans
+}
+
+// planQuestionForm: each plan question with its control (Yes/No, one of the
+// options, any of them, or a text field).
+func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.CanvasObject {
+	box := container.NewVBox()
+	for i, q := range qs {
+		q := q
+		l := widget.NewLabel(fmt.Sprintf("%d. %s", i+1, q.Text))
+		l.Wrapping = fyne.TextWrapWord
+		var ctl fyne.CanvasObject
+		switch q.Kind {
+		case qYesNo:
+			r := widget.NewRadioGroup([]string{"Yes", "No"}, nil)
+			r.Horizontal = true
+			if a, ok := ans[q.ID]; ok && a.Yes != nil {
+				r.Selected = map[bool]string{true: "Yes", false: "No"}[*a.Yes]
+			}
+			r.OnChanged = func(sel string) {
+				a := ans[q.ID]
+				if sel == "" {
+					a.Yes = nil
+				} else {
+					yes := sel == "Yes"
+					a.Yes = &yes
+				}
+				ans[q.ID] = a
+			}
+			ctl = r
+		case qSingle:
+			r := widget.NewRadioGroup(q.Options, nil)
+			if a, ok := ans[q.ID]; ok && a.Choice >= 0 && a.Choice < len(q.Options) {
+				r.Selected = q.Options[a.Choice]
+			}
+			r.OnChanged = func(sel string) {
+				a := planAnswer{Choice: -1}
+				for j, o := range q.Options {
+					if o == sel {
+						a.Choice = j
+					}
+				}
+				ans[q.ID] = a
+			}
+			ctl = r
+		case qMulti:
+			c := widget.NewCheckGroup(q.Options, nil)
+			if a, ok := ans[q.ID]; ok {
+				for _, p := range a.Picks {
+					if p >= 0 && p < len(q.Options) {
+						c.Selected = append(c.Selected, q.Options[p])
+					}
+				}
+			}
+			c.OnChanged = func(sel []string) {
+				picks := []int{}
+				for j, o := range q.Options {
+					for _, x := range sel {
+						if x == o {
+							picks = append(picks, j)
+						}
+					}
+				}
+				ans[q.ID] = planAnswer{Picks: picks, Choice: -1}
+			}
+			ctl = c
+		default:
+			e := widget.NewMultiLineEntry()
+			e.Wrapping = fyne.TextWrapWord
+			e.SetMinRowsVisible(2)
+			e.SetPlaceHolder("Your answer")
+			if a, ok := ans[q.ID]; ok {
+				e.Text = a.Text
+			}
+			e.OnChanged = func(t string) { ans[q.ID] = planAnswer{Text: t, Choice: -1} }
+			ctl = e
+		}
+		box.Add(container.NewVBox(l, ctl))
+	}
+	note := widget.NewLabel("Unanswered questions are sent as \"no answer\".")
+	note.SizeName = theme.SizeNameCaptionText
+	box.Add(note)
+	return box
 }

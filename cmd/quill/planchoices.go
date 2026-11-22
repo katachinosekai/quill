@@ -46,7 +46,9 @@ func dropQuestionWord(o string) string {
 	switch strings.ToLower(f[0]) {
 	case "should", "shall", "do", "does", "will", "would", "can", "could", "is", "are":
 		r := []rune(strings.Join(f[1:], " "))
-		r[0] = []rune(strings.ToUpper(string(r[0])))[0]
+		if !strings.ContainsAny(f[1], "0123456789") { // "v0.1.20 ship now" stays lower case
+			r[0] = []rune(strings.ToUpper(string(r[0])))[0]
+		}
 		return string(r)
 	}
 	return o

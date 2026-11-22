@@ -2672,16 +2672,35 @@ func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
 // answerPlanWith approves (or not) and, with choice, answers the choice the
 // approval question offered (user 2026-11-21).
 func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice string) {
-	if s = d.cardOwner(s, it); s == nil {
+	if s != nil && s.remote != nil {
+		if s = d.cardOwner(s, it); s != nil {
+			d.remotePlan(s, it, ok, choice, nil)
+		}
 		return
 	}
-	if s.remote != nil {
-		d.remotePlan(s, it, ok, choice)
+	d.answerPlanMsg(s, it, ok, planGoWith(choice))
+}
+
+// answerPlanAnswers approves with every plan question's answer (plan card
+// with questions; planquestions.go).
+func (d *desk) answerPlanAnswers(s *deskSession, it *chat.Item, qs []planQ, ans map[int]planAnswer) {
+	if s != nil && s.remote != nil {
+		if s = d.cardOwner(s, it); s != nil {
+			d.remotePlan(s, it, true, "", planAnswersJSON(qs, ans))
+		}
+		return
+	}
+	d.answerPlanMsg(s, it, true, planGoAnswers(qs, ans))
+}
+
+// answerPlanMsg approves (sending msg) or turns the plan down.
+func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string) {
+	if s = d.cardOwner(s, it); s == nil {
 		return
 	}
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {
 		s.runAll = true
-		d.sendTo(s, planGoWith(choice))
+		d.sendTo(s, msg)
 		return
 	}
 	if it.PermState != chat.PermPending {
@@ -2697,7 +2716,7 @@ func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice str
 	it.PermState = chat.PermAllowed
 	s.runAll = true
 	d.chatFor(s, []*chat.Item{it})
-	d.sendTo(s, planGoWith(choice))
+	d.sendTo(s, msg)
 	if !s.running() {
 		s.runAll = false
 	}
