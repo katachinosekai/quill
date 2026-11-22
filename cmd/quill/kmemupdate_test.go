@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,7 +82,63 @@ func TestBundledKmemIsCurrent(t *testing.T) {
 	if err != nil {
 		t.Skip("kmem not installed")
 	}
-	if installed := kmemScriptVersion(p); installed != "" && versionLess(bundled, installed) {
+	home, _ := os.UserHomeDir()
+	if installed := installedKmemVersion(home, p); installed != "" && versionLess(bundled, installed) {
 		t.Fatalf("third_party/kmem is %s but kmem %s is installed: run make kmem-sync", bundled, installed)
+	}
+}
+
+// installedKmemVersion: the kmem release in use. Since kmem 1.8.0,
+// ~/.local/bin/kmem is a launcher without KMEM_VERSION that runs
+// releases/<v>/kmem; during a staged rollout the bundle must match the
+// stable release (rollout.json "stable"), not a candidate some sessions
+// try. Older installs carry KMEM_VERSION in the script; else ask
+// `kmem version --json`.
+func installedKmemVersion(home, script string) string {
+	if b, err := os.ReadFile(filepath.Join(home, ".local", "share", "kmem", "rollout.json")); err == nil {
+		var r struct {
+			Stable string `json:"stable"`
+		}
+		if json.Unmarshal(b, &r) == nil && r.Stable != "" {
+			return r.Stable
+		}
+	}
+	if v := kmemScriptVersion(script); v != "" {
+		return v
+	}
+	out, err := exec.Command(script, "version", "--json").Output()
+	if err != nil {
+		return ""
+	}
+	var v struct {
+		Kmem string `json:"kmem"`
+	}
+	if json.Unmarshal(out, &v) != nil {
+		return ""
+	}
+	return v.Kmem
+}
+
+func TestInstalledKmemVersion(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local", "bin")
+	os.MkdirAll(bin, 0o755)
+	script := filepath.Join(bin, "kmem")
+	// Old single-file install: the script's KMEM_VERSION.
+	os.WriteFile(script, []byte("#!/usr/bin/env python3\nKMEM_VERSION = \"1.6.3\"\n"), 0o755)
+	if v := installedKmemVersion(home, script); v != "1.6.3" {
+		t.Fatalf("script version: %q", v)
+	}
+	// Launcher (no KMEM_VERSION): `kmem version --json`.
+	os.WriteFile(script, []byte("#!/bin/sh\necho '{\"kmem\": \"1.8.0\", \"api\": 1}'\n"), 0o755)
+	if v := installedKmemVersion(home, script); v != "1.8.0" {
+		t.Fatalf("launcher version: %q", v)
+	}
+	// A staged rollout: the stable release counts, not the candidate.
+	share := filepath.Join(home, ".local", "share", "kmem")
+	os.MkdirAll(share, 0o755)
+	os.WriteFile(filepath.Join(share, "rollout.json"), []byte(`{"stable": "1.7.0", "candidate": "1.8.0"}`), 0o644)
+	if v := installedKmemVersion(home, script); v != "1.7.0" {
+		t.Fatalf("rollout stable: %q", v)
 	}
 }
