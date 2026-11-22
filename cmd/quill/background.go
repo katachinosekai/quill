@@ -85,6 +85,11 @@ func (d *desk) listenInstance(path string) {
 					d.do(func() { d.resumeAll(d.resumableIn(key)) })
 				case "reload":
 					d.do(func() {
+						// `quill --reload` is the user asking: it also takes a
+						// build that waits behind the update line.
+						if d.swapTo == "" && d.pendingBuild != "" {
+							d.swapOK, d.swapTo = true, d.pendingBuild
+						}
 						d.forceSwap = true
 						d.trySwap()
 					})

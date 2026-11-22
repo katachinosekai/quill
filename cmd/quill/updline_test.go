@@ -64,6 +64,11 @@ func TestUpdateLineAsksFirst(t *testing.T) {
 			t.Fatalf("build line actions: %s", got)
 		}
 		h.d.lastTyped = time.Now() // keeps trySwap from going ahead in the test
+		reloadPending(h.d)
+		if !h.d.swapOK || h.d.swapTo != "/nonexistent/quill" {
+			t.Fatal("quill --reload takes the waiting build")
+		}
+		h.d.swapOK, h.d.swapTo = false, ""
 		h.d.acceptBuild()
 		if !h.d.swapOK || h.d.swapTo != "/nonexistent/quill" {
 			t.Fatal("Restart into it asks for the switch")
@@ -87,5 +92,12 @@ func TestUpdateLineAsksFirst(t *testing.T) {
 func test_tap(o fyne.CanvasObject) {
 	if b, ok := o.(*widget.Button); ok && b.OnTapped != nil {
 		b.OnTapped()
+	}
+}
+
+// reloadPending does what the "reload" command does before trySwap.
+func reloadPending(d *desk) {
+	if d.swapTo == "" && d.pendingBuild != "" {
+		d.swapOK, d.swapTo = true, d.pendingBuild
 	}
 }
