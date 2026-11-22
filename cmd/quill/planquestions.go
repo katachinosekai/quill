@@ -88,10 +88,14 @@ func planQuestions(text string) []planQ {
 				continue
 			}
 			seen[key] = true
-			if q, ok := classifyQuestion(sent, letters); ok {
-				q.ID = len(out) + 1
-				out = append(out, q)
+			q, ok := classifyQuestion(sent, letters)
+			if !ok {
+				// The approval sentence: what follows on its line ("Yes
+				// (recommended) or no?") belongs to it, not a new question.
+				break
 			}
+			q.ID = len(out) + 1
+			out = append(out, q)
 		}
 	}
 	return out

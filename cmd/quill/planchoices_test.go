@@ -22,6 +22,7 @@ func TestPlanChoices(t *testing.T) {
 		{"Do you approve steps 1–4? And should it ship as v0.1.18, or as a local commit only (recommended)?", 2, 1},
 		{"Should these go out as v0.1.19, or do you want more changes first?", 2, -1},
 		{"Do you approve steps 1–5, including the push and the public release?", 0, -1},
+		{"Do you approve steps 1–6? Yes (recommended) or no?", 0, -1},
 		{"Do you approve steps 1–4? And should I go ahead with t063026 afterwards, stopping after its step 2?", 0, -1},
 	} {
 		opts, rec := planChoices(c.q)

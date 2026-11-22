@@ -35,7 +35,7 @@ const (
 
 type itemView struct {
 	holder   *fyne.Container
-	stream   *widget.Label
+	st       *streamView // a streaming reply (streamtext.go)
 	expanded bool
 	full     bool
 	height   float32
@@ -635,21 +635,13 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 		iv.holder.Show()
 	}
 	if blankItem(it) {
-		iv.stream = nil
+		iv.st = nil
 		iv.holder.Objects = nil
 		iv.holder.Hide()
 	} else if it.Kind == chat.Assistant && it.Streaming {
-		if iv.stream == nil {
-			iv.stream = widget.NewLabel(it.Text)
-			iv.stream.Wrapping = fyne.TextWrapWord
-			iv.stream.Alignment = v.align()
-			iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, msgText(iv.stream))}
-			iv.holder.Refresh()
-		} else {
-			iv.stream.SetText(it.Text)
-		}
+		v.refreshStream(it, iv)
 	} else {
-		iv.stream = nil
+		iv.st = nil
 		iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, v.render(it, iv))}
 		iv.holder.Refresh()
 	}
@@ -1823,6 +1815,12 @@ func planQuestion(c *chat.Conversation, plan *chat.Item) string {
 		}
 	}
 	text = strings.TrimSpace(text)
+	// With numbered closing questions (rule 28) the approval one is the title.
+	if q := chat.ClosingApproval(text); q != "" {
+		if q = strings.TrimSpace(strings.TrimRight(mdNoise.Replace(q), "*_ ")); len(q) <= 300 {
+			return q
+		}
+	}
 	last := strings.TrimSpace(text[strings.LastIndex(text, "\n")+1:])
 	last = strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(last), "#>*-_ "))
 	last = strings.TrimRight(last, "*_ ")

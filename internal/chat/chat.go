@@ -190,9 +190,45 @@ func (c *Conversation) AsksApproval() bool {
 		if q := lastQuestion(last); q != "" && approvalAsk.MatchString(q) {
 			return true
 		}
+		// Rule 28 (user 2026-11-21): a plan ends with its questions numbered,
+		// one per line; the approval can be any of them, not just the last.
+		if ClosingApproval(t) != "" {
+			return true
+		}
 		return proposes(last)
 	}
 	return false
+}
+
+var numberedQ = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?\d+[.)]\s+`)
+
+// ClosingApproval: the approval question among the numbered question lines
+// that end a message ("1. Do you approve steps 1–6? …", "2. …?"), or "".
+func ClosingApproval(text string) string {
+	lines := strings.Split(strings.TrimRight(strings.TrimSpace(text), "*_ "), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if l == "" {
+			continue
+		}
+		if !numberedQ.MatchString(l) || !strings.Contains(l, "?") {
+			return ""
+		}
+		q := strings.TrimSpace(strings.Trim(numberedQ.ReplaceAllString(l, ""), "*_ "))
+		if lq := lastQuestionOf(q); lq != "" && approvalAsk.MatchString(lq) {
+			return q
+		}
+	}
+	return ""
+}
+
+// lastQuestionOf: the first question sentence of s (quotes blanked).
+func lastQuestionOf(s string) string {
+	i := strings.Index(s, "?")
+	if i < 0 {
+		return ""
+	}
+	return quotedSpans.ReplaceAllString(s[:i], " ")
 }
 
 // AsksQuestion: the turn's last text ends with a question to the user (its

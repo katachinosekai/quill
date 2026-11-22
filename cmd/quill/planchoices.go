@@ -31,6 +31,9 @@ func planChoices(question string) ([]string, int) {
 		for i, o := range opts {
 			opts[i] = dropQuestionWord(o)
 		}
+		if isYesNoPair(opts) {
+			continue // "Do you approve …? Yes or no?": the card's own buttons answer it
+		}
 		return opts, recommendedOption(sent, len(opts))
 	}
 	return nil, -1

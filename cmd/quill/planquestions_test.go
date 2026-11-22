@@ -29,6 +29,8 @@ func TestPlanQuestions(t *testing.T) {
 		{"1. Should v0.1.20 ship now (recommended), or wait for Quill Android's card?\n2. Should rule 21 stay as it is?\n3. What should the Welcome's title say?\n\n**Do you approve steps 1–3?**",
 			"single[v0.1.20 ship now|Wait for Quill Android's card]*v0.1.20 ship now ; yesno ; text"},
 		{"**Do you approve steps 1–5, including the push and the public release?**", ""},
+		{"Plan:\n1. a\n\nQuestions:\n1. Do you approve steps 1–6? Yes (recommended) or no?\n2. Animation style: fade in each finished paragraph plus smooth reveal of the last one (recommended), typing effect character by character, or fade only?\n3. Should \"Animate new text\" start on (recommended) or off?",
+			"single[Fade in each finished paragraph plus smooth reveal of the last one|Typing effect character by character|Fade only]*Fade in each finished paragraph plus smooth reveal of the last one ; single[\"Animate new text\" start on|Off]*\"Animate new text\" start on"},
 		{"```\nwhat? or this?\n```\n**Approve this plan?**", ""},
 	} {
 		if got := qsSummary(planQuestions(c.text)); got != c.want {

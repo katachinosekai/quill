@@ -48,7 +48,9 @@ func TestProposalsGetTheCard(t *testing.T) {
 		"Plan:\n1. a\n2. b\n\n**Do you approve steps 1–3? Your approval also covers the earlier question only if you say which option you want.**":                             true,
 		"**Approve this plan? I'll start with step 1.**":                                                                                                                       true,
 		"**Anything else? I can also approve the release later.**":                                                                                                             false,
-		"Anything else?":             false,
+		"Plan:\n1. a\n2. b\n\nQuestions:\n1. Do you approve steps 1–6? Yes (recommended) or no?\n2. Animation style: fade in each finished paragraph plus smooth reveal of the last one (recommended), typing effect character by character, or fade only?": true,
+		"**Plan**\n1. x\n2. y\n\n1. Should \"Animate new text\" start on (recommended) or off?\n2. Do you approve steps 1–7?":                                                                                                                               true,
+		"Questions:\n1. Which colour?\n2. What size?": false,
 		"Should I? Hmm.":             true,
 		"I wonder what to do. Done.": false,
 	} {
