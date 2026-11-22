@@ -432,6 +432,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 	}
 	d.initPhone()
 	d.startRemotePCs()
+	d.wireKmemQuit()
 	return d
 }
 
@@ -1453,8 +1454,8 @@ func (d *desk) ensureProcess(s *deskSession) error {
 		s.failed = err.Error()
 		return err
 	}
-	kmemMem := d.kmemMemory()
-	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: sessionPrompt(kmemMem, d.buildGateOn(), d.coordinatorOn(s.model)),
+	kmemMem := d.kmemMemory() || isHiddenSession(s)
+	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: d.sessionPromptFor(s, kmemMem),
 		Env: append(append(d.localEnv(s.model), checkpointEnv), sessionMemoryEnv(kmemMem)...)}
 	d.warnInsecureOllama(s)
 	if s.persisted {

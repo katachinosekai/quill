@@ -25,7 +25,7 @@ import (
 // kmemWindowOpenHook/kmemWindowCloseHook.
 
 // kmemAssistName is the operator's kmem name (kmemWinOperator in kmemwindow.go).
-const kmemAssistName = "kmem-lock-audit"
+const kmemAssistName = kmemWinOperator
 
 // prefKmemWinStarted: when the last assistant session started (RFC 3339), for
 // the "ended without saving" note.

@@ -38,6 +38,7 @@ func main() {
 	heapFlag := flag.Bool("heap", false, "write a heap profile of the running Quill into $XDG_RUNTIME_DIR/quill-heap-<pid>.pprof")
 	resumeAll := flag.Bool("resume-all", false, "ask the running Quill to resume every ended kmem session in Inactive from its handoff")
 	resumeOne := flag.String("resume", "", "ask the running Quill to open the session with this kmem name, or start one from its handoff")
+	kmemWindow := flag.Bool("kmem-window", false, "ask the running Quill Desktop to open its kmem window (the Monday check-in uses it)")
 	profile := flag.Bool("profile", false, "record 10 s of the running Quill's CPU use into $XDG_RUNTIME_DIR/quill-cpu-<pid>.pprof")
 	flag.Parse()
 	if *showVersion {
@@ -54,6 +55,13 @@ func main() {
 	}
 	if *profile {
 		if !sendCommand(sock, "profile") {
+			fmt.Fprintln(os.Stderr, "no running Quill answered")
+			os.Exit(1)
+		}
+		return
+	}
+	if *kmemWindow {
+		if !sendCommand(sock, "kmem-window") {
 			fmt.Fprintln(os.Stderr, "no running Quill answered")
 			os.Exit(1)
 		}

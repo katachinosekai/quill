@@ -90,7 +90,9 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 					s = a.d.session(parts[1])
 				}
 			}
-			if s == nil {
+			// The kmem window's assistant is not a phone session: writes to
+			// it are refused like an unknown id (B's listings hide it too).
+			if s == nil || isHiddenSession(s) || a.d.hiddenID(parts[1], s.cwd) {
 				fail = notFound("no session " + parts[1])
 				return
 			}
