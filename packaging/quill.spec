@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           quill
-Version:        0.1.19
+Version:        0.1.20
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -70,6 +70,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.20-1
+- Plan cards answer their questions: an option marked recommended goes with Approve ("Other answers…" shows the rest), one Approve per option otherwise, and plans that ask several things get a control for each (Yes/No, options, checkboxes, a text field) with all answers sent together
+- Phone API: plan items carry their choices and questions, and approvals can carry the answers (Quill for Android and Other PCs use them)
+- Quill Desktop never updates or restarts on its own: a quiet line under the header offers Update / What's new / Later, and a new build on disk waits for "Restart into it"
+- Quill's default kmem rules ask sessions to number a plan's open questions
+- Bundles Quill for Android 0.9.18
 * Sat Nov 21 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.19-1
 - kmem 1.6.1 bundled: handoffs follow renames, stricter kmem-guard
 - Welcome on new installs: online or local model, speech-to-text language (or off), ask first or let Claude work, kmem or Claude's auto memory, and Quill's default kmem rules (recommended for beginners) or none (advanced)
