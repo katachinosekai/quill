@@ -796,14 +796,28 @@ func (v *chatView) markdown(text string) fyne.CanvasObject {
 func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
 	var parts []fyne.CanvasObject
 	var run []widget.RichTextSegment
+	text := func(segs ...widget.RichTextSegment) *widget.RichText {
+		alignSegments(segs, fyne.TextAlignCenter)
+		t := widget.NewRichText(segs...)
+		t.Wrapping = fyne.TextWrapWord
+		return t
+	}
 	flush := func() {
 		if len(run) == 0 {
 			return
 		}
-		alignSegments(run, fyne.TextAlignCenter)
-		t := widget.NewRichText(run...)
-		t.Wrapping = fyne.TextWrapWord
-		parts = append(parts, t)
+		if from, to, w, ok := balancedParagraph(run); ok {
+			// One overlong line: it wraps in its own narrower column.
+			if from > 0 {
+				parts = append(parts, text(run[:from]...))
+			}
+			parts = append(parts, container.New(fitCenter{natural: w}, text(run[from:to]...)))
+			if to < len(run) {
+				parts = append(parts, text(run[to:]...))
+			}
+		} else {
+			parts = append(parts, text(run...))
+		}
 		run = nil
 	}
 	for _, seg := range segs {
@@ -815,7 +829,7 @@ func centeredBlocks(segs []widget.RichTextSegment) fyne.CanvasObject {
 		flush()
 		t := widget.NewRichText(l)
 		t.Wrapping = fyne.TextWrapWord
-		parts = append(parts, container.New(fitCenter{natural: listNaturalWidth(l, 0)}, t))
+		parts = append(parts, container.New(fitCenter{natural: balancedListWidth(l)}, t))
 	}
 	flush()
 	if len(parts) == 1 {
@@ -2096,10 +2110,24 @@ func (v *chatView) planAnswers(it *chat.Item, qs []planQ) map[int]planAnswer {
 // options, any of them, or a text field).
 func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.CanvasObject {
 	box := container.NewVBox()
+	texts := make([]string, len(qs))
+	for i, q := range qs {
+		texts[i] = fmt.Sprintf("%d. %s", i+1, q.Text)
+	}
+	long, longW := -1, float32(0)
+	if v.d.center {
+		// An overlong question wraps in balanced lines, weighted against
+		// the other questions (as in centered lists).
+		long, longW = balancedLabel(texts, theme.Size(theme.SizeNameText))
+	}
 	for i, q := range qs {
 		q := q
-		l := widget.NewLabel(fmt.Sprintf("%d. %s", i+1, q.Text))
+		l := widget.NewLabel(texts[i])
 		l.Wrapping = fyne.TextWrapWord
+		var head fyne.CanvasObject = l
+		if i == long {
+			head = container.New(fitCenter{natural: longW}, l)
+		}
 		var ctl fyne.CanvasObject
 		switch q.Kind {
 		case qYesNo:
@@ -2166,7 +2194,7 @@ func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.Can
 			e.OnChanged = func(t string) { ans[q.ID] = planAnswer{Text: t, Choice: -1} }
 			ctl = e
 		}
-		box.Add(container.NewVBox(l, ctl))
+		box.Add(container.NewVBox(head, ctl))
 	}
 	note := widget.NewLabel("Unanswered questions are sent as \"no answer\".")
 	note.SizeName = theme.SizeNameCaptionText

@@ -5,10 +5,10 @@ import "testing"
 func TestKmemNameIn(t *testing.T) {
 	for in, want := range map[string]string{
 		`use kmem name "Quill 2" (kmem --as "Quill 2" ...)`: "Quill 2",
-		"run `kmem --as demo brief` first":                 "demo",
-		`kmem --as=demo rules`:                             "demo",
-		`please fix the build`:                             "",
-		`this session's kmem name is "x"`:                  "",
+		"run `kmem --as demo brief` first":                  "demo",
+		`kmem --as=demo rules`:                              "demo",
+		`please fix the build`:                              "",
+		`this session's kmem name is "x"`:                   "",
 	} {
 		if got := kmemNameIn(in); got != want {
 			t.Errorf("kmemNameIn(%q) = %q, want %q", in, got, want)
