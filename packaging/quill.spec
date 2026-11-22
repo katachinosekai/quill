@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.22
+Version:        0.1.23
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -74,6 +74,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.23-1
+- Much less memory and CPU: the bundled Fyne parsed the fonts again for every chat message (1.5 GB and over a full CPU core after a few hours); now each font is parsed once (265 MB, idle CPU near 0); a safety net keeps the garbage collector from spinning
+- Faster, leaner session scans (start-up allocations -85 %) and phone change tracking (-90 %)
+- Claude desktop app sessions: their titles from the app, scratch workspaces shown as "Claude desktop app (scratch)"
+- kmem panel: Claude's own auto memory (MEMORY.md) for the current project; recycle bin items open in their own window with the full reason and text, Restore and Delete for good
+- kmem 1.6.3; renaming a tab also moves its kmem label and project
+- Bundles Quill for Android 0.9.20
 * Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.22-1
 - A session that runs out of memory (a game or build it started) no longer takes Quill Desktop and the other sessions down: each Claude session runs in its own systemd scope
 - Message times under each message (Settings: on/off, the system's 12/24-hour format or your own pattern with a preview)
