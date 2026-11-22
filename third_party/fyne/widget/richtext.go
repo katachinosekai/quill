@@ -112,13 +112,6 @@ func (t *RichText) MinSize() fyne.Size {
 func (t *RichText) Refresh() {
 	t.minCache = fyne.Size{}
 	t.updateRowBounds()
-
-	for _, s := range t.Segments {
-		if txt, ok := s.(*TextSegment); ok {
-			txt.parent = t
-		}
-	}
-
 	t.BaseWidget.Refresh()
 }
 
@@ -438,6 +431,15 @@ func (t *RichText) updateRowBounds() {
 	var iterateSegments func(segList []RichTextSegment, depth int)
 	iterateSegments = func(segList []RichTextSegment, depth int) {
 		for _, seg := range segList {
+			// Quill: every text segment drawn gets t as its parent, nested
+			// ones (list items, the bullets ListSegment makes on the fly)
+			// included. Only top-level ones used to, so list text took its
+			// size from whatever theme was being rendered at that moment
+			// (a ThemeOverride's own layout pass, or the app's anywhere
+			// else) and streaming replies snapped between the two.
+			if txt, ok := seg.(*TextSegment); ok {
+				txt.parent = t
+			}
 			if parent, ok := seg.(RichTextBlock); ok {
 				segs := parent.Segments()
 				iterateSegments(segs, depth+1)

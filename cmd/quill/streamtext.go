@@ -172,12 +172,17 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 
 // drawStream shows st.it.Text[:st.pos]: new finished paragraphs are added
 // once, the live paragraph is redrawn when it changed.
+// Each new paragraph of a streaming reply gets its own message theme: a
+// widget added to the reply's existing ThemeOverride drew at the default
+// size until that override was refreshed, so text snapped between sizes
+// while streaming (user 2026-11-22; list text also needed the RichText
+// parent fix in third_party/fyne/widget/richtext.go).
 func (v *chatView) drawStream(st *streamView, iv *itemView) {
 	done, live := splitParas(st.it.Text[:st.pos])
 	if len(done) > st.done {
 		objs := st.box.Objects[:len(st.box.Objects)-1]
 		for _, p := range done[st.done:] {
-			objs = append(objs, v.markdown(p))
+			objs = append(objs, msgText(v.markdown(p)))
 		}
 		st.box.Objects = append(objs, st.live)
 		st.done = len(done)
@@ -189,7 +194,7 @@ func (v *chatView) drawStream(st *streamView, iv *itemView) {
 		if strings.TrimSpace(live) == "" {
 			st.live.Objects = nil
 		} else {
-			st.live.Objects = []fyne.CanvasObject{v.markdown(closeOpenMarkdown(live))}
+			st.live.Objects = []fyne.CanvasObject{msgText(v.markdown(closeOpenMarkdown(live)))}
 		}
 		st.live.Refresh()
 	}
