@@ -1606,9 +1606,50 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	border := colAccent
 	owner := v.s
 	if it.PermState == chat.PermPending {
-		run := glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), func() { v.d.answerPlan(owner, it, true) })
 		no := glowButton("Don't run", theme.CancelIcon(), colError, true, func() { v.d.answerPlan(owner, it, false) })
-		parts = append(parts, v.buttonRow(run, no))
+		approve := func(opt string) fyne.CanvasObject {
+			label := "Approve plan & run all"
+			if opt != "" {
+				label = "Approve: " + shortLabel(opt, 50)
+			}
+			return glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), func() { v.d.answerPlanWith(owner, it, true, opt) })
+		}
+		var opts []string
+		rec := -1
+		if owner != nil && owner.remote == nil {
+			opts, rec = planChoices(title.Text)
+		}
+		switch {
+		case len(opts) > 0 && rec >= 0:
+			// The recommended answer goes with Approve; the others wait behind a link.
+			parts = append(parts, v.buttonRow(approve(opts[rec]), no))
+			var others []fyne.CanvasObject
+			for i, o := range opts {
+				if i != rec {
+					others = append(others, approve(o))
+				}
+			}
+			row := v.buttonRow(others...)
+			row.Hide()
+			var more *widget.Button
+			more = widget.NewButton("Other answers…", func() {
+				row.Show()
+				more.Hide()
+				if v.box != nil {
+					relayout(v.box)
+				}
+			})
+			more.Importance = widget.LowImportance
+			parts = append(parts, v.centered(more), row)
+		case len(opts) > 0:
+			var btns []fyne.CanvasObject
+			for _, o := range opts {
+				btns = append(btns, approve(o))
+			}
+			parts = append(parts, v.buttonRow(append(btns, no)...))
+		default:
+			parts = append(parts, v.buttonRow(approve(""), no))
+		}
 	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !replied(owner, it) {
 		resend := glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, func() { v.d.answerPlan(owner, it, true) })
 		parts = append(parts, v.buttonRow(resend))
@@ -1998,4 +2039,12 @@ func (v *chatView) touched() {
 	if v.d != nil {
 		v.d.noteActivity(v.s)
 	}
+}
+
+// shortLabel cuts a button label to n runes.
+func shortLabel(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }

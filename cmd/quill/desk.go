@@ -1653,9 +1653,9 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		s.forkOf = ""
 	}
 	if d.planFirst {
-		if approvesPlan(s, text) && text != planGoMessage {
+		if approvesPlan(s, text) && !isPlanGo(text) {
 			d.approveByText(s)
-		} else if text != planGoMessage && !isRetry(text) && !s.inTurn {
+		} else if !isPlanGo(text) && !isRetry(text) && !s.inTurn {
 			s.runAll, s.runAllNext = false, false
 			d.chatFor(s, s.conv.CancelPlans())
 		}
@@ -2483,7 +2483,19 @@ func approves(text string) bool {
 	if isRetry(text) {
 		return false
 	}
-	return isApproval(text) || text == planGoMessage
+	return isApproval(text) || isPlanGo(text)
+}
+
+// isPlanGo: the plan card's approval, alone or with the answer to the
+// approval question's choice appended (planGoWith).
+func isPlanGo(text string) bool { return strings.HasPrefix(text, planGoMessage) }
+
+// planGoWith: the approval text carrying the chosen option.
+func planGoWith(choice string) string {
+	if choice == "" {
+		return planGoMessage
+	}
+	return planGoMessage + " Answer to your question: " + choice + "."
 }
 
 var stepList = regexp.MustCompile(`(?i)^(steps?\s*)?#?\d+(\s*(-|–|—|\bto\b|,|\band\b|&|\s)\s*#?\d+)+$`)
@@ -2548,7 +2560,7 @@ func coversPlan(s *deskSession, text string) bool {
 }
 
 func approvesPlan(s *deskSession, text string) bool {
-	if text == planGoMessage {
+	if isPlanGo(text) {
 		return true
 	}
 	if approves(text) {
@@ -2648,6 +2660,12 @@ func (d *desk) approveByText(s *deskSession) {
 }
 
 func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
+	d.answerPlanWith(s, it, ok, "")
+}
+
+// answerPlanWith approves (or not) and, with choice, answers the choice the
+// approval question offered (user 2026-11-21).
+func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice string) {
 	if s = d.cardOwner(s, it); s == nil {
 		return
 	}
@@ -2657,7 +2675,7 @@ func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
 	}
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {
 		s.runAll = true
-		d.sendTo(s, planGoMessage)
+		d.sendTo(s, planGoWith(choice))
 		return
 	}
 	if it.PermState != chat.PermPending {
@@ -2673,7 +2691,7 @@ func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
 	it.PermState = chat.PermAllowed
 	s.runAll = true
 	d.chatFor(s, []*chat.Item{it})
-	d.sendTo(s, planGoMessage)
+	d.sendTo(s, planGoWith(choice))
 	if !s.running() {
 		s.runAll = false
 	}
