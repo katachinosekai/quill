@@ -28,6 +28,20 @@ import (
 // memory on both sides; it expires after the idle time without activity from
 // that device, and after 5 wrong passwords the device waits 15 minutes.
 // Phones are not locked unless their Lock switch says so.
+//
+// Activity (user 2026-11-23): only a device's writes count (every POST that
+// passes the gate, /phone/unlock/touch included: Quill Android sends it for
+// touches and typing); reads, polling and the stream don't. The idle time is
+// the Settings choice (15 min by default). Unlock and touch replies say
+// idleLeftSec, the seconds left until the lock with no further activity.
+//
+// Live reload (user 2026-11-23): the tokens, their last activity and the
+// failure counts/lock-outs go over to the new build with the live reload
+// (`quill --reload`, the update switch) through an inherited pipe
+// (pclock_handover_unix.go), memory only: never a file, never preferences.
+// The idle clock keeps running across the switch (last activity is handed
+// as wall time; the gap counts as idle). A full quit, restart or crash
+// restart still locks every device: tokens are memory only by design.
 
 const (
 	pcPassIter     = 600000
@@ -88,6 +102,86 @@ func (l *pcLock) reset() {
 	l.mu.Lock()
 	l.tokens = map[string]pcToken{}
 	l.mu.Unlock()
+}
+
+// left: how long device id's token stays valid with no further activity
+// (0 without a valid token).
+func (l *pcLock) left(id string, idle time.Duration) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	t, ok := l.tokens[id]
+	if !ok {
+		return 0
+	}
+	return max(0, idle-l.now().Sub(t.last))
+}
+
+// leftSec: idleLeftSec in replies, whole seconds rounded up.
+func leftSec(d time.Duration) int { return int((d + time.Second - 1) / time.Second) }
+
+// handedLock is the pcLock state handed to the new build in a live reload.
+// Times are wall-clock milliseconds, so idle time keeps counting.
+type handedLock struct {
+	Tokens map[string]handedToken `json:"tokens,omitempty"`
+	Fails  map[string]handedFail  `json:"fails,omitempty"`
+	Pw     map[string]handedPw    `json:"pw,omitempty"` // phoneunlock.go's lanMem.pwTok/pwConn
+}
+
+type handedToken struct {
+	Tok  string `json:"tok"`
+	Last int64  `json:"last"`
+}
+
+type handedFail struct {
+	N     int   `json:"n"`
+	Until int64 `json:"until"`
+}
+
+type handedPw struct {
+	Tok  string  `json:"tok"`
+	Conn lanConn `json:"conn"`
+}
+
+// handOver: the state for the new build. Tokens already past the idle time
+// are left behind.
+func (l *pcLock) handOver(idle time.Duration) handedLock {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	h := handedLock{Tokens: map[string]handedToken{}, Fails: map[string]handedFail{}}
+	for id, t := range l.tokens {
+		if now.Sub(t.last) <= idle {
+			h.Tokens[id] = handedToken{Tok: t.tok, Last: t.last.UnixMilli()}
+		}
+	}
+	for id, f := range l.fails {
+		h.Fails[id] = handedFail{N: f.n, Until: f.until.UnixMilli()}
+	}
+	return h
+}
+
+// takeOver adopts the old build's state (at start, before the phone server
+// runs). A last activity in the future (clock set back) counts as now: never
+// later than the old build had it.
+func (l *pcLock) takeOver(h handedLock) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	for id, t := range h.Tokens {
+		if len(t.Tok) != 64 || id == "" {
+			continue
+		}
+		last := time.UnixMilli(t.Last)
+		if last.After(now) {
+			last = now
+		}
+		l.tokens[id] = pcToken{tok: t.Tok, last: last}
+	}
+	for id, f := range h.Fails {
+		if id != "" && f.N > 0 {
+			l.fails[id] = pcFails{n: f.N, until: time.UnixMilli(f.Until)}
+		}
+	}
 }
 
 func (l *pcLock) forget(id string) {
@@ -190,9 +284,11 @@ func (d *desk) device(id string) (folders.Phone, bool) {
 	return folders.Phone{}, false
 }
 
-// pcGate is the phone server's gate (runs on the HTTP goroutine). Writes and
-// /phone/unlock/touch count as activity; reads (polling, the stream) don't,
-// so an idle viewer is locked again after the idle time.
+// pcGate is the phone server's gate (runs on the HTTP goroutine). Every POST
+// that reaches it counts as activity (writes and /phone/unlock/touch; it
+// runs before the Idempotency-Key replay, so a retried write counts too);
+// reads (polling, the stream) don't, so an idle viewer is locked again after
+// the idle time. An expired token is deleted, never revived by a touch.
 func (d *desk) pcGate(id string, r *http.Request) (bool, string) {
 	p, ok := d.device(id)
 	if !ok || !p.NeedsUnlock() {
@@ -209,7 +305,12 @@ func (d *desk) pcGate(id string, r *http.Request) (bool, string) {
 func (a *phoneAPI) unlockAPI(w http.ResponseWriter, r *http.Request, path, phone string) {
 	d := a.d
 	if path == "unlock/touch" {
-		folders.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "idleMin": int(d.pcIdle().Minutes())})
+		// The gate already counted this POST as activity (or refused it).
+		out := map[string]any{"ok": true, "idleMin": int(d.pcIdle().Minutes())}
+		if p, ok := d.device(phone); ok && p.NeedsUnlock() {
+			out["idleLeftSec"] = leftSec(d.pcLock.left(phone, d.pcIdle()))
+		}
+		folders.WriteJSON(w, http.StatusOK, out)
 		return
 	}
 	var in struct {
@@ -233,7 +334,7 @@ func (a *phoneAPI) unlockAPI(w http.ResponseWriter, r *http.Request, path, phone
 		folders.WriteError(w, http.StatusForbidden, code, msg)
 		return
 	}
-	folders.WriteJSON(w, http.StatusOK, map[string]any{"token": tok, "idleMin": int(d.pcIdle().Minutes()), "needed": true})
+	folders.WriteJSON(w, http.StatusOK, map[string]any{"token": tok, "idleMin": int(d.pcIdle().Minutes()), "idleLeftSec": leftSec(d.pcLock.left(phone, d.pcIdle())), "needed": true})
 }
 
 // setDevicePasswordDialog asks for a new device password; done runs after
@@ -338,5 +439,49 @@ func (d *desk) setDeviceLock(id string, on bool) {
 			d.setPhones(list)
 			return
 		}
+	}
+}
+
+// handedUnlocks: what main read from a live reload's pipe, for newDesk.
+var handedUnlocks []byte
+
+// takeOverUnlocks adopts a live reload's device-lock state (newDesk).
+func (d *desk) takeOverUnlocks() {
+	b := handedUnlocks
+	handedUnlocks = nil
+	var h handedLock
+	if len(b) == 0 || json.Unmarshal(b, &h) != nil {
+		return
+	}
+	d.pcLock.takeOver(h)
+	d.handedPw = h.Pw
+}
+
+// handOverWith: handOver plus the phone server's password-unlock tokens
+// (only those whose token is still valid).
+func (l *pcLock) handOverWith(lan *lanMem, idle time.Duration) handedLock {
+	h := l.handOver(idle)
+	if lan == nil {
+		return h
+	}
+	lan.mu.Lock()
+	defer lan.mu.Unlock()
+	for id, tok := range lan.pwTok {
+		if t, ok := h.Tokens[id]; ok && t.Tok == tok {
+			if h.Pw == nil {
+				h.Pw = map[string]handedPw{}
+			}
+			h.Pw[id] = handedPw{Tok: tok, Conn: lan.pwConn[id]}
+		}
+	}
+	return h
+}
+
+// adoptPw takes a live reload's password-unlock tokens (phone server start).
+func (m *lanMem) adoptPw(pw map[string]handedPw) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, p := range pw {
+		m.pwTok[id], m.pwConn[id] = p.Tok, p.Conn
 	}
 }

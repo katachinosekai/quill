@@ -671,12 +671,12 @@ func (a *phoneAPI) keyUnlock(w http.ResponseWriter, phone, nonce, sig string, c 
 	a.lan.mu.Lock()
 	delete(a.lan.pwTok, phone)
 	a.lan.mu.Unlock()
-	var idle int
+	var idle time.Duration
 	a.ui(func() {
-		idle = int(d.pcIdle().Minutes())
+		idle = d.pcIdle()
 		a.lanNotice(phone, name, c.String())
 	})
-	folders.WriteJSON(w, http.StatusOK, map[string]any{"token": tok, "idleMin": idle, "needed": true, "method": "key"})
+	folders.WriteJSON(w, http.StatusOK, map[string]any{"token": tok, "idleMin": int(idle.Minutes()), "idleLeftSec": leftSec(d.pcLock.left(phone, idle)), "needed": true, "method": "key"})
 }
 
 // unlockChallenge serves POST /phone/unlock/challenge (passes the lock gate).

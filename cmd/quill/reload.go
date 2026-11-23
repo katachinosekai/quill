@@ -239,6 +239,11 @@ func (d *desk) trySwap() {
 		metas = append(metas, meta{s, hs})
 	}
 	target := d.swapTo
+	var lan *lanMem
+	if a := d.phone().api; a != nil {
+		lan = a.lan
+	}
+	idle := d.pcIdle()
 	go func() {
 		var handed []meta
 		for _, m := range metas {
@@ -258,7 +263,16 @@ func (d *desk) trySwap() {
 		path, err := writePrivate("quill-restore-*.json", b)
 		if err == nil {
 			env := append(os.Environ(), restoreEnv+"="+path)
+			// Device-lock tokens: memory only, in a pipe (pclock.go).
+			unlocks, _ := json.Marshal(d.pcLock.handOverWith(lan, idle))
+			kv, undo, ok := passUnlocks(unlocks)
+			if ok {
+				env = append(env, kv)
+			}
 			err = execSelf(target, os.Args, env)
+			if ok {
+				undo()
+			}
 			os.Remove(path)
 		}
 		d.do(func() {

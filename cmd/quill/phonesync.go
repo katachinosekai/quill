@@ -202,6 +202,8 @@ func (d *desk) startPhoneServer() error {
 	s.SetUsageSource(d.phoneUsageJSON)
 	s.SetSeen(func(id string) { d.do(func() { d.phoneSeen(id) }) })
 	p.api = newPhoneAPI(d, s)
+	p.api.lan.adoptPw(d.handedPw)
+	d.handedPw = nil
 	s.SetAPI(p.api)
 	s.SetGate(d.pcGate)
 	p.server, p.fp = s, fp

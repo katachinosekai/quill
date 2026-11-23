@@ -31,6 +31,9 @@ func audioIdentity() {
 }
 
 func main() {
+	// First: a live reload's device-lock state (pclock_handover_unix.go). Only
+	// the window process uses it; any other path drops it (devices lock).
+	handedUnlocks = takeUnlocks()
 	audioIdentity()
 	showVersion := flag.Bool("version", false, "print the version")
 	claudeBin := flag.String("claude", "claude", "claude CLI to run")
@@ -96,6 +99,7 @@ func main() {
 		return
 	}
 	if os.Getenv(keeperEnv) == "" && os.Getenv("QUILL_NO_KEEPER") == "" {
+		handedUnlocks = nil
 		os.Exit(runKeeper(os.Args[1:], takeRestore()))
 	}
 	os.Exit(runWindowWith(*claudeBin, sock))

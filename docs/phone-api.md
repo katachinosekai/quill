@@ -545,7 +545,17 @@ Every paired device must unlock with Quill Desktop's device password unless its 
 
 ### POST /phone/unlock {password}
 
-`{"password": "..."}` → `{"token": "<64 hex>", "idleMin": 15, "needed": true}`. Send the token as `X-Quill-Unlock` on every later request. It expires after `idleMin` minutes without a write (`POST /phone/unlock/touch` counts as one). Wrong password: `403 wrong_password`; after 5 failures in a row: `403 locked_out` for 15 minutes; no password set on the PC: `403 no_password`. With the Password switch off: `{"token": "", "needed": false}`.
+`{"password": "..."}` → `{"token": "<64 hex>", "idleMin": 15, "idleLeftSec": 900, "needed": true}`. Send the token as `X-Quill-Unlock` on every later request. It expires after `idleMin` minutes without a write (`POST /phone/unlock/touch` counts as one). Wrong password: `403 wrong_password`; after 5 failures in a row: `403 locked_out` for 15 minutes; no password set on the PC: `403 no_password`. With the Password switch off: `{"token": "", "needed": false}`.
+
+`idleLeftSec`: seconds until the token expires if no further activity comes (whole seconds, rounded up); Quill Android can show it or plan its next touch with it.
+
+### POST /phone/unlock/touch
+
+Marks activity (send it for the user's touches and typing; reads, polling and the stream never count). Body `{}`. → `{"ok": true, "idleMin": 15, "idleLeftSec": 900}` (`idleLeftSec` only for a device whose Password switch is on). Every POST that passes the lock counts as activity, this one included. With an expired or unknown token: `401 locked`; an expired token is deleted and never comes back, so unlock again.
+
+### Tokens across a Quill Desktop reload
+
+A live reload of Quill Desktop (`quill --reload`, switching to a new build) keeps every unlock token, its last activity and the wrong-password counts and lock-outs: the device stays unlocked and the idle time keeps counting through the switch (no extra time). A full quit/restart of Quill Desktop, or its restart after a crash, locks every device again: tokens live only in memory.
 
 ### Home-network unlock (no password, hardware-key proof)
 
@@ -572,7 +582,7 @@ After each key unlock Quill Desktop shows "Phone X unlocked without a password f
 quill-unlock-v1|<deviceId>|<nonce>|<fingerprint>
 ```
 
-`<deviceId>` is `phoneId` from hello (the pairing link's `i`), `<nonce>` exactly as received, `<fingerprint>` the pinned certificate's SHA-256 in lowercase hex (the pairing link's `fp`, 64 chars). Success: `{"token": "...", "idleMin": 15, "needed": true, "method": "key"}`. Bad signature: `403 bad_signature`; unknown, used, expired or another device's nonce: `403 bad_nonce`; both count toward the same 5-try lock-out as wrong passwords (`403 locked_out`). `403 lan_unlock_off` if the conditions stopped holding (not counted). During a lock-out further failures neither add to nor reset the count; it starts again only after the 15 minutes.
+`<deviceId>` is `phoneId` from hello (the pairing link's `i`), `<nonce>` exactly as received, `<fingerprint>` the pinned certificate's SHA-256 in lowercase hex (the pairing link's `fp`, 64 chars). Success: `{"token": "...", "idleMin": 15, "idleLeftSec": 900, "needed": true, "method": "key"}`. Bad signature: `403 bad_signature`; unknown, used, expired or another device's nonce: `403 bad_nonce`; both count toward the same 5-try lock-out as wrong passwords (`403 locked_out`). `403 lan_unlock_off` if the conditions stopped holding (not counted). During a lock-out further failures neither add to nor reset the count; it starts again only after the 15 minutes.
 
 ## Pairing and per-phone keys
 

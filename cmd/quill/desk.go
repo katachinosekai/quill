@@ -219,6 +219,7 @@ type desk struct {
 	escClosers     map[fyne.CanvasObject]func()
 	kmemVer        kmemVersion
 	pcLock         *pcLock
+	handedPw       map[string]handedPw // a live reload's lanMem.pwTok/pwConn, for the phone server
 	pcPassRefresh  func()
 	pcBox          *fyne.Container
 	pcsBtn         *widget.Button
@@ -461,6 +462,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 		doWait:        fyne.DoAndWait,
 	}
 	d.pcLock = newPCLock()
+	d.takeOverUnlocks() // before initPhone: the phone server starts with them
 	d.applyLocalServers()
 	d.pcNote = map[string]string{}
 	d.loadOrg()
