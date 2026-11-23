@@ -326,6 +326,8 @@ type desk struct {
 	mainRoot      *fyne.Container // the main area with the docked assistant panel (assistbox.go)
 	abox          *assistBox      // the assistant box (assistbox.go)
 	keepBox       bool            // a tab switch keeps the overlay open (the operator's move-in)
+	main          mainTarget      // the main message box messages the overlay's assistant (mainbox.go)
+	targetLbl     *widget.Label   // above the main message box: who it messages, when not the tab
 	tipLayer      *fyne.Container // top layer of the window content for tooltips (agentstrip.go)
 	chatDropHL    *canvas.Rectangle
 	viewBtn       *widget.Button
@@ -1086,7 +1088,11 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildQuillMoveBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.agentStrip.root, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
-	d.input = newSendEntry(d.send)
+	d.input = newSendEntry(func(t string) {
+		if !d.sendTargeted(d.input, t, false) {
+			d.send(t)
+		}
+	})
 	d.input.later = d.afterUI
 	d.input.ac = d.newAutocorrector()
 	d.input.autoFormat = d.autoFormatOn
@@ -1098,13 +1104,29 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.OnChanged = func(t string) {
 		d.lastTyped = time.Now()
 		d.noteActivity(d.current)
-		d.cmds.update(t)
+		if d.targeted(d.input) == "" {
+			d.cmds.update(t)
+		}
 	}
-	d.input.onSendNow = d.sendNow
+	d.input.onSendNow = func(t string) {
+		if !d.sendTargeted(d.input, t, true) {
+			d.sendNow(t)
+		}
+	}
 	d.input.onActivity = func() { d.noteActivity(d.current) }
-	d.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(d.input, d.current, k) }
+	d.input.onHistory = func(k *fyne.KeyEvent) bool {
+		if r := d.targeted(d.input); r != "" {
+			return d.historyKey(d.input, d.targetSession(r), k)
+		}
+		return d.historyKey(d.input, d.current, k)
+	}
 	d.input.onFocus = d.clearSelections
-	d.input.onEscape = func() bool { return d.escape(d.current) }
+	d.input.onEscape = func() bool {
+		if d.targeted(d.input) != "" {
+			return d.assistBoxEscape()
+		}
+		return d.escape(d.current)
+	}
 	d.input.hint = "Message Claude"
 	d.input.SetPlaceHolder(d.input.hint)
 	if d.app.Preferences().Bool("centerInput") {
@@ -1133,7 +1155,11 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		}
 	})
 	d.stopBtn.Importance = widget.DangerImportance
-	d.sendBtn = widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.send(d.input.Text) })
+	d.sendBtn = widget.NewButtonWithIcon("", theme.MailSendIcon(), func() {
+		if !d.sendTargeted(d.input, d.input.Text, false) {
+			d.send(d.input.Text)
+		}
+	})
 	d.sendBtn.Importance = widget.HighImportance
 	d.stt = newSpeech(d)
 	d.chipsBtn = menuButton("Chips", theme.MenuDropUpIcon(), d.chipItems)
@@ -1150,7 +1176,10 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		return d.modeItems(d.current)
 	})
 	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.autoBtn), d.chipsBtn)
-	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
+	d.targetLbl = caption("")
+	d.targetLbl.Truncation = fyne.TextTruncateEllipsis
+	d.targetLbl.Hide()
+	inputCard := bg(colInput, 12, container.NewBorder(d.targetLbl, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	d.verLine = d.newVerLine()
 	d.statsRow = container.New(hintsLayout{}, d.verLine.slot, d.folder)
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), d.statsRow)

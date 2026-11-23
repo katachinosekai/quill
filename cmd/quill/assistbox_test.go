@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,8 +49,8 @@ func TestAssistBoxOpenCloseSwitch(t *testing.T) {
 		if d.assistBoxRole() != boxKmem || b.title.Text != "kmem assistant" || b.body.Objects[0] != kin {
 			t.Fatal("the other button switches the content")
 		}
-		if d.win.Canvas().Focused() != kin {
-			t.Fatal("opening focuses the box's own message box")
+		if d.win.Canvas().Focused() != d.input || d.input.PlaceHolder != "Message the kmem assistant" {
+			t.Fatal("over the chat, opening focuses the main message box, which messages the assistant")
 		}
 		d.toggleAssistBox(boxKmem)
 		if d.assistBoxRole() != "" || b.card.Visible() || len(b.layer.Objects)+len(b.panel.Objects) != 0 {
@@ -120,6 +121,27 @@ func TestAssistBoxOwnMessageBox(t *testing.T) {
 		if d.box().body.Objects[0] != c.root || c.view.s != s || d.hostView(s) != c.view || !d.hostShown(s) {
 			t.Fatal("the role's chat shows in the box and is its hidden host")
 		}
+		// Over the chat: no message box of its own; the main one messages it.
+		if c.inRow.Visible() || d.input.PlaceHolder != "Message the Quill operator" || d.win.Canvas().Focused() != d.input || d.input.Text != "" {
+			t.Fatalf("over the chat, the main message box messages the operator: %v %q %v %q", c.inRow.Visible(), d.input.PlaceHolder, d.win.Canvas().Focused() == d.input, d.input.Text)
+		}
+		if !d.targetLbl.Visible() || !strings.Contains(d.targetLbl.Text, "Quill operator") {
+			t.Fatal("the main box says who it messages")
+		}
+		d.input.SetText("overlay message")
+		d.input.onSend(d.input.Text)
+		if lastUser(s) != "overlay message" || d.input.Text != "" || d.current == s {
+			t.Fatalf("sent to the role's session: %q", lastUser(s))
+		}
+	})
+	h.eventually("the overlay message's reply", func() bool { return !s.conv.Busy && !s.inTurn })
+	h.ui(func() {
+		d := h.d
+		// Docked: its own message box, the main one stays the tab's.
+		d.setAssistDock(boxQuill, true)
+		if !d.assistBoxDocked() || !c.inRow.Visible() || d.input.Text != "main draft" || d.input.PlaceHolder != "Message Claude" || d.targetLbl.Visible() {
+			t.Fatal("docked: its own message box; the main one has the tab's draft back")
+		}
 		if c.input.PlaceHolder != "Message the Quill operator" || d.win.Canvas().Focused() != c.input {
 			t.Fatal("its own message box, focused")
 		}
@@ -131,6 +153,7 @@ func TestAssistBoxOwnMessageBox(t *testing.T) {
 		if d.input.Text != "main draft" || d.current == s {
 			t.Fatal("the main message box keeps its draft and tab")
 		}
+		d.setAssistDock(boxQuill, false)
 		if d.box().status.Text == "" {
 			t.Fatal("the header shows the status")
 		}

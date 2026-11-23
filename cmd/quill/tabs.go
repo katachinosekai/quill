@@ -240,6 +240,11 @@ func (d *desk) followDraft() {
 		d.chat.queueBox.Objects = nil
 		d.chat.queueBox.Refresh()
 	}
+	if d.targeted(d.input) != "" {
+		// The assistant keeps the box; this tab's draft comes back when it closes.
+		d.strip.lastCur, d.main.key = cur, cur
+		return
+	}
 	first := d.strip.lastCur == ""
 	if prev := d.sessions[d.strip.lastCur]; prev != nil && prev.qedit != nil {
 		d.cancelQueueEdit(prev)

@@ -105,6 +105,7 @@ type assistant struct {
 	chat     fyne.CanvasObject
 	view     *chatView
 	input    *sendEntry
+	inRow    fyne.CanvasObject // the input row (hidden in the box overlay: the main message box messages it)
 	stateLbl *widget.Label
 	modelLbl *widget.Label
 	note     *widget.Label

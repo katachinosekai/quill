@@ -206,6 +206,7 @@ func (d *desk) trySwap() {
 	d.flushUI()
 	// Other PCs' sessions are memory only: never handed over or restored.
 	d.stopRemotes()
+	d.closeAssistOverlay() // the main message box's text is the tab's draft again (mainbox.go)
 	st := d.restoreHead()
 	if d.current != nil && !d.split() {
 		d.strip.keepBox(d.current.id, d.input)

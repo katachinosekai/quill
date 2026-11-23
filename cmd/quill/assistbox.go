@@ -73,14 +73,15 @@ var (
 // assistBoxView is what a role shows in the box. content is built once and
 // kept across open and close (unsent text stays). Every func may be nil.
 type assistBoxView struct {
-	title   string                // "Quill operator", "kmem assistant"
-	content fyne.CanvasObject     // below the box's header (title, status, Dock, ×)
-	input   fyne.Focusable        // its own message box: focused on open
-	inputFn func() fyne.Focusable // instead of input when it is built later (kmem: after the chat attaches)
-	popOut  func()                // a Pop out button in the header (kmem: the box as its own window)
-	escape  func() bool           // Escape inside the box, before it closes (a popup, a selection); true = handled
-	status  func() string         // the header's status line (refreshed every second while open)
-	shown   func(on bool)         // the box opened (true) or closed / switched away (false)
+	title   string                   // "Quill operator", "kmem assistant"
+	content fyne.CanvasObject        // below the box's header (title, status, Dock, ×)
+	input   fyne.Focusable           // its own message box: focused on open
+	inputFn func() fyne.Focusable    // instead of input when it is built later (kmem: after the chat attaches)
+	popOut  func()                   // a Pop out button in the header (kmem: the box as its own window)
+	escape  func() bool              // Escape inside the box, before it closes (a popup, a selection); true = handled
+	status  func() string            // the header's status line (refreshed every second while open)
+	shown   func(on bool)            // the box opened (true) or closed / switched away (false)
+	inRow   func() fyne.CanvasObject // its own message box row: hidden over the chat (mainbox.go)
 }
 
 type assistBox struct {
@@ -305,6 +306,7 @@ func (d *desk) openAssistBox(role string) {
 	b.role = role
 	d.showBoxContent(role)
 	d.placeBox(d.assistDockWanted(role) && d.dockFits())
+	d.syncMainTarget()
 	v := d.viewOf(role)
 	if v.shown != nil {
 		v.shown(true)
@@ -345,6 +347,7 @@ func (d *desk) closeAssistBox() {
 	}
 	b.role = ""
 	wasDocked := b.docked
+	d.syncMainTarget()
 	d.syncAssistButtons()
 	d.focusMain()
 	d.animateBox(boxShrink, from, to, func() {
@@ -394,7 +397,9 @@ func (d *desk) focusBox() {
 	if b.role == "" || d.win == nil {
 		return
 	}
-	if in := d.viewOf(b.role).focusable(); in != nil {
+	if in := d.main.in; in != nil && d.main.role == b.role {
+		d.win.Canvas().Focus(in) // the overlay's message box is the main one
+	} else if in := d.viewOf(b.role).focusable(); in != nil {
 		d.win.Canvas().Focus(in)
 	}
 	d.syncBoxOutline()
@@ -419,8 +424,11 @@ func (d *desk) boxFocused() bool {
 	if b == nil || b.role == "" || d.win == nil {
 		return false
 	}
-	in := d.viewOf(b.role).focusable()
 	f := d.win.Canvas().Focused()
+	if d.main.in != nil && d.main.role == b.role && f == d.main.in {
+		return true // over the chat, the main message box is the box's
+	}
+	in := d.viewOf(b.role).focusable()
 	return in != nil && f != nil && f == in
 }
 
@@ -480,6 +488,7 @@ func (d *desk) setAssistDock(role string, on bool) {
 	}
 	from, ok := d.boxRect()
 	d.placeBox(docked)
+	d.syncMainTarget()
 	d.refreshBoxHeader()
 	if ok {
 		to, _ := d.boxRect()
@@ -610,6 +619,7 @@ func (l *assistRootLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		}
 		defer d.layoutArea()
 		defer d.refreshBoxHeader()
+		defer d.syncMainTarget()
 	}
 	ghostL.Move(fyne.NewPos(0, 0))
 	ghostL.Resize(size)
@@ -1159,6 +1169,8 @@ type assistChat struct {
 
 	// The reason strip above the chat: why the role isn't running, with the
 	// role's one action ("Move it here", "Take over").
+	inRow fyne.CanvasObject // its own message box: hidden over the chat (the main one messages it)
+
 	reasonBox *fyne.Container
 	reasonLbl *widget.Label
 	reasonBtn *widget.Button
@@ -1200,6 +1212,7 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 	})
 	stop.Importance = widget.DangerImportance
 	in := bg(colBackground, 10, container.NewBorder(nil, nil, nil, container.NewVBox(stop, layout.NewSpacer(), send), c.input))
+	c.inRow = in
 	c.reasonLbl = widget.NewLabel("")
 	c.reasonLbl.Wrapping = fyne.TextWrapWord
 	c.reasonBtn = widget.NewButton("", func() {
@@ -1223,6 +1236,7 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 			return false
 		},
 		status: func() string { return d.assistStatusText(a) },
+		inRow:  func() fyne.CanvasObject { return c.inRow },
 		shown: func(on bool) {
 			if !on {
 				return
@@ -1310,6 +1324,12 @@ func (d *desk) registerKmemBox() {
 		},
 		status: func() string { return d.assistStatusText(d.assist()) },
 		popOut: d.popOutKmem,
+		inRow: func() fyne.CanvasObject {
+			if a := d.assist(); a.inRow != nil {
+				return a.inRow
+			}
+			return nil
+		},
 	}
 	v.shown = func(on bool) {
 		w := d.kmemWin

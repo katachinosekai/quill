@@ -131,22 +131,44 @@ func (d *desk) newPane() *pane {
 	p.outline.CornerRadius = 14
 	p.outline.StrokeWidth = 1
 	p.outline.StrokeColor = color.NRGBA{0xff, 0xff, 0xff, 0x1c}
-	p.input = newSendEntry(func(text string) { d.sendFromPane(p, text) })
+	p.input = newSendEntry(func(text string) {
+		if !d.sendTargeted(p.input, text, false) {
+			d.sendFromPane(p, text)
+		}
+	})
 	p.input.later = d.afterUI
 	p.input.ac = d.newAutocorrector()
 	p.input.autoFormat = d.autoFormatOn
 	p.input.known = func() func(string) bool { return d.knownWords(p.view.s) }
 	p.input.onFix = func(msg string) { d.flashHint(p.stats, msg) }
-	p.input.onSendNow = func(text string) { d.sendNowFromPane(p, text) }
+	p.input.onSendNow = func(text string) {
+		if !d.sendTargeted(p.input, text, true) {
+			d.sendNowFromPane(p, text)
+		}
+	}
 	p.input.SetMinRowsVisible(2)
 	p.input.hint = "Message Claude"
 	p.input.SetPlaceHolder(p.input.hint)
 	p.input.onShortcut = d.handleShortcut
-	p.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(p.input, p.view.s, k) }
+	p.input.onHistory = func(k *fyne.KeyEvent) bool {
+		if r := d.targeted(p.input); r != "" {
+			return d.historyKey(p.input, d.targetSession(r), k)
+		}
+		return d.historyKey(p.input, p.view.s, k)
+	}
 	p.input.onActivity = func() { d.noteActivity(p.view.s) }
 	p.input.onFocus = d.clearSelections
-	p.input.onEscape = func() bool { return d.escape(p.view.s) }
-	sendBtn := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.sendFromPane(p, p.input.Text) })
+	p.input.onEscape = func() bool {
+		if d.targeted(p.input) != "" {
+			return d.assistBoxEscape()
+		}
+		return d.escape(p.view.s)
+	}
+	sendBtn := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() {
+		if !d.sendTargeted(p.input, p.input.Text, false) {
+			d.sendFromPane(p, p.input.Text)
+		}
+	})
 	sendBtn.Importance = widget.HighImportance
 	p.stop = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
 		if p.view.s != nil {
@@ -359,6 +381,7 @@ func (d *desk) paneFor(s *deskSession) *pane {
 
 func (d *desk) setSplit(n int) {
 	n = max(1, min(maxPanes, n))
+	d.closeAssistOverlay() // the main message box goes back to its tab first
 	if n == 1 {
 		if !d.split() {
 			return
@@ -525,7 +548,10 @@ func (d *desk) syncPanes() {
 		if p.view.s != nil {
 			id = p.view.s.id
 		}
-		if id != p.lastID {
+		if id != p.lastID && d.targeted(p.input) != "" {
+			d.main.key = id // the assistant keeps the box; this tab's draft comes back later
+			p.lastID = id
+		} else if id != p.lastID {
 			d.strip.keepBox(p.lastID, p.input)
 			d.strip.fillBox(id, p.input)
 			p.lastID = id

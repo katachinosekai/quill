@@ -278,7 +278,9 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 			d.interrupt(s)
 		}
 	})
-	bottom := container.NewVBox(a.note, container.NewBorder(nil, nil, nil, container.NewVBox(send, stop), a.input))
+	a.inRow = container.NewBorder(nil, nil, nil, container.NewVBox(send, stop), a.input)
+	bottom := container.NewVBox(a.note, a.inRow)
+	d.syncBoxInputs()
 	return container.NewBorder(head, bottom, nil, nil, a.view.root)
 }
 
