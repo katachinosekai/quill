@@ -399,10 +399,12 @@ func (d *desk) kmemAssistWaitOwner(a *kmemAssist, run int, o *deskSession, title
 // unsent input); show(s) catches up on what happened while it was hidden.
 func (d *desk) kmemAssistAttach(a *kmemAssist) {
 	w, s := a.w, a.s
+	if s != nil {
+		a.reason, a.button = "", "" // also with the window closed: phones read it (kmemAssistSummary)
+	}
 	if w == nil || s == nil {
 		return
 	}
-	a.reason, a.button = "", ""
 	if a.chat == nil {
 		a.chat = d.kmemAssistChat(a)
 	}
