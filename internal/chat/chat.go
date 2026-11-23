@@ -228,18 +228,57 @@ var yesNoOptsRe = regexp.MustCompile(`(?i)^\W*yes\b.*\bor\b.*\bno\b`)
 // the question names no plan words (user 2026-11-22, tf2db21: a quick-choice
 // Yes to it didn't count as plan approval).
 func yesNoProposal(line string) bool {
-	line = numberedQ.ReplaceAllString(strings.TrimSpace(line), "")
+	line = quotedSpans.ReplaceAllString(numberedQ.ReplaceAllString(strings.TrimSpace(line), ""), " ")
 	i := strings.Index(line, "?")
 	if i < 0 {
 		return false
 	}
-	q := quotedSpans.ReplaceAllString(line[:i], " ")
+	q := line[:i]
 	if m := sentenceEnd.FindAllStringIndex(q, -1); len(m) > 0 {
 		q = q[m[len(m)-1][1]:]
 	}
 	q = strings.TrimLeft(q, "*_ ")
 	rest := strings.Trim(line[i+1:], "*_ ")
-	return proposalAsk.MatchString(q) && yesNoOptsRe.MatchString(rest)
+	if !yesNoOptsRe.MatchString(rest) {
+		return false
+	}
+	return proposalAsk.MatchString(q) || actionAsk(q, rest)
+}
+
+// actionVerbs: verbs a proposal of work starts with ("Fix 2 and 3?",
+// "Release Quill Android 0.9.36 now?", "Merge it?"). Verbs that ask for
+// information (show, check, tell, explain) and that stop things (stop,
+// cancel, kill) are left out on purpose: a Yes there is not a go-ahead.
+const actionVerbs = `fix|merge|release|ship|run|rerun|re-run|commit|push|delete|remove|apply|add|update|create|start|rename|revert|deploy|publish|install|build|restart|rebase|implement|continue|proceed|tag|cut|bump|land|move|switch|enable|disable|reset|drop|archive|write|rewrite|save|refactor|migrate|port|replace|retry|redo|upload|send|patch|squash|cherry-pick|finish|go ahead|go with|do it|do that|do this|do both|do all|clean up|set up|turn on|turn off`
+
+var actionStart = regexp.MustCompile(`(?i)^(?:(?:ok|okay|so|and|also|then|now)[,:]?\s+)?(?:` + actionVerbs + `)\b|^(?:ok|okay) to\b`)
+
+// plainYesNo: the options of a bare yes/no question ("Yes or no?", "Yes
+// (recommended) or no?" with the parentheses blanked).
+var plainYesNo = regexp.MustCompile(`(?i)^yes,?\s+or\s+no[.!?]*$`)
+
+// actionAsk: q, the closing question before "Yes or no?", proposes doing
+// something: it starts with an imperative or action verb. Information
+// questions ("Did it show its replies?", "Is that placement OK?") never do.
+func actionAsk(q, rest string) bool {
+	q = strings.TrimSpace(q)
+	if q == "" || len(q) > 200 || openAsk.MatchString(q) || whAsk.MatchString(q) {
+		return false
+	}
+	if !plainYesNo.MatchString(strings.Join(strings.Fields(rest), " ")) {
+		return false
+	}
+	return actionStart.MatchString(q)
+}
+
+// ProposesWork: question q (one sentence) proposes doing something: an offer
+// ("Can I run …", "Want me to …") or an action verb ("Merge it", "Fix 2 and 3").
+func ProposesWork(q string) bool {
+	q = strings.TrimLeft(strings.TrimSpace(quotedSpans.ReplaceAllString(q, " ")), "*_ ")
+	if q == "" || openAsk.MatchString(q) || whAsk.MatchString(q) {
+		return false
+	}
+	return proposalAsk.MatchString(q) || len(q) <= 200 && actionStart.MatchString(q) || approvalAsk.MatchString(q)
 }
 
 // AsksApproval: the turn's last text ends in a question asking to approve,

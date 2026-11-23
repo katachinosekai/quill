@@ -68,10 +68,10 @@ func TestProposalsGetTheCard(t *testing.T) {
 func TestYesNoProposalIsApprovalAsk(t *testing.T) {
 	for text, want := range map[string]bool{
 		"Reply.\n\n**1. A or B?**\n**2. Can I run `tool find x`? Yes (recommended) or no?**": true,
-		"Reply.\n\nCan I run the read-only lookup? Yes (recommended) or no?":                  true,
-		"Reply.\n\nCan I run the lookup?\nYes (recommended) or no?":                           true,
-		"Reply.\n\nCan I run the lookup? Blue or red?":                                        false,
-		"Reply.\n\nWhich lookup should I run? Yes or no?":                                     false,
+		"Reply.\n\nCan I run the read-only lookup? Yes (recommended) or no?":                 true,
+		"Reply.\n\nCan I run the lookup?\nYes (recommended) or no?":                          true,
+		"Reply.\n\nCan I run the lookup? Blue or red?":                                       false,
+		"Reply.\n\nWhich lookup should I run? Yes or no?":                                    false,
 	} {
 		c := New()
 		c.AddUser("hi")
@@ -86,11 +86,11 @@ func TestYesNoProposalIsApprovalAsk(t *testing.T) {
 // "1. Can I run steps 1–6?\nYes (recommended) or no?").
 func TestApprovalWithOptionsOnNextLine(t *testing.T) {
 	for text, want := range map[string]bool{
-		"Plan.\n\n**1. Can I run steps 1–6?**\nYes (recommended) or no?":                                          true,
-		"Plan.\n\n1. Can I run steps 1–5? Yes (recommended) or no?":                                               true,
-		"Plan.\n\nCan I run steps 1–3? Yes (recommended) or no?":                                                  true,
-		"Plan.\n\n1. Where should it live?\nInside the window (recommended) or a linked session?":                 false,
-		"Plan.\n\n1. Can B carry out its plan?\nApprove as is (recommended), approve with changes, or stop?":      true,
+		"Plan.\n\n**1. Can I run steps 1–6?**\nYes (recommended) or no?":                                                                           true,
+		"Plan.\n\n1. Can I run steps 1–5? Yes (recommended) or no?":                                                                                true,
+		"Plan.\n\nCan I run steps 1–3? Yes (recommended) or no?":                                                                                   true,
+		"Plan.\n\n1. Where should it live?\nInside the window (recommended) or a linked session?":                                                  false,
+		"Plan.\n\n1. Can B carry out its plan?\nApprove as is (recommended), approve with changes, or stop?":                                       true,
 		"Plan.\n\n1. Where should it live?\nInside the window (recommended) or a linked session\n2. Can I run steps 1–2?\nYes (recommended) or no": true,
 	} {
 		c := New()
@@ -108,5 +108,66 @@ func TestApprovalWithOptionsOnNextLine(t *testing.T) {
 	}
 	if got := JoinOptionLines("Done.\nThis or that is fine.\n2. Next?\n3. Or not?"); got != "Done.\nThis or that is fine.\n2. Next?\n3. Or not?" {
 		t.Fatalf("only an unnumbered options line right under a question joins: %q", got)
+	}
+}
+
+// A closing "<action>? Yes or no?" question proposes work and gets the
+// approval card; one that only asks for information does not.
+func TestActionYesNoIsApprovalAsk(t *testing.T) {
+	for text, want := range map[string]bool{
+		"Done.\n\n**Fix 2 and 3 (the stale label and the 409)? Yes or no?**":               true,
+		"Done.\n\n**Fix 2 and 3 (the stale label and the 409)? Yes (recommended) or no?**": true,
+		"Done.\n\nRelease Quill Android 0.9.36 now? Yes or no?":                            true,
+		"Done.\n\n**Release Quill Android 0.9.36 now? Yes (recommended) or no?**":          true,
+		"Done.\n\n**Merge it? Yes or no?**":                                                true,
+		"Done.\n\nMerge fix/gate-dialog-stale into master? Yes or no?":                     true,
+		"Done.\n\nPush the branch? Yes, or no?":                                            true,
+		"Done.\n\nDelete the old worktree? Yes (recommended) or no?":                       true,
+		"Done.\n\nRestart Quill Desktop now? Yes or no?":                                   true,
+		"Done.\n\nCommit and tag v1.2.3? Yes or no?":                                       true,
+		"Done.\n\nOkay to apply the patch? Yes or no?":                                     true,
+		"Done.\n\nGo ahead with the rebase? Yes or no?":                                    true,
+		"Plan.\n\n1. Where?\n2. **Fix 2 and 3 (details)? Yes or no?**":                     true,
+		"Found it. Fix 2 and 3? Yes or no?":                                                true,
+		"Fix the title (is it \"a? b?\") now? Yes or no?":                                  true,
+		"Done.\n\nDid the kmem Assistant show its replies? Yes, no, or not checked yet?":   false,
+		"Done.\n\nIs that placement OK? Yes or no?":                                        false,
+		"Done.\n\nDoes the card look right? Yes or no?":                                    false,
+		"Done.\n\nHas the build finished? Yes or no?":                                      false,
+		"Done.\n\nShow me the log? Yes or no?":                                             false,
+		"Done.\n\nStop the session? Yes or no?":                                            false,
+		"Done.\n\nWhich fix should I merge? Yes or no?":                                    false,
+		"Done.\n\nWas the release published? Yes or no?":                                   false,
+		"Done.\n\nThe fix needs a merge. Is it merged? Yes or no?":                         false,
+		"Done.\n\nFix 2 and 3? Blue or red?":                                               false,
+		"Done.\n\nFix 2 and 3? Yes, no, or not sure yet?":                                  false,
+		"Done.\n\nMerged it. Yes or no?":                                                   false,
+		"Done.\n\nIs the merge fix 2 and 3? Yes or no?":                                    false,
+		"Done.\n\nWill the release run tonight? Yes or no?":                                false,
+		"Done.\n\nAre the tests run on every push? Yes or no?":                             false,
+	} {
+		c := New()
+		c.AddUser("hi")
+		c.Items = append(c.Items, &Item{Kind: Assistant, Text: text})
+		if got := c.AsksApproval(); got != want {
+			t.Errorf("AsksApproval(%q) = %v, want %v", text, got, want)
+		}
+	}
+	if ClosingApproval("Plan.\n\n1. Where?\n2. **Merge it? Yes or no?**") == "" {
+		t.Error("ClosingApproval misses the numbered action question")
+	}
+	if ClosingApproval("Plan.\n\n1. Where?\n2. **Is that placement OK? Yes or no?**") != "" {
+		t.Error("ClosingApproval takes an information question")
+	}
+}
+
+func TestProposesWork(t *testing.T) {
+	for q, want := range map[string]bool{
+		"Merge it": true, "Can I run steps 1-3": true, "Fix 2 and 3 (x)": true, "Do you approve steps 1-3": true,
+		"Did it show its replies": false, "Is that placement OK": false, "Which one": false, "": false,
+	} {
+		if got := ProposesWork(q); got != want {
+			t.Errorf("ProposesWork(%q) = %v, want %v", q, got, want)
+		}
 	}
 }
