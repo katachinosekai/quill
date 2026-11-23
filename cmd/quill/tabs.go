@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"unicode"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -282,7 +283,7 @@ func (d *desk) syncTabs() {
 		seen[id] = true
 		title, _, st := d.rowText(id)
 		active := d.current != nil && d.current.id == id
-		label := canvas.NewText(oneLine(title, tabTitleRunes), colText)
+		label := canvas.NewText(d.tabLabel(id, title), colText)
 		label.TextSize = fontBody
 		label.TextStyle.Bold = active
 		if !active {
@@ -547,33 +548,93 @@ func (d *desk) showDropdownWith(dd *dropdown) func() {
 }
 
 func (d *desk) tabMenu(id string, at fyne.Position) {
-	closeOthers := func(keep func(i, at int) bool) {
-		pos := -1
-		for i, t := range d.tabs {
-			if t == id {
-				pos = i
-			}
-		}
-		var kept, gone []string
-		for i, t := range d.tabs {
-			if keep(i, pos) {
-				kept = append(kept, t)
-			} else {
-				gone = append(gone, t)
-			}
-		}
-		defer d.closeSessionTabs(gone)
-		d.tabs = kept
-		d.saveTabs()
-		d.tabSig = ""
-		d.syncTabs()
+	widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", d.tabMenuItems(id)...), d.win.Canvas(), at)
+}
+
+// tabMenuItems is the session menu; a topic tab (docs/design/topic-tabs.md
+// §3.3) has no Rename or Restore original name, its title is the topic, and
+// gets "Switch topic..." instead.
+func (d *desk) tabMenuItems(id string) []*fyne.MenuItem {
+	items := d.sessionMenuItems(id)
+	if d.topicOf(id) == "" {
+		return items
 	}
-	d.sessionMenu(id, at,
-		fyne.NewMenuItem("Close tab", func() { d.closeSessionTab(id) }),
-		fyne.NewMenuItem("Hide tab (keep running)", func() { d.closeTab(id) }),
-		fyne.NewMenuItem("Close other tabs", func() { closeOthers(func(i, at int) bool { return i == at }) }),
-		fyne.NewMenuItem("Close tabs to the right", func() { closeOthers(func(i, at int) bool { return i <= at }) }),
-	)
+	var out []*fyne.MenuItem
+	for _, it := range items {
+		switch it.Label {
+		case "Rename...", "Restore original name":
+			continue
+		}
+		out = append(out, it)
+		if it.Label == "Open in split view" {
+			out = append(out, fyne.NewMenuItem("Switch topic...", func() { d.switchTopic(id) }))
+		}
+	}
+	return out
+}
+
+// switchTopic ends the topic's session the way End session does today (the
+// handoff save is the end-check until kmem's K4 and sub C replace it), then
+// opens a new tab on the "Open a topic" card.
+func (d *desk) switchTopic(id string) {
+	d.closeTab(id)
+	d.endWithSave(id, placeInactive)
+	d.newSessionDialog()
+}
+
+// mergeTarget: the topic an old-name session (a kmem name that is not a
+// topic) will be merged into, by matching the name's words against the
+// topics' scopes ("zomboid-launcher" and "launcher" -> Zomboid). Only in kmem
+// memory mode, only for live sessions; ok is false when no topic fits.
+func (d *desk) mergeTarget(id string) (topicInfo, bool) {
+	k := d.org.Kmem[id]
+	if k == "" || d.sessions[id] == nil || d.topicOf(id) != "" || !d.kmemMemory() {
+		return topicInfo{}, false
+	}
+	topicCache.mu.Lock()
+	list := append([]topicInfo(nil), topicCache.list...)
+	topicCache.mu.Unlock()
+	for _, w := range strings.FieldsFunc(k, func(r rune) bool { return r == '-' || r == '_' || r == '/' || r == '.' || unicode.IsDigit(r) }) {
+		for _, t := range list {
+			if !t.Labeled || t.Slug == "kmem" {
+				continue
+			}
+			for _, sc := range append([]string{t.Slug}, t.Scope...) {
+				if w == sc || len(sc) >= 4 && strings.HasPrefix(w, sc) {
+					return t, true
+				}
+			}
+		}
+	}
+	return topicInfo{}, false
+}
+
+const mergeMark = " → merging into "
+
+// topicRowTitle: a topic coordinator is shown as its topic's title; an old
+// name as "<its title> → merging into <Topic>" until it ends.
+func (d *desk) topicRowTitle(id, title string) string {
+	if s := d.sessions[id]; s == nil || s.remote != nil {
+		return title
+	}
+	if slug := d.topicOf(id); slug != "" {
+		if t, ok := cachedTopic(slug); ok && t.Title != "" {
+			return t.Title
+		}
+		return title
+	}
+	if t, ok := d.mergeTarget(id); ok {
+		return title + mergeMark + t.Title
+	}
+	return title
+}
+
+// tabLabel shortens a tab title but keeps the "merging into" tail visible.
+func (d *desk) tabLabel(id, title string) string {
+	if i := strings.Index(title, mergeMark); i >= 0 {
+		return oneLine(title[:i], 14) + title[i:]
+	}
+	return oneLine(title, tabTitleRunes)
 }
 
 func (d *desk) reopenLastTab() {

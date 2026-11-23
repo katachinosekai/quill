@@ -786,6 +786,7 @@ func (d *desk) rowText(id string) (string, string, status) {
 	if title == "" {
 		title = "New session"
 	}
+	title = d.topicRowTitle(id, title)
 	meta := ago(last)
 	if s != nil && s.remote != nil {
 		meta = "on " + s.remote.link.conf.Name
@@ -799,8 +800,8 @@ func (d *desk) rowText(id string) (string, string, status) {
 	if s != nil && s.remote == nil && st == stRunning && !s.conv.Busy && !s.proc.Busy() {
 		meta += fmt.Sprintf("  ·  %d in background", s.conv.Working())
 	}
-	if k := d.org.Kmem[id]; k != "" {
-		meta += "  ·  kmem " + k
+	if k := d.org.Kmem[id]; k != "" && d.topicOf(id) == "" {
+		meta += "  ·  kmem " + k // a topic tab's kmem name is its title
 	}
 	if s != nil && s.pendingEnd != 0 {
 		meta += "  ·  ending soon (open to keep)"
