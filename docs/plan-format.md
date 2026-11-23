@@ -35,8 +35,11 @@ and the plan card read plans in this format.
 ### Auto-approve: until the user turns it off
 
 The plan card shows the approval question once, as a radio group with one
-"Send answers" button (decision fdd52bd). Between the radio group and "Send
-answers" the card now has one more row: a checkbox, "Keep approving in this
+"Send answers" button (decision fdd52bd, updated as f615a37): the warning
+("Answering … runs this plan …"), the bold approval question and the radio
+group sit together in one box with an accent border while the plan waits
+(muted once answered). Between that box and "Send answers" the card has one
+more row: a checkbox, "Keep approving in this
 tab until I turn it off" (not shown once auto-approve is on, on an answered
 card, for a session on another computer, or with plan-first off). Sending a
 go-ahead with it ticked approves the plan as above and turns on auto-approve
