@@ -400,6 +400,22 @@ type itemTrack struct {
 	irev     map[int]int
 }
 
+// newItemTrack starts a session's tracker with an epoch and a rev that no
+// earlier tracker for it handed out, also one from before a Quill Desktop
+// restart: Quill Android keeps the largest rev it has seen across a restart
+// (rev = max(rev, new)) and fetches the open chat only when a session's rev
+// grows past it or its epoch changes, so revs that started over at 0 left
+// the open chat without live updates (user 2026-11-22). rev starts at the
+// clock in ms (a tracker bumps it far less than once per ms); the epoch, a
+// clock value in seconds that fits Android's int, makes the phone's next
+// incremental fetch get the fresh window instead of everything since its
+// old rev.
+var trackClock = time.Now // tests: a restart some time later
+
+func newItemTrack(now time.Time) *itemTrack {
+	return &itemTrack{epoch: int(now.Unix() % 1_000_000_000), rev: int(now.UnixMilli())}
+}
+
 func (t *itemTrack) reset(c *chat.Conversation) {
 	t.conv = c
 	t.epoch++
@@ -462,7 +478,7 @@ func (t *itemTrack) update(s *deskSession) {
 func (a *phoneAPI) track(s *deskSession) *itemTrack {
 	t := a.tracks[s.id]
 	if t == nil {
-		t = &itemTrack{}
+		t = newItemTrack(trackClock())
 		a.tracks[s.id] = t
 	}
 	t.update(s)
