@@ -44,7 +44,7 @@ func TestDesktopNotifications(t *testing.T) {
 	})
 	h.eventually("approval notification", func() bool { return has("Launcher needs approval") })
 	h.eventually("allow button", func() bool { return h.button("Allow") != nil })
-	h.ui(func() { test.Tap(h.button("Allow")) })
+	h.ui(func() { h.d.chat.btnChanged = time.Time{}; test.Tap(h.button("Allow")) })
 	h.eventually("finished notification", func() bool { return has("Launcher finished | done allow") })
 
 	h.ui(func() {
@@ -55,7 +55,7 @@ func TestDesktopNotifications(t *testing.T) {
 		h.d.send("demo")
 	})
 	h.eventually("allow button again", func() bool { return h.button("Allow") != nil })
-	h.ui(func() { test.Tap(h.button("Allow")) })
+	h.ui(func() { h.d.chat.btnChanged = time.Time{}; test.Tap(h.button("Allow")) })
 	h.eventually("turn done", func() bool {
 		return !s.conv.Busy && s.conv.Items[len(s.conv.Items)-1].Text == "done allow" && len(s.conv.PendingPermissions()) == 0
 	})
@@ -107,7 +107,7 @@ func TestPhoneEvents(t *testing.T) {
 		h.d.send("demo")
 	})
 	h.eventually("allow button", func() bool { return h.button("Allow") != nil })
-	h.ui(func() { test.Tap(h.button("Allow")) })
+	h.ui(func() { h.d.chat.btnChanged = time.Time{}; test.Tap(h.button("Allow")) })
 	var got []folders.Event
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		if got = events(); len(got) >= 2 {

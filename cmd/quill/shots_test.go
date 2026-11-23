@@ -201,7 +201,7 @@ func TestScreenshots(t *testing.T) {
 	h.eventually("permission", func() bool { return s.status() == stWaiting && h.button("Allow") != nil })
 	snap("permission.png")
 
-	h.ui(func() { test.Tap(h.button("Allow")) })
+	h.ui(func() { h.d.chat.btnChanged = time.Time{}; test.Tap(h.button("Allow")) })
 	h.eventually("done", func() bool { it := lastItem(s); return it != nil && it.Text == "done allow" })
 	h.ui(func() {
 		h.d.center = true

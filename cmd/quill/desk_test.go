@@ -378,6 +378,7 @@ func TestResumePermissionAndInterrupt(t *testing.T) {
 		if h.d.stopBtn.Disabled() {
 			t.Fatal("stop should be enabled while waiting")
 		}
+		h.d.chat.btnChanged = time.Time{}
 		test.Tap(h.button("Allow always (this session)"))
 	})
 	h.eventually("turn done", func() bool {

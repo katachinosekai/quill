@@ -96,6 +96,7 @@ type streamView struct {
 	fadeDirty bool               // the last draw had faded characters
 	lastFade  [textFadeSteps]int // the fade steps of the last draw
 	liveRT    *widget.RichText   // the live paragraph's one RichText, redrawn in place
+	marks     []bool             // Markdown markers of the reply text (mdstream.go)
 	liveTree  fyne.CanvasObject  // centred / lettered: the live blocks, updated in place
 }
 
@@ -244,14 +245,32 @@ func (st *streamView) advance(text string) {
 	st.carry += revealRate(st.speed, gap)
 	step := int(st.carry)
 	st.carry -= float64(step)
-	n := min(st.pos+step, len(text))
-	for n < len(text) && !utf8.RuneStart(text[n]) {
+	// Markers take no time: step counts the bytes that show.
+	marks := st.markers(text)
+	n, shown, runes := st.pos, 0, 0
+	for n < len(text) && (shown < step || marks[n] || !utf8.RuneStart(text[n])) {
+		if !marks[n] {
+			shown++
+			if utf8.RuneStart(text[n]) {
+				runes++
+			}
+		}
 		n++
 	}
 	if st.animated {
-		st.noteReveal(utf8.RuneCountInString(text[st.pos:n]), streamNow())
+		st.noteReveal(runes, streamNow())
 	}
 	st.pos = n
+}
+
+// markers: which bytes of text are Markdown markers (cached while the text
+// does not grow).
+func (st *streamView) markers(text string) []bool {
+	if len(st.marks) != len(text) {
+		st.marks = make([]bool, len(text))
+		scanMD(text, st.marks)
+	}
+	return st.marks
 }
 
 // drawStream shows st.it.Text[:st.pos]: new finished paragraphs are added
@@ -286,13 +305,17 @@ func (v *chatView) drawStream(st *streamView, iv *itemView) {
 		st.shown, st.lastFade = live, counts
 		st.renders++
 		st.fadeDirty = total > 0
+		disp := live
+		if st.animated {
+			disp = streamMarkdown(live)
+		}
 		switch {
-		case strings.TrimSpace(live) == "":
+		case strings.TrimSpace(disp) == "":
 			st.liveRT, st.liveTree = nil, nil
 			st.live.Objects = nil
 			st.live.Refresh()
 		case st.animated:
-			v.drawLiveFaded(st, closeOpenMarkdown(live), counts)
+			v.drawLiveFaded(st, disp, counts)
 		default:
 			st.live.Objects = []fyne.CanvasObject{msgText(v.markdown(closeOpenMarkdown(live)))}
 			st.live.Refresh()
