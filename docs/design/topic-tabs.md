@@ -307,7 +307,8 @@ rotation, Quit and /clear:
 - `safePoint` also waits for running subagents (Q19), for all sessions.
 - Not done here: `endWait` is not persisted across a Quill restart
   (`restore.go` keeps `kmemSave` only); the phone API's `endWait` field
-  (sub G); `relaunch.go`'s "Restart from kmem?" dialog text (sub F).
+  (sub G); `relaunch.go`'s "Restart from kmem?" dialog text (done in sub F,
+  §3.12 as built).
 
 ### 3.10 Topic briefing for subagents
 
@@ -352,6 +353,49 @@ to topic slugs; `org.Ended`/`Hidden`/`RC` kept; `d.tabs` of ended sessions
 removed. Archived/inactive transcripts without a kmem handoff: unlisted,
 only searchable (Q20). One notice: "Sessions are now topic tabs; the state
 of each topic is in kmem → Topics; N older conversations stay on disk."
+
+**As built (sub F, branch feat/topics-f, 2026-11-23):**
+
+- Gate: kmem memory mode and `"end-check"` in `kmem version --json`
+  (`migrateTopicsWhenReady`, run once at startup after the bundled kmem
+  update). Without the feature, End, rotation and `--resume-all` keep the
+  handoff flows and the places (§3.9 "until K2/K4 ship"); the installed kmem
+  (no features) changes nothing. Claude-memory mode never migrates.
+- `topicmigrate.go` `migrateTopics`: first a backup file
+  `~/.config/fyne/<app id>/backups/sidebar-org-pre-topics-YYYYMMDD-HHMMSS.json`
+  (`-N` suffix if taken, 0600, read back before anything changes) with the
+  raw `sidebarOrg`, `tabs`, `sortState`, `folderOpen` values, plus the
+  `sidebarOrgPreTopics`/`tabsPreTopics` copies. If the backup fails nothing
+  changes and the next start retries. Then: `Place` emptied, `Folders`
+  dropped, `Names` of place/folder keys dropped, `sortState` removed, tabs of
+  ended (not running) sessions closed; marker `topicMigration=1`.
+- Kept unchanged: **all** `Titles` (user 2026-11-23: keep all titles, not
+  only live ids), `Kmem`, `Ended`, `Hidden`, `RC`, `Projects`, `Dirs`.
+- `Projects`/`Dirs` are not re-keyed at migration time (user 2026-11-23,
+  option C): when an old-name session merges or ends (`markEnded`, quick end
+  in `endWithHandoff`), its project's extra folders are **copied** (never
+  moved) to the project of the topic it maps to through kmem config
+  `sessions[name].topic` (f574201; read at that moment, so later mappings
+  count; free text is no mapping; topic kmem skipped). Target project =
+  `Projects[topic]`, else the topic title (`carryDirsToTopic`).
+- After the migration no place is written (`putPlace`/`setPlacement` only
+  clear, `endPlace()` = ""): End, close, rotation, /clear, restart, fork and
+  the kmem assistant's move-in write none; notices drop "moved to …".
+- Restart dialog (`relaunch.go`): a running topic session with the check gets
+  "Restart this topic?" (end-of-session check, then a fresh topic session
+  from the briefing; old session deleted); old-name sessions keep "Restart
+  from kmem?" (f5d45ef).
+- Quit records `topicsLiveAtQuit` (slugs) and `topicSessionsAtQuit` (ids).
+  After the migration `quill --resume-all` reopens those topics through
+  `openTopic` (switch if live); a stopped, restored tab of a recorded session
+  is closed and marked ended first (never resumed). Before the migration it
+  resumes Inactive/Archive handoffs as before.
+- Dead code removed in both modes: the `rules.go` sorting state
+  (`rulePlace`/`stickyPlace`/`fixedActive`/`resortNow`, `sortState`),
+  `projectRows`, `autoPlace`, `newFolder`, folder/place drop targets. The
+  Format Rules dialog still describes Active/Inactive/Archive (its
+  `isActive`/`isInactive` are in `sidebar.go`, sub I); `orgFolder` and
+  `sortedFolders` stay for `sidebar.go`.
 
 ## 4. kmem commands this assumes (kmem-lock-audit plans the kmem side)
 

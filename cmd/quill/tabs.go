@@ -114,7 +114,6 @@ func (d *desk) purgeEmpty(id string) {
 	delete(d.created, id)
 	delete(d.org.Titles, id)
 	delete(d.org.Place, id)
-	delete(d.sorted.Place, id)
 	for i, t := range d.tabs {
 		if t == id {
 			d.tabs = append(d.tabs[:i], d.tabs[i+1:]...)
@@ -579,7 +578,7 @@ func (d *desk) tabMenuItems(id string) []*fyne.MenuItem {
 // opens a new tab on the "Open a topic" card.
 func (d *desk) switchTopic(id string) {
 	d.closeTab(id)
-	d.endWithSave(id, placeInactive)
+	d.endWithSave(id, d.endPlace())
 	d.newSessionDialog()
 }
 

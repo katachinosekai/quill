@@ -371,7 +371,7 @@ func (d *desk) kmemAssistMoveIn(a *kmemAssist, o *deskSession) {
 		return
 	}
 	title, _, _ := d.rowText(o.id)
-	d.endAndSaveTo(o.id, placeInactive)
+	d.endAndSaveTo(o.id, d.endPlace())
 	d.kmemAssistReason(a, fmt.Sprintf("Waiting for the tab “%s” to save its kmem handoff...", title))
 	d.kmemAssistWaitOwner(a, a.run, o, title, time.Now().Add(3*kmemWinSaveWait))
 }

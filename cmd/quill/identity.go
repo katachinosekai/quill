@@ -109,7 +109,7 @@ func (d *desk) closeAndEnd(id string) {
 			return
 		}
 		s.pendingEnd = 0
-		d.endWithSave(id, placeInactive)
+		d.endWithSave(id, d.endPlace())
 	})
 }
 
@@ -139,6 +139,7 @@ func (d *desk) endWithHandoff(id, place string) {
 	s := d.sessions[id]
 	if s == nil || !s.running() || trivialSession(s) || d.ensureKmem(id) == "" {
 		d.endSession(id)
+		d.carryDirsToTopic(id)
 		d.setPlacement(id, place)
 		d.refreshSidebar()
 		return
@@ -153,7 +154,7 @@ func (d *desk) endWithHandoff(id, place string) {
 			return
 		}
 		s.kmemSave = nil
-		d.notify(s, fmt.Sprintf("This session didn't save its kmem handoff “%s” within %d minutes, so it was not ended; it keeps running in %s. Close it again once it can save.", ks.name, int(kmemEndTimeout/time.Minute), d.folderTitle(place, "Inactive")))
+		d.notify(s, fmt.Sprintf("This session didn't save its kmem handoff “%s” within %d minutes, so it was not ended; it keeps running. Close it again once it can save.", ks.name, int(kmemEndTimeout/time.Minute)))
 		d.refreshSidebar()
 	})
 }
@@ -176,6 +177,7 @@ func (d *desk) markEnded(id string) {
 		d.org.Ended = map[string]bool{}
 	}
 	d.org.Ended[id] = true
+	d.carryDirsToTopic(id)
 	d.saveOrg()
 }
 

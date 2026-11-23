@@ -406,8 +406,6 @@ type desk struct {
 	sideOff       bool
 	sideBody      *fyne.Container
 	folderOpen    map[string]bool
-	sorted        sortState
-	sortDirty     bool
 	org           sideOrg
 	rowPlace      map[string]string
 	sideItems     []*sideItem
@@ -448,7 +446,7 @@ func newDesk(a fyne.App, w fyne.Window, cfg config) *desk {
 	d.pcNote = map[string]string{}
 	d.loadOrg()
 	d.loadRules()
-	d.loadSortState()
+	d.loadFolderOpen()
 	for _, id := range a.Preferences().StringList("createdSessions") {
 		d.created[id] = true
 	}
@@ -930,29 +928,6 @@ func (d *desk) rebuildRows() {
 	}
 	d.listTheme.Refresh()
 	d.suppress = false
-}
-
-func (d *desk) projectRows(es []sideEntry, depth int, prefix string, forceOpen bool) []sideRow {
-	var rows []sideRow
-	if !d.groupProjects {
-		parent := strings.TrimSuffix(prefix, ":")
-		for _, e := range sortRecent(es) {
-			rows = append(rows, sideRow{id: e.id, depth: depth, parent: parent})
-		}
-		return rows
-	}
-	for _, g := range groupByFolder(es) {
-		key := prefix + g.cwd
-		open := forceOpen || d.isOpen(key)
-		rows = append(rows, sideRow{header: d.folderTitle(key, tildePath(g.cwd)), key: key, depth: depth, count: len(g.items), open: open})
-		if open {
-			parent := strings.TrimSuffix(prefix, ":")
-			for _, e := range g.items {
-				rows = append(rows, sideRow{id: e.id, depth: depth + 1, parent: parent})
-			}
-		}
-	}
-	return rows
 }
 
 func (d *desk) isOpen(key string) bool {
@@ -2327,6 +2302,7 @@ func (d *desk) confirmClose() {
 func (d *desk) confirmQuit() {
 	running := d.runningSessions()
 	if len(running) == 0 {
+		d.rememberTopicsAtQuit()
 		d.app.Quit()
 		return
 	}
@@ -2345,6 +2321,7 @@ func (d *desk) confirmQuit() {
 // second confirm (decision 22). Then the kmem assistant saves its handoff and
 // everything stops.
 func (d *desk) quitConfirmed(checks []*deskSession) {
+	d.rememberTopicsAtQuit()
 	prog := dialog.NewCustomWithoutButtons("Stopping sessions...", widget.NewProgressBarInfinite(), d.win)
 	prog.Show()
 	stop := func() {

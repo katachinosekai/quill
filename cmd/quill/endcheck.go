@@ -402,9 +402,7 @@ func (d *desk) finishTopicEnd(s *deskSession, place string) {
 		s.stopping = true
 		go func() { _ = p.Stop(5 * time.Second) }()
 	}
-	if place != "" {
-		d.org.Place[s.id] = place
-	}
+	d.putPlace(s.id, place)
 	d.markEnded(s.id)
 	d.saveOrg()
 	d.closeTab(s.id)

@@ -158,7 +158,18 @@ func handoffPrompt(oldID, path, title string, conv *chat.Conversation, brief str
 
 func (d *desk) askRelaunch(id string) {
 	title, _, _ := d.rowText(id)
+	if d.endCheckFor(d.session(id)) {
+		dialog.ShowConfirm("Restart this topic?", restartTopicText(title, d.topicTitleOf(id)),
+			func(ok bool) {
+				if ok {
+					d.rotateTopic(id)
+				}
+			}, d.win)
+		return
+	}
 	if name := d.org.Kmem[id]; name != "" && d.kmemAvailable() {
+		// An old-name session (not merged into a topic yet) keeps the
+		// handoff save (decision f5d45ef).
 		dialog.ShowConfirm("Restart from kmem?",
 			fmt.Sprintf("“%s” is asked to save its kmem handoff “%s”. Once it is saved, a fresh session with the same name, folder, model and mode resumes from it, and this session is deleted (its knowledge is in kmem). If the handoff isn't saved, nothing is deleted.", title, name),
 			func(ok bool) {
@@ -168,13 +179,32 @@ func (d *desk) askRelaunch(id string) {
 			}, d.win)
 		return
 	}
+	closed := "will be closed and moved to Archive"
+	if d.placesRemoved() {
+		closed = "will be closed"
+	}
 	dialog.ShowConfirm("Restart as a new session?",
-		fmt.Sprintf("“%s” will be closed and moved to Archive. A fresh session with the same name, folder, model and mode starts. Claude compacts the old conversation into a short brief, and the new session takes over from that brief and the last few messages. The old session's history is kept.", title),
+		fmt.Sprintf("“%s” %s. A fresh session with the same name, folder, model and mode starts. Claude compacts the old conversation into a short brief, and the new session takes over from that brief and the last few messages. The old session's history is kept.", title, closed),
 		func(ok bool) {
 			if ok {
 				d.relaunchSession(id)
 			}
 		}, d.win)
+}
+
+// restartTopicText: the restart dialog of a topic session (rotation through
+// the end-of-session check; no handoff).
+func restartTopicText(title, topic string) string {
+	return fmt.Sprintf("“%s” runs its end-of-session check first (claimed tasks checkpointed or released, status fact current). Once it passes, a fresh %s session starts from the topic's kmem briefing and this session is deleted (its state is in kmem). If the check does not pass, nothing is deleted.", title, topic)
+}
+
+// topicTitleOf: the title of the topic a session coordinates.
+func (d *desk) topicTitleOf(id string) string {
+	slug := d.topicOf(id)
+	if t, ok := cachedTopic(slug); ok && t.Title != "" {
+		return t.Title
+	}
+	return topicTitle(slug)
 }
 
 func (d *desk) clearSession(s *deskSession) {
@@ -202,7 +232,7 @@ func (d *desk) clearNow(s *deskSession) {
 	s.queue = nil
 	d.syncQueue(s)
 	ns := d.replaceWith(s, title)
-	d.org.Place[s.id] = placeInactive
+	d.putPlace(s.id, placeInactive)
 	d.saveOrg()
 	d.refreshSidebar()
 	if len(queued) > 0 {
@@ -246,7 +276,7 @@ func (d *desk) relaunchSession(id string) {
 	}
 	ns := d.replaceWith(old, title)
 	ns.restarting = true
-	d.org.Place[id] = placeArchive
+	d.putPlace(id, placeArchive)
 	d.saveOrg()
 	d.compactInto(ns, id, path, title, conv)
 }
@@ -283,7 +313,7 @@ func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
 	ns := d.addSession(old.cwd, old.model, old.mode, false)
 	d.org.Titles[ns.id] = title
 	if strings.HasPrefix(place, folderPrefix) || place == placeAuto {
-		d.org.Place[ns.id] = place
+		d.putPlace(ns.id, place)
 	}
 	var tabs []string
 	replaced := false

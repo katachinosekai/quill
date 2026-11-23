@@ -1273,7 +1273,7 @@ func (d *desk) forkSession(s *deskSession) (*deskSession, error) {
 	}
 	d.org.Titles[id] = title + " (fork)"
 	if place := d.placement(s.id); strings.HasPrefix(place, folderPrefix) {
-		d.org.Place[id] = place
+		d.putPlace(id, place)
 	}
 	d.saveOrg()
 	go d.refresh()

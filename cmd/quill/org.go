@@ -102,12 +102,36 @@ func (d *desk) placement(id string) string {
 }
 
 func (d *desk) setPlacement(id, place string) {
-	if place == "" {
-		delete(d.org.Place, id)
-	} else {
-		d.org.Place[id] = place
-	}
+	d.putPlace(id, place)
 	d.saveOrg()
+}
+
+// putPlace records a session's sidebar place (Inactive, Archive, ...) without
+// saving. After the topic migration (topicmigrate.go) there are no places:
+// it only clears one.
+func (d *desk) putPlace(id, place string) {
+	if place == "" || d.placesRemoved() {
+		delete(d.org.Place, id)
+		return
+	}
+	d.org.Place[id] = place
+}
+
+// endPlace: the place an ended session goes to; none after the topic
+// migration.
+func (d *desk) endPlace() string {
+	if d.placesRemoved() {
+		return ""
+	}
+	return placeInactive
+}
+
+// movedTo: " and moved to <place>" for end notices; "" without places.
+func (d *desk) movedTo(place string) string {
+	if place == "" || d.placesRemoved() {
+		return ""
+	}
+	return " and moved to " + d.folderTitle(place, place)
 }
 
 func (d *desk) folderTitle(key, fallback string) string {
@@ -120,17 +144,6 @@ func (d *desk) folderTitle(key, fallback string) string {
 		}
 	}
 	return fallback
-}
-
-func (d *desk) newFolder(onDone func(id string)) {
-	d.askName("New folder", "", func(name string) {
-		id := fmt.Sprintf("%d", time.Now().UnixNano())
-		d.org.Folders = append(d.org.Folders, orgFolder{ID: id, Name: name})
-		d.saveOrg()
-		if onDone != nil {
-			onDone(id)
-		}
-	})
 }
 
 func (d *desk) askName(title, current string, onOK func(string)) {
@@ -182,7 +195,7 @@ func (d *desk) sessionMenuItems(id string) []*fyne.MenuItem {
 		d.sessionToolsItem(id),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
-		fyne.NewMenuItem("End session", func() { d.closeTab(id); d.endWithSave(id, placeInactive) }),
+		fyne.NewMenuItem("End session", func() { d.closeTab(id); d.endWithSave(id, d.endPlace()) }),
 		fyne.NewMenuItem("Delete session...", func() { d.askDelete(id) }),
 	)
 	return items
@@ -240,13 +253,17 @@ func (d *desk) askEndProject(key, name string) {
 	if len(ids) == 0 {
 		return
 	}
-	dialog.ShowConfirm("End all in “"+name+"”?", fmt.Sprintf("%d session(s) save their kmem handoffs and close. Resume them later from the kmem panel.", len(ids)), func(ok bool) {
+	msg := fmt.Sprintf("%d session(s) save their kmem handoffs and close. Resume them later from the kmem panel.", len(ids))
+	if d.placesRemoved() {
+		msg = fmt.Sprintf("%d session(s) close: topic sessions after their end-of-session check, older ones after saving their kmem handoffs. Their conversations stay on disk.", len(ids))
+	}
+	dialog.ShowConfirm("End all in “"+name+"”?", msg, func(ok bool) {
 		if !ok {
 			return
 		}
 		for _, id := range ids {
 			d.closeTab(id)
-			d.endWithSave(id, placeInactive)
+			d.endWithSave(id, d.endPlace())
 		}
 	}, d.win)
 }
@@ -294,50 +311,15 @@ func (d *desk) endSession(id string) {
 	}, d.win)
 }
 
+// dropOn: a session dropped on a project header or on another session's row
+// joins that project (the sidebar has no places or folders since 135bd4b).
 func (d *desk) dropOn(id string, target sideRow) {
 	switch {
 	case target.id != "" && target.id != id && strings.HasPrefix(target.parent, projectPrefix):
 		d.setProject(id, d.projectOf(target.id))
-		return
 	case strings.HasPrefix(target.key, projectPrefix):
 		d.setProject(id, strings.TrimPrefix(target.key, projectPrefix))
-		return
 	}
-	switch {
-	case target.id != "":
-		if target.id == id {
-			return
-		}
-		p := d.placement(target.id)
-		if p == "" {
-			p = d.autoPlace(target.id)
-		}
-		d.setPlacement(id, p)
-	case strings.HasPrefix(target.key, folderPrefix):
-		d.setPlacement(id, target.key)
-	case target.key == placeInactive || strings.HasPrefix(target.key, placeInactive+":"):
-		d.placeSession(id, placeInactive)
-	case target.key == placeArchive || strings.HasPrefix(target.key, placeArchive+":"):
-		d.placeSession(id, placeArchive)
-	case target.key == placeAuto || strings.HasPrefix(target.key, placeAuto+":"):
-		d.setPlacement(id, placeAuto)
-	case target.key == placeActive || strings.HasPrefix(target.key, "a:"):
-		d.setPlacement(id, placeActive)
-	}
-}
-
-func (d *desk) autoPlace(id string) string {
-	for _, r := range d.rows {
-		if r.id == id {
-			switch {
-			case strings.HasPrefix(r.parent, folderPrefix):
-				return r.parent
-			case r.parent == placeInactive, r.parent == placeArchive, r.parent == placeAuto:
-				return r.parent
-			}
-		}
-	}
-	return placeActive
 }
 
 type sideItem struct {

@@ -92,116 +92,13 @@ func (d *desk) rulesDialog() {
 		}
 		d.app.Preferences().SetBool("skipDeleteWarning", !warnChk.Checked)
 		d.setRules(sortRules{ActiveMinutes: a, ArchiveDays: b, ClaudeFolder: claudeChk.Checked, RecentActive: !fixedChk.Checked})
-		d.resortNow()
 	}, d.win)
 	dlg.Resize(fyne.NewSize(520, 360))
 	dlg.Show()
 }
 
-const demoteEvery = 30 * time.Minute
-
-type sortState struct {
-	Place  map[string]string `json:"place"`
-	At     int64             `json:"at"`
-	Active []string          `json:"active"`
-}
-
-func placeRank(p string) int {
-	switch p {
-	case placeActive:
-		return 0
-	case placeArchive:
-		return 2
-	}
-	return 1
-}
-
-func (d *desk) loadSortState() {
-	d.sorted = sortState{Place: map[string]string{}}
-	if b := d.app.Preferences().String("sortState"); b != "" {
-		_ = json.Unmarshal([]byte(b), &d.sorted)
-	}
-	if d.sorted.Place == nil {
-		d.sorted.Place = map[string]string{}
-	}
+func (d *desk) loadFolderOpen() {
 	if b := d.app.Preferences().String("folderOpen"); b != "" {
 		_ = json.Unmarshal([]byte(b), &d.folderOpen)
 	}
-}
-
-func (d *desk) saveSortState() {
-	if b, err := json.Marshal(d.sorted); err == nil {
-		d.app.Preferences().SetString("sortState", string(b))
-	}
-}
-
-func (d *desk) demoteDue() bool {
-	return time.Since(time.Unix(d.sorted.At, 0)) >= demoteEvery
-}
-
-func (d *desk) rulePlace(e sideEntry) string {
-	switch {
-	case d.isActive(e.id, e.last):
-		return placeActive
-	case d.isInactive(e.id, e.last):
-		return placeArchive
-	}
-	return placeInactive
-}
-
-func (d *desk) stickyPlace(e sideEntry, demote bool) string {
-	want := d.rulePlace(e)
-	prev, ok := d.sorted.Place[e.id]
-	if ok && placeRank(want) > placeRank(prev) && !demote {
-		return prev
-	}
-	if prev != want {
-		d.sorted.Place[e.id] = want
-		d.sortDirty = true
-	}
-	return want
-}
-
-func (d *desk) resortNow() {
-	d.sorted.At = 0
-	d.rebuildRows()
-}
-
-func (d *desk) fixedActive(es []sideEntry) []sideEntry {
-	in := map[string]sideEntry{}
-	for _, e := range es {
-		in[e.id] = e
-	}
-	var order []string
-	var out []sideEntry
-	for _, id := range d.sorted.Active {
-		if e, ok := in[id]; ok {
-			order = append(order, id)
-			out = append(out, e)
-			delete(in, id)
-		}
-	}
-	for _, e := range sortRecent(es) {
-		if _, ok := in[e.id]; ok {
-			order = append(order, e.id)
-			out = append(out, e)
-		}
-	}
-	if !equalIDs(order, d.sorted.Active) {
-		d.sorted.Active = order
-		d.sortDirty = true
-	}
-	return out
-}
-
-func equalIDs(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -167,7 +167,13 @@ func (d *desk) listenInstance(path string) {
 					if strings.HasSuffix(strings.TrimSpace(line), placeArchive) {
 						key = placeArchive
 					}
-					d.do(func() { d.resumeAll(d.resumableIn(key)) })
+					d.do(func() {
+						if d.placesRemoved() {
+							d.reopenTopicsAtQuit() // topic tabs: no Inactive/Archive any more
+							return
+						}
+						d.resumeAll(d.resumableIn(key))
+					})
 				case "reload":
 					// `quill --reload` is the user asking. The line after "ok"
 					// says whether it switches or what it waits for.

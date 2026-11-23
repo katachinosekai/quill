@@ -36,7 +36,7 @@ func main() {
 	claudeBin := flag.String("claude", "claude", "claude CLI to run")
 	reload := flag.Bool("reload", false, "ask the running Quill to switch to this build now")
 	heapFlag := flag.Bool("heap", false, "write a heap profile of the running Quill into $XDG_RUNTIME_DIR/quill-heap-<pid>.pprof")
-	resumeAll := flag.Bool("resume-all", false, "ask the running Quill to resume every ended kmem session in Inactive from its handoff")
+	resumeAll := flag.Bool("resume-all", false, "ask the running Quill Desktop to reopen the kmem topics that were live when it last quit, as fresh sessions (before topic tabs: resume every ended kmem session in Inactive, or Archive with the argument archive, from its handoff)")
 	resumeOne := flag.String("resume", "", "ask the running Quill to open the session with this kmem name, or start one from its handoff")
 	kmemWindow := flag.Bool("kmem-window", false, "ask the running Quill Desktop to open its kmem window (the Monday check-in uses it)")
 	profile := flag.Bool("profile", false, "record 10 s of the running Quill's CPU use into $XDG_RUNTIME_DIR/quill-cpu-<pid>.pprof")
@@ -136,6 +136,9 @@ func runWindowWith(claudeBin, sock string) int {
 			d.kmemVer.reset()
 			d.refreshKmemVer() // the version line must not keep offering the update just done
 		}
+		// One-time move to topic tabs once kmem has the end-of-session
+		// check (topicmigrate.go); after the update so a new kmem counts.
+		d.migrateTopicsWhenReady()
 	}()
 	d.watchFocus()
 	d.startNotifier()

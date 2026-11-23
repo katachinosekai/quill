@@ -535,7 +535,7 @@ func (d *desk) endAndSaveTo(id, place string) {
 		spare = 1
 	}
 	s.kmemSave = &kmemSave{name: name, asked: time.Now().Add(-2 * time.Second), spare: spare, end: true, place: place}
-	d.notify(s, fmt.Sprintf("Ending: waiting for this session to save its kmem handoff “%s”; it is stopped and moved to %s after that.", name, d.folderTitle(place, place)))
+	d.notify(s, fmt.Sprintf("Ending: waiting for this session to save its kmem handoff “%s”; it is stopped%s after that.", name, d.movedTo(place)))
 	d.sendTo(s, kmemEndMessage(name))
 }
 
@@ -551,16 +551,16 @@ func (d *desk) finishKmemEnd(s *deskSession, name, place string) {
 		d.markEnded(s.id)
 		return
 	}
-	if place == "" {
+	if place == "" && !d.placesRemoved() {
 		place = placeArchive
 	}
-	d.notify(s, fmt.Sprintf("Saved kmem handoff “%s”; this session is stopped and moved to %s (nothing deleted).", name, d.folderTitle(place, place)))
+	d.notify(s, fmt.Sprintf("Saved kmem handoff “%s”; this session is stopped%s (nothing deleted).", name, d.movedTo(place)))
 	if s.running() {
 		p := s.proc
 		s.stopping = true
 		go func() { _ = p.Stop(5 * time.Second) }()
 	}
-	d.org.Place[s.id] = place
+	d.putPlace(s.id, place)
 	d.markEnded(s.id)
 	d.saveOrg()
 	d.closeTab(s.id)

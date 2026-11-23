@@ -111,7 +111,7 @@ func (a *phoneAPI) menuAction(s *deskSession, action string, in writeBody) (map[
 		return a.sessionOut(id), nil
 	case "end":
 		d.closeTab(id)
-		d.endWithSave(id, placeInactive)
+		d.endWithSave(id, d.endPlace())
 		return map[string]any{"saving": s.kmemSave != nil}, nil
 	case "delete":
 		if s.terminal != nil && !s.running() {
