@@ -757,13 +757,17 @@ var sessionKey struct {
 	k []byte
 }
 
-// initSessionKey makes this launch's key for session tokens; a handover
-// (reload, or a restart after a crash, with sessions still running) keeps
-// the key the sessions' tokens were made with.
+// initSessionKey makes this launch's key for session tokens. On Linux a
+// handover (reload, or a restart after a crash, with sessions still running)
+// keeps the key the sessions' tokens were made with, from a 0600 file in the
+// private runtime folder; reading that file doesn't help another session,
+// as the socket peer must also run under the operator (settingspeer_linux.go).
+// Without peer credentials the key is never written down: the token is all
+// there is, so a reload ends the operator's right to write until it restarts.
 func initSessionKey(handover bool) {
 	path := filepath.Join(privateDir(), sessionKeyFile)
 	var k []byte
-	if handover {
+	if handover && peerCredsSupported {
 		if b, err := os.ReadFile(path); err == nil && len(b) == 64 {
 			k, _ = hex.DecodeString(string(b))
 		}
@@ -773,12 +777,15 @@ func initSessionKey(handover bool) {
 		if _, err := rand.Read(k); err != nil {
 			return
 		}
-		tmp := path + ".tmp"
-		_ = os.Remove(tmp)
-		if f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
-			_, werr := f.WriteString(hex.EncodeToString(k))
-			if f.Close() == nil && werr == nil {
-				_ = os.Rename(tmp, path)
+		_ = os.Remove(path)
+		if peerCredsSupported {
+			tmp := path + ".tmp"
+			_ = os.Remove(tmp)
+			if f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
+				_, werr := f.WriteString(hex.EncodeToString(k))
+				if f.Close() == nil && werr == nil {
+					_ = os.Rename(tmp, path)
+				}
 			}
 		}
 	}
