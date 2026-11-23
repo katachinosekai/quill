@@ -46,7 +46,9 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 	head := canvas.NewText("Open a topic", colText)
 	head.TextSize = 16
 	head.TextStyle.Bold = true
-	sub := mutedText("Each topic has one coordinator session that starts fresh from kmem. Anything you type now waits until you pick.", fontMeta)
+	// Two lines: one is wider than the 560 px card.
+	sub := container.NewVBox(mutedText("Each topic has one coordinator session that starts fresh from kmem.", fontMeta),
+		mutedText("Anything you type now waits until you pick.", fontMeta))
 	list := container.NewVBox(mutedText("Loading topics...", fontMeta))
 	name := widget.NewEntry()
 	name.SetPlaceHolder("New topic, e.g. Garden planner")
@@ -69,8 +71,10 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 	newRow := container.NewBorder(nil, nil, nil, start, name)
 	scroll := container.NewVScroll(list) // there can be dozens of top-level topics
 	scroll.SetMinSize(fyne.NewSize(0, list.MinSize().Height))
-	body := container.NewVBox(head, sub, widget.NewSeparator(), mutedText("Topics", fontMeta), scroll,
-		widget.NewSeparator(), mutedText("New topic…", fontMeta), newRow, preview)
+	// The new-topic row sits above the list so dozens of topics never push
+	// it out of view.
+	body := container.NewVBox(head, sub, widget.NewSeparator(), mutedText("New topic…", fontMeta), newRow, preview,
+		widget.NewSeparator(), mutedText("Topics", fontMeta), scroll)
 	bgr := canvas.NewRectangle(colCard)
 	bgr.CornerRadius = 14
 	card := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(12, 12, 16, 16), body))
@@ -102,11 +106,18 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 				rows = append(rows, b)
 			}
 			if len(rows) == 0 {
-				rows = append(rows, mutedText("No kmem topics yet: name a new one below.", fontMeta))
+				rows = append(rows, mutedText("No kmem topics yet: name a new one above.", fontMeta))
 			}
 			list.Objects = rows
 			list.Refresh()
 			scroll.SetMinSize(fyne.NewSize(0, min(list.MinSize().Height, 380)))
+			// The card grew: lay out the chat column it sits in, not just
+			// the card at its old size.
+			for _, v := range d.allViews() {
+				if v.s == s {
+					v.reflow()
+				}
+			}
 			relayoutTree(card)
 		})
 	}()

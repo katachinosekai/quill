@@ -323,12 +323,34 @@ func dot(c color.Color) *canvas.Circle {
 	return d
 }
 
+// fixedSize pins its content to size; a zero width or height follows the
+// content's MinSize instead (sized(560, 0, card): a fixed width, as tall as
+// the card needs). Pinning a height to 0 made the content overflow its
+// 0-high slot and draw over whatever came below it.
 type fixedSize struct{ size fyne.Size }
 
-func (f fixedSize) MinSize([]fyne.CanvasObject) fyne.Size { return f.size }
-func (f fixedSize) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+func (f fixedSize) sizeFor(objs []fyne.CanvasObject) fyne.Size {
+	s := f.size
+	if s.Width > 0 && s.Height > 0 {
+		return s
+	}
+	var m fyne.Size
 	for _, o := range objs {
-		s := f.size
+		m = m.Max(o.MinSize())
+	}
+	if s.Width <= 0 {
+		s.Width = m.Width
+	}
+	if s.Height <= 0 {
+		s.Height = m.Height
+	}
+	return s
+}
+
+func (f fixedSize) MinSize(objs []fyne.CanvasObject) fyne.Size { return f.sizeFor(objs) }
+func (f fixedSize) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	s := f.sizeFor(objs)
+	for _, o := range objs {
 		o.Resize(s)
 		o.Move(fyne.NewPos(0, (size.Height-s.Height)/2))
 	}
