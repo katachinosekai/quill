@@ -6,6 +6,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -249,7 +250,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			skip[i] = true
 		}
 	}
-	box := container.NewVBox(v.planToggle(plan, reply))
+	box := container.New(settledVBox{}, v.planToggle(plan, reply))
 	caption := func(text string) fyne.CanvasObject {
 		msg := widget.NewLabel(text)
 		msg.Wrapping = fyne.TextWrapWord
@@ -381,4 +382,26 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		v.noteButtons(plan.Seq, "none")
 	}
 	return box
+}
+
+// settledVBox is a VBox that lays out again when a block's height changed
+// while it was being laid out. A wrapped RichText (a list, a paragraph in a
+// column) only reports its real MinSize after it has been resized to its
+// column, so a plain VBox placed the next block by the height from before the
+// wrap and the approval box drew over the last wrapped list item.
+type settledVBox struct{}
+
+func (settledVBox) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	return layout.NewVBoxLayout().MinSize(objs)
+}
+
+func (settledVBox) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	vb := layout.NewVBoxLayout()
+	for pass := 0; pass < 4; pass++ {
+		before := vb.MinSize(objs)
+		vb.Layout(objs, size)
+		if vb.MinSize(objs) == before {
+			return
+		}
+	}
 }
