@@ -96,3 +96,48 @@ func TestChoiceButtonsOptionMarkers(t *testing.T) {
 		}
 	}
 }
+
+// t3ff30a: a blocked call in a turn that then failed with API errors (or wrote
+// no plan) showed "Approve this plan?" with nothing to approve.
+func TestNoPlanCardAfterFailedTurn(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.planFirst = true
+		end := func(texts []string, ev *protocol.Event) int {
+			s := h.d.createSession(h.proj, "default", "default")
+			h.d.open(s.id)
+			s.conv.AddUser("a request")
+			for _, x := range texts {
+				s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, Text: x})
+			}
+			s.planWait = true
+			h.d.planGate(s, ev, nil)
+			if s.planWait {
+				t.Fatal("the wait ends with the turn")
+			}
+			n := 0
+			for _, it := range s.conv.Items {
+				if it.Kind == chat.Plan {
+					n++
+				}
+			}
+			return n
+		}
+		apiErr := "API Error: Unable to connect to API (ECONNREFUSED)"
+		if end([]string{apiErr}, &protocol.Event{Type: "result", Subtype: "success", IsError: true, Result: apiErr}) != 0 {
+			t.Fatal("an API error: no plan card")
+		}
+		if end([]string{apiErr}, &protocol.Event{Type: "result"}) != 0 {
+			t.Fatal("only an API error message: no plan card")
+		}
+		if end(nil, &protocol.Event{Type: "result"}) != 0 {
+			t.Fatal("no plan text: no plan card")
+		}
+		if end([]string{"1. Edit x.\n2. Build."}, &protocol.Event{Type: "result", Subtype: "error_during_execution"}) != 0 {
+			t.Fatal("a failed turn: no plan card")
+		}
+		if end([]string{"1. Edit x.\n2. Build."}, &protocol.Event{Type: "result", Subtype: "success"}) != 1 {
+			t.Fatal("a written plan still gets the card")
+		}
+	})
+}

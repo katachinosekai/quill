@@ -2754,6 +2754,13 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			s.planWait = false
 			return nil
 		}
+		// A turn that failed (API errors such as ECONNREFUSED after retries)
+		// or wrote no text has no plan to approve: no card (t3ff30a, the kmem
+		// window showed "Approve this plan?" after a failed turn).
+		if s.planWait && (turnFailed(ev) || !turnHasText(s.conv)) {
+			s.planWait = false
+			return nil
+		}
 		if s.planWait || asks {
 			s.planWait = false
 			s.runAll, s.runAllNext = false, false
@@ -2763,6 +2770,29 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		}
 	}
 	return nil
+}
+
+// turnFailed: the turn's result reports an error (not a user interrupt).
+func turnFailed(ev *protocol.Event) bool {
+	if strings.HasPrefix(ev.TerminalReason, "aborted") {
+		return false
+	}
+	return ev.IsError || (ev.Subtype != "" && ev.Subtype != "success")
+}
+
+// turnHasText: the current turn wrote assistant text other than an
+// "API Error: …" message.
+func turnHasText(c *chat.Conversation) bool {
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		it := c.Items[i]
+		if it.Kind == chat.User || it.Kind == chat.Plan {
+			return false
+		}
+		if t := strings.TrimSpace(it.Text); it.Kind == chat.Assistant && t != "" && !strings.HasPrefix(t, "API Error") {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *desk) approveNow(s *deskSession) {
