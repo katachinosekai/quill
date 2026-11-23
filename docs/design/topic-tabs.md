@@ -281,6 +281,68 @@ rotation, Quit and /clear:
 4. Quill never resolves blockers itself (rule 2: only the session releases
    its pzlock turn; claims are the session's).
 
+### 3.8a Topic snapshot: a hybrid of handoffs and topics (proposal, user 2026-11-24; not decided)
+
+Amends §1.6 ("no handoffs for topic state"), §3.8 and K2/K4/K5. Status:
+**proposal for review** by kmem-lock-audit and the user; nothing is built
+until the user approves the final version.
+
+Why: tasks, the status fact and topic facts carry the *work*, but a
+handoff also carried what the next session needs *right away* and that
+fits none of them:
+
+- questions waiting on the user, with their options and the recommended
+  one (decision fd10b14: never assume an answer, ask again; 2026-11-24 the
+  open questions survived only because the handoff listed them);
+- running jobs, background subagents, worktrees and branches in flight (the
+  end-check only notes them for the end; the next session isn't told);
+- hypotheses and half-done reasoning ("X likely causes Y, unverified");
+- curated pointers: the handful of facts that matter now, not the
+  top-ranked ones;
+- peer coordination in flight (waiting for another session's go-ahead).
+
+Proposal: **one snapshot per topic**, the latest session's, stored the way
+a handoff is today (`handoff/<topic>`, same fields: pointers, state,
+hypothesis, job) and owned by the topic, not by a session name.
+
+1. **Written at the end-of-session check (K4).** `kmem end-check` gains a
+   snapshot step: it refuses (blocker `{"kind": "snapshot"}`) until the
+   session has saved the topic snapshot in this session, the same way it
+   asks for the status fact. Fields as `kmem handoff save` today, plus a
+   `--question "text | options | recommended"` line kind for open user
+   questions. "Checkpoint now" (§3.9) also saves it.
+2. **Read automatically (K2).** `kmem context --topic T` puts the topic's
+   snapshot at the top of the briefing (questions first, then jobs/
+   worktrees, hypotheses, pointers resolved to their current facts), marked
+   with its age. A fresh topic session therefore starts where the last one
+   stopped, with no "Resume" choice: the topic UI (§3.2) stays as designed.
+   Subagent briefs (§3.10) get the snapshot only when the task matches it
+   (questions and jobs are the coordinator's, not the subagent's).
+3. **Stale parts drop out.** A question the user answered (a matching
+   decision fact, or the coordinator removes it) and a job whose process
+   ended are left out of the briefing; pointers to retired facts follow
+   `--replaces` as `handoff get` does now. Snapshots older than the policy
+   TTL show as "old snapshot" with a one-line summary only.
+4. **Conversion (K5) becomes a merge.** Existing handoffs are merged into
+   their topic's snapshot (state lines that are tasks/facts still convert to
+   those; the rest stays in the snapshot) instead of being retired as
+   history only. Several old names in one topic: newest wins per line kind;
+   questions from all are kept.
+5. **Rotation unchanged.** The hard threshold (`rotateTopic`) runs the
+   end-check, so the snapshot is saved before the fresh session starts.
+6. **Quill Desktop side.** `endCheckMessage` lists the snapshot blocker in
+   plain words ("save this topic's snapshot: open questions, jobs,
+   worktrees, hypotheses, key facts"); the Topics tab (§3.5) shows the
+   snapshot (Show only) under the topic; the phone `GET /phone/topics`
+   gains `snapshotAt` and the open questions, so Quill Android can show them.
+7. **Rule 24** would read: "Before a session ends or is cleared, run the
+   end-of-session check (it saves the topic snapshot)."
+
+Open points for kmem-lock-audit: field names and JSON for the question line
+kind; whether the snapshot lives under `handoff/<topic>` (reuses `handoff
+get`, rename and policy code) or a new `snapshot/<topic>`; how K2 bounds
+its size inside the 3000-char briefing.
+
 ### 3.9 What changes in Quill Desktop's kmem code
 
 | Today | Change |
