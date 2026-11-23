@@ -160,3 +160,95 @@ index 45623e3..4cd6e3f 100644
 +	}
 +	return o
 +}
+
+--- a/internal/painter/font.go	2026-11-23 02:50:30.164618444 -0800
++++ b/internal/painter/font.go	2026-11-23 02:50:30.167654225 -0800
+@@ -110,10 +110,11 @@
+ 		faces.addFace(loadMeasureFont(added))
+ 	}
+ 
+-	local := lookupLangFont(family, aspect)
+-	if local != nil {
+-		faces.addFace(local)
+-	}
++	// The system-locale font is looked up on the first glyph none of the
++	// bundled fonts has (Quill patch): the lookup scans every installed
++	// font and loads the locale's whole font file.
++	faces.aspect = aspect
++	faces.lazyLang = true
+ 
+ 	return faces
+ }
+@@ -191,6 +192,7 @@
+ func ClearFontCache() {
+ 	fontCache.Clear()
+ 	fontCustomCache.Clear()
++	parsedFonts.Range(func(k, _ any) bool { parsedFonts.Delete(k); return true })
+ 
+ 	runBufferMut.Lock()
+ 	clear(shapeCache)
+@@ -224,13 +226,32 @@
+ 	})
+ }
+ 
++// parsedFonts holds each font resource parsed once (Quill patch, 2026-11-22):
++// fontCache is keyed by theme scope, and every ThemeOverride (Quill puts
++// one around each chat message) is its own scope, so each one parsed the
++// theme, fallback and emoji fonts again: 1.3 GB of duplicate font tables
++// after a few hours, and a garbage collector that never stopped.
++var parsedFonts sync.Map // fontKey -> *font.Face
++
++type fontKey struct {
++	name string
++	size int
++}
++
+ func loadMeasureFont(data fyne.Resource) *font.Face {
+-	loaded, err := font.ParseTTF(bytes.NewReader(data.Content()))
++	content := data.Content()
++	key := fontKey{data.Name(), len(content)}
++	if f, ok := parsedFonts.Load(key); ok {
++		return f.(*font.Face)
++	}
++	loaded, err := font.ParseTTF(bytes.NewReader(content))
+ 	if err != nil {
+ 		fyne.LogError("font load error", err)
+ 		return nil
+ 	}
+-
++	if f, dup := parsedFonts.LoadOrStore(key, loaded); dup {
++		return f.(*font.Face)
++	}
+ 	return loaded
+ }
+ 
+@@ -582,8 +603,10 @@
+ func (n noopLogger) Printf(string, ...any) {}
+ 
+ type dynamicFontMap struct {
+-	faces  []*font.Face
+-	family string
++	faces    []*font.Face
++	family   string
++	aspect   font.Aspect
++	lazyLang bool // the system-locale font is still to be looked up
+ }
+ 
+ func (d *dynamicFontMap) ResolveFace(r rune) *font.Face {
+@@ -593,6 +616,16 @@
+ 		}
+ 	}
+ 
++	if d.lazyLang {
++		d.lazyLang = false
++		if local := lookupLangFont(d.family, d.aspect); local != nil {
++			d.addFace(local)
++			if _, ok := local.NominalGlyph(r); ok {
++				return local
++			}
++		}
++	}
++
+ 	toAdd := lookupRuneFont(r, d.family, font.Aspect{})
+ 	if toAdd != nil {
+ 		d.addFace(toAdd)
