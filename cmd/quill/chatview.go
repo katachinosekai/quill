@@ -84,6 +84,7 @@ type chatView struct {
 	stepOpen      map[*chat.Item]bool
 	planAns       map[*chat.Item]map[int]planAnswer // plan card answers, kept across redraws
 	planPlain     map[*chat.Item]bool               // plans shown as written plus the card, not overlaid
+	planApprove   map[*chat.Item]int                // the approval question's pick on a plan card (planapproval.go)
 	btnKinds      map[int]string                    // buttons each item shows now (click guard)
 	choicePicks   map[*chat.Item]map[string]int     // picks on a multi-question reply, kept until sent
 	btnChanged    time.Time                         // when any item's buttons last changed
@@ -1729,11 +1730,30 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		var opts []string
 		rec := -1
 		var qs []planQ
+		var appr *approvalOpts
+		kind := "pending"
 		if owner != nil {
 			qs = planItemQuestions(owner, it)
 			opts, rec = planChoices(title.Text)
+			appr = planItemApproval(owner, it)
 		}
 		switch {
+		case appr != nil:
+			// The approval question's own options answer the plan
+			// (planapproval.go); other questions share the card and one Send.
+			msg.SetText("Claude's plan is above. " + approvalCaption(appr))
+			// The title is the approval question: its buttons go right under
+			// it, the other questions after them.
+			var ans map[int]planAnswer
+			if len(qs) > 0 {
+				ans = v.planAnswers(it, qs)
+			}
+			parts = append(parts, v.approvalButtons(owner, it, appr, qs, ans))
+			if len(qs) > 0 {
+				parts = append(parts, v.planQuestionForm(qs, ans))
+				parts = append(parts, v.approvalSend(owner, it, appr, qs, ans)...)
+			}
+			kind = approvalKind(appr, qs)
 		case len(qs) > 0:
 			// Several questions, or one that isn't a pick between options:
 			// a control for each, all answers go with Approve.
@@ -1771,7 +1791,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		default:
 			parts = append(parts, v.buttonRow(approve(""), no))
 		}
-		v.noteButtons(it.Seq, "pending")
+		v.noteButtons(it.Seq, kind)
 	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !owner.inTurn && !replied(owner, it) {
 		// Not while a turn is under way: Busy drops between a turn's steps,
 		// and this button flipped in and out under the pointer (tb704f5).

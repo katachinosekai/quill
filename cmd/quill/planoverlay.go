@@ -143,27 +143,57 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	owner := v.s
 	ans := v.planAnswers(plan, qs)
 	lines := strings.Split(reply.Text, "\n")
-	// The approval question is the Approve button.
+	// The approval question is the Approve button; one with its own options
+	// stays, with those options as buttons under it (planapproval.go).
+	appr := planItemApproval(owner, plan)
 	skip := map[int]bool{}
+	// apprStart..apprLine: the original lines of the approval question (its
+	// options may be on the next line; chat.JoinOptionLineSpans).
+	apprStart, apprLine := -1, -1
 	if title := normQ(planQuestion(owner.conv, plan)); title != "" {
-		for i := len(lines) - 1; i >= 0; i-- {
-			if n := normQ(lines[i]); n != "" && (n == title || strings.Contains(n, title)) {
-				skip[i] = true
+		joined, first := chat.JoinOptionLineSpans(reply.Text)
+		for i := len(joined) - 1; i >= 0; i-- {
+			if n := normQ(joined[i]); n != "" && (n == title || strings.Contains(n, title)) {
+				apprStart, apprLine = first[i], len(lines)-1
+				if i+1 < len(first) {
+					apprLine = first[i+1] - 1
+				}
+				for apprLine > apprStart && strings.TrimSpace(lines[apprLine]) == "" {
+					apprLine--
+				}
 				break
 			}
 		}
 	}
+	if appr == nil {
+		for i := apprStart; i >= 0 && i <= apprLine; i++ {
+			skip[i] = true
+		}
+	}
 	box := container.NewVBox(v.planToggle(plan, reply))
+	apprButtons := func() { box.Add(v.approvalButtons(owner, plan, appr, qs, ans)) }
 	prose := func(from, to int) {
 		var keep []string
+		flush := func() {
+			if t := strings.Join(keep, "\n"); strings.TrimSpace(t) != "" {
+				box.Add(msgText(v.markdownBlocks(t)))
+			}
+			keep = nil
+		}
 		for i := from; i < to && i < len(lines); i++ {
 			if !skip[i] {
-				keep = append(keep, lines[i])
+				l := lines[i]
+				if appr != nil && i == apprStart {
+					l = numLeadMD.ReplaceAllString(l, "$1$2$3\u00a0") // "2." stays 2
+				}
+				keep = append(keep, l)
+			}
+			if appr != nil && i == apprLine {
+				flush()
+				apprButtons()
 			}
 		}
-		if t := strings.Join(keep, "\n"); strings.TrimSpace(t) != "" {
-			box.Add(msgText(v.markdownBlocks(t)))
-		}
+		flush()
 	}
 	at := 0
 	for i := 0; i < len(qs); {
@@ -185,9 +215,27 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			}
 			box.Add(ctl)
 		}
+		if appr != nil && apprLine >= q.line && apprLine < q.end {
+			apprButtons() // the approval shares this question's lines
+		}
 		at = q.end
 	}
 	prose(at, len(lines))
+	if appr != nil {
+		if apprLine < 0 {
+			apprButtons() // the question wasn't found in the reply: its buttons close it
+		}
+		msg := widget.NewLabel(approvalCaption(appr) + " Unanswered questions are sent as \"no answer\".")
+		msg.Wrapping = fyne.TextWrapWord
+		msg.Alignment = v.align()
+		msg.SizeName = theme.SizeNameCaptionText
+		box.Add(msg)
+		for _, o := range v.approvalSend(owner, plan, appr, qs, ans) {
+			box.Add(o)
+		}
+		v.noteButtons(plan.Seq, approvalKind(appr, qs))
+		return box
+	}
 	msg := widget.NewLabel("Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done. Unanswered questions are sent as \"no answer\".")
 	msg.Wrapping = fyne.TextWrapWord
 	msg.Alignment = v.align()

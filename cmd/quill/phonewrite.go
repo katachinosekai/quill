@@ -34,6 +34,9 @@ type writeBody struct {
 	Answers   map[string][]string `json:"answers"`
 	Index     *int                `json:"index"`
 	Choice    *int                `json:"choice"` // approvePlan: index into the plan item's request.choices
+	// approvePlan: index into the plan item's request.approval.options; a
+	// stop option is rejectPlan
+	ApprovalChoice *int `json:"approvalChoice"`
 	// approvePlan: answers to request.questions by id ("yes"/"no", option
 	// index, option indexes, or text)
 	PlanAnswers map[string]json.RawMessage `json:"planAnswers"`
@@ -223,6 +226,38 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		if !pending {
 			return nil, stale("the plan is no longer pending")
 		}
+		if in.ApprovalChoice != nil {
+			appr := planItemApproval(s, it)
+			if in.Action != "approvePlan" || in.Choice != nil || appr == nil || *in.ApprovalChoice < 0 || *in.ApprovalChoice >= len(appr.Options) {
+				return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", "approvalChoice goes with approvePlan and an index into request.approval.options"}
+			}
+			var qs []planQ
+			var ans map[int]planAnswer
+			if in.PlanAnswers != nil && !appr.Stop[*in.ApprovalChoice] {
+				qs = planItemQuestions(s, it)
+				var err error
+				if ans, err = parsePlanAnswers(qs, in.PlanAnswers); err != nil {
+					return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", err.Error()}
+				}
+			}
+			d.answerPlanApproval(s, it, appr, *in.ApprovalChoice, qs, ans)
+			if appr.Stop[*in.ApprovalChoice] && strings.TrimSpace(in.Text) != "" {
+				a.send(s, in.Text)
+			}
+			break
+		}
+		// A choice that is the approval question's stop option ("Approve:
+		// Stop" on an older client, or another PC) turns the plan down.
+		stopChoice := false
+		if in.Choice != nil && in.Action == "approvePlan" {
+			if opts, _ := planChoices(planQuestion(s.conv, it)); *in.Choice >= 0 && *in.Choice < len(opts) {
+				stopChoice = isApprovalStop(planItemApproval(s, it), opts[*in.Choice])
+			}
+		}
+		if stopChoice {
+			d.answerPlanWith(s, it, false, "")
+			break
+		}
 		if in.PlanAnswers != nil {
 			if in.Action != "approvePlan" {
 				return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", "planAnswers go with approvePlan"}
@@ -232,7 +267,11 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 			if err != nil {
 				return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", err.Error()}
 			}
-			d.answerPlanMsg(s, it, true, planGoAnswers(qs, ans))
+			choice := ""
+			if opts, _ := planChoices(planQuestion(s.conv, it)); in.Choice != nil && *in.Choice >= 0 && *in.Choice < len(opts) {
+				choice = opts[*in.Choice] // another PC's approval option with answers (answerPlanApproval)
+			}
+			d.answerPlanMsg(s, it, true, planGoFull(choice, qs, ans))
 			break
 		}
 		choice := ""

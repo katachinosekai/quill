@@ -748,6 +748,12 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 					req["recommended"] = rec
 				}
 			}
+			// The approval question's own options (planapproval.go): Quill
+			// Desktop shows these instead of Approve / Don't run; answer with
+			// approvePlan + approvalChoice (a stop option turns the plan down).
+			if a := planItemApproval(s, it); a != nil {
+				req["approval"] = a
+			}
 		case it.Kind == chat.Rotate:
 		case isQuestion(it):
 			req["tool"] = it.ToolName

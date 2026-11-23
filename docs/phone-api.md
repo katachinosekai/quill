@@ -102,12 +102,14 @@ Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new ra
 | `allow` | `permission` | |
 | `allowAlways` | `permission` with `request.canAllowAlways` | |
 | `deny` | `permission`, `question` | `text`: optional reason sent to Claude |
-| `approvePlan` | `plan` | |
+| `approvePlan` | `plan` | optional `choice` (index into `request.choices`), `planAnswers` (by `request.questions` id), `approvalChoice` (index into `request.approval.options`, see below) |
 | `rejectPlan` | `plan` | `text`: optional feedback sent to Claude |
 | `answer` | `question` | `answers` (see below) |
 | `choice` | `assistant` item with open `choices` | `index` |
 | `rotate` | `rotate` | |
 | `dismiss` | `rotate` | |
+
+A plan whose approval question offers its own options, a go-ahead and a way to stop ("Can I run steps 1–3? Yes (recommended) or no?"), carries `request.approval`: `{"options": ["Yes", "No"], "stop": [false, true], "recommended": 0}` (`recommended` -1 = none). Quill Desktop shows these options instead of Approve / Don't run. `approvePlan` with `approvalChoice` answers with option i: a go-ahead approves the plan, with `planAnswers` if the plan has other questions; a stop option acts as `rejectPlan` and ignores `planAnswers`. `approvePlan` with a `choice` that is a stop option also acts as `rejectPlan`. Plain `approvePlan` / `rejectPlan` still work.
 
 ## Objects
 
