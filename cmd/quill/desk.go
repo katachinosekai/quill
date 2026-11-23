@@ -2858,6 +2858,9 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		}
 		if s.planWait || asks {
 			s.planWait = false
+			if keptPlan(s.conv, lastTurnText(s.conv)) != nil {
+				return nil // same questions as the unanswered card: it stays
+			}
 			endPlan(s)
 			out := s.conv.CancelPlans()
 			out = append(out, s.conv.MarkPlanText()...)

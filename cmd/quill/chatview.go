@@ -2204,6 +2204,9 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 	if !ok && multi == nil {
 		return "", nil
 	}
+	if keptPlan(s.conv, it.Text) != nil {
+		return "", nil // repeats the unanswered plan card's questions
+	}
 	latest := true
 	after := false
 	for _, x := range s.conv.Items {
