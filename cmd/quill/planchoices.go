@@ -68,11 +68,23 @@ func dropQuestionWord(o string) string {
 // starting a new one (user 2026-11-22).
 var continuation = regexp.MustCompile(`(?i)^(?:with|without|including|plus|so|so that|which|that|where|while|because|but|then|except|unless|since|using|via|like|such as|e\.g\.|i\.e\.)\b`)
 
+// continuesPrev: p goes on with prev. Not when prev already uses p's lead word
+// ("replaced with X (recommended), with Y, or keep both?": parallel options,
+// not an elaboration; user 2026-11-23).
+func continuesPrev(prev, p string) bool {
+	lead := continuation.FindString(strings.TrimSpace(p))
+	if lead == "" {
+		return false
+	}
+	has, _ := regexp.MatchString(`(?i)\b`+regexp.QuoteMeta(lead)+`\b`, parenAside.ReplaceAllString(prev, ""))
+	return !has
+}
+
 // mergeContinuations joins comma parts that continue the part before them.
 func mergeContinuations(parts []string) []string {
 	var out []string
 	for _, p := range parts {
-		if len(out) > 0 && continuation.MatchString(strings.TrimSpace(p)) {
+		if len(out) > 0 && continuesPrev(out[len(out)-1], p) {
 			out[len(out)-1] += ", " + p
 			continue
 		}

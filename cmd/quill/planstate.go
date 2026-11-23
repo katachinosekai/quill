@@ -129,3 +129,32 @@ func lastTurnText(c *chat.Conversation) string {
 	}
 	return ""
 }
+
+// livePlan: the latest plan card if it is still pending and current.
+func livePlan(c *chat.Conversation) *chat.Item {
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		if it := c.Items[i]; it.Kind == chat.Plan {
+			if it.PermState == chat.PermPending && planState(c, it) == planActive {
+				return it
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// asksNewQuestion: a reply asks a question of its own (its last line has a
+// "?", or it numbers questions). A plain status reply does not, and never
+// supersedes an earlier unanswered question card (user 2026-11-23, tc3712f).
+func asksNewQuestion(text string) bool {
+	body, _ := chat.SplitSources(text)
+	body = strings.TrimSpace(chat.JoinOptionLines(body))
+	if body == "" {
+		return false
+	}
+	if strings.Contains(body[strings.LastIndex(body, "\n")+1:], "?") {
+		return true
+	}
+	_, qs := numberedChoiceQs(body)
+	return qs != nil
+}

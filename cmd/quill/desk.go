@@ -2987,6 +2987,11 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 		}
 		if s.planWait || asks {
 			s.planWait = false
+			// A status reply (no new question) leaves an unanswered card live,
+			// even when a call in its turn was blocked (user 2026-11-23).
+			if !asks && livePlan(s.conv) != nil {
+				return nil
+			}
 			if keptPlan(s.conv, lastTurnText(s.conv)) != nil {
 				return nil // same questions as the unanswered card: it stays
 			}

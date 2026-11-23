@@ -2302,7 +2302,7 @@ func (v *chatView) choiceGate(it *chat.Item) (ok, latest bool) {
 		if x.Kind == chat.Plan {
 			return false, false
 		}
-		if x.Kind == chat.User || x.Kind == chat.Assistant && strings.TrimSpace(x.Text) != "" {
+		if x.Kind == chat.User || x.Kind == chat.Assistant && !x.Streaming && asksNewQuestion(x.Text) {
 			latest = false
 		}
 	}

@@ -929,8 +929,8 @@ func openChoiceItem(c *chat.Conversation) *chat.Item {
 		if it.Kind == chat.User || it.Kind == chat.Plan {
 			return nil
 		}
-		if it.Kind == chat.Assistant && strings.TrimSpace(it.Text) != "" {
-			return it
+		if it.Kind == chat.Assistant && strings.TrimSpace(it.Text) != "" && !it.Streaming && asksNewQuestion(it.Text) {
+			return it // plain status replies after it don't supersede it
 		}
 	}
 	return nil
