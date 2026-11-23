@@ -76,6 +76,9 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 	card := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(12, 12, 16, 16), body))
 	go func() {
 		ts := d.loadTopics()
+		if d.kmemHasFeature(extSessionsFeature) {
+			d.loadExtSessions() // on demand: the card decides what is live
+		}
 		d.do(func() {
 			var rows []fyne.CanvasObject
 			for _, t := range ts {
@@ -84,6 +87,9 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 				if owner := d.topicOwner(t.Slug, s); owner != nil {
 					b = widget.NewButton(t.Title+" · "+d.ownerLabel(owner), func() { d.open(owner.id) })
 					b.Importance = widget.LowImportance
+				} else if e, ext := d.topicExternal(t.Slug); ext {
+					b = widget.NewButton(t.Title+" · running elsewhere ("+e.Name+")", nil)
+					b.Disable()
 				} else {
 					b = widget.NewButton(topicButtonLabel(t), func() { d.pickTopic(s, t, false) })
 				}

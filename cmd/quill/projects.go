@@ -259,6 +259,7 @@ func (d *desk) liveSession(id string) bool {
 type projectGroup struct {
 	name    string
 	entries []sideEntry
+	ext     []extSession // live outside Quill Desktop (K6): read-only rows
 }
 
 func (d *desk) projectGroups(entries []sideEntry) []projectGroup {
@@ -282,6 +283,18 @@ func (d *desk) projectGroups(entries []sideEntry) []projectGroup {
 		p := d.projectOf(e.id)
 		by[p] = append(by[p], e)
 	}
+	ext := map[string][]extSession{} // group name -> external live sessions
+	if d.kmemMemory() {
+		d.refreshExtSessions(false)
+		for slug, es := range d.externalLive() {
+			if t, ok := cachedTopic(slug); ok {
+				ext[t.Title] = append(ext[t.Title], es...)
+				if _, has := by[t.Title]; !has {
+					by[t.Title] = nil
+				}
+			}
+		}
+	}
 	var out []projectGroup
 	for name, es := range by {
 		sort.SliceStable(es, func(i, j int) bool {
@@ -295,7 +308,7 @@ func (d *desk) projectGroups(entries []sideEntry) []projectGroup {
 			}
 			return es[i].last.After(es[j].last)
 		})
-		out = append(out, projectGroup{name, es})
+		out = append(out, projectGroup{name, es, ext[name]})
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].name) < strings.ToLower(out[j].name) })
 	return out

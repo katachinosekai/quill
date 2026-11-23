@@ -379,6 +379,9 @@ func (it *sideItem) TappedSecondary(e *fyne.PointEvent) {
 		it.d.folderMenu(r, e.AbsolutePosition)
 		return
 	}
+	if r.ext != nil {
+		return // a session running elsewhere has no Quill menu
+	}
 	it.d.sessionMenu(r.id, e.AbsolutePosition)
 }
 

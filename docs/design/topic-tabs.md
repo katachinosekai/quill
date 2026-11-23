@@ -212,6 +212,25 @@ topic tabs. Merge it into a topic at a safe point."
 4. External live sessions (`d.terms`, `internal/live`) appear only with a
    kmem topic name, as that topic's live session ("live in a terminal",
    Take over via `takeOver`). Needs K6.
+
+   **As built (sub I, branch feat/topics-i, 2026-11-23; kmem 1.10.0 K6):**
+   `extsessions.go` runs `kmem sessions --live --json` only when `kmem
+   version --json` lists the feature "sessions"; without it nothing is run,
+   shown or checked (as before). The list is cached: reloaded in the
+   background at most every 30 s (checked on each sidebar rebuild) and on
+   demand (the "Open a topic" card, a refused open). Only `live:"live"`
+   entries count; `gone` and `unknown` never show as live. A session id Quill
+   itself runs (`d.sessions`, incl. the kmem window) is not external. The kmem
+   name maps to a topic by `topicForName` (the name is a topic, or the explicit
+   kmem config `sessions[name].topic`; never guessed). In kmem memory mode
+   `projectGroups` adds a read-only row "NAME / running elsewhere" under the
+   topic's group (also when the group has no Quill session); tapping or
+   right-clicking it does nothing. One live per topic: `pickTopic` refuses a
+   topic held by an external session with a notice in the tab (the card
+   stays), `openTopic` returns nil, and the card lists the topic disabled as
+   "running elsewhere". **Not built: Take over** (decision 21 recommended it;
+   the sub I brief asked for read-only rows and refuse/warn); see the open
+   question in the report.
 5. Claude-memory mode (`kmemMemory()` false): unchanged (today: live
    sessions by project; `rebuildRows` has no mode branch). Q18: bring back
    history groups there, in which case the places code moves behind

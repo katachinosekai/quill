@@ -272,6 +272,11 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 		d.open(owner.id)
 		return
 	}
+	if e, ok := d.topicExternal(t.Slug); ok {
+		d.refreshExtSessions(true)
+		d.notify(s, extNotice(t, e)) // the card stays: pick another topic
+		return
+	}
 	s.pickPending = false
 	s.kmemNew = false // the topic prompt names the kmem name itself
 	d.org.Titles[s.id] = t.Title
@@ -306,7 +311,7 @@ func (d *desk) pickNewTopic(s *deskSession, text string) {
 
 // openTopic: the one entry for paths that start a topic session outside the
 // card (phone, --resume-all, kmem window): switch to its live session, or
-// start a fresh one.
+// start a fresh one. nil when the topic is live outside Quill Desktop.
 func (d *desk) openTopic(slug string) *deskSession {
 	if owner := d.topicOwner(slug, &deskSession{}); owner != nil {
 		d.open(owner.id)
@@ -315,6 +320,9 @@ func (d *desk) openTopic(slug string) *deskSession {
 	t, ok := cachedTopic(slug)
 	if !ok {
 		t = topicInfo{Slug: slug, Title: topicTitle(slug), Scope: []string{slug}}
+	}
+	if _, ext := d.topicExternal(slug); ext {
+		return nil // live outside Quill Desktop (K6): refused, no tab
 	}
 	ns := d.createSession(homeDir(), "default", "default")
 	ns.pickPending = true

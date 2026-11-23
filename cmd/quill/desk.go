@@ -189,6 +189,7 @@ type sideRow struct {
 	depth  int
 	count  int
 	open   bool
+	ext    *extSession // a live session outside Quill Desktop: read-only row
 }
 
 type desk struct {
@@ -688,6 +689,19 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			caption := head.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
 			meta := col.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
 			mark := left.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*fyne.Container)
+			if r.ext != nil { // read-only: running outside Quill Desktop
+				title.SetText(r.ext.Name)
+				meta.Text = "running elsewhere"
+				meta.Refresh()
+				if caption.Text != "" {
+					caption.Text = ""
+					caption.Refresh()
+				}
+				setStatusMark(mark, stTerminal)
+				d.setGlow(glow, nil, 0)
+				row.Refresh()
+				return
+			}
 			t, m, st2 := d.rowText(r.id)
 			title.SetText(t)
 			meta.Text = m
@@ -719,6 +733,10 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 		if r.header != "" {
 			list.Unselect(id)
 			d.toggleFolder(r.key)
+			return
+		}
+		if r.ext != nil {
+			list.Unselect(id) // read-only: nothing to open
 			return
 		}
 		d.open(r.id)
@@ -886,6 +904,26 @@ func (d *desk) rebuildRows() {
 		add(info.ID, info.Cwd, info.Last)
 	}
 	groups := d.projectGroups(entries)
+	for i := range groups {
+		if q != "" { // search narrows external rows by name
+			var keep []extSession
+			for _, e := range groups[i].ext {
+				if strings.Contains(strings.ToLower(e.Name+" "+groups[i].name), q) {
+					keep = append(keep, e)
+				}
+			}
+			groups[i].ext = keep
+		}
+	}
+	if q != "" {
+		var kept []projectGroup
+		for _, g := range groups {
+			if len(g.entries) > 0 || len(g.ext) > 0 {
+				kept = append(kept, g)
+			}
+		}
+		groups = kept
+	}
 	if q == "" {
 		d.syncRCNames()
 		d.rowPlace = make(map[string]string, len(entries))
@@ -906,10 +944,13 @@ func (d *desk) rebuildRows() {
 	for _, g := range groups {
 		key := projectPrefix + g.name
 		open := q != "" || d.isOpen(key)
-		rows = append(rows, sideRow{header: g.name, key: key, count: len(g.entries), open: open})
+		rows = append(rows, sideRow{header: g.name, key: key, count: len(g.entries) + len(g.ext), open: open})
 		if open {
 			for _, e := range g.entries {
 				rows = append(rows, sideRow{id: e.id, depth: 1, parent: key})
+			}
+			for i := range g.ext {
+				rows = append(rows, sideRow{depth: 1, parent: key, ext: &g.ext[i]})
 			}
 		}
 	}
