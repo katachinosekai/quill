@@ -427,6 +427,8 @@ type desk struct {
 	restartWait   string      // a clean restart waits for running turns; why the handover failed
 	restartRetry  *time.Timer // re-checks the running turns for a waiting clean restart
 	restarting    bool        // a clean restart stops the sessions and starts a new Quill Desktop
+	restartBy     time.Time   // a waiting clean restart goes ahead then (restartTurnWait)
+	restartKeeps  string      // a new build the tray restart keeps pending
 	binMu         sync.Mutex
 	bin           *binWatch // Quill's own program file (watchBinary), under binMu
 	flushTimer    *time.Timer

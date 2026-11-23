@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/katachinosekai/quill/internal/chat"
 )
 
 // The tray's "Restart Quill Desktop" (t125b67, user 2026-11-23). It leaves
@@ -20,14 +22,24 @@ import (
 //   - It goes now: typing in the last 15 s does not hold it (the user asked).
 //     What can't be handed over still holds it (sign-in, terminal takeover;
 //     swapBlockers), and busy turns are handed over as the reload does.
-//   - The program file: os.Executable(); if that file was deleted or is not
-//     a whole program, the path Quill Desktop was started from; last, the
-//     running image itself (/proc/self/exe).
+//   - The exact build that runs now (user 2026-11-23): the running image
+//     (/proc/self/exe) first; only if that fails, the path Quill Desktop was
+//     started from, then os.Executable(). A new build on disk, offered or
+//     accepted, is not picked up: it stays pending and is offered again
+//     after the restart (restoreState.Build).
 //   - When the handover is not possible (the exec failed), a clean restart:
-//     once the running turns end (or "Restart now"), the sessions stop and a
-//     new Quill Desktop resumes them, as at a start after an update.
+//     once the running turns end, "Restart now", or after restartTurnWait,
+//     the sessions stop and a new Quill Desktop resumes them, as at a start
+//     after an update.
 
 const restartLabel = "Restart Quill Desktop"
+
+// restartTurnWait: how long a clean restart waits for busy turns (user
+// 2026-11-23: then it goes ahead; tests shorten it).
+var restartTurnWait = 2 * time.Minute
+
+// restartTargets: where the restart finds the build that runs now.
+func restartTargets() []string { return []string{selfImage(), startPath, runningExe()} }
 
 // startPath: the program file Quill Desktop was started from (a handover
 // keeps os.Args, so this is the first start's path).
@@ -104,9 +116,14 @@ func (d *desk) restartQuill() {
 		d.cleanRestart()
 		return
 	}
-	if d.swapTo == "" { // a build the user accepted already is restarted into
-		d.swapTo = restartTarget(runningExe(), startPath, selfImage())
+	// A new build on disk stays pending: not this restart's (user 2026-11-23).
+	d.restartKeeps = d.pendingBuildPath()
+	d.pendingBuild, d.swapOK = "", false
+	if d.swapRetry != nil {
+		d.swapRetry.Stop()
+		d.swapRetry = nil
 	}
+	d.swapTo = restartTarget(restartTargets()...)
 	if d.swapTo == "" {
 		d.restartFallback(errors.New("Quill Desktop's program file was not found"))
 		return
@@ -114,6 +131,33 @@ func (d *desk) restartQuill() {
 	d.restartAsked = true
 	d.forceSwap, d.swapNow = true, true
 	d.trySwap()
+}
+
+// pendingBuildPath: a new build waiting for the user, accepted or offered,
+// or one the watcher hasn't reported yet ("" if none).
+func (d *desk) pendingBuildPath() string {
+	if d.restartKeeps != "" {
+		return d.restartKeeps
+	}
+	if d.swapTo != "" && !d.restartAsked {
+		return d.swapTo
+	}
+	if d.pendingBuild != "" {
+		return d.pendingBuild
+	}
+	if exe := runningExe(); exe != "" && usableBinary(exe) && buildID(exe) != runningBuildID() {
+		return exe
+	}
+	return ""
+}
+
+// offerKeptBuild offers the build a restart kept pending again (UI thread).
+func (d *desk) offerKeptBuild() {
+	path := d.restartKeeps
+	d.restartKeeps = ""
+	if path != "" && usableBinary(path) {
+		d.offerBuild(path)
+	}
 }
 
 // restartFallback: the handover was not possible (why). The sessions are
@@ -124,6 +168,7 @@ func (d *desk) restartFallback(why error) {
 		msg = why.Error()
 	}
 	d.restartWait = msg
+	d.restartBy = time.Now().Add(restartTurnWait)
 	d.waitTurnsThenRestart()
 }
 
@@ -142,11 +187,13 @@ func (d *desk) waitTurnsThenRestart() {
 		return
 	}
 	n := d.busyTurns()
-	if n == 0 {
+	left := time.Until(d.restartBy).Round(time.Second)
+	if n == 0 || left <= 0 {
 		d.cleanRestart()
 		return
 	}
-	d.setUpdLine(fmt.Sprintf("Quill Desktop could not hand its sessions over (%s). It restarts and resumes them when %d running turn(s) end.", d.restartWait, n),
+	d.setUpdLine(fmt.Sprintf("Quill Desktop could not hand its sessions over (%s). It restarts and resumes them when %d running turn(s) end, at the latest in %d:%02d.",
+		d.restartWait, n, int(left.Minutes()), int(left.Seconds())%60),
 		lineBtn("Restart now", d.cleanRestart),
 		lineBtn("Cancel", d.cancelRestart))
 	if d.restartRetry == nil {
@@ -160,12 +207,17 @@ func (d *desk) waitTurnsThenRestart() {
 }
 
 func (d *desk) cancelRestart() {
+	d.stopRestartWait()
+	d.setUpdLine("")
+	d.offerKeptBuild()
+}
+
+func (d *desk) stopRestartWait() {
 	d.restartWait = ""
 	if d.restartRetry != nil {
 		d.restartRetry.Stop()
 		d.restartRetry = nil
 	}
-	d.setUpdLine("")
 }
 
 // spawnQuill starts a new Quill Desktop (tests replace it).
@@ -198,7 +250,7 @@ func (d *desk) cleanRestart() {
 	if d.restarting {
 		return
 	}
-	d.cancelRestart()
+	d.stopRestartWait()
 	d.restarting = true
 	d.setUpdLine("Restarting Quill Desktop…")
 	st := d.handoverState()
@@ -208,8 +260,9 @@ func (d *desk) cleanRestart() {
 			st.Running = append(st.Running, s.id)
 		}
 	}
+	st.Build = d.restartKeeps
 	d.rememberTopicsAtQuit()
-	target := restartTarget(startPath, runningExe(), selfImage())
+	target := restartTarget(restartTargets()...)
 	go func() {
 		d.stopAll(running)
 		err := errors.New("Quill Desktop's program file was not found")
@@ -233,7 +286,15 @@ func (d *desk) cleanRestart() {
 					}
 				}
 			}
-			d.setUpdLine("Quill Desktop could not restart: " + err.Error())
+			msg := "Quill Desktop could not restart: " + err.Error()
+			if d.restartKeeps == "" {
+				d.setUpdLine(msg)
+				return
+			}
+			d.offerKeptBuild() // the line offers the new build again; the error goes to the chat
+			if d.current != nil {
+				d.chat.update([]*chat.Item{d.current.conv.AddError(msg)})
+			}
 		})
 	}()
 }

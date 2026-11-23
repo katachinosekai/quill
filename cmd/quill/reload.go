@@ -45,6 +45,7 @@ type restoreState struct {
 	Carets   map[string]caretPos `json:"carets,omitempty"`
 	Paused   *pauseState         `json:"paused,omitempty"`
 	KmemWin  bool                `json:"kmemWin,omitempty"` // the kmem window was open: reopen it
+	Build    string              `json:"build,omitempty"`   // a new build a tray restart kept pending: offer it again
 }
 
 type pauseState struct {
@@ -131,6 +132,10 @@ func (d *desk) watchBinary(ctx context.Context) {
 // asked for (Update, Restart into it) happens by itself; otherwise the update
 // line asks (user 2026-11-21: never update on its own).
 func (d *desk) binaryChanged(path string) {
+	if d.restartAsked || d.restartWait != "" || d.restarting {
+		d.restartKeeps = path // a tray restart keeps the build pending (trayrestart.go)
+		return
+	}
 	if !d.swapOK {
 		d.offerBuild(path)
 		return
@@ -208,6 +213,9 @@ func (d *desk) trySwap() {
 	}
 	d.swapping = true
 	st := d.handoverState()
+	if restart {
+		st.Build = d.restartKeeps
+	}
 	running := d.runningSessions()
 	type meta struct {
 		s  *deskSession
@@ -479,6 +487,10 @@ func (d *desk) applyRestore(st *restoreState) {
 	}
 	if st.KmemWin {
 		d.showKmem()
+	}
+	if st.Build != "" {
+		d.restartKeeps = st.Build
+		d.offerKeptBuild()
 	}
 	defer d.restoreSplit(st.Split)
 	if st.Session == "" {
