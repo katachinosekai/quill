@@ -10,9 +10,15 @@ import (
 // session's own kmem name; other reads stay read-only under any name.
 func TestKmemAsBriefRulesOnlyForOwnName(t *testing.T) {
 	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("hello")
+	})
+	h.eventually("a running, idle session", func() bool { return s.proc != nil && !s.conv.Busy })
 	h.ui(func() {
 		h.d.planFirst = true
-		s := h.d.createSession(h.proj, "default", "default")
+		s.inTurn = false
 		h.d.org.Kmem[s.id] = "demo"
 		extra := h.d.readOnlyExtraFor(s)
 		for cmd, want := range map[string]bool{
@@ -44,6 +50,7 @@ func TestKmemAsBriefRulesOnlyForOwnName(t *testing.T) {
 		if readOnlyRequest(bashReq("kmem --as demo brief"), h.d.readOnlyExtraFor(bare)) {
 			t.Error("no kmem name: --as brief stays gated")
 		}
+
 		// Through the gate itself.
 		own := gateCall(h, s, "k1", "Bash", `{"command":"kmem --as demo brief"}`, "")
 		other := gateCall(h, s, "k2", "Bash", `{"command":"kmem --as other brief"}`, "")
