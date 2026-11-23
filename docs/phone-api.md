@@ -28,15 +28,18 @@ Any non-2xx response has this body:
 | 400 | `bad_request` | malformed JSON, missing field, bad value |
 | 400 | `idempotency_key_missing` | a POST without `Idempotency-Key` |
 | 403 | `forbidden` | missing, unknown or revoked key |
+| 403 | `file_denied` | `GET /phone/session/{id}/file`: outside the allowed folders or on a deny list (`message` names the rule) |
+| 403 | `files_off` | `GET /phone/session/{id}/file` while this phone's "Let this device open files" switch is off |
 | 403 | `control_off` | a write while "Let paired phones control sessions" is off, or off for this phone |
 | 404 | `not_found` | unknown path, session, request or queue entry |
 | 409 | `stale` | the target changed: the request is no longer pending, the queue entry text no longer matches |
 | 409 | `in_progress` | the same Idempotency-Key is still being handled |
 | 409 | `not_running` | the session has no running Claude process and the action needs one (interrupt) |
+| 409 | `file_busy` | another file read of this phone is still running |
 | 409 | `blocked` | Quill refused the send the same way the desktop box would (session loading, taking over, held by a terminal), or the /command only works on the desktop (dialogs, browser, files, settings: /login, /mcp, /export, /add-dir, ...) |
 | 413 | `too_large` | body over 64 KiB, or `text` over 32 KiB |
 | 422 | `idempotency_mismatch` | Idempotency-Key reused with a different method, path or body |
-| 429 | `rate_limited` | too many writes; see `Retry-After` |
+| 429 | `rate_limited` | too many writes or file reads; see `Retry-After` |
 | 500 | `internal` | the request failed inside Quill Desktop; nothing is remembered for its Idempotency-Key, so it may be retried |
 | 503 | `not_ready` | Quill is still starting |
 
@@ -235,7 +238,7 @@ Assistant items with a choice card add:
 
 First call after pairing and after each app start. Body: `{"name": "Pixel 8", "app": "0.9.4"}`. Sets the phone's display name in Quill's phone list and its last-seen time.
 
-Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15", "unlock": true, "lanUnlock": false}`. `control` says whether writes are allowed for this phone right now. `unlock`: this device must unlock before anything else works (see "Device lock and unlock"). `lanUnlock`: right now this device may unlock with its hardware key instead of the password (home-network unlock); older Quill Desktop builds leave it out (treat as `false`). `quill` is the Quill Desktop version (`"dev"` in local builds). Needs an Idempotency-Key like every POST, but is allowed while control is off.
+Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15", "unlock": true, "lanUnlock": false}`. `control` says whether writes are allowed for this phone right now. `unlock`: this device must unlock before anything else works (see "Device lock and unlock"). `lanUnlock`: right now this device may unlock with its hardware key instead of the password (home-network unlock); older Quill Desktop builds leave it out (treat as `false`). `quill` is the Quill Desktop version (`"dev"` in local builds). `files`: `{"api": 1, "on": false}`: the file endpoint's version and whether this device may open files right now (a phone whose "Let this device open files" switch is on; always `false` for other PCs); older Quill Desktop builds leave it out (no file links). Needs an Idempotency-Key like every POST, but is allowed while control is off.
 
 ### GET /phone/sessions
 
@@ -325,6 +328,7 @@ Returns at once when something changed after `cursor`, otherwise after `wait` se
     {"type": "order", "ids": ["3f2a...", "77aa..."]},
     {"type": "usage", "usage": {}},
     {"type": "control", "control": false},
+    {"type": "files", "files": {"api": 1, "on": true}},
     {"type": "settings", "settings": {"buildGate": false, "coordinator": true}}
   ]
 }
@@ -333,7 +337,36 @@ Returns at once when something changed after `cursor`, otherwise after `wait` se
 - A `session` change carries the whole Session object; its `epoch`/`rev` tell the phone whether to fetch items (only for the session on screen; others just update their row). `usage` is shaped as in `/phone/sessions`.
 - Every reply carries the current `settings` (as in `/phone/sessions`); a `settings` change comes when either switch changed, on the PC or from a device.
 - `reset: true` (cursor too old, or a different `boot`): the phone refetches `/phone/sessions`.
+- `control` and `files` changes are per phone: each phone gets only its own (`files` follows its "Let this device open files" switch, shaped like hello's `files`).
 - At most one stream per phone; a second one ends the first with an empty reply. Revoking a phone ends its stream with `403`.
+
+### GET /phone/session/{id}/file?path=...
+
+Read-only: one file Claude mentioned in that session, for Quill Android's file viewer (design: `docs/design/phone-links.md`). `path`: the link target as the shared detector found it (`cmd/quill/testdata/links.json`): an absolute path, `~/...` (expanded on Quill Desktop) or a `file://` URL; without the `:N` line hint; URL-encoded; at most 4096 bytes.
+
+```json
+{"v": 1, "path": "/home/user/Projects/demo/main.go", "name": "main.go",
+ "size": 5120, "mtimeMs": 1795000000000, "kind": "text", "lang": "go",
+ "text": "package main\n...", "truncated": false}
+```
+
+- `path`: the requested path, expanded and cleaned (not the symlink target). `size` in bytes, `mtimeMs` the modification time.
+- `kind`:
+  - `text`: valid UTF-8 with no NUL in the first 8 KiB. `text` holds at most 256 KiB, cut after the last whole line (`truncated: true` when the file is longer). `lang` from the extension (`go`, `java`, `kotlin`, `python`, `js`, `ts`, `sh`, `json`, `yaml`, `toml`, `c`, `cpp`, `markdown`, `svg`, ..., else `text`).
+  - `image`: `png`, `jpg`/`jpeg`, `gif`, `webp`, `bmp` whose bytes match the extension; `mime` and `data` (standard base64), at most 8 MiB. An SVG is `text`.
+  - `too_large`: an image over 8 MiB; `binary`: anything else. Both carry the metadata only.
+
+Rules (all on Quill Desktop):
+
+- Only paths in that session's Claude output count: `assistant` and `plan` text, tool and permission `summary`, `diff.path`. The user's own messages, notices and thinking don't.
+- Allowed roots: the session's folder and the user's home, after resolving symlinks; never `/proc`, `/sys`, `/dev` or `/run`.
+- Deny list, on the path as written and resolved: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.docker`, `~/.config/gcloud`, `~/.config/gh`, `~/.password-store`, `~/.local/share/keyrings`, `~/.pki`, browser and mail profiles (`~/.mozilla`, `~/.thunderbird`, `~/.config/google-chrome`, `~/.config/chromium`, `~/.config/BraveSoftware`, `~/.config/vivaldi`, `~/.config/microsoft-edge`, `~/.config/opera`, browser apps under `~/.var/app`), `~/.claude/.credentials.json`, kmem's data and Quill Desktop's own settings and keys, `.git` internals; file names `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `*.kdbx`, `id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`, `.netrc`, `.pgpass`, `.git-credentials`, `.npmrc`, `.pypirc`, `*credentials*`, `*secret*`, `*token*`, `local.properties` (case-insensitive); text containing a `PRIVATE KEY` header. Plus the user's own list in Quill Desktop → Devices ("Files phones may not open": folders/files or name patterns).
+- Phones only: another Quill Desktop PC paired as a device gets `403 forbidden`. The usual pairing key and unlock apply (`403 forbidden`, `401 locked`); a file read does not count as activity for the unlock idle time.
+- Per-device switch "Let this device open files" in Quill Desktop → Devices, off by default.
+- Per phone: one file read at a time (`409 file_busy`), at most 2 per second, 60 and 64 MiB per 10 minutes (`429 rate_limited` with `Retry-After`).
+- Every request, served or refused, is written to `phone-files.log` in Quill Desktop's phone folder (time, device, session, path, size, result; last 2000 lines); never sent to a phone. Quill Desktop → Devices → "Opened files..." shows a device's last 20. No desktop notification.
+
+Errors: `400 bad_request` (empty, relative, too long, NUL, `..` segment, not UTF-8, a `file://` URL with a host); `404 not_found` (unknown session, not mentioned in it, missing, not a regular file, symlink loop: one reply for all, so the route can't probe which files exist); `403 file_denied`; `403 files_off`; `403 forbidden` (not a phone); `409 file_busy`; `429 rate_limited`.
 
 ### POST /phone/session/{id}/send
 

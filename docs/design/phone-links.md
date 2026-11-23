@@ -1,9 +1,10 @@
 # Links in Quill Android's chat (design)
 
-Status: design, 2026-11-22, open questions not decided yet. User decision
-f7fe6b5 ("Quill Android links like Quill Desktop ... design first"). Base:
-Quill Desktop master c21db01, Quill Android master 1c0c4ff (0.9.35). Scope:
-both apps. No code in this document's commit.
+Status: decided 2026-11-22 (all 13 questions: the recommended answer, kmem
+f2ab8af, see §12). Quill Desktop's part of phases 1 and 2 built 2026-11-23
+on feat/phone-links: see §13 "As built". User decision f7fe6b5 ("Quill
+Android links like Quill Desktop ... design first"). Base: Quill Desktop
+master c21db01, Quill Android master 1c0c4ff (0.9.35). Scope: both apps.
 
 Related: `docs/phone-api.md` (pairing, unlock, control, errors),
 `docs/design/kmem-android.md` (capability and security pattern this follows).
@@ -58,7 +59,7 @@ test fails when its copy's SHA-256 differs from the one recorded in
 Where links are found
 
 - In prose only: not in fenced blocks, indented code or inline code spans
-  (same as `autolinks`). Exception for paths: see Open question 2.
+  (same as `autolinks`). Exception for paths: an inline code span that is one whole path is a path link (decided, question 2).
 - In `user`, `assistant`, `plan` and `notice` text, tool `summary`, and
   `diff.path` (the tool header becomes tappable). Not in `thinking`.
 
@@ -77,10 +78,10 @@ Path details
 - Not a path: a lone `/`, `//...`, things that look like a fraction or a ratio
   (`1/2`, `and/or`: no leading `/`), URL paths inside a web link.
 - A suffix `:N` or `:N-M` (line or range, as Claude writes `main.go:120`) is
-  kept as a hint, not part of the path (Open question 3).
+  kept as a hint, not part of the path; the viewer scrolls to line N (decided, question 3).
 - `~` is expanded on Quill Desktop, never on the phone (the phone sends the
   text as written).
-- Relative paths (`src/main.go`) are not links (Open question 4).
+- Relative paths (`src/main.go`) are not links (decided, question 4).
 - At most 50 links per item; the rest stay plain text.
 
 Shared test cases (first set; each is a row of `links.json`)
@@ -113,7 +114,7 @@ and/or 1/2 /                                    -> none
 - Misleading labels: when a Markdown label itself looks like a URL with a
   different host than the target, the tap shows a confirm with the real URL.
 - Addresses that only exist on the PC (`localhost`, `127.0.0.0/8`, `[::1]`,
-  `0.0.0.0`): Open question 9.
+  `0.0.0.0`): a tap explains "This address is on Quill Desktop's PC" with Copy and Open anyway (decided, question 9).
 
 ## 5. Other link schemes
 
@@ -150,7 +151,7 @@ without the line hint), URL-encoded, at most 4096 bytes.
 - Text: valid UTF-8 with no NUL in the first 8 KiB. Images: `png`, `jpg`,
   `jpeg`, `gif`, `webp`, `bmp` whose first bytes match
   (`http.DetectContentType`); `svg` is sent as text. Everything else: binary.
-- Limits (Open question 7): text sent up to 256 KiB, cut at a line boundary
+- Limits (decided, question 7): text sent up to 256 KiB, cut at a line boundary
   (`truncated: true`); images up to 8 MiB; larger files `too_large`.
 - The hidden kmem assistant session gets the same handler at
   `/phone/kmem/assistant/file` (phase 4).
@@ -180,9 +181,9 @@ All of these must hold:
 
 1. Mentioned: the path appears in that session's items as the phone API
    sends them (text, tool summary, diff path), found by the same detector as
-   §3 (Open question 1 decides whose messages count).
+   §3; only Claude's output counts: messages, tool summaries, diff paths (decided, question 1).
 2. Under an allowed root after resolving symlinks: the session's folder or
-   the user's home (Open question 5 for `/tmp` and others).
+   the user's home, nothing else (decided, question 5).
 3. Not on the deny list (§7.2), checked on both the path as written and the
    resolved path.
 4. A regular file (not a directory, device, FIFO, socket); never under
@@ -205,7 +206,7 @@ All of these must hold:
 - Contents: a text file whose first 256 KiB contain `-----BEGIN` ... `PRIVATE
   KEY-----` is refused (`file_denied`, "looks like a private key").
 - The list lives in one Go table with a test per entry; extending it needs no
-  phone change. User-added entries: Open question 6.
+  phone change. User-added entries: a list in Quill Desktop → Devices on top of the built-in one (decided, question 6).
 
 ### 7.3 Symlinks, `..` and races
 
@@ -224,7 +225,7 @@ All of these must hold:
   (revoked: `403 forbidden`), `X-Quill-Unlock` when the device must unlock
   (`401 locked`). A file read does not extend the unlock idle timer (only
   writes do).
-- Other Quill Desktop PCs paired as devices: Open question 8.
+- Other Quill Desktop PCs paired as devices: refused, phones only (decided, question 8).
 
 ### 7.5 Control mode
 
@@ -233,7 +234,7 @@ It is a read, so control mode is not the gate; the file switch (§7.6) is.
 ### 7.6 The file switch
 
 Quill Desktop → Devices, per device: "Let this device open files"; its
-default is Open question 10. Off: `403 files_off`, and Quill Android shows
+default is off (decided, question 10). Off: `403 files_off`, and Quill Android shows
 "Opening files is off in Quill Desktop → Devices" in the viewer. Changing it
 sends a `control`-style stream change so the capability updates live.
 
@@ -249,15 +250,15 @@ sends a `control`-style stream change so the capability updates live.
   `phone-files.log` in its config directory: time, device id and name, session
   id, path, size, result code. Kept at 2000 lines; never sent to any phone.
 - Quill Desktop → Devices shows the last 20 lines per device.
-- A desktop notification per served file: Open question 11.
+- No desktop notification, the audit log only (decided, question 11).
 
 ### 7.9 Data on the phone
 
 - Contents are kept in memory only while the viewer is open; never written to
   disk, the share sheet or the clipboard as a file. Selecting and copying
   text is allowed.
-- The viewer sets `FLAG_SECURE` (no screenshots, hidden in recents): Open
-  question 12.
+- No `FLAG_SECURE` in the viewer: screenshots stay allowed (decided,
+  question 12).
 
 ## 8. The in-app viewer (Quill Android)
 
@@ -334,18 +335,94 @@ Quill Android
 Manual: tap a URL and a path from a real Claude reply; ask for `~/.ssh/config`
 (deny message, audit line in Devices); turn the file switch off and tap again.
 
-## 12. Open questions
+## 12. Open questions (decided)
 
-1. Which mentions make a file readable? (a) any message in the session, user's included; (b) only Claude's messages, tool summaries and diff paths (recommended); (c) no mention check, roots and deny list only.
-2. Are paths inside inline code (`/home/user/x.go`) tappable? (a) yes, when the whole code span is one path (recommended); (b) never, like URLs; (c) yes, any path inside inline code.
-3. What happens with a `:N` line suffix? (a) open the file and scroll to line N (recommended); (b) ignore the suffix; (c) treat it as part of the file name.
-4. Are relative paths (`src/main.go`) links? (a) no (recommended); (b) yes, resolved against the session's folder.
-5. Which roots may files come from? (a) the session's folder and the user's home (recommended); (b) also `/tmp`; (c) the session's folder only.
-6. Can the user add their own deny-list entries? (a) no, the built-in list only; (b) a list in Quill Desktop → Devices (recommended).
-7. Size limits? (a) text 256 KiB shown, images 8 MiB (recommended); (b) text 1 MiB, images 25 MiB like Quill Desktop's previews; (c) text 64 KiB, images 2 MiB.
-8. May other Quill Desktop PCs paired as devices use the file endpoint? (a) no, phones only (recommended); (b) yes, same rules.
-9. What does a tap on a `localhost` / `127.0.0.1` link do? (a) open it on the phone as is; (b) show "This address is on Quill Desktop's PC" with Copy and Open anyway (recommended); (c) not tappable.
-10. Default of the per-device "Let this device open files" switch? (a) off until the user turns it on (recommended); (b) on for every paired phone; (c) no switch, pairing and unlock are enough.
-11. Notify on Quill Desktop when a phone opens a file? (a) no, audit log only (recommended); (b) a notification for every file; (c) a notification only for files outside the session's folder.
-12. Block screenshots in the viewer (`FLAG_SECURE`)? (a) no (recommended); (b) yes, always; (c) yes, only for files outside the session's folder.
-13. Should Quill Desktop also make non-media file paths tappable (opening its own viewer), so both apps match exactly? (a) yes, as a separate task after this one (recommended); (b) no, Quill Android only; (c) yes, in phase 2.
+All decided 2026-11-22 by the user: the recommended answer each time (kmem
+f2ab8af). The rest of this document reads them as decided.
+
+1. Which mentions make a file readable? (a) any message in the session, user's included; (b) only Claude's messages, tool summaries and diff paths (recommended); (c) no mention check, roots and deny list only. **Decided: (b).**
+2. Are paths inside inline code (`/home/user/x.go`) tappable? (a) yes, when the whole code span is one path (recommended); (b) never, like URLs; (c) yes, any path inside inline code. **Decided: (a).**
+3. What happens with a `:N` line suffix? (a) open the file and scroll to line N (recommended); (b) ignore the suffix; (c) treat it as part of the file name. **Decided: (a).**
+4. Are relative paths (`src/main.go`) links? (a) no (recommended); (b) yes, resolved against the session's folder. **Decided: (a).**
+5. Which roots may files come from? (a) the session's folder and the user's home (recommended); (b) also `/tmp`; (c) the session's folder only. **Decided: (a).**
+6. Can the user add their own deny-list entries? (a) no, the built-in list only; (b) a list in Quill Desktop → Devices (recommended). **Decided: (b).**
+7. Size limits? (a) text 256 KiB shown, images 8 MiB (recommended); (b) text 1 MiB, images 25 MiB like Quill Desktop's previews; (c) text 64 KiB, images 2 MiB. **Decided: (a).**
+8. May other Quill Desktop PCs paired as devices use the file endpoint? (a) no, phones only (recommended); (b) yes, same rules. **Decided: (a).**
+9. What does a tap on a `localhost` / `127.0.0.1` link do? (a) open it on the phone as is; (b) show "This address is on Quill Desktop's PC" with Copy and Open anyway (recommended); (c) not tappable. **Decided: (b).**
+10. Default of the per-device "Let this device open files" switch? (a) off until the user turns it on (recommended); (b) on for every paired phone; (c) no switch, pairing and unlock are enough. **Decided: (a).**
+11. Notify on Quill Desktop when a phone opens a file? (a) no, audit log only (recommended); (b) a notification for every file; (c) a notification only for files outside the session's folder. **Decided: (a).**
+12. Block screenshots in the viewer (`FLAG_SECURE`)? (a) no (recommended); (b) yes, always; (c) yes, only for files outside the session's folder. **Decided: (a).**
+13. Should Quill Desktop also make non-media file paths tappable (opening its own viewer), so both apps match exactly? (a) yes, as a separate task after this one (recommended); (b) no, Quill Android only; (c) yes, in phase 2. **Decided: (a).**
+
+## 13. As built (Quill Desktop, phases 1 and 2, 2026-11-23)
+
+Phase 1, shared rules
+
+- Detector: `cmd/quill/links.go` `findLinks`. Cases:
+  `cmd/quill/testdata/links.json`, checksum in
+  `docs/phone-links-cases.sha256` (`sha256sum` format). Tests:
+  `cmd/quill/links_test.go`.
+- `links.json`: `{"version": 1, "about": ..., "cases": [{"name", "text",
+  "links": [{"kind", "start", "end", "text", "target", "label"?, "line"?,
+  "lineEnd"?}]}]}`. `start`/`end` are Unicode code point offsets of the
+  tappable span (end exclusive), `text` is that span. The span is the whole
+  `[label](target)` or `<url>`, a path with its line hint, or the inside of
+  an inline code span. `target`: the URL (web, other), the percent-decoded
+  path (file), the path as written without the hint (path). Absent fields
+  mean empty or 0.
+- Details settled while building: a `/` path needs two segments (`/a/b`;
+  so `/clear` and `/tmp` are not links), a `~/` path one; a path can't start
+  right after a letter, digit or one of `/:.~-\@#%+&$` (so `and/or`, `1/2`,
+  URL paths), but can after `=` (`--out=/a/b`); the hints are `:N`, `:N-M`
+  and `:N:C` (column ignored); fences are ```` ``` ```` and `~~~`, a fence
+  opened and closed on one line is skipped alone; an unclosed inline code
+  span stays code; `file://` URLs need no host or `localhost`; `quillpair:`
+  is not a link at all; the 50-link cap counts per item.
+- Quill Desktop's own rendering is unchanged (task t421a1e); `autolinks`
+  is tested against the detector and differs only in the 50-link cap and
+  in file URLs with a host or no path.
+
+Phase 2, file endpoint (`cmd/quill/phonefiles.go`, tests in
+`cmd/quill/phonefiles_test.go`; API in `docs/phone-api.md`)
+
+- `GET /phone/session/{id}/file?path=...` and hello's `"files": {"api": 1,
+  "on": ...}` as in §6. A per-phone stream change `{"type": "files",
+  "files": {"api": 1, "on": ...}}` follows the switch.
+- Mentions: `assistant` and `plan` text, tool and permission `summary`
+  (through `findLinks`), `diff.path`. Not user messages, notices or thinking.
+- Order of checks: device is a phone (else `403 forbidden`), switch on
+  (`403 files_off`), not busy (`409`), rate (`429`), path syntax (`400`),
+  session and mention (`404`), deny list on the written path, system
+  folders, `EvalSymlinks` (`404` on failure), deny list, system folders and
+  roots on the resolved path (`403 file_denied`), regular file, open with
+  `O_NOFOLLOW|O_NONBLOCK` and `os.SameFile` against the `Lstat` (`404`).
+  Unmentioned paths never reach the disk checks.
+- `/proc/self/environ` and other paths outside both roots get `403
+  file_denied` (outside the roots), not the `404` §11 lists.
+- Deny list as §7.2 plus: `~/.thunderbird`, `~/.librewolf`,
+  `~/.waterfox`, `~/.config/google-chrome-beta`, `~/.config/microsoft-edge`,
+  `~/.config/opera`, `~/.config/kmem`, `~/.local/state/kmem`,
+  `~/.config/quill`, `~/.config/fyne/<app id>`, browser and mail flatpaks by
+  id (firefox, chrom, brave, vivaldi, edge, opera, librewolf, torbrowser,
+  zen, waterfox, floorp, thunderbird), `id_dsa*`; `*credentials*` instead
+  of `credentials*` (also catches `.credentials.json`).
+- Text is never `too_large`: longer text is cut (`truncated`). A `.png`
+  whose bytes are not a PNG goes through the text/binary rules.
+- User deny list: preference `phoneFilesDeny`, edited in Settings →
+  Sessions → Devices ("Files phones may not open"), one entry per line:
+  `/...` or `~/...` = that file or folder, anything else = a
+  case-insensitive file name pattern; `#` lines are comments.
+- Switch: `folders.Phone.Files` (`"files"` in the stored device list), a
+  "Let this device open files" check under each phone in Devices, with
+  "Opened files..." (the device's last 20 audit lines).
+- Audit: `phone-files.log` next to the phone keys (`QUILL_PHONE_DIR` or
+  `~/.config/quill/phone`), tab-separated: RFC 3339 time, device id, quoted
+  device name, session id, quoted path, size, result code (`ok` or the
+  error code).
+- File replies get the slow-link write deadline (60 s) like items pages.
+- Not built yet: the kmem assistant's `/phone/kmem/assistant/file`
+  (phase 4).
+- Open: `/run` is never served, which includes `/run/media/...`, where
+  removable and second drives are mounted; a project there is refused
+  (`file_denied`, "system folder /run") even as the session's folder.
+
