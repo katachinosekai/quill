@@ -213,7 +213,7 @@ func (d *desk) takeOverTopic(e extSession, t topicInfo, pending *deskSession) {
 		return
 	}
 	if owner := d.topicOwner(t.Slug, pending); owner != nil {
-		d.open(owner.id) // someone else got the topic first
+		d.openOwner(owner) // someone else got the topic first
 		return
 	}
 	p := d.terms[e.ID]
