@@ -15,7 +15,8 @@ import (
 // all", or a typed approval of a pending plan (approvesPlan). The approval
 // (s.runAll) then covers:
 //
-//  1. The turn the approval starts: every call of the session's own.
+//  1. The turn the approval starts: every call of the session's own (and a
+//     turn the user's retry of a blocked action starts while it lasts).
 //  2. The background work started in a covered turn: Bash calls with
 //     run_in_background and Agent calls (s.planWork). A subagent started in
 //     a covered turn is granted (agentGrants) and its calls, and those of

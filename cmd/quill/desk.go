@@ -1832,6 +1832,8 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		}
 		if !isRetry(text) {
 			s.planRevoked = false // the user's newest message decides from here
+		} else if s.runAll && !s.inTurn {
+			s.turnCovered = true // the user's retry continues the approved plan
 		}
 	}
 	if s.resumeNext == "" {
