@@ -403,7 +403,9 @@ func (v *chatView) rebuild() {
 		v.moreObj = v.moreRow(v.shownFrom)
 		v.box.Add(v.moreObj)
 	}
-	v.placeholder = len(items) == 0
+	// The pick card stays while the tab is unpicked, even under a notice
+	// (a refused name), so another topic can still be chosen.
+	v.placeholder = len(items) == 0 || v.s.pickPending
 	if v.placeholder {
 		v.box.Add(v.emptySession())
 	}
@@ -616,7 +618,7 @@ func (v *chatView) update(items []*chat.Item) {
 		if iv, ok := v.views[it.Seq]; ok {
 			v.refreshItem(it, iv)
 		} else {
-			if v.placeholder {
+			if v.placeholder && !v.s.pickPending {
 				v.box.RemoveAll()
 				v.placeholder = false
 			}

@@ -55,33 +55,7 @@ func TestNewTopicFromCardButton(t *testing.T) {
 	}
 }
 
-func TestNewTopicGateProbe(t *testing.T) {
-	h := newHarness(t)
-	topicKmem(t, h)
-	var s *deskSession
-	h.ui(func() {
-		h.d.planFirst = true
-		h.d.newSessionDialog()
-		s = h.d.current
-		h.d.pickNewTopic(s, "Garden Planner")
-	})
-	h.eventually("prompt", func() bool { return strings.Contains(sentText(s), "coordinator; kmem name") })
-	h.ui(func() {
-		for _, c := range []string{
-			`kmem --as garden-planner brief`, `kmem --as garden-planner rules`,
-			`kmem --as garden-planner task list`,
-			`kmem --as garden-planner context "Garden Planner coordinator: claimed tasks, open tasks, status, next steps" --topic garden-planner`,
-			`kmem --as garden-planner context --topic garden-planner`,
-			`kmem brief`, `kmem task list`,
-			`kmem --as garden-planner brief && kmem --as garden-planner task list`,
-		} {
-			t.Logf("%v  %s", h.d.kmemResumeAllowed(s, bashReq(c)), c)
-		}
-		t.Logf("resumeAs=%q", s.resumeAs)
-	})
-}
-
-func TestNewTopicKmem19Probe(t *testing.T) {
+func TestNewTopicFromCardWithSessionsFeature(t *testing.T) {
 	h := newHarness(t)
 	topicKmem(t, h)
 	base := h.d.kmemRun
@@ -104,7 +78,40 @@ func TestNewTopicKmem19Probe(t *testing.T) {
 		e, b := cardWidgets(h)
 		e.SetText("Garden Planner")
 		test.Tap(b)
-		t.Logf("pending=%v kmem=%q", s.pickPending, h.d.org.Kmem[s.id])
+		if s.pickPending || h.d.org.Kmem[s.id] != "garden-planner" || h.d.org.Titles[s.id] != "Garden Planner" {
+			t.Fatalf("not opened: %v %q", s.pickPending, h.d.org.Kmem[s.id])
+		}
 	})
 	h.eventually("prompt", func() bool { return strings.Contains(sentText(s), "coordinator; kmem name") })
+}
+
+// A refused pick (the name "kmem") posts its notice but leaves the card, so
+// the user can type another name; before the fix the notice replaced the card
+// and the tab was stuck unpicked.
+func TestRefusedNewTopicKeepsCard(t *testing.T) {
+	h := newHarness(t)
+	topicKmem(t, h)
+	var s *deskSession
+	h.ui(func() {
+		h.d.newSessionDialog()
+		s = h.d.current
+	})
+	h.eventually("card", func() bool { return strings.Contains(strings.Join(cardButtons(h), "|"), "Beta") })
+	h.ui(func() {
+		e, b := cardWidgets(h)
+		e.SetText("kmem")
+		test.Tap(b)
+		if !s.pickPending || !strings.Contains(sentText(s), "kmem window's topic") {
+			t.Fatalf("refused with a notice, tab still pending: %v %q", s.pickPending, sentText(s))
+		}
+		e, b = cardWidgets(h)
+		if e == nil || b == nil {
+			t.Fatal("the card is gone after the refusal: the tab is stuck")
+		}
+		e.SetText("Garden Planner")
+		test.Tap(b)
+		if s.pickPending || h.d.org.Kmem[s.id] != "garden-planner" {
+			t.Fatal("a second try opens the topic")
+		}
+	})
 }
