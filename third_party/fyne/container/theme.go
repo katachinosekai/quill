@@ -3,6 +3,7 @@
 package container
 
 import (
+	"reflect"
 	"weak"
 
 	"fyne.io/fyne/v2"
@@ -24,7 +25,8 @@ type ThemeOverride struct {
 
 	holder *fyne.Container
 
-	mobile bool
+	mobile  bool
+	applied fyne.Theme // Theme at the last apply (Quill patch)
 }
 
 // NewThemeOverride provides a container where the child widgets are themed by the specified theme.
@@ -39,13 +41,13 @@ func NewThemeOverride(obj fyne.CanvasObject, th fyne.Theme) *ThemeOverride {
 	t := &ThemeOverride{Content: obj, Theme: th, holder: NewStack(obj)}
 	t.ExtendBaseWidget(t)
 
-	cache.OverrideTheme(obj, addFeatures(th, t))
+	t.apply()
 	obj.Refresh() // required as the widgets passed in could have been initially rendered with default theme
 	return t
 }
 
 func (t *ThemeOverride) CreateRenderer() fyne.WidgetRenderer {
-	cache.OverrideTheme(t.Content, addFeatures(t.Theme, t))
+	t.apply()
 
 	return &overrideRenderer{parent: t, objs: []fyne.CanvasObject{t.holder}}
 }
@@ -56,9 +58,35 @@ func (t *ThemeOverride) Refresh() {
 		t.holder.Refresh()
 	}
 
-	cache.OverrideTheme(t.Content, addFeatures(t.Theme, t))
+	t.apply()
 	t.Content.Refresh()
 	t.BaseWidget.Refresh()
+}
+
+// apply themes the content. The theme caches are cleared only when the
+// override's Theme was replaced since the last apply (Quill patch,
+// 2026-11-23); before, every apply of every override cleared them, see
+// overrideWidget in internal/cache/theme.go.
+func (t *ThemeOverride) apply() {
+	if t.applied != nil && !sameTheme(t.applied, t.Theme) {
+		cache.ResetThemeCaches()
+	}
+	t.applied = t.Theme
+	cache.OverrideTheme(t.Content, addFeatures(t.Theme, t))
+}
+
+// sameTheme reports whether a and b are the same theme value; values that
+// cannot be compared count as different.
+func sameTheme(a, b fyne.Theme) (same bool) {
+	if reflect.TypeOf(a) != reflect.TypeOf(b) || !reflect.TypeOf(a).Comparable() {
+		return false
+	}
+	defer func() {
+		if recover() != nil { // comparable type holding an uncomparable value
+			same = false
+		}
+	}()
+	return a == b
 }
 
 // SetDeviceIsMobile allows a ThemeOverride container to shape the contained widgets as a mobile device.

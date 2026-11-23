@@ -77,8 +77,15 @@ func overrideTheme(o fyne.CanvasObject, s *overrideScope) {
 	}
 }
 
+// overrideWidget no longer clears the SVG and text-size caches (Quill patch,
+// 2026-11-23): it did so for every widget on every apply, and Quill applies
+// an override per chat message, so each redraw threw away every cached
+// measurement and icon. Neither cache needs it: SVGs in a scope are keyed by
+// its cache ID, new on every apply, and text sizes are keyed by text, size,
+// style and font source and measured with the app theme's faces, which only
+// change with the app theme (the driver clears both caches then). An
+// override whose theme is replaced clears them once (container.ThemeOverride).
 func overrideWidget(w fyne.Widget, s *overrideScope) {
-	ResetThemeCaches()
 	overrides.Store(w, s)
 
 	r := Renderer(w)
