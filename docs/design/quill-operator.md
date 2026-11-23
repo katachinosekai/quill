@@ -1,6 +1,6 @@
 # Quill operator and the assistant box (design)
 
-Status: design, 2026-11-24. Base: master 914ae23.
+Status: built (phases 1–3), 2026-11-24. Base: master 914ae23.
 Scope: Quill Desktop (a new "Quill" button, the Quill operator session, one
 animated assistant box for kmem and the Quill operator, a docked side-panel
 state, a settings command Quill Desktop gives its operator), the phone API
@@ -12,7 +12,7 @@ end-of-session check §3.8, topic snapshot §3.8a), `docs/design/kmem-window.md`
 (phone routes for the kmem assistant §4.3). kmem facts: fe21517 (this
 decision), f3a1828 (plan approval scope), fdd52bd (plan cards), f6fa284 (gate:
 own kmem name, "Approved."), f77c3d0 (topic snapshot), fc6b73c (kmem assistant
-is the only always-running hidden session; this design changes that).
+is the only always-running hidden session; replaced by the two-session fact, §5.3).
 
 ## 1. User decisions this design starts from
 
@@ -444,7 +444,9 @@ and snapshot.
 
 ### 5.3 Facts and docs
 
-- New fact replacing fc6b73c (via `--replaces`, after the user's approval):
+- Done in phase 3 (sub I): the one-time move-in notice on the running tab
+  (`quilloperator.go`, pref `quillMoveNoticeSeen`; [Move it here] / [Later],
+  never automatic) and the fact below (via `--replaces`):
   two always-running hidden sessions, kmem-lock-audit (kmem) and quill (Quill
   operator), both behind toolbar buttons.
 - kmem config `sessions[quill]` keeps title "Quill"; topic-tabs.md §3.1

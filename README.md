@@ -50,6 +50,12 @@ Quill needs the Claude Code CLI (`claude`) installed and signed in. On a new ins
 - Shared memory for all your sessions through the bundled kmem: handoffs, tasks, shared rules, a recycle bin
 - Optional default rules (recommended for beginners); yours are never replaced
 - A banner shows what only you decide: items in the recycle bin and audit problems
+- The **kmem** button opens the kmem box: your kmem panels as tabs on the left and a chat with the kmem assistant on the right (Ctrl+Shift+K). It can dock to the side or pop out as its own window; the old separate kmem window is gone.
+
+**Quill operator**
+- The **Quill** button (Ctrl+Shift+O) opens a chat with the Quill operator, a hidden session that starts with Quill Desktop. Ask it to change Quill Desktop settings; it applies them through the `quill settings` command (`list`, `get`, `set`, `undo`), shows each change as a card with Undo (the last 50 are kept), and never touches security settings. With a Quill source folder set (Settings, General) it also does developer work on Quill.
+- Quill Desktop runs two always-running hidden sessions, the kmem assistant and the Quill operator, behind the kmem and Quill buttons. Both open in the same box: an overlay over the window or docked to the side, remembered per assistant.
+- If a Quill session is already running in a tab, a one-time notice offers **Move it here** (the session keeps running, its tab's auto-approve ends) or **Later**; nothing moves by itself.
 
 **Other PCs**
 - Pair another PC running Quill Desktop and work in its sessions from here (Reload button, plan cards and approvals work the same)

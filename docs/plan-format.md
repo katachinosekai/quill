@@ -23,6 +23,13 @@ and the plan card read plans in this format.
 
 ## What an approval covers
 
+(The Quill operator's settings command is covered the same way: a
+`quill settings set` change is allowed under an approved plan, applied at
+once, and shown as a change card with Undo. Security settings, including
+plan-first and auto-approve, are never changeable through it. The operator's
+own auto-approve is separate from a tab's; moving a tab into the Quill button
+ends that tab's auto-approve.)
+
 - Every tool call of the request the plan answers.
 - Subagents started (or resumed with SendMessage) for the plan inherit its
   approval until they finish (their task notification).
