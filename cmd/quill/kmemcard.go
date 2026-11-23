@@ -193,10 +193,7 @@ func (d *desk) renameKmem(id, old, next string) {
 				d.notify(s, "kmem renamed the handoff but could not move its config label from "+old+" to "+next)
 			}
 			d.org.Kmem[id] = next
-			if p, ok := d.org.Projects[old]; ok && d.org.Projects[next] == "" && !d.kmemNameInUse(old) {
-				d.org.Projects[next] = p // the project set in Quill is keyed by kmem name
-				delete(d.org.Projects, old)
-			}
+			d.moveKmemProject(old, next)
 			resetKmemSessions() // the label just moved; don't group by the cached old key for a minute
 			d.saveOrg()
 		})

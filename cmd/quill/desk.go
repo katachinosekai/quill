@@ -199,6 +199,7 @@ type desk struct {
 	pcNote         map[string]string
 	hsMu           sync.Mutex
 	lastHandoffs   []kmemHandoff
+	kmemNoHandoff  map[string]bool // linked names kmem had no handoff for at the last rename check (kmemrename.go)
 	policy         handoffPolicy
 	policyAt       time.Time
 	policyBusy     bool
@@ -2250,6 +2251,7 @@ func (d *desk) watch(ctx context.Context) {
 	go d.chat.followGuard(ctx)
 	go d.fetchCommands()
 	d.refreshAccount()
+	d.do(func() { d.reconcileKmemNames(true, nil) }) // kmem handoffs renamed while Quill Desktop was closed
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	n := 0
@@ -2261,6 +2263,7 @@ func (d *desk) watch(ctx context.Context) {
 			d.refresh()
 			if n++; n%12 == 0 {
 				d.refreshAccount()
+				d.do(func() { d.reconcileKmemNames(false, nil) })
 			}
 		}
 	}

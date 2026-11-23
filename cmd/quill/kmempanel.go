@@ -193,6 +193,7 @@ func setBox(c *fyne.Container, objs ...fyne.CanvasObject) {
 // reload reads everything in the background and fills the tabs.
 func (p *kmemPanel) reload() {
 	d := p.d
+	d.reconcileKmemNames(true, nil) // tab links follow handoffs renamed outside Quill Desktop
 	go func() {
 		var brief struct {
 			Brief string `json:"brief"`
@@ -387,7 +388,9 @@ func (p *kmemPanel) resumeHandoff(name string) {
 	if name != kmemWinOperator {
 		p.d.showWindow()
 	}
-	p.d.resumeHandoffNamed(name)
+	// follow renames made outside Quill Desktop first, so a NEW handoff
+	// under an old name never opens the renamed tab (bug 2026-11-22)
+	p.d.reconcileKmemNames(true, func(kmemRenameScan) { p.d.resumeHandoffNamed(name) })
 }
 
 // resumeHandoffNamed: the live session holding the name if there is one,
@@ -427,36 +430,6 @@ func (d *desk) resumeHandoffNamed(name string) *deskSession {
 var kmemNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
 
 func validKmemName(s string) bool { return kmemNameRe.MatchString(s) }
-
-// resumeNamedFromCLI: `quill --resume NAME` (user 2026-11-21): bring the
-// window up and open that kmem session, or start one from its handoff.
-func (d *desk) resumeNamedFromCLI(name string) {
-	if name == kmemWinOperator && d.kmemAvailable() {
-		d.openKmemWindow()
-		return
-	}
-	d.showWindow()
-	if !d.kmemAvailable() {
-		return
-	}
-	if d.handoffOwner(name, &deskSession{}) != nil {
-		d.resumeHandoffNamed(name)
-		return
-	}
-	go func() {
-		known := false
-		for _, h := range d.kmemHandoffs() { // runs kmem: off the UI thread
-			known = known || h.Name == name
-		}
-		d.do(func() {
-			if known {
-				d.resumeHandoffNamed(name)
-			} else if s := d.current; s != nil {
-				d.notify(s, "quill --resume: there is no kmem handoff or live session called “"+name+"”.")
-			}
-		})
-	}()
-}
 
 // trashHandoffNamed moves every fact of a handoff to the kmem recycle bin.
 func (d *desk) trashHandoffNamed(name, why string, done func()) {
