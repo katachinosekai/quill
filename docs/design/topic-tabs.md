@@ -266,6 +266,49 @@ rotation, Quit and /clear:
 | `kmempanel.go` Handoffs tab, `trashHandoffNamed` | read-only Topics tab (§3.5); no Delete |
 | `autohandoff.go` messages naming handoffs | "end-of-session check" wording |
 
+**As built (sub C, branch feat/topics-c, 2026-11-23; kmem 1.10.0 K4):**
+
+- Gate: `kmem version --json` `"features"` (`kmemclient.go` `kmemHasFeature`,
+  UI thread `kmemFeatureCached`). The check runs only with `"end-check"` and
+  only for a local, visible, running **topic** session (`endCheckFor`);
+  old-name sessions, the kmem assistant (`kmemassist.go`) and kmem without the
+  feature keep the handoff save flows unchanged. The topic prompt's K2
+  briefing is gated on `"topic-context"` instead of a version number.
+- Command: `kmem --as T end-check --session <session id> --pid <claude pid>
+  --json` (no `--since`/`--path`: kmem's own session start is used). JSON is
+  read even when kmem's stderr notices come first; exit 1 with blockers =
+  blockers; exit 2, no JSON, `api` ≠ 1 or `ok:false` without blockers = kmem
+  error.
+- `endcheck.go`: `endWait{why, name, place, spare, asked, checking,
+  blockers, done}` next to `kmemSave`; one flow for End (`endWithSave` →
+  `endTopic`; Switch topic and closing a tab go through it), rotation
+  (`relaunchViaKmem` → `rotateTopic`; auto/cold rotation, Rotate now, /clear
+  and Restart from kmem go through it), Quit and /export **Checkpoint now**
+  (`saveHandoffNow` → `checkpointNow`: asks for checkpoints + status, then
+  reports the check; the session goes on). First check runs without asking;
+  ok ends at once. Blockers: a notice lists them, the tab meta shows
+  "end-of-session check: N blocker(s)", the session gets one message
+  (`endCheckMessage`), and `kmemAfterTurn` re-runs the check after each turn;
+  `spare` and "the … was cancelled; nothing was stopped" as before. End keeps
+  the 5-minute cap. Trivial sessions end without a check (as before).
+- kmem error: End, rotation and Checkpoint now fall back to the handoff save
+  flow with a notice; Quit lists the topic ("kmem error: …") for the second
+  confirm.
+- End still writes the caller's place (Inactive) until sub F removes places;
+  rotation deletes the old session and starts the §3.2 prompt via
+  `sendResume`.
+- Quit (`quitConfirmed`): every visible running topic session runs the flow
+  at once, 60 s cap each; all pass → kmem assistant save (`kmemQuitFlow`) →
+  stop all. Any fail → "Quit anyway?" listing each topic with its blockers
+  (or error / no reply); Cancel stops nothing.
+- Plan-first during the check (`endCheckAllowed` via `kmemSaveAllowed`):
+  read-only set + every `kmem` command + `pzlock status` + `pzlock release
+  <listed lock name>`; commits still need a plan (Q24).
+- `safePoint` also waits for running subagents (Q19), for all sessions.
+- Not done here: `endWait` is not persisted across a Quill restart
+  (`restore.go` keeps `kmemSave` only); the phone API's `endWait` field
+  (sub G); `relaunch.go`'s "Restart from kmem?" dialog text (sub F).
+
 ### 3.10 Topic briefing for subagents
 
 Quill injects into the first prompt and `coordinatorHint`: "brief every
