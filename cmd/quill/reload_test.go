@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
@@ -308,4 +310,69 @@ func TestReloadKeepsNewTabAndItsDraft(t *testing.T) {
 			t.Fatal("a draft typed in another tab went into this tab's box")
 		}
 	})
+}
+
+// t2debee: a switch the user asked for that waits says why in the window,
+// offers "Reload now" when only typing holds it, and `quill --reload`
+// prints the same.
+func TestReloadWaitNotice(t *testing.T) {
+	h := newHarness(t)
+	h.d.do = func(f func()) {
+		go func() {
+			uiMu.Lock()
+			defer uiMu.Unlock()
+			f()
+		}()
+	}
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		s.title = "Parser work"
+		h.d.swapTo, h.d.forceSwap = "/nonexistent/quill", true
+		h.d.lastTyped = time.Now()
+		s.takeover = true
+		h.d.trySwap()
+		if h.d.swapping || !h.d.updLine.Visible() {
+			t.Fatal("held, with a notice")
+		}
+		txt := h.d.updText.Text
+		if !strings.Contains(txt, "you typed in the last 15 seconds") || !strings.Contains(txt, `"Parser work" is being taken over from a terminal`) {
+			t.Fatalf("the notice names what holds it: %q", txt)
+		}
+		if len(h.d.updActs.Objects) != 0 {
+			t.Fatal("no Reload now while a takeover holds it")
+		}
+		if st := h.d.reloadStatus(); !strings.HasPrefix(st, reloadWaiting+"\t") || !strings.Contains(st, "Parser work") {
+			t.Fatalf("status for the CLI: %q", st)
+		}
+		s.takeover = false
+		h.d.trySwap()
+		if len(h.d.updActs.Objects) != 1 || h.d.updActs.Objects[0].(*widget.Button).Text != "Reload now" || h.d.swapRetry == nil {
+			t.Fatalf("only typing holds it: Reload now, and a retry when typing pauses: %v", h.d.updActs.Objects)
+		}
+		test.Tap(h.d.updActs.Objects[0].(*widget.Button))
+		if !h.d.swapping {
+			t.Fatal("Reload now switches while the user typed")
+		}
+	})
+	h.eventually("the failed switch clears its line", func() bool { return !h.d.swapping && !h.d.updLine.Visible() })
+}
+
+func TestReloadCLIReports(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "q.sock")
+	h := newHarness(t)
+	h.d.listenInstance(sock)
+	h.ui(func() {
+		h.d.swapTo = "/nonexistent/quill"
+		h.d.lastTyped = time.Now()
+	})
+	var out strings.Builder
+	if code := reloadCLI(sock, &out); code != 0 || !strings.Contains(out.String(), "when this clears: you typed in the last 15 seconds.") || !strings.Contains(out.String(), `"Reload now"`) {
+		t.Fatalf("waiting: %d %q", code, out.String())
+	}
+	h.ui(func() { h.d.swapTo, h.d.pendingBuild = "", "" })
+	out.Reset()
+	if code := reloadCLI(sock, &out); code != 0 || !strings.Contains(out.String(), "already runs this build") {
+		t.Fatalf("no new build, same program: %d %q", code, out.String())
+	}
 }

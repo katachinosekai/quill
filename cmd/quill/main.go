@@ -90,11 +90,7 @@ func main() {
 		return
 	}
 	if *reload {
-		if !sendCommand(sock, "reload") {
-			fmt.Fprintln(os.Stderr, "no running Quill answered")
-			os.Exit(1)
-		}
-		return
+		os.Exit(reloadCLI(sock, os.Stdout))
 	}
 	if os.Getenv(restoreEnv) == "" && signalRunning(sock) {
 		return

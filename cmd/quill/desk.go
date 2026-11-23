@@ -376,6 +376,11 @@ type desk struct {
 	centerChecks  []*widget.Check
 	suppressAlign bool
 	forceSwap     bool
+	swapNow       bool        // "Reload now": switch without waiting for typing to pause
+	swapRetry     *time.Timer // retries a switch held by typing
+	swapNotice    bool        // the update line shows why a switch waits
+	binMu         sync.Mutex
+	bin           *binWatch // Quill's own program file (watchBinary), under binMu
 	flushTimer    *time.Timer
 	cmds          *cmdMenu
 	sidebar       fyne.CanvasObject

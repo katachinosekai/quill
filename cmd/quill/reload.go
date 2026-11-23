@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -70,7 +73,11 @@ func newBinWatch() *binWatch {
 	return &binWatch{path: exe, mod: st.ModTime(), size: st.Size()}
 }
 
-func (b *binWatch) changed() bool {
+func (b *binWatch) changed() bool { return b.changedAfter(time.Second) }
+
+// changedAfter: the program file is a new ELF build, last written more than
+// settle ago (a build still being written isn't taken).
+func (b *binWatch) changedAfter(settle time.Duration) bool {
 	st, err := os.Stat(b.path)
 	if err != nil || st.Size() == 0 {
 		return false
@@ -78,7 +85,7 @@ func (b *binWatch) changed() bool {
 	if st.ModTime().Equal(b.mod) && st.Size() == b.size {
 		return false
 	}
-	if time.Since(st.ModTime()) < time.Second || st.Mode()&0o111 == 0 {
+	if time.Since(st.ModTime()) < settle || st.Mode()&0o111 == 0 {
 		return false
 	}
 	f, err := os.Open(b.path)
@@ -99,6 +106,9 @@ func (d *desk) watchBinary(ctx context.Context) {
 	if b == nil {
 		return
 	}
+	d.binMu.Lock()
+	d.bin = b
+	d.binMu.Unlock()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
@@ -106,7 +116,10 @@ func (d *desk) watchBinary(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if b.changed() {
+			d.binMu.Lock()
+			changed := b.changed()
+			d.binMu.Unlock()
+			if changed {
 				d.do(func() { d.binaryChanged(b.path) })
 			}
 		}
@@ -167,18 +180,18 @@ func (d *desk) restoreHead() restoreState {
 }
 
 func (d *desk) trySwap() {
-	if d.swapTo == "" || d.swapping || d.signingIn != nil {
+	if d.swapTo == "" || d.swapping {
 		return
 	}
-	// Never swap while the user is typing, not even for `quill --reload`
-	// (user 2026-11-21: a forced reload mid-prompt moved the draft).
-	if time.Since(d.lastTyped) < typingQuiet {
+	if why := d.swapBlockers(); len(why) > 0 {
+		d.swapWaits(why)
 		return
 	}
-	for _, s := range d.sessions {
-		if s.takeover {
-			return
-		}
+	d.swapNow = false
+	noticed := d.swapNotice
+	if noticed {
+		d.swapNotice = false
+		d.setUpdLine("Switching to the new Quill Desktop build…")
 	}
 	d.swapping = true
 	d.stopMedia()
@@ -245,6 +258,9 @@ func (d *desk) trySwap() {
 			d.forceSwap = false
 			for _, m := range handed {
 				d.reattach(m.s, m.hs)
+			}
+			if noticed {
+				d.setUpdLine("")
 			}
 			if d.current != nil {
 				d.chat.update([]*chat.Item{d.current.conv.AddError("Could not switch to the new build: " + err.Error())})
@@ -452,4 +468,128 @@ func placeWindow(w fyne.Window, st *restoreState) {
 	if os.Getenv("WAYLAND_DISPLAY") == "" && (st.X != 0 || st.Y != 0) {
 		p.RequestPosition(st.X, st.Y)
 	}
+}
+
+// swapBlockers: what holds a switch the user asked for, in words. Busy
+// turns and running subagents don't: their sessions are handed over to the
+// new build and keep running.
+func (d *desk) swapBlockers() []string {
+	var why []string
+	if d.signingIn != nil {
+		why = append(why, "signing in to Claude is in progress")
+	}
+	// Never swap while the user is typing, not even for `quill --reload`
+	// (user 2026-11-21: a forced reload mid-prompt moved the draft), unless
+	// they press "Reload now".
+	if !d.swapNow && time.Since(d.lastTyped) < typingQuiet {
+		why = append(why, "you typed in the last 15 seconds")
+	}
+	var taken []string
+	for _, s := range d.sessions {
+		if s.takeover {
+			taken = append(taken, strconv.Quote(firstNonEmpty(s.title, s.id)))
+		}
+	}
+	sort.Strings(taken)
+	for _, t := range taken {
+		why = append(why, t+" is being taken over from a terminal")
+	}
+	return why
+}
+
+// typingHolds: only typing holds the switch, which "Reload now" overrides.
+// A takeover or sign-in in progress can't be handed over.
+func typingHolds(why []string) bool {
+	return len(why) == 1 && strings.HasPrefix(why[0], "you typed")
+}
+
+// swapWaits shows why a switch waits (t2debee: `quill --reload` waited
+// without a word) and retries it when typing pauses; a takeover or sign-in
+// retries it when it ends (handleEvent, refresh).
+func (d *desk) swapWaits(why []string) {
+	d.swapNotice = true
+	text := "Quill Desktop switches to the new build when this clears: " + strings.Join(why, "; ") + "."
+	if typingHolds(why) {
+		d.setUpdLine(text, lineBtn("Reload now", func() {
+			d.swapNow = true
+			d.trySwap()
+		}))
+	} else {
+		d.setUpdLine(text)
+	}
+	if left := typingQuiet - time.Since(d.lastTyped); left > 0 && d.swapRetry == nil {
+		d.swapRetry = time.AfterFunc(left+100*time.Millisecond, func() {
+			d.do(func() {
+				d.swapRetry = nil
+				d.trySwap()
+			})
+		})
+	}
+}
+
+// Replies to `quill --reload` after "ok" (reloadStatus, reloadCLI).
+const (
+	reloadSwitching = "switching"
+	reloadWaiting   = "waiting"
+	reloadNoBuild   = "nobuild"
+)
+
+// reloadRequest: `quill --reload`. It also takes a build that waits behind
+// the update line, or one the watcher hasn't seen yet (the command can come
+// within its one-second settle). It returns the status line for the CLI.
+func (d *desk) reloadRequest() string {
+	if d.swapTo == "" && d.pendingBuild == "" {
+		d.binMu.Lock()
+		if b := d.bin; b != nil && b.changedAfter(0) {
+			d.pendingBuild = b.path
+		}
+		d.binMu.Unlock()
+	}
+	if d.swapTo == "" && d.pendingBuild != "" {
+		d.swapOK, d.swapTo = true, d.pendingBuild
+	}
+	d.forceSwap = true
+	d.trySwap()
+	return d.reloadStatus()
+}
+
+func (d *desk) reloadStatus() string {
+	switch {
+	case d.swapping:
+		return reloadSwitching
+	case d.swapTo == "":
+		return reloadNoBuild + "\t" + runningExe()
+	default:
+		return reloadWaiting + "\t" + strings.Join(d.swapBlockers(), "; ")
+	}
+}
+
+// runningExe: the program file this process was started from.
+func runningExe() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	return exe
+}
+
+// buildID identifies a program file by size and time; the running image is
+// read through /proc/self/exe where there is one (it stays readable after a
+// rebuild replaced the file).
+func buildID(path string) string {
+	st, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatInt(st.Size(), 10) + ":" + strconv.FormatInt(st.ModTime().UnixNano(), 10)
+}
+
+func runningBuildID() string {
+	if id := buildID("/proc/self/exe"); id != "" {
+		return id
+	}
+	return buildID(runningExe())
 }
