@@ -28,12 +28,20 @@ type approvalOpts struct {
 	Options     []string `json:"options"`
 	Stop        []bool   `json:"stop"`        // the option turns the plan down
 	Recommended int      `json:"recommended"` // -1 = none
+	// DontRun: no option stops, so the card adds its own "Don't run" (the
+	// options are planChoices', in its order: request.choices).
+	DontRun bool `json:"dontRun,omitempty"`
 }
 
+// dontRunPick: answerPlanApproval's index for the card's own "Don't run".
+const dontRunPick = -2
+
 // planApprovalOptions: the options the approval question (the plan card's
-// title) offers, when they hold both a go-ahead and a way to stop; else nil
-// (the card keeps its Approve button). Only the last options sentence of
-// the title counts.
+// title) offers: a go-ahead and a way to stop (the last options sentence of
+// the title), or else the picks between things to approve that
+// planChoices reads ("Ship as v0.1.18, or v0.2.0?"; user 2026-11-22,
+// f4684ce), which get a "Don't run" of their own. nil: the card keeps its
+// Approve button.
 func planApprovalOptions(title string) *approvalOpts {
 	sents := questionSentences(strings.TrimSpace(strings.Trim(mdNoise.Replace(title), "*_ ")))
 	for i := len(sents) - 1; i >= 0; i-- {
@@ -55,12 +63,21 @@ func planApprovalOptions(title string) *approvalOpts {
 				stops++
 			}
 		}
-		if stops == 0 || stops == len(opts) {
+		if stops == len(opts) {
 			return nil
 		}
-		return a
+		if stops > 0 {
+			return a
+		}
+		break
 	}
-	return nil
+	// No way to stop: planChoices' options (it leaves out "Do you approve
+	// …, or should I change something first?", which is no pick).
+	opts, rec := planChoices(title)
+	if len(opts) == 0 {
+		return nil
+	}
+	return &approvalOpts{Options: opts, Stop: make([]bool, len(opts)), Recommended: rec, DontRun: true}
 }
 
 // planItemApproval: planApprovalOptions for a plan item's card.
@@ -90,26 +107,56 @@ func planGoFull(choice string, qs []planQ, ans map[int]planAnswer) string {
 	return msg
 }
 
+// planStopMessage: what a stop on a card with other questions sends: the
+// plan isn't run, and the answers go along (planGoAnswers' numbering).
+func planStopMessage(choice string, qs []planQ, ans map[int]planAnswer) string {
+	msg := planStopText
+	if choice != "" {
+		msg += " Answer to your question: " + choice + "."
+	}
+	return msg + strings.TrimPrefix(planGoAnswers(qs, ans), planGoMessage+planGoScope)
+}
+
+const planStopText = "Not running the plan: the user turned it down."
+
 // answerPlanApproval answers the plan with option i of the approval question
-// (and, with qs, the other questions' answers): go-ahead approves as
-// "Approve plan & run all" does, stop is "Don't run".
+// (dontRunPick: the card's own "Don't run"), and with qs the other
+// questions' answers: a go-ahead approves as "Approve plan & run all" does;
+// a stop is "Don't run", and with other questions their answers are sent
+// after it (user 2026-11-22, f4684ce).
 func (d *desk) answerPlanApproval(s *deskSession, it *chat.Item, a *approvalOpts, i int, qs []planQ, ans map[int]planAnswer) {
-	if a == nil || i < 0 || i >= len(a.Options) {
+	if a == nil || (i < 0 || i >= len(a.Options)) && !(i == dontRunPick && a.DontRun) {
 		return
 	}
-	stop, choice := a.Stop[i], approvalChoice(a.Options[i])
+	stop, choice := true, ""
+	if i >= 0 {
+		stop, choice = a.Stop[i], approvalChoice(a.Options[i])
+	}
+	if stop && strings.EqualFold(choice, "no") {
+		choice = ""
+	}
 	if s != nil && s.remote != nil {
-		if s = d.cardOwner(s, it); s != nil {
-			var answers map[string]any
-			if !stop && len(qs) > 0 {
-				answers = planAnswersJSON(qs, ans)
-			}
-			d.remotePlan(s, it, !stop, choice, answers)
+		if s = d.cardOwner(s, it); s == nil {
+			return
 		}
+		if stop && len(qs) > 0 {
+			// rejectPlan's text goes to Claude after the refusal.
+			d.remoteWrite(s, "answer", map[string]any{"requestId": it.RequestID, "action": "rejectPlan", "text": planStopMessage(choice, qs, ans)})
+			return
+		}
+		var answers map[string]any
+		if !stop && len(qs) > 0 {
+			answers = planAnswersJSON(qs, ans)
+		}
+		d.remotePlan(s, it, !stop, choice, answers)
 		return
 	}
 	if stop {
+		pending := it.PermState == chat.PermPending
 		d.answerPlanMsg(s, it, false, "")
+		if pending && it.PermState == chat.PermDenied && len(qs) > 0 {
+			d.sendTo(s, planStopMessage(choice, qs, ans))
+		}
 		return
 	}
 	d.answerPlanMsg(s, it, true, planGoFull(choice, qs, ans))
@@ -160,6 +207,13 @@ func (v *chatView) approvalButtons(owner *deskSession, plan *chat.Item, a *appro
 			v.redrawPlan(plan, planReply(owner.conv, plan))
 		})))
 	}
+	if a.DontRun {
+		// No option stops: the card's own way to turn the plan down, at
+		// once (with the other questions' answers, if any).
+		btns = append(btns, glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() {
+			v.d.answerPlanApproval(owner, plan, a, dontRunPick, qs, ans)
+		})))
+	}
 	return v.buttonRow(btns...)
 }
 
@@ -184,6 +238,9 @@ func (v *chatView) approvalSend(owner *deskSession, plan *chat.Item, a *approval
 // approvalKind: the click guard's kind for a card with approval options.
 func approvalKind(a *approvalOpts, qs []planQ) string {
 	k := "approval:" + strings.Join(a.Options, "/")
+	if a.DontRun {
+		k += "|dontrun"
+	}
 	if len(qs) > 0 {
 		k += "|send"
 	}

@@ -1720,27 +1720,18 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	owner := v.s
 	if it.PermState == chat.PermPending {
 		no := glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() { v.d.answerPlan(owner, it, false) }))
-		approve := func(opt string) fyne.CanvasObject {
-			label := "Approve plan & run all"
-			if opt != "" {
-				label = "Approve: " + shortLabel(opt, 50)
-			}
-			return glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() { v.d.answerPlanWith(owner, it, true, opt) }))
-		}
-		var opts []string
-		rec := -1
+		approve := glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() { v.d.answerPlan(owner, it, true) }))
 		var qs []planQ
 		var appr *approvalOpts
 		kind := "pending"
 		if owner != nil {
 			qs = planItemQuestions(owner, it)
-			opts, rec = planChoices(title.Text)
 			appr = planItemApproval(owner, it)
 		}
 		switch {
 		case appr != nil:
-			// The approval question's own options answer the plan
-			// (planapproval.go); other questions share the card and one Send.
+			// The approval question's own options (or picks, with a
+			// "Don't run") answer the plan (planapproval.go); other questions share the card and one Send.
 			msg.SetText("Claude's plan is above. " + approvalCaption(appr))
 			// The title is the approval question: its buttons go right under
 			// it, the other questions after them.
@@ -1761,35 +1752,8 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 			parts = append(parts, v.planQuestionForm(qs, ans))
 			run := glowButton("Approve plan & send answers", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() { v.d.answerPlanAnswers(owner, it, qs, ans) }))
 			parts = append(parts, v.buttonRow(run, no))
-		case len(opts) > 0 && rec >= 0:
-			// The recommended answer goes with Approve; the others wait behind a link.
-			parts = append(parts, v.buttonRow(approve(opts[rec]), no))
-			var others []fyne.CanvasObject
-			for i, o := range opts {
-				if i != rec {
-					others = append(others, approve(o))
-				}
-			}
-			row := v.buttonRow(others...)
-			row.Hide()
-			var more *widget.Button
-			more = widget.NewButton("Other answers…", func() {
-				row.Show()
-				more.Hide()
-				if v.box != nil {
-					relayout(v.box)
-				}
-			})
-			more.Importance = widget.LowImportance
-			parts = append(parts, v.centered(more), row)
-		case len(opts) > 0:
-			var btns []fyne.CanvasObject
-			for _, o := range opts {
-				btns = append(btns, approve(o))
-			}
-			parts = append(parts, v.buttonRow(append(btns, no)...))
 		default:
-			parts = append(parts, v.buttonRow(approve(""), no))
+			parts = append(parts, v.buttonRow(approve, no))
 		}
 		v.noteButtons(it.Seq, kind)
 	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !owner.inTurn && !replied(owner, it) {

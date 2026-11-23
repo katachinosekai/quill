@@ -29,7 +29,8 @@ func TestPlanApprovalOptions(t *testing.T) {
 		"Do you approve? Approve as is (recommended), approve with changes, or stop?":        "Approve as is*|Approve with changes|Stop!",
 		"Should I run the migration now, or not yet?":                                        "Run the migration now|Not yet!",
 		"Do you approve steps 1–4?":                                                          "",
-		"Should it ship as v0.1.18 (recommended), or replace the v0.1.17 files?":             "",
+		"Should it ship as v0.1.18 (recommended), or replace the v0.1.17 files?":             "Ship as v0.1.18*|Replace the v0.1.17 files|+",
+		"Do you approve steps 1–3, or should I change something first?":                      "",
 		"Should I ship ELTF 1.3.7 now (Workshop upload, Steam restart, and one join check)?": "",
 	} {
 		got := ""
@@ -43,6 +44,9 @@ func TestPlanApprovalOptions(t *testing.T) {
 					o += "!"
 				}
 				parts = append(parts, o)
+			}
+			if a.DontRun {
+				parts = append(parts, "+")
 			}
 			got = strings.Join(parts, "|")
 		}
@@ -265,10 +269,23 @@ func TestApprovalMixedCardNo(t *testing.T) {
 	h.ui(func() {
 		v := h.d.chat
 		reply := planReply(s.conv, plan)
+		qs := planItemQuestions(s, plan)
+		v.planAnswers(plan, qs)[qs[2].ID] = planAnswer{Choice: -1, Text: "v2"}
 		tapLabel(t, h, v.renderPlanReply(reply), "No")
 		tapLabel(t, h, v.renderPlanReply(reply), "Send answers")
-		if plan.PermState != chat.PermDenied || s.runAll || !s.planRevoked {
-			t.Fatalf("Send with No is Don't run: %v %v %v", plan.PermState, s.runAll, s.planRevoked)
+		if plan.PermState != chat.PermDenied || s.runAll {
+			t.Fatalf("Send with No is Don't run: %v %v", plan.PermState, s.runAll)
+		}
+		// f4684ce: the other answers still go to Claude, in one reply.
+		got := lastUserText(s)
+		if !strings.HasPrefix(got, planStopText+" Answers to your questions:") || !strings.Contains(got, " 3. What should the tag say? → \"v2\".") || !strings.Contains(got, " 1. Use blue or red? → no answer.") {
+			t.Fatalf("the answers go along: %q", got)
+		}
+		if approvesPlan(s, got) || plan.PermState != chat.PermDenied {
+			t.Fatal("the stop reply is no approval")
+		}
+		if st := ownCall(h, s, "n2", "make"); st == chat.PermAutoAllowed {
+			t.Fatal("nothing runs after No")
 		}
 	})
 }
@@ -373,6 +390,34 @@ func TestPhoneApprovalChoice(t *testing.T) {
 	})
 	h.eventually("the approval's turn ends", func() bool { return !s.inTurn && !s.conv.Busy })
 
+	// No with answers: refused, and the answers go along (f4684ce).
+	plan3, req3 := addPlan(mixedPlan)
+	pid3, _ := req3["id"].(string)
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]any{"requestId": pid3, "action": "approvePlan", "approvalChoice": 1, "planAnswers": map[string]any{"3": "v2"}}); code != 200 {
+		t.Fatalf("approvalChoice No with answers: %d %v", code, m)
+	}
+	h.ui(func() {
+		if got := lastUserText(s); plan3.PermState != chat.PermDenied || s.runAll || !strings.HasPrefix(got, planStopText) || !strings.Contains(got, "→ \"v2\".") {
+			t.Fatalf("the phone's No: %v %v %q", plan3.PermState, s.runAll, got)
+		}
+	})
+	h.eventually("that turn ends", func() bool { return !s.inTurn && !s.conv.Busy })
+
+	// A pick without a stop option: request.approval matches request.choices
+	// and says the card has its own Don't run.
+	_, req4 := addPlan(shipPlan)
+	ap4, _ := req4["approval"].(map[string]any)
+	if !reflect.DeepEqual(ap4["options"], req4["choices"]) || ap4["dontRun"] != true || ap4["recommended"] != req4["recommended"] {
+		t.Fatalf("approval and choices agree: %v", req4)
+	}
+	h.ui(func() {
+		for _, it := range s.conv.PendingPermissions() {
+			if it.Kind == chat.Plan {
+				it.PermState = chat.PermCancelled
+			}
+		}
+	})
+
 	plan2, req2 := addPlan("1. Edit x.\n\nShould I run the migration now (recommended), or not yet?")
 	ch, _ := req2["choices"].([]any)
 	if len(ch) != 2 || ch[1] != "Not yet" {
@@ -385,6 +430,106 @@ func TestPhoneApprovalChoice(t *testing.T) {
 	h.ui(func() {
 		if plan2.PermState != chat.PermDenied || s.runAll {
 			t.Fatalf("\"Approve: Stop\" turns the plan down: %v %v", plan2.PermState, s.runAll)
+		}
+	})
+}
+
+// directPlan: a running, idle plan-first session with a plan card over text
+// (made as the turn's end makes it, whatever the question asks).
+func directPlan(t *testing.T, h *harness, text string) (*deskSession, *chat.Item) {
+	t.Helper()
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.sendTo(s, "hello")
+	})
+	h.eventually("a running, idle session", func() bool { return s.proc != nil && !s.conv.Busy })
+	var plan *chat.Item
+	h.ui(func() {
+		h.d.planFirst = true
+		s.inTurn = false
+		userEvent(h, s, "a request", nil)
+		s.conv.Items = append(s.conv.Items, &chat.Item{Seq: 9000 + len(s.conv.Items), Kind: chat.Assistant, Text: text})
+		s.conv.MarkPlanText()
+		plan = s.conv.AddPlan()
+		h.d.chat.show(s)
+		h.d.chat.btnChanged = time.Time{}
+	})
+	return s, plan
+}
+
+const shipPlan = "Plan:\n1. Edit x.\n2. Build.\n\n**Should it ship as v0.1.18 (recommended), or replace the v0.1.17 files?**"
+
+// f4684ce (user 2026-11-22): a pick between things to approve gets the new
+// buttons too, with a "Don't run" of its own; a pick approves with it.
+func TestApprovalPicksWithoutStop(t *testing.T) {
+	h := newHarness(t)
+	s, plan := directPlan(t, h, shipPlan)
+	h.ui(func() {
+		o := h.d.chat.renderPlan(plan)
+		if got := buttonLabels(o); !reflect.DeepEqual(got, []string{"Ship as v0.1.18 (recommended)", "Replace the v0.1.17 files", "Don't run"}) {
+			t.Fatalf("buttons %q", got)
+		}
+		tapLabel(t, h, o, "Replace the v0.1.17 files")
+		if plan.PermState != chat.PermAllowed || !s.runAll || lastUserText(s) != planGoWith("Replace the v0.1.17 files") {
+			t.Fatalf("the pick approves with it: %v %v %q", plan.PermState, s.runAll, lastUserText(s))
+		}
+		if st := ownCall(h, s, "s1", "make"); st != chat.PermAutoAllowed {
+			t.Fatalf("approved: %v", st)
+		}
+	})
+	h2 := newHarness(t)
+	s2, plan2 := directPlan(t, h2, shipPlan)
+	h2.ui(func() {
+		n := len(s2.conv.Items)
+		tapLabel(t, h2, h2.d.chat.renderPlan(plan2), "Don't run")
+		if plan2.PermState != chat.PermDenied || s2.runAll || len(s2.conv.Items) != n {
+			t.Fatalf("Don't run, nothing sent without questions: %v %v %d", plan2.PermState, s2.runAll, len(s2.conv.Items)-n)
+		}
+	})
+}
+
+// The same pick with other questions: picked and changeable, one Send; the
+// card's "Don't run" sends the answers with the refusal.
+func TestApprovalPicksWithoutStopMixed(t *testing.T) {
+	text := "Plan:\n1. Edit x.\n2. Build.\n\n1. Use blue or red?\n2. What should the tag say?\n\n**Should it ship as v0.1.18 (recommended), or replace the v0.1.17 files?**"
+	h := newHarness(t)
+	s, plan := directPlan(t, h, text)
+	h.ui(func() {
+		v := h.d.chat
+		v.planPlain = map[*chat.Item]bool{plan: true}
+		qs := planItemQuestions(s, plan)
+		if len(qs) != 2 {
+			t.Fatalf("questions %+v", qs)
+		}
+		ans := v.planAnswers(plan, qs)
+		ans[qs[1].ID] = planAnswer{Choice: -1, Text: "v2"}
+		o := v.renderPlan(plan)
+		if got := buttonLabels(o); !reflect.DeepEqual(got, []string{"Ship as v0.1.18 (recommended)", "Replace the v0.1.17 files", "Don't run", "Send answers"}) {
+			t.Fatalf("buttons %q", got)
+		}
+		tapLabel(t, h, o, "Replace the v0.1.17 files")
+		tapLabel(t, h, v.renderPlan(plan), "Ship as v0.1.18 (recommended)") // changed
+		if plan.PermState != chat.PermPending {
+			t.Fatal("picks wait for Send")
+		}
+		tapLabel(t, h, v.renderPlan(plan), "Send answers")
+		got := lastUserText(s)
+		if plan.PermState != chat.PermAllowed || !strings.HasPrefix(got, planGoWith("Ship as v0.1.18")+" Answers to your questions:") || !strings.Contains(got, "→ \"v2\".") {
+			t.Fatalf("approved with the pick and the answers: %v %q", plan.PermState, got)
+		}
+	})
+	h2 := newHarness(t)
+	s2, plan2 := directPlan(t, h2, text)
+	h2.ui(func() {
+		v := h2.d.chat
+		v.planPlain = map[*chat.Item]bool{plan2: true}
+		qs := planItemQuestions(s2, plan2)
+		v.planAnswers(plan2, qs)[qs[1].ID] = planAnswer{Choice: -1, Text: "v2"}
+		tapLabel(t, h2, v.renderPlan(plan2), "Don't run")
+		got := lastUserText(s2)
+		if plan2.PermState != chat.PermDenied || s2.runAll || !strings.HasPrefix(got, planStopText+" Answers to your questions:") || !strings.Contains(got, "→ \"v2\".") {
+			t.Fatalf("Don't run sends the answers: %v %v %q", plan2.PermState, s2.runAll, got)
 		}
 	})
 }

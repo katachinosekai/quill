@@ -233,7 +233,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 			}
 			var qs []planQ
 			var ans map[int]planAnswer
-			if in.PlanAnswers != nil && !appr.Stop[*in.ApprovalChoice] {
+			if in.PlanAnswers != nil { // with a stop option they go to Claude after the refusal
 				qs = planItemQuestions(s, it)
 				var err error
 				if ans, err = parsePlanAnswers(qs, in.PlanAnswers); err != nil {

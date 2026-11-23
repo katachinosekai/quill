@@ -59,13 +59,15 @@ func TestPlanCardAnswersTheChoice(t *testing.T) {
 	}
 	h.ui(func() { h.d.open(editsID) })
 	h.eventually("history", func() bool { return h.d.sessions[editsID].loaded })
+	// User 2026-11-22 (f4684ce): the picks are the question's own buttons,
+	// with a "Don't run" of the card's own.
 	rec := strings.Join(ask("Should kmem 1.5.2 ship as a new release v0.1.18 (recommended), or replace the v0.1.17 files?"), "|")
-	if !strings.Contains(rec, "Approve: Kmem 1.5.2 ship as a new release v0.1.18") || !strings.Contains(rec, "Other answers…") || !strings.Contains(rec, "Don't run") {
-		t.Fatalf("recommended: one Approve with it, the rest behind a link: %s", rec)
+	if rec != "Kmem 1.5.2 ship as a new release v0.1.18 (recommended)|Replace the v0.1.17 files|Don't run" {
+		t.Fatalf("recommended: the options as buttons, then Don't run: %s", rec)
 	}
 	all := strings.Join(ask("Should these go out as v0.1.19, or do you want more changes first?"), "|")
-	if !strings.Contains(all, "Approve: These go out as v0.1.19") || !strings.Contains(all, "Approve: You want more changes first") || strings.Contains(all, "Other answers") {
-		t.Fatalf("no recommendation: one Approve per option: %s", all)
+	if all != "These go out as v0.1.19|You want more changes first|Don't run" {
+		t.Fatalf("no recommendation: one button per option: %s", all)
 	}
 	plain := strings.Join(ask("Do you approve steps 1–2?"), "|")
 	if !strings.Contains(plain, "Approve plan & run all") {
