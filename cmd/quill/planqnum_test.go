@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -43,7 +42,7 @@ func TestPlanQuestionNumbersKeepOriginals(t *testing.T) {
 	}
 	yes := true
 	reply := planGoAnswers(qs, map[int]planAnswer{1: {Yes: &yes, Choice: -1}, 3: {Yes: &yes, Choice: -1}})
-	if !strings.Contains(reply, " 2. Run the check now? → yes.") || !strings.Contains(reply, " 4. Ship it") || strings.Contains(reply, " 1. ") {
+	if reply != "Approved. Answers: 2 → yes; 3 → no answer; 4 → yes." {
 		t.Fatalf("reply %q", reply)
 	}
 	if g := planQGaps([]planQ{{Num: 1}, {Num: 2}}); g != "" {

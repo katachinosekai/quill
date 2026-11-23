@@ -417,12 +417,17 @@ type planAnswer struct {
 // planGoAnswers: the approval with every question's answer, in order, so
 // Claude reads them against its numbered questions.
 func planGoAnswers(qs []planQ, ans map[int]planAnswer) string {
+	return planGoMessage + planAnswerList(qs, ans)
+}
+
+// planAnswerList: " Answers: 2 → Per-question cards; 3 → \"v2\"." with the
+// question numbers and the picked option text only (no question text); a
+// blank answer is "N → no answer". "" without questions.
+func planAnswerList(qs []planQ, ans map[int]planAnswer) string {
 	if len(qs) == 0 {
-		return planGoMessage + planGoScope
+		return ""
 	}
-	var b strings.Builder
-	b.WriteString(planGoMessage + planGoScope)
-	b.WriteString(" Answers to your questions:")
+	var parts []string
 	for i, q := range qs {
 		a, ok := ans[q.ID]
 		val := "no answer"
@@ -444,7 +449,7 @@ func planGoAnswers(qs []planQ, ans map[int]planAnswer) string {
 					}
 				}
 				if len(picks) > 0 {
-					val = strings.Join(picks, "; ")
+					val = strings.Join(picks, ", ")
 				} else if a.Picks != nil {
 					val = "none"
 				}
@@ -455,9 +460,9 @@ func planGoAnswers(qs []planQ, ans map[int]planAnswer) string {
 				}
 			}
 		}
-		fmt.Fprintf(&b, " %d. %s → %s.", planQNum(q, i), shortLabel(q.Text, 90), val)
+		parts = append(parts, fmt.Sprintf("%d → %s", planQNum(q, i), val))
 	}
-	return b.String()
+	return " Answers: " + strings.Join(parts, "; ") + "."
 }
 
 // planAnswersJSON: the phone API's "answers" for these answers (question id

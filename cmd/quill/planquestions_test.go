@@ -58,8 +58,7 @@ func TestPlanGoAnswersText(t *testing.T) {
 	msg := planGoAnswers(qs, map[int]planAnswer{
 		1: {Choice: 1}, 2: {Yes: &yes, Choice: -1}, 3: {Picks: []int{0, 2}, Choice: -1},
 	})
-	for _, want := range []string{planGoMessage, "1. Should v0.1.20 ship now (recommended), or wait for Quill Android's card? → Wait for Quill Android's card.",
-		"2. Should rule 21 stay as it is? → yes.", "3. Which of a–c should I add? → a: Plan-first; c: Pair a phone.", "4. What should the title say? → no answer."} {
+	for _, want := range []string{"Approved. Answers: 1 → Wait for Quill Android's card; 2 → yes; 3 → a: Plan-first, c: Pair a phone; 4 → no answer."} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("reply lacks %q:\n%s", want, msg)
 		}

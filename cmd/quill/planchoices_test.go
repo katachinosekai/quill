@@ -30,7 +30,7 @@ func TestPlanChoices(t *testing.T) {
 			t.Errorf("%q: %d options %q, recommended %d; want %d, %d", c.q, len(opts), opts, rec, c.opts, c.rec)
 		}
 	}
-	if got := planGoWith("A new Quill Desktop release v0.1.18"); !strings.HasPrefix(got, planGoMessage) || !strings.HasSuffix(got, "Answer to your question: A new Quill Desktop release v0.1.18.") {
+	if got := planGoWith("A new Quill Desktop release v0.1.18"); !strings.HasPrefix(got, planGoMessage) || !strings.HasSuffix(got, "Choice: A new Quill Desktop release v0.1.18.") {
 		t.Fatalf("the approval carries the choice: %q", got)
 	}
 	s := &deskSession{conv: chat.New()}

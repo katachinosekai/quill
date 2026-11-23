@@ -175,7 +175,11 @@ func TestKmemAssistantHint(t *testing.T) {
 		if !strings.Contains(normal, coordinatorHint) || !strings.Contains(normal, buildGateHint) || strings.Contains(normal, kmemAssistantHint) {
 			t.Fatalf("a normal session keeps its hints: %q", normal)
 		}
-		if h.d.sessionPromptFor(s, true) != sessionPrompt(true, h.d.buildGateOn(), h.d.coordinatorOn(s.model)) {
+		want := sessionPrompt(true, h.d.buildGateOn(), h.d.coordinatorOn(s.model))
+		if h.d.planFirst {
+			want += " " + planApprovalHint
+		}
+		if h.d.sessionPromptFor(s, true) != want {
 			t.Fatal("a normal session's prompt is unchanged")
 		}
 		s.hidden = true

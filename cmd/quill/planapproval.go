@@ -101,11 +101,7 @@ func approvalChoice(opt string) string {
 // planGoFull: the approval with the approval question's choice and the other
 // questions' answers (planGoAnswers' numbering).
 func planGoFull(choice string, qs []planQ, ans map[int]planAnswer) string {
-	msg := planGoWith(choice)
-	if len(qs) > 0 {
-		msg += strings.TrimPrefix(planGoAnswers(qs, ans), planGoMessage+planGoScope)
-	}
-	return msg
+	return planGoWith(choice) + planAnswerList(qs, ans)
 }
 
 // planGoChanges: the approval with the user's "Changes (optional)" text
@@ -168,12 +164,12 @@ func levenshtein(a, b string) int {
 func planStopMessage(choice string, qs []planQ, ans map[int]planAnswer) string {
 	msg := planStopText
 	if choice != "" {
-		msg += " Answer to your question: " + choice + "."
+		msg += " Choice: " + choice + "."
 	}
-	return msg + strings.TrimPrefix(planGoAnswers(qs, ans), planGoMessage+planGoScope)
+	return msg + planAnswerList(qs, ans)
 }
 
-const planStopText = "Not running the plan: the user turned it down."
+const planStopText = "Not approved."
 
 // answerPlanApproval answers the plan with option i of the approval question
 // (dontRunPick: the card's own "Don't run"), and with qs the other

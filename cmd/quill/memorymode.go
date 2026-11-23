@@ -50,6 +50,14 @@ const planFormatHint = "When a plan or proposal ends with questions for the user
 // "Ask before building" (prefBuildGate, on by default) turns it off.
 const buildGateHint = "Don't build (compile, package, release or rebuild dist/) after each change until the user asks for a build. When a build would be next, end with a plan card question: add more features, debug, secure, or build? Mark the one you recommend."
 
+// planApprovalHint: how Quill Desktop's approvals read and what one covers
+// (planscope.go), told once at session start instead of in every approval
+// (user 2026-11-23). Added with plan-first (Settings → General).
+const planApprovalHint = "Quill Desktop approvals are short: \"Approved.\" may be followed by \"Choice: <option>.\", \"Answers: 2 → <option>; 3 → \\\"<text>\\\".\" (your question numbers, the picked option only) and \"Also: <changes from the user>\"; \"Not approved.\" means the plan is not to run. An approval pre-approves every tool call for that request (plan approval scope, kmem fact f3a1828). Background commands and subagents you start for it stay approved until they finish, and so do the plan's remaining steps in the turn their completion notice starts, unless the user writes something else meanwhile: end your turn instead of waiting for them."
+
+// planGoReminder: the short form, for a session whose prompt lacks the hint.
+const planGoReminder = " After \"Approved.\", background commands and subagents you start stay approved until they finish; end your turn instead of waiting for them."
+
 const prefBuildGate = "buildGate"
 
 func (d *desk) buildGateOn() bool {
@@ -95,7 +103,12 @@ func (d *desk) sessionPromptFor(s *deskSession, kmemMem bool) string {
 	if isHiddenSession(s) {
 		return sessionPrompt(true, false, false) + " " + kmemAssistantHint
 	}
-	return sessionPrompt(kmemMem, d.buildGateOn(), d.coordinatorOn(s.model))
+	p := sessionPrompt(kmemMem, d.buildGateOn(), d.coordinatorOn(s.model))
+	s.approvalHint = d.planFirst
+	if d.planFirst {
+		p += " " + planApprovalHint
+	}
+	return p
 }
 
 func sessionMemoryEnv(kmem bool) []string {

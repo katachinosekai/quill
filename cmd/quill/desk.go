@@ -86,6 +86,7 @@ type deskSession struct {
 	clearAfterTurn bool
 	terminal       *live.Process
 	planWait       bool
+	approvalHint   bool     // the session's prompt has planApprovalHint (else planAsk adds a reminder)
 	releaseTasks   []string // kmem task releases Quill asked for after a rewind (allowed for that turn)
 	runAll         bool
 	runAllNext     bool
@@ -2651,12 +2652,24 @@ func (d *desk) setCenter(on bool) {
 
 const (
 	planAskMessage = "Quill plan-first approval: nothing was run. Before running anything that needs approval, list everything you are going to do for this request (every command, file change and tool, in order, with a short reason), then stop and wait. The user will approve the whole plan at once. If you have questions, end the plan with them numbered, one per line, options in each line and a recommended option marked \"(recommended)\"."
-	planGoMessage  = "Plan approved. Go ahead and carry out the whole plan; every tool call for this request is pre-approved."
-	// planGoScope follows planGoMessage in the approval Quill sends (t2debee,
-	// planscope.go): the coordinator held its turn open with wait loops to
-	// keep the approval alive.
-	planGoScope = " Background commands and subagents you start for it stay approved until they finish, and so do the plan's remaining steps in the turn their completion notice starts, unless the user writes something else meanwhile: end your turn instead of waiting for them."
+	// planGoMessage: the approval Quill sends, short on purpose (user
+	// 2026-11-23): " Choice: …", " Answers: 2 → …; 3 → …." and " Also: …"
+	// may follow. What an approval covers (planscope.go) is in the session
+	// hint (planApprovalHint), not repeated per approval.
+	planGoMessage = "Approved."
+	// planGoLegacy: the approval text of earlier builds (still in
+	// transcripts and logs); the gate counts it as before.
+	planGoLegacy = "Plan approved. Go ahead and carry out the whole plan; every tool call for this request is pre-approved."
 )
+
+// planAsk: the plan-first refusal text; without the session hint (plan-first
+// turned on mid-session) it carries a one-line reminder of what an approval covers.
+func planAsk(s *deskSession) string {
+	if s != nil && s.approvalHint {
+		return planAskMessage
+	}
+	return planAskMessage + planGoReminder
+}
 
 func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
 	trackAgentCalls(s, ev)
@@ -2754,7 +2767,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			return nil
 		}
-		if s.proc.DenyWith(it.RequestID, it.Request, planAskMessage) == nil {
+		if s.proc.DenyWith(it.RequestID, it.Request, planAsk(s)) == nil {
 			it.PermState = chat.PermPlanAsked
 			s.planWait = true
 		}
@@ -2884,14 +2897,25 @@ func approves(text string) bool {
 
 // isPlanGo: the plan card's approval, alone or with the answer to the
 // approval question's choice appended (planGoWith).
-func isPlanGo(text string) bool { return strings.HasPrefix(text, planGoMessage) }
+func isPlanGo(text string) bool {
+	if strings.HasPrefix(text, planGoLegacy) {
+		return true
+	}
+	rest, ok := strings.CutPrefix(text, planGoMessage)
+	if !ok {
+		return false
+	}
+	// Exactly the approval, or followed by what Quill appends; "Approved.
+	// but not that" typed by hand is no approval.
+	return rest == "" || strings.HasPrefix(rest, " Choice: ") || strings.HasPrefix(rest, " Answers: ") || strings.HasPrefix(rest, " Also: ")
+}
 
 // planGoWith: the approval text carrying the chosen option.
 func planGoWith(choice string) string {
 	if choice == "" {
-		return planGoMessage + planGoScope
+		return planGoMessage
 	}
-	return planGoMessage + planGoScope + " Answer to your question: " + choice + "."
+	return planGoMessage + " Choice: " + choice + "."
 }
 
 var stepList = regexp.MustCompile(`(?i)^(steps?\s*)?#?\d+(\s*(-|–|—|\bto\b|,|\band\b|&|\s)\s*#?\d+)+$`)

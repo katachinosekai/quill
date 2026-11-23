@@ -55,7 +55,7 @@ func TestPlanCardReviewFindings(t *testing.T) {
 	// R6 (Sonnet 6, Opus 1, Opus 4): answers keep Claude's numbers and the "Topic:" lead.
 	qs := planItemQuestionsText("Questions:\n1. Do you approve steps 1–6? Yes (recommended) or no?\n2. Animation style: fade in (recommended), typing, or fade only?\n3. Should \"Animate new text\" start on (recommended) or off?")
 	msg := planGoAnswers(qs, map[int]planAnswer{})
-	if !strings.Contains(msg, " 2. Animation style: fade in") || !strings.Contains(msg, " 3. Should \"Animate new text\"") {
+	if msg != "Approved. Answers: 2 → no answer; 3 → no answer." {
 		t.Errorf("R6: numbering/labels: %s", msg)
 	}
 	if got := qsSummary(planQuestions("**Do you approve steps 1–4 (as in option B: the safe path)?**")); got != "" {

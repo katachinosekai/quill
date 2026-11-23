@@ -353,7 +353,7 @@ func TestPhoneAPIWrites(t *testing.T) {
 	}
 	h.eventually("approval with all answers sent", func() bool {
 		for _, it := range s.conv.Items {
-			if it.Kind == chat.User && strings.HasPrefix(it.Text, planGoMessage) && strings.Contains(it.Text, "stay as it is? → no.") && strings.Contains(it.Text, "→ b: Memory.") && strings.Contains(it.Text, "→ \"Hello\".") {
+			if it.Kind == chat.User && strings.HasPrefix(it.Text, planGoMessage) && strings.Contains(it.Text, "→ no;") && strings.Contains(it.Text, "→ b: Memory;") && strings.Contains(it.Text, "→ \"Hello\".") {
 				return true
 			}
 		}

@@ -249,10 +249,7 @@ func TestApprovalMixedCard(t *testing.T) {
 					t.Fatalf("Send with Yes approves: %v %v", plan.PermState, s.runAll)
 				}
 				got := lastUserText(s)
-				if !strings.HasPrefix(got, planGoMessage+planGoScope+" Answers to your questions:") ||
-					!strings.Contains(got, " 1. Use blue or red? → Red.") ||
-					!strings.Contains(got, " 2. Which parts should I add? → a: logs; c: tests.") ||
-					!strings.Contains(got, " 3. What should the tag say? → \"v2\".") {
+				if !strings.HasPrefix(got, planGoMessage+" Answers: 1 → Red; 2 → a: logs, c: tests; 3 → \"v2\".") {
 					t.Fatalf("answers go along with the original numbers: %q", got)
 				}
 				if st := ownCall(h, s, "m1", "make"); st != chat.PermAutoAllowed {
@@ -278,7 +275,7 @@ func TestApprovalMixedCardNo(t *testing.T) {
 		}
 		// f4684ce: the other answers still go to Claude, in one reply.
 		got := lastUserText(s)
-		if !strings.HasPrefix(got, planStopText+" Answers to your questions:") || !strings.Contains(got, " 3. What should the tag say? → \"v2\".") || !strings.Contains(got, " 1. Use blue or red? → no answer.") {
+		if !strings.HasPrefix(got, planStopText+" Answers: 1 → no answer; 2 → no answer; 3 → \"v2\".") {
 			t.Fatalf("the answers go along: %q", got)
 		}
 		if approvesPlan(s, got) || plan.PermState != chat.PermDenied {
@@ -384,7 +381,7 @@ func TestPhoneApprovalChoice(t *testing.T) {
 		if plan.PermState != chat.PermAllowed || !s.runAll {
 			t.Fatalf("the phone's Yes approves: %v %v", plan.PermState, s.runAll)
 		}
-		if got := lastUserText(s); !strings.HasPrefix(got, planGoMessage) || !strings.Contains(got, "→ Use blue.") || !strings.Contains(got, "→ \"v2\".") || !strings.HasSuffix(got, " Also: keep it small") {
+		if got := lastUserText(s); !strings.HasPrefix(got, planGoMessage) || !strings.Contains(got, "1 → Use blue;") || !strings.Contains(got, "3 → \"v2\".") || !strings.HasSuffix(got, " Also: keep it small") {
 			t.Fatalf("with the answers and the changes: %q", got)
 		}
 	})
@@ -515,7 +512,7 @@ func TestApprovalPicksWithoutStopMixed(t *testing.T) {
 		}
 		tapLabel(t, h, v.renderPlan(plan), "Send answers")
 		got := lastUserText(s)
-		if plan.PermState != chat.PermAllowed || !strings.HasPrefix(got, planGoWith("Ship as v0.1.18")+" Answers to your questions:") || !strings.Contains(got, "→ \"v2\".") {
+		if plan.PermState != chat.PermAllowed || !strings.HasPrefix(got, planGoWith("Ship as v0.1.18")+" Answers: 1 → no answer; 2 → \"v2\".") {
 			t.Fatalf("approved with the pick and the answers: %v %q", plan.PermState, got)
 		}
 	})
@@ -528,7 +525,7 @@ func TestApprovalPicksWithoutStopMixed(t *testing.T) {
 		v.planAnswers(plan2, qs)[qs[1].ID] = planAnswer{Choice: -1, Text: "v2"}
 		tapLabel(t, h2, v.renderPlan(plan2), "Don't run")
 		got := lastUserText(s2)
-		if plan2.PermState != chat.PermDenied || s2.runAll || !strings.HasPrefix(got, planStopText+" Answers to your questions:") || !strings.Contains(got, "→ \"v2\".") {
+		if plan2.PermState != chat.PermDenied || s2.runAll || !strings.HasPrefix(got, planStopText+" Answers: ") || !strings.Contains(got, "→ \"v2\".") {
 			t.Fatalf("Don't run sends the answers: %v %v %q", plan2.PermState, s2.runAll, got)
 		}
 	})
