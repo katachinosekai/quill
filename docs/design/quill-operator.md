@@ -551,7 +551,7 @@ merge, and the Quill Android work follows the desktop API.
 7. The operator may change every setting except security settings.
 8. Undo: a log of the last 50 changes.
 9. kmem in the box: panels as tabs on the left, chat on the right.
-10. Old kmem window: answer unclear ("replaced with Pop out later" vs "with Pop out now"); asked again.
+10. Old kmem window: replaced by the kmem box, with a Pop out button (the box as its own window) in the first version.
 11. Button space: three buttons (Settings · Quill · kmem).
 12. Split view: one box over all panes.
 13. Animation length: its own setting (not tied to Text animation speed).
