@@ -78,12 +78,46 @@ func (d *desk) coordinatorOn(model string) bool {
 }
 
 func sessionPrompt(kmem, buildGate, coordinator bool) string {
+	return sessionPromptWith(kmem, buildGate, coordinator, topicHints{})
+}
+
+// topicHints: what a topic session's prompt teaches (docs/design/topic-tabs.md
+// §3.8, §3.10, §6). Zero value = today's hints, for non-topic sessions and a
+// kmem without the "topic-context" feature.
+type topicHints struct {
+	topic    string // the session's kmem topic ("" = not a topic session)
+	endCheck bool   // kmem has "end-check": mention the end-of-session check
+}
+
+// topicMemoryHint: the kmem hint of a topic session (kmem 1.10.0 topic-context).
+func topicMemoryHint(t topicHints) string {
+	h := "Project memory is kmem, not Claude memory files. Topic `" + t.topic + "` (`kmem --as " + t.topic + "`): start with `kmem brief` and `kmem context --topic " + t.topic + "`, save one fact per `kmem add`, record progress in `kmem task checkpoint`, keep the one fact `" + t.topic + "/status` current with `--replaces`."
+	if t.endCheck {
+		h += " Before the session ends, the end-of-session check must pass."
+	}
+	return h + " Pinned kmem facts hold the user's preferences; follow them. Do not write MEMORY.md or other Claude memory files."
+}
+
+// topicCoordinatorHint: coordinatorHint with the subagent briefing of §3.10.
+func topicCoordinatorHint(topic string) string {
+	return strings.Replace(coordinatorHint, "with the kmem briefing when kmem is on)", "briefed with `kmem context \"<task>\" --topic "+topic+"`, stable part first, ending \"checkpoint your task\"). Only you write `"+topic+"/status`", 1)
+}
+
+func sessionPromptWith(kmem, buildGate, coordinator bool, t topicHints) string {
 	p := quillPromptHint + " " + planFormatHint
 	if buildGate {
 		p += " " + buildGateHint
 	}
+	topical := kmem && t.topic != ""
 	if coordinator {
-		p += " " + coordinatorHint
+		if topical {
+			p += " " + topicCoordinatorHint(t.topic)
+		} else {
+			p += " " + coordinatorHint
+		}
+	}
+	if topical {
+		return p + " " + topicMemoryHint(t)
 	}
 	if kmem {
 		return p + " " + kmemMemoryHint
@@ -103,7 +137,11 @@ func (d *desk) sessionPromptFor(s *deskSession, kmemMem bool) string {
 	if isHiddenSession(s) {
 		return sessionPrompt(true, false, false) + " " + kmemAssistantHint
 	}
-	p := sessionPrompt(kmemMem, d.buildGateOn(), d.coordinatorOn(s.model))
+	var t topicHints
+	if kmemMem && d.kmemFeatureCached("topic-context") {
+		t = topicHints{topic: d.topicOf(s.id), endCheck: d.kmemFeatureCached("end-check")}
+	}
+	p := sessionPromptWith(kmemMem, d.buildGateOn(), d.coordinatorOn(s.model), t)
 	s.approvalHint = d.planFirst
 	if d.planFirst {
 		p += " " + planApprovalHint

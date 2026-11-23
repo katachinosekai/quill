@@ -106,3 +106,66 @@ func TestPinnedSection(t *testing.T) {
 		t.Fatal("no pinned section expected")
 	}
 }
+
+func TestTopicHintTexts(t *testing.T) {
+	topic := topicHints{topic: "alpha", endCheck: true}
+	m := topicMemoryHint(topic)
+	for _, k := range []string{"`kmem brief`", "`kmem context --topic alpha`", "kmem --as alpha", "kmem task checkpoint", "`alpha/status`", "--replaces", "end-of-session check", "MEMORY.md"} {
+		if !strings.Contains(m, k) {
+			t.Errorf("topic memory hint lacks %q", k)
+		}
+	}
+	if strings.Contains(topicMemoryHint(topicHints{topic: "alpha"}), "end-of-session") {
+		t.Error("no end-check feature: the hint must not mention the check")
+	}
+	c := topicCoordinatorHint("alpha")
+	for _, k := range []string{"`kmem context \"<task>\" --topic alpha`", "stable part first", "checkpoint your task", "Only you write `alpha/status`"} {
+		if !strings.Contains(c, k) {
+			t.Errorf("topic coordinator hint lacks %q", k)
+		}
+	}
+	for _, h := range []string{m, c} {
+		if l := strings.ToLower(h); strings.Contains(l, "handoff") || strings.Contains(l, "resume") {
+			t.Errorf("topic hint mentions handoff/resume: %q", h)
+		}
+	}
+	// today's hints stay for non-topic sessions
+	plain := sessionPromptWith(true, true, true, topicHints{})
+	if plain != sessionPrompt(true, true, true) || strings.Contains(plain, "--topic") || !strings.Contains(plain, kmemMemoryHint) {
+		t.Error("non-topic session keeps today's hints")
+	}
+	full := sessionPromptWith(true, true, true, topic)
+	if !strings.Contains(full, planFormatHint) || !strings.Contains(full, buildGateHint) || strings.Contains(full, coordinatorHint) || strings.Contains(full, kmemMemoryHint) {
+		t.Error("topic prompt swaps both kmem hints and keeps the others")
+	}
+	if n := len(full); n > 3000 || n > len(sessionPrompt(true, true, true))+300 {
+		t.Errorf("topic prompt too long: %d (today %d)", n, len(sessionPrompt(true, true, true)))
+	}
+	if len(m) > 700 {
+		t.Errorf("topic memory hint %d chars", len(m))
+	}
+}
+
+func TestSessionPromptForTopicFeatures(t *testing.T) {
+	for _, feat := range []bool{false, true} {
+		h := newHarness(t)
+		endCheckKmem(t, h, feat)
+		s := topicSession(h, "alpha")
+		h.d.kmemAPILevel()
+		var p string
+		h.ui(func() {
+			h.d.topicOf(s.id)
+			p = h.d.sessionPromptFor(s, true)
+		})
+		if feat {
+			if !strings.Contains(p, "`kmem context --topic alpha`") || !strings.Contains(p, "end-of-session check") || !strings.Contains(p, "Only you write `alpha/status`") {
+				t.Errorf("features present: topic hints missing: %q", p)
+			}
+		} else if strings.Contains(p, "--topic") || strings.Contains(p, "end-of-session") || !strings.Contains(p, kmemMemoryHint) {
+			t.Errorf("features absent: today's hints expected: %q", p)
+		}
+		if !strings.Contains(p, planApprovalHint) && h.d.planFirst {
+			t.Error("plan approval hint must stay")
+		}
+	}
+}
