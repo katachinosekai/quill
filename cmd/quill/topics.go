@@ -158,11 +158,37 @@ func (d *desk) loadTopics() []topicInfo {
 		}
 	}
 	list := buildTopics(topicsOut, labels, ts.Tasks, status)
+	d.applyKmemScopes(list)
 	applySavedTitles(list, labels)
 	topicCache.mu.Lock()
 	topicCache.list, topicCache.at, topicCache.loaded, topicCache.busy = list, time.Now(), true, false
 	topicCache.mu.Unlock()
 	return list
+}
+
+// topicScopeFeature: the `kmem version --json` feature of `kmem scope T` and
+// of the scope in `kmem context --topic T` (kmem 1.10.1). With it kmem's
+// stored scope replaces the label's scope from Quill's config; Quill no
+// longer passes a scope list to kmem.
+const topicScopeFeature = "topic-scope"
+
+// applyKmemScopes reads each topic's stored scope (`kmem scope T --json`)
+// for display and the task counts. A topic with no stored scope keeps what
+// it had. Not on the UI thread.
+func (d *desk) applyKmemScopes(list []topicInfo) {
+	if !d.kmemHasFeature(topicScopeFeature) {
+		return
+	}
+	for i := range list {
+		t := &list[i]
+		var r struct {
+			Scope scopeList `json:"scope"`
+		}
+		if d.kmemJSON(&r, "scope", t.Slug) && len(r.Scope) > 0 {
+			t.Scope = r.Scope
+			t.Labeled = true
+		}
+	}
 }
 
 // refreshTopics reloads the cache in the background when it is older than a

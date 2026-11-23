@@ -117,7 +117,7 @@ func recallRunner(h *harness, calls *[]string) {
 			if calls != nil {
 				*calls = append(*calls, a)
 			}
-			if args[1] == "zebra" {
+			if args[len(args)-1] == "zebra" { // recall -n N -- q
 				return "alpha/core: [f9] fact: the zebra crossing pattern is used in\nthe signal code\n" +
 					"alpha/status: [f8] fact: zebra again\n" +
 					"kmem/rules: [f1] rule: zebra\n" +
@@ -145,7 +145,7 @@ func TestContentHitsMapToTopLevelTopics(t *testing.T) {
 	if n := len([]rune(hits[1].Snippet)); n > snippetMax+2 || !strings.Contains(hits[1].Snippet, "zebra") {
 		t.Fatalf("long snippet cut around the word: %d %q", n, hits[1].Snippet)
 	}
-	if len(calls) != 1 || calls[0] != "recall zebra -n 8" {
+	if len(calls) != 1 || calls[0] != "recall -n 8 -- zebra" {
 		t.Fatalf("calls %v", calls)
 	}
 	if got := h.d.contentHits("zebra", ts, map[string]bool{"alpha": true}, none); len(got) != 1 {

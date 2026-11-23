@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -94,6 +96,11 @@ func (d *desk) endCheck(name, sid string, pid int) (endCheckResult, string) {
 		args = append(args, "--pid", strconv.Itoa(pid))
 	}
 	out, err := d.runKmem("kmem", append(args, "--json")...)
+	// kmem 1.10.1: exit 2 is every kmem error, 1 only blockers, 0 ok. Exit 2
+	// is an error whatever the output looks like.
+	if exitCodeOf(err) == 2 {
+		return endCheckResult{}, err.Error() + ": " + firstLine(out)
+	}
 	r, perr := parseEndCheck(out)
 	switch {
 	case perr != "":
@@ -105,6 +112,24 @@ func (d *desk) endCheck(name, sid string, pid int) (endCheckResult, string) {
 		return r, err.Error()
 	}
 	return r, ""
+}
+
+// exitCodeOf: the exit status of a failed kmem run, -1 if err is nil or not
+// an exit status (timeout, no kmem).
+func exitCodeOf(err error) int {
+	if err == nil {
+		return -1
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	if i := strings.LastIndex(err.Error(), "exit status "); i >= 0 {
+		if n, e := strconv.Atoi(strings.TrimSpace(err.Error()[i+len("exit status "):])); e == nil {
+			return n
+		}
+	}
+	return -1
 }
 
 func parseEndCheck(out string) (endCheckResult, string) {
@@ -201,7 +226,7 @@ func endCheckMessage(why endWhy, name string, bs []endBlocker) string {
 		head = "Quill is ending this session; it is stopped once its end-of-session check passes."
 	}
 	return fmt.Sprintf("%s `kmem --as %s end-check` lists:\n- %s\n"+
-		"Resolve each one: checkpoint or release the claims, note or end the jobs and uncommitted files in `%s/status` (or commit them), "+
+		"Resolve each one: checkpoint or release the claims, commit the uncommitted files or write the repo name and the word \"uncommitted\" (or \"WIP\") in `%s/status`, and end each background job or write it there as \"pid N\" (e.g. \"job pid 1234\"), "+
 		"update `%s/status` (one fact, `--replaces`), and release your shared lock turn after its logs are read. "+
 		"Don't start other work. Reply with one line when done; Quill runs the check again.",
 		head, name, blockerList(bs, "\n- "), name, name)

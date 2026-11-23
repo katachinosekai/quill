@@ -197,7 +197,7 @@ func (d *desk) contentHits(q string, ts []topicInfo, skip map[string]bool, dorma
 	if q == "" || !d.kmemAvailable() {
 		return nil
 	}
-	out, err := d.runKmem("kmem", "recall", q, "-n", recallHitLimit)
+	out, err := d.runKmem("kmem", "recall", "-n", recallHitLimit, "--", q)
 	if err != nil {
 		return nil
 	}

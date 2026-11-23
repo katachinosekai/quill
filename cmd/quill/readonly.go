@@ -1228,6 +1228,8 @@ func readOnlyKmemWords(words []string) bool {
 		return len(ops) == 1
 	case "rules", "get", "find", "show", "context", "recall", "topics", "version", "help":
 		return true
+	case "scope":
+		return len(ops) == 2 // `kmem scope T` reads; with a list it stores
 	case "task":
 		return len(ops) >= 2 && (ops[1] == "list" || ops[1] == "check")
 	case "handoff":

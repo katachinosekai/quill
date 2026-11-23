@@ -557,7 +557,7 @@ func (p *kmemPanel) memoryTab() fyne.CanvasObject {
 		}
 		p.memTopic = ""
 		go func() {
-			out, _ := d.runKmem("kmem", "find", q)
+			out, _ := d.runKmem("kmem", "find", "--", q)
 			d.do(func() { p.setMemText(firstNonEmpty(strings.TrimSpace(out), "Nothing found.")) })
 		}()
 	}
