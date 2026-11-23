@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fyne.io/fyne/v2/dialog"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/katachinosekai/quill/internal/live"
 )
 
 // External live sessions (docs/design/topic-tabs.md §3.2, §3.6, K6): a Claude
@@ -142,4 +145,92 @@ func (d *desk) topicExternal(slug string) (extSession, bool) {
 func extNotice(t topicInfo, e extSession) string {
 	return t.Title + " is already live outside Quill Desktop (kmem name " + e.Name +
 		"). End that session first; a topic has one live session."
+}
+
+// extTakeOverBlock: why e cannot be taken over here, "" if it can. Only a
+// session whose Claude process this computer's live-session files list can be
+// released; one on another machine (kmem sees it, we do not) cannot.
+func (d *desk) extTakeOverBlock(e extSession) string {
+	switch {
+	case !d.kmemFeatureCached(extSessionsFeature):
+		return "needs a newer kmem"
+	case topicForName(e.Name) == "":
+		return "not a topic"
+	}
+	if _, ok := d.terms[e.ID]; !ok {
+		return "not running on this computer"
+	}
+	if _, ok := d.infos[e.ID]; !ok {
+		return "its conversation is not on this computer"
+	}
+	return ""
+}
+
+// extWhere: where the session runs, for the confirm text.
+func extWhere(p live.Process) string {
+	switch p.Entry {
+	case "", "cli":
+		return "the terminal"
+	}
+	return "the " + p.Entry + " session"
+}
+
+// offerTakeOver asks, then takes the external session e over: its terminal
+// Claude stops and the topic continues in a Quill Desktop tab (kmem name =
+// topic). pending: the "Open a topic" card's tab, closed once the topic's tab
+// is open. UI thread.
+func (d *desk) offerTakeOver(e extSession, pending *deskSession) {
+	slug := topicForName(e.Name)
+	if why := d.extTakeOverBlock(e); why != "" {
+		dialog.ShowInformation("Can't take over", "Quill Desktop can't take over "+e.Name+": "+why+".", d.win)
+		return
+	}
+	t, ok := cachedTopic(slug)
+	if !ok {
+		t = topicInfo{Slug: slug, Title: topicTitle(slug), Scope: []string{slug}}
+	}
+	p := d.terms[e.ID]
+	msg := "Take over " + t.Title + " from " + extWhere(p) + "? The terminal session stops and continues here."
+	if p.Busy() {
+		msg += " It is in the middle of a turn; that turn is stopped."
+	}
+	dialog.ShowConfirm("Take over?", msg, func(ok bool) {
+		if ok {
+			d.takeOverTopic(e, t, pending)
+		}
+	}, d.win)
+}
+
+// takeOverTopic: the confirmed Take over. Re-checks (the world changed while
+// the dialog was open), names the session after the topic, then the existing
+// takeOver flow releases the process and resumes the session in a tab.
+func (d *desk) takeOverTopic(e extSession, t topicInfo, pending *deskSession) {
+	if why := d.extTakeOverBlock(e); why != "" {
+		dialog.ShowInformation("Can't take over", "Quill Desktop can't take over "+e.Name+": "+why+".", d.win)
+		return
+	}
+	if owner := d.topicOwner(t.Slug, pending); owner != nil {
+		d.open(owner.id) // someone else got the topic first
+		return
+	}
+	p := d.terms[e.ID]
+	s := d.session(e.ID)
+	if s == nil || s.running() || s.takeover {
+		return
+	}
+	d.org.Titles[s.id] = t.Title
+	d.org.Kmem[s.id] = t.Slug
+	s.kmemNew = false
+	d.saveOrg()
+	d.takeOverThen(s, p, "", func(err error) {
+		if err != nil {
+			return
+		}
+		d.afterPick(s, false)
+		d.open(s.id)
+		if pending != nil && pending != s && pending.pickPending {
+			d.closeTab(pending.id)
+		}
+		d.refreshExtSessions(true)
+	})
 }

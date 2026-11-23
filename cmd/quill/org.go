@@ -380,7 +380,15 @@ func (it *sideItem) TappedSecondary(e *fyne.PointEvent) {
 		return
 	}
 	if r.ext != nil {
-		return // a session running elsewhere has no Quill menu
+		d := it.d // a session running elsewhere: only Take over
+		x := *r.ext
+		items := []*fyne.MenuItem{fyne.NewMenuItem("Take over", func() { d.offerTakeOver(x, nil) })}
+		if why := d.extTakeOverBlock(x); why != "" {
+			items = []*fyne.MenuItem{fyne.NewMenuItem("Can't take over: "+why, nil)}
+			items[0].Disabled = true
+		}
+		widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", items...), d.win.Canvas(), e.AbsolutePosition)
+		return
 	}
 	it.d.sessionMenu(r.id, e.AbsolutePosition)
 }

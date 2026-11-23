@@ -259,6 +259,7 @@ type desk struct {
 	infos         map[string]transcript.Info
 	order         []transcript.Info
 	terms         map[string]live.Process
+	releaseFn     func(live.Process) error // tests: replaces finder.Release
 	current       *deskSession
 	ownPIDs       sync.Map
 
@@ -693,7 +694,7 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			mark := left.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*fyne.Container)
 			if r.ext != nil { // read-only: running outside Quill Desktop
 				title.SetText(r.ext.Name)
-				meta.Text = "running elsewhere"
+				meta.Text = "running elsewhere · tap to take over"
 				meta.Refresh()
 				if caption.Text != "" {
 					caption.Text = ""
@@ -738,7 +739,8 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			return
 		}
 		if r.ext != nil {
-			list.Unselect(id) // read-only: nothing to open
+			list.Unselect(id) // not Quill Desktop's: nothing to open, only Take over
+			d.offerTakeOver(*r.ext, nil)
 			return
 		}
 		d.open(r.id)
@@ -1793,15 +1795,33 @@ func (d *desk) send(text string) {
 }
 
 func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
+	d.takeOverThen(s, t, text, nil)
+}
+
+// releaseProc ends the terminal's Claude process (a test hook; never a real
+// process in tests).
+func (d *desk) releaseProc(t live.Process) error {
+	if d.releaseFn != nil {
+		return d.releaseFn(t)
+	}
+	return d.finder.Release(t, d.cfg.ClaudeBin, 5*time.Second)
+}
+
+// takeOverThen: takeOver with a callback (UI thread) when it ended. Empty
+// text takes the session over without sending anything: the process just
+// resumes (the topic Take over, docs/design/topic-tabs.md §3.2).
+func (d *desk) takeOverThen(s *deskSession, t live.Process, text string, after func(error)) {
 	s.takeover = true
-	d.input.SetText("")
+	if text != "" {
+		d.input.SetText("")
+	}
 	d.updateChrome()
 	path := ""
 	if info, ok := d.infos[s.id]; ok {
 		path = info.Path
 	}
 	go func() {
-		err := d.finder.Release(t, d.cfg.ClaudeBin, 5*time.Second)
+		err := d.releaseProc(t)
 		var conv *chat.Conversation
 		var mod time.Time
 		if err == nil && path != "" {
@@ -1814,10 +1834,13 @@ func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
 			s.takeover = false
 			if err != nil {
 				d.chatFor(s, []*chat.Item{s.conv.AddError("Could not take the session over: " + err.Error())})
-				if d.current == s && d.input.Text == "" {
+				if text != "" && d.current == s && d.input.Text == "" {
 					d.input.SetText(text)
 				}
 				d.updateChrome()
+				if after != nil {
+					after(err)
+				}
 				return
 			}
 			s.terminal = nil
@@ -1831,7 +1854,21 @@ func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
 					d.chat.show(s)
 				}
 			}
+			if text == "" {
+				err := d.ensureProcess(s)
+				if err != nil {
+					d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start claude: " + err.Error())})
+				}
+				d.updateChrome()
+				if after != nil {
+					after(err)
+				}
+				return
+			}
 			d.sendTo(s, text)
+			if after != nil {
+				after(nil)
+			}
 		})
 	}()
 }

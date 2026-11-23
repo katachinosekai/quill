@@ -228,9 +228,22 @@ topic tabs. Merge it into a topic at a safe point."
    right-clicking it does nothing. One live per topic: `pickTopic` refuses a
    topic held by an external session with a notice in the tab (the card
    stays), `openTopic` returns nil, and the card lists the topic disabled as
-   "running elsewhere". **Not built: Take over** (decision 21 recommended it;
-   the sub I brief asked for read-only rows and refuse/warn); see the open
-   question in the report.
+   "running elsewhere".
+
+   **As built (sub I2, branch feat/topics-i2): Take over.** The "running
+   elsewhere" sidebar row (tap, or right-click > Take over) and the card's
+   entry ("... running elsewhere (name) · Take over") offer it, only with the
+   kmem feature "sessions" and only when the session's Claude process is in
+   this computer's live-session files (`d.terms[session id]`) and its
+   transcript is known. Otherwise nothing is offered and the reason shows
+   (right-click: a disabled "Can't take over: not running on this computer";
+   tap: an info dialog; the card entry stays disabled with the reason).
+   Confirm: "Take over <Topic> from the terminal? The terminal session stops
+   and continues here." (plus a note if mid-turn). On Yes `takeOverTopic`
+   re-checks, sets the kmem name and title to the topic, and runs the existing
+   `takeOver` flow (`takeOverThen` with empty text: release the process,
+   reload the transcript, resume the session in a tab without sending
+   anything), then opens the tab and closes the card's pending tab.
 5. Claude-memory mode (`kmemMemory()` false): unchanged (today: live
    sessions by project; `rebuildRows` has no mode branch). Q18: bring back
    history groups there, in which case the places code moves behind

@@ -88,8 +88,13 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 					b = widget.NewButton(t.Title+" · "+d.ownerLabel(owner), func() { d.open(owner.id) })
 					b.Importance = widget.LowImportance
 				} else if e, ext := d.topicExternal(t.Slug); ext {
-					b = widget.NewButton(t.Title+" · running elsewhere ("+e.Name+")", nil)
-					b.Disable()
+					if why := d.extTakeOverBlock(e); why != "" {
+						b = widget.NewButton(t.Title+" · running elsewhere ("+e.Name+"): "+why, nil)
+						b.Disable()
+					} else {
+						b = widget.NewButton(t.Title+" · running elsewhere ("+e.Name+") · Take over", func() { d.offerTakeOver(e, s) })
+						b.Importance = widget.LowImportance
+					}
 				} else {
 					b = widget.NewButton(topicButtonLabel(t), func() { d.pickTopic(s, t, false) })
 				}
