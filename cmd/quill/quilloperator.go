@@ -35,7 +35,7 @@ const (
 )
 
 // quillOpBubble: the Quill button's bubble, set by the box UI (nil: no badge).
-var quillOpBubble = func(d *desk) *bubble { return nil }
+var quillOpBubble = func(d *desk) *bubble { return d.assistBubble(roleQuill) }
 
 var quillRole *assistRole
 
@@ -61,6 +61,10 @@ func newQuillRole() *assistRole {
 		ready:       func(d *desk) bool { return d.kmemGot },
 		seenPref:    prefQuillOpSeen,
 		bubble:      func(d *desk) *bubble { return quillOpBubble(d) },
+		reason:      quillBoxReason,
+		attach:      quillBoxAttach,
+		refresh:     quillBoxRefresh,
+		dot:         func(d *desk, on bool) { d.setAssistRunDot(roleQuill, on) },
 		prompt:      func(d *desk) string { return d.topicPrompt(quillTopic(), false) },
 		stop:        quillOpStop,
 		elsewhere:   quillOpElsewhere,
@@ -273,8 +277,12 @@ func quillOpStop(d *desk, a *assistant, s *deskSession) {
 // move that running session in, as it is.
 func quillOpElsewhere(d *desk, a *assistant, o *deskSession) {
 	title, _, _ := d.rowText(o.id)
+	button := "Move it here" // only a running tab moves in as it is
+	if !o.running() || o.stopping {
+		button = "Close the tab, start here"
+	}
 	d.assistReasonWith(a, fmt.Sprintf("The Quill operator is open in the tab “%s”.", title),
-		"Move it here", func() { d.quillMoveIn(a, o) })
+		button, func() { d.quillMoveIn(a, o) })
 }
 
 // quillMoveIn turns the tab session o into the hidden operator without

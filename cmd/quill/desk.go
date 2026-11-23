@@ -257,6 +257,8 @@ type desk struct {
 	kmemBubble    *bubble
 	kmemRunDot    *canvas.Circle // the kmem assistant runs (kmembadge.go)
 	kmemBtnBox    fyne.CanvasObject
+	quillChat     *assistChat       // the Quill operator's chat in the box (quillwire.go)
+	settingCards  []*settingCard    // the change cards in that chat (quillwire.go)
 	quillBtnBox   fyne.CanvasObject // the Quill operator's button with its badge and dot (assistbox.go)
 	kmemNeedsNow  kmemNeeds
 	kmemCo        kmemCoalescer // read-only kmem commands: one load per event (kmemload.go)
@@ -1377,8 +1379,8 @@ func (d *desk) open(id string) {
 		return
 	}
 	if d.hiddenID(id, s.cwd) {
-		// The kmem window's assistant never gets a tab (docs/design/kmem-window.md §4).
-		d.showKmem()
+		// A hidden assistant never gets a tab: its role's host (the box) opens.
+		d.openHiddenRole(d.hiddenRoleOf(id, s.cwd))
 		return
 	}
 	d.closeAssistOverlay() // a tab or sidebar row closes the box first, then switches (Q16)
@@ -1571,9 +1573,12 @@ func (d *desk) processOptions(s *deskSession) session.Options {
 		opts.SessionID = s.id
 	}
 	if isHiddenSession(s) {
-		// Other sessions find the kmem assistant by this name (ListAgents,
+		// Other sessions find a hidden assistant by this name (ListAgents,
 		// SendMessage), not by its folder ("kmem-window-51").
 		opts.Name = kmemPeerName
+		if hiddenRole(s) == roleQuill {
+			opts.Name = quillOpName
+		}
 	}
 	return opts
 }

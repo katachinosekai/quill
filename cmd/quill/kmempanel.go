@@ -740,7 +740,7 @@ func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
 		if owner := d.handoffOwner(name, &deskSession{}); owner != nil {
 			live = "live in a tab"
 			if isHiddenSession(owner) {
-				live = "live in the kmem window"
+				live = roleDef(hiddenRole(owner)).owner
 			}
 		}
 		var claimed, open []topicTask

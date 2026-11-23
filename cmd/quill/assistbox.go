@@ -1009,6 +1009,9 @@ func (d *desk) syncAssistButtons() {
 	}
 	d.refreshBoxHeader()
 	d.syncBoxOutline()
+	if len(d.settingCards) > 0 {
+		d.syncSettingCards() // a setting changed in Settings disables its card's Undo
+	}
 	if need && !b.tickOn {
 		b.tickOn = true
 		d.afterUI(time.Second, func() {
@@ -1153,6 +1156,13 @@ type assistChat struct {
 	input *sendEntry
 	root  fyne.CanvasObject
 	box   *assistBoxView
+
+	// The reason strip above the chat: why the role isn't running, with the
+	// role's one action ("Move it here", "Take over").
+	reasonBox *fyne.Container
+	reasonLbl *widget.Label
+	reasonBtn *widget.Button
+	tap       func()
 }
 
 // attachAssistBox builds role's chat for the box (once), registers it as the
@@ -1190,7 +1200,17 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 	})
 	stop.Importance = widget.DangerImportance
 	in := bg(colBackground, 10, container.NewBorder(nil, nil, nil, container.NewVBox(stop, layout.NewSpacer(), send), c.input))
-	c.root = container.NewBorder(nil, in, nil, nil, c.view.root)
+	c.reasonLbl = widget.NewLabel("")
+	c.reasonLbl.Wrapping = fyne.TextWrapWord
+	c.reasonBtn = widget.NewButton("", func() {
+		if c.tap != nil {
+			c.tap()
+		}
+	})
+	c.reasonBtn.Importance = widget.HighImportance
+	c.reasonBox = container.NewVBox(bg(colBackground, 10, container.NewVBox(c.reasonLbl, c.reasonBtn)))
+	c.reasonBox.Hide()
+	c.root = container.NewBorder(c.reasonBox, in, nil, nil, c.view.root)
 	c.box = &assistBoxView{
 		title:   title,
 		content: c.root,

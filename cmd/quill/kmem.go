@@ -633,7 +633,7 @@ func (d *desk) endAndSaveTo(id, place string) {
 func (d *desk) finishKmemEnd(s *deskSession, name, place string) {
 	if isHiddenSession(s) {
 		// The kmem window's assistant: no tab, no placement; stop and mark ended (§4 #23).
-		d.notify(s, fmt.Sprintf("Saved kmem handoff “%s”; the kmem assistant is stopped.", name))
+		d.notify(s, fmt.Sprintf("Saved kmem handoff “%s”; the %s is stopped.", name, roleDef(hiddenRole(s)).title))
 		if s.running() {
 			p := s.proc
 			s.stopping = true

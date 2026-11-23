@@ -240,6 +240,13 @@ func (d *desk) hostViews() []*chatView {
 	return out
 }
 
+// openHiddenRole brings up role's host (its box); an unknown role opens kmem's.
+func (d *desk) openHiddenRole(role string) {
+	if h := d.hostFor(hiddenRoleOr(role)); h.open != nil {
+		h.open()
+	}
+}
+
 // openHidden brings up the host of id's role.
 func (d *desk) openHidden(id string) {
 	if h := d.hostFor(d.hiddenRoleOf(id, "")); h.open != nil {

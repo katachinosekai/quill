@@ -848,6 +848,9 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		}
 		return msgText(v.markdown(it.Text))
 	case chat.Notice:
+		if n := settingCardN(it.Text); n > 0 {
+			return v.d.settingCardView(n)
+		}
 		l := widget.NewLabel(it.Text)
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = fyne.TextAlignCenter

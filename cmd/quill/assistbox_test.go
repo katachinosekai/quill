@@ -41,8 +41,8 @@ func TestAssistBoxOpenCloseSwitch(t *testing.T) {
 		if d.assistBoxRole() != boxQuill || !d.assistOverlayOpen() || len(b.layer.Objects) != 1 || !b.card.Visible() {
 			t.Fatal("the Quill button opens the overlay")
 		}
-		if b.title.Text != "Quill operator" || !boxHasLabel(b.body, quillNotSetUp) {
-			t.Fatal("without a quill role: the placeholder body")
+		if b.title.Text != "Quill operator" || d.quillChat == nil || b.body.Objects[0] != d.quillChat.root {
+			t.Fatal("the Quill button opens the operator's chat")
 		}
 		d.toggleAssistBox(boxKmem)
 		if d.assistBoxRole() != boxKmem || b.title.Text != "kmem assistant" || b.body.Objects[0] != kin {

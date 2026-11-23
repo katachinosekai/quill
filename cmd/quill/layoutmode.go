@@ -42,6 +42,7 @@ func (d *desk) layoutButtons() fyne.CanvasObject {
 	d.kmemBtn.Importance = widget.MediumImportance
 	d.kmemBtnBox = d.kmemButtonBox()
 	d.quillBtnBox = d.quillButton()
+	d.attachQuillBox()
 	d.syncAssistButtons()
 	return d.layoutBtn
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -240,8 +241,10 @@ func (d *desk) pauseForUsage(used int, resets int64) {
 // assistant counts only while the window shows it (docs/design/kmem-window.md §4 #14).
 func (d *desk) pausable() []*deskSession {
 	out := d.runningVisible()
-	if s := d.kmemWin.session(); s != nil && s.running() && isHiddenSession(s) {
-		out = append(out, s)
+	for _, role := range hostRoles() {
+		if s := d.hostFor(role).hostSession(); s != nil && s.running() && isHiddenSession(s) && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
 	}
 	return out
 }
