@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -89,8 +90,41 @@ var denyNames = []string{
 	"*credentials*", "*secret*", "*token*", "local.properties",
 }
 
-// systemDirs are never served, even under an allowed root.
-var systemDirs = []string{"/proc", "/sys", "/dev", "/run"}
+// systemDirs are never served, even under an allowed root; under runDir
+// only the current user's mounted drives (runDir/media/<user>) are allowed
+// (user decision 2026-11-23: projects live on mounted drives).
+var (
+	systemDirs = []string{"/proc", "/sys", "/dev"}
+	runDir     = "/run"
+	mediaUser  = currentUserName // tests: a fixed name
+)
+
+func currentUserName() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
+}
+
+// systemFolder: the rule p (clean, absolute) falls under, "" = none.
+func systemFolder(p string) string {
+	for _, s := range systemDirs {
+		if under(p, s) {
+			return "system folder " + s
+		}
+	}
+	if !under(p, runDir) {
+		return ""
+	}
+	name := mediaUser()
+	if name != "" && !strings.ContainsAny(name, "/\\") && name != "." && name != ".." {
+		media := filepath.Join(runDir, "media", name)
+		if under(p, media) && p != media {
+			return ""
+		}
+	}
+	return "system folder " + runDir
+}
 
 var privateKeyRe = regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----`)
 
@@ -269,10 +303,8 @@ func readPhoneFile(p string, fr fileRules) (body map[string]any, size int64, fer
 	if rule := fr.denied(p); rule != "" {
 		return nil, 0, deniedFile(rule)
 	}
-	for _, s := range systemDirs {
-		if under(p, s) {
-			return nil, 0, deniedFile("system folder " + s)
-		}
+	if rule := systemFolder(p); rule != "" {
+		return nil, 0, deniedFile(rule)
 	}
 	real, err := filepath.EvalSymlinks(p)
 	if err != nil {
@@ -281,10 +313,8 @@ func readPhoneFile(p string, fr fileRules) (body map[string]any, size int64, fer
 	if rule := fr.denied(real); rule != "" {
 		return nil, 0, deniedFile(rule)
 	}
-	for _, s := range systemDirs {
-		if under(real, s) {
-			return nil, 0, deniedFile("system folder " + s)
-		}
+	if rule := systemFolder(real); rule != "" {
+		return nil, 0, deniedFile(rule)
 	}
 	inRoot := false
 	for _, root := range []string{fr.home, fr.folder} {

@@ -187,7 +187,8 @@ All of these must hold:
 3. Not on the deny list (§7.2), checked on both the path as written and the
    resolved path.
 4. A regular file (not a directory, device, FIFO, socket); never under
-   `/proc`, `/sys`, `/dev` or `/run`.
+   `/proc`, `/sys`, `/dev` or `/run` (except the current user's drives under
+   `/run/media/<user>`, decided 2026-11-23, see §13).
 
 ### 7.2 Deny list (never served, even when mentioned)
 
@@ -422,7 +423,11 @@ Phase 2, file endpoint (`cmd/quill/phonefiles.go`, tests in
 - File replies get the slow-link write deadline (60 s) like items pages.
 - Not built yet: the kmem assistant's `/phone/kmem/assistant/file`
   (phase 4).
-- Open: `/run` is never served, which includes `/run/media/...`, where
-  removable and second drives are mounted; a project there is refused
-  (`file_denied`, "system folder /run") even as the session's folder.
+- `/run` (user decision 2026-11-23, option b): only the current user's
+  mounted drives, `/run/media/<user>/...`, may be served, and only inside
+  the roots, after the mention check, symlink resolution and both deny
+  lists. Another user's `/run/media/...`, `/run/media` and
+  `/run/media/<user>` themselves, `/run/user/...` and the rest of `/run`
+  stay `403 file_denied` ("system folder /run"), also as the session's
+  folder and also as a symlink target. `/proc`, `/sys` and `/dev`: never.
 

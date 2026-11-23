@@ -97,6 +97,53 @@ func TestPhoneFileRoots(t *testing.T) {
 	f.want(out, "file_denied")
 }
 
+// TestPhoneFileRunMedia: under /run only the current user's mounted drives
+// (/run/media/<user>/...) are served, still within the roots and deny lists.
+// A temp folder stands in for /run.
+func TestPhoneFileRunMedia(t *testing.T) {
+	if u := currentUserName(); u != "" && (systemFolder("/run/media/"+u+"/disk/x.go") != "" || systemFolder("/run/media/someone-else/disk/x.go") == "" || systemFolder("/run/user/1000/x") == "") {
+		t.Fatal("real /run rules")
+	}
+	f := newFileFixture(t)
+	run := filepath.Join(t.TempDir(), "run")
+	oldRun, oldUser := runDir, mediaUser
+	runDir, mediaUser = run, func() string { return "user" }
+	defer func() { runDir, mediaUser = oldRun, oldUser }()
+
+	proj := filepath.Join(run, "media", "user", "disk", "Projects", "demo")
+	f.fr.folder = proj
+	f.want(f.write(filepath.Join(proj, "main.go"), []byte("package main\n")), "ok")
+	// still the deny lists and the roots
+	f.want(f.write(filepath.Join(proj, ".env"), []byte("KEY=placeholder\n")), "file_denied")
+	f.want(f.write(filepath.Join(run, "media", "user", "other", "x.txt"), []byte("x\n")), "file_denied") // outside the session's folder
+	// another user's drive, /run/user, the rest of /run: denied even as the session's folder
+	for _, p := range []string{
+		filepath.Join(run, "media", "someone", "disk", "x.txt"),
+		filepath.Join(run, "user", "1000", "x.txt"),
+		filepath.Join(run, "x.txt"),
+	} {
+		f.fr.folder = filepath.Dir(p)
+		f.want(f.write(p, []byte("x\n")), "file_denied")
+	}
+	f.fr.folder = proj
+	// the media folder itself is not a way into /run/media/<user>/..
+	if systemFolder(filepath.Join(run, "media", "user")) == "" || systemFolder(filepath.Join(run, "media")) == "" {
+		t.Fatal("/run/media and /run/media/<user> themselves must stay denied")
+	}
+	// a symlink on the user's drive into /run/user
+	secret := f.write(filepath.Join(run, "user", "1000", "auth.txt"), []byte("x\n"))
+	link := filepath.Join(proj, "auth-link.txt")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, e := readPhoneFile(link, f.fr); e == nil || e.code != "file_denied" || !strings.Contains(e.msg, "system folder") {
+		t.Fatalf("symlink into /run/user: %+v", e)
+	}
+	// no user name: nothing under /run
+	mediaUser = func() string { return "" }
+	f.want(filepath.Join(proj, "main.go"), "file_denied")
+}
+
 func TestPhoneFileSymlinks(t *testing.T) {
 	f := newFileFixture(t)
 	key := f.write(filepath.Join(f.home, ".ssh", "id_ed25519"), []byte("placeholder\n"))
