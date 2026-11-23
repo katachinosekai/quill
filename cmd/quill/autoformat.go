@@ -94,7 +94,7 @@ func (e *sendEntry) formatRune(r rune) bool {
 	}
 	switch {
 	case unicode.IsLower(r) && sentenceStart(before):
-		up := string(unicode.ToUpper(r))
+		up := string(localeUpper(r, acSystemLang().Tag))
 		e.SetText(string(before) + up + string(rs[off:]))
 		e.setCursor(off + 1)
 		e.lastFmt = &fmtChange{start: off, before: string(r), after: up}

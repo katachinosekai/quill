@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"os"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -19,7 +20,6 @@ import (
 )
 
 const (
-	acLang    = "en_US"
 	acTimeout = 300 * time.Millisecond
 	acHintFor = 4 * time.Second
 )
@@ -33,6 +33,13 @@ type hunspell struct {
 	in   io.WriteCloser
 	out  *bufio.Reader
 	dead bool
+}
+
+func (h *hunspell) close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.dead = true
+	h.in.Close()
 }
 
 func hunspellAvailable() bool {
@@ -118,9 +125,19 @@ func (h *hunspell) check(word string) (bool, []string) {
 type autocorrector struct {
 	sp      speller
 	start   func() speller
+	orig    func() speller // start again after the language changed
 	enabled func() bool
 	ignored func(string) bool
 	ignore  func(string)
+}
+
+// restart drops the running speller so the next word starts the dictionary
+// now in use.
+func (a *autocorrector) restart() {
+	if c, ok := a.sp.(interface{ close() }); ok {
+		c.close()
+	}
+	a.sp, a.start = nil, a.orig
 }
 
 func (a *autocorrector) speller() speller {
@@ -308,8 +325,18 @@ func (e *sendEntry) TypedRune(r rune) {
 	e.Entry.TypedRune(r)
 }
 
+// acSys is the dictionary in use: the saved pick, else the system language.
+func (d *desk) acSys() acSystem {
+	return acSystemFor(d.app.Preferences().String(prefACDict))
+}
+
+// autocorrectOn: an explicit choice in Settings (or the welcome flow) wins;
+// otherwise autocorrect is on when the system language has a dictionary.
 func (d *desk) autocorrectOn() bool {
-	return d.app.Preferences().BoolWithFallback("autocorrect", true)
+	p := d.app.Preferences()
+	on := p.BoolWithFallback("autocorrect", true)
+	explicit := on == p.BoolWithFallback("autocorrect", false)
+	return autocorrectEnabled(explicit, on, d.acSys())
 }
 
 func (d *desk) acIgnored() map[string]bool {
@@ -332,16 +359,18 @@ func (d *desk) newAutocorrector() *autocorrector {
 			d.app.Preferences().SetString("autocorrectIgnore", strings.TrimSpace(list+"\n"+w))
 		},
 		start: func() speller {
-			if !hunspellAvailable() {
+			sys := d.acSys()
+			if !hunspellAvailable() || !sys.HasDic {
 				return nil
 			}
-			h, err := startHunspell(acLang)
+			h, err := startHunspell(sys.Dict.Path)
 			if err != nil {
 				return nil
 			}
 			return h
 		},
 	}
+	d.ac.orig = d.ac.start
 	return d.ac
 }
 
@@ -409,6 +438,19 @@ func (d *desk) flashHint(t *canvas.Text, msg string) {
 	})
 }
 
+// setACPick saves the language picked in Settings. A dictionary pick also
+// turns autocorrect on; the running speller restarts with the new language.
+func (d *desk) setACPick(value string) {
+	p := d.app.Preferences()
+	p.SetString(prefACDict, value)
+	if value != acDictSystem && value != acDictOff {
+		p.SetBool("autocorrect", true)
+	}
+	if d.ac != nil {
+		d.ac.restart()
+	}
+}
+
 func (d *desk) autocorrectSettings() fyne.CanvasObject {
 	chk := widget.NewCheck("Autocorrect the message box", func(on bool) { d.app.Preferences().SetBool("autocorrect", on) })
 	chk.Checked = d.autocorrectOn()
@@ -426,14 +468,67 @@ func (d *desk) autocorrectSettings() fyne.CanvasObject {
 	})
 	words.Importance = widget.LowImportance
 	row := container.NewHBox(chk, words)
+	sys := d.acSys()
+	status := mutedText(autocorrectStatus(sys), fontMeta)
+	if hunspellAvailable() {
+		opts := acOptions(sys, listDicts(acDictDirs(os.Getenv)))
+		labels := make([]string, len(opts))
+		cur := ""
+		saved := d.app.Preferences().String(prefACDict)
+		for i, o := range opts {
+			labels[i] = o.Label
+			if o.Value == saved {
+				cur = o.Label
+			}
+		}
+		if cur == "" {
+			cur = labels[0] // a saved dictionary that is gone: the system rule shows
+		}
+		pick := widget.NewSelect(labels, func(l string) {
+			for _, o := range opts {
+				if o.Label != l {
+					continue
+				}
+				d.setACPick(o.Value)
+				s := d.acSys()
+				chk.Checked = d.autocorrectOn()
+				if s.Off || !s.HasDic {
+					chk.Disable()
+				} else {
+					chk.Enable()
+				}
+				if s.HasDic {
+					words.Enable()
+				} else {
+					words.Disable()
+				}
+				chk.Refresh()
+				status.Text = autocorrectStatus(s)
+				status.Refresh()
+			}
+		})
+		pick.Selected = cur
+		if sys.Off {
+			chk.Disable()
+		}
+		row = container.NewVBox(row, container.NewHBox(widget.NewLabel("Autocorrect language"), pick))
+	}
+	if hunspellAvailable() && !sys.HasDic && !sys.Off {
+		chk.Disable()
+		words.Disable()
+		fmtChk := widget.NewCheck("Auto formatting (capital letters, — dashes, list continuation with Shift+Enter)", func(on bool) { d.app.Preferences().SetBool(prefAutoFormat, on) })
+		fmtChk.Checked = d.autoFormatOn()
+		status.Text += " (install the hunspell dictionary for your language to turn it on in Quill Desktop)."
+		return container.NewVBox(row, status, fmtChk)
+	}
 	if !hunspellAvailable() {
 		chk.Disable()
 		words.Disable()
 		fmtChk := widget.NewCheck("Auto formatting (capital letters, — dashes, list continuation with Shift+Enter)", func(on bool) { d.app.Preferences().SetBool(prefAutoFormat, on) })
 		fmtChk.Checked = d.autoFormatOn()
-		return container.NewVBox(row, mutedText("Needs hunspell with an en_US dictionary (e.g. dnf install hunspell hunspell-en-US, or apt install hunspell hunspell-en-us).", fontMeta), fmtChk)
+		return container.NewVBox(row, mutedText("Needs hunspell with a dictionary for your system language (en_US for English; e.g. dnf install hunspell hunspell-en-US, or apt install hunspell hunspell-en-us).", fontMeta), fmtChk)
 	}
 	fmtChk := widget.NewCheck("Auto formatting (capital letters, — dashes, list continuation with Shift+Enter)", func(on bool) { d.app.Preferences().SetBool(prefAutoFormat, on) })
 	fmtChk.Checked = d.autoFormatOn()
-	return container.NewVBox(row, fmtChk)
+	return container.NewVBox(row, status, fmtChk)
 }

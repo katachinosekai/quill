@@ -78,7 +78,7 @@ func TestAutocorrectWithHunspell(t *testing.T) {
 	if !hunspellAvailable() {
 		t.Skip("hunspell not installed")
 	}
-	h, err := startHunspell(acLang)
+	h, err := startHunspell("en_US")
 	if err != nil {
 		t.Skip("no en_US dictionary: ", err)
 	}
