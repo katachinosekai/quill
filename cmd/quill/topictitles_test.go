@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +24,18 @@ func TestTopicTitlesAndOldNames(t *testing.T) {
 		topicInfo{Slug: "quill", Title: "Quill", Scope: []string{"quill"}, Labeled: true},
 		topicInfo{Slug: "beta", Title: "Beta", Scope: []string{"beta"}},
 	)
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfg, []byte(`{"sessions":{
+		"zomboid-launcher":{"as":"quill","topic":"zomboid"},
+		"networking":{"topic":"zomboid"},
+		"quill-android-2":{"topic":"quill"},
+		"beta":{"topic":"beta"},
+		"unk":{"topic":"nosuch"},
+		"plainmap":{"as":"quill"}}}`), 0o600)
+	oldCfg := kmemCfgPath
+	kmemCfgPath = func() string { return cfg }
+	resetKmemSessions()
+	t.Cleanup(func() { kmemCfgPath = oldCfg; resetKmemSessions() })
 	h.d.kmemOff = false
 	h.d.kmemRun = func(string, ...string) (string, error) { return "", errors.New("unexpected") }
 	h.ui(func() {
@@ -36,7 +50,7 @@ func TestTopicTitlesAndOldNames(t *testing.T) {
 
 		for name, want := range map[string]string{
 			"zomboid-launcher": "Zomboid",
-			"networking":       "Zomboid", // scope word "network"
+			"networking":       "Zomboid",
 			"quill-android-2":  "Quill",
 		} {
 			old := h.d.createSession(h.proj, "default", "default")
@@ -49,15 +63,23 @@ func TestTopicTitlesAndOldNames(t *testing.T) {
 			if lbl := h.d.tabLabel(old.id, title); !strings.HasSuffix(lbl, "merging into "+want) {
 				t.Fatalf("tab label keeps the tail: %q", lbl)
 			}
+			m := strings.Join(menuLabels(h.d.tabMenuItems(old.id)), "|")
+			if strings.Contains(m, "Rename") || strings.Contains(m, "Restore original name") {
+				t.Fatalf("old-name tab keeps Rename: %s", m)
+			}
 		}
 
-		// No matching topic, an unlabeled topic, kmem itself: the plain title.
-		for _, name := range []string{"scratch", "beta", "kmem-lock-audit"} {
+		// No mapping (even when the words match a topic), a mapping to an
+		// unlabeled or unknown topic, kmem itself: the plain title and Rename.
+		for _, name := range []string{"scratch", "kmem-lock-audit", "zomboid-other", "unk", "plainmap"} {
 			s := h.d.createSession(h.proj, "default", "default")
 			h.d.org.Kmem[s.id] = name
 			h.d.org.Titles[s.id] = "Plain"
 			if title, _, _ := h.d.rowText(s.id); strings.Contains(title, "merging") {
 				t.Fatalf("%s: no merge target, got %q", name, title)
+			}
+			if m := strings.Join(menuLabels(h.d.tabMenuItems(s.id)), "|"); !strings.Contains(m, "Rename...") {
+				t.Fatalf("%s: Rename expected: %s", name, m)
 			}
 		}
 

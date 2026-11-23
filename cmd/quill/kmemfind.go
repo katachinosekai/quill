@@ -307,6 +307,7 @@ func (p *kmemPanel) viewOld(in transcript.Info) {
 func (p *kmemPanel) copyAsFact(in transcript.Info, excerpt string) {
 	d := p.d
 	topic := widget.NewEntry()
+	topic.SetText(topicForName(in.Kmem)) // editable; blank when unknown
 	topic.SetPlaceHolder("kmem topic, e.g. quill/notes")
 	body := widget.NewMultiLineEntry()
 	body.Wrapping = fyne.TextWrapWord

@@ -109,3 +109,26 @@ func TestFindOldStartsNoSession(t *testing.T) {
 		}
 	})
 }
+
+func TestFactTopicPrefill(t *testing.T) {
+	resetTopicCache()
+	t.Cleanup(resetTopicCache)
+	setTopicCache(topicInfo{Slug: "zomboid", Title: "Zomboid", Labeled: true})
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfg, []byte(`{"sessions":{"old-name":{"topic":"quill/notes"},"nomap":{"as":"x"}}}`), 0o600)
+	oldCfg := kmemCfgPath
+	kmemCfgPath = func() string { return cfg }
+	resetKmemSessions()
+	t.Cleanup(func() { kmemCfgPath = oldCfg; resetKmemSessions() })
+	for name, want := range map[string]string{
+		"old-name": "quill/notes", // explicit mapping
+		"zomboid":  "zomboid",     // the topic tab itself
+		"nomap":    "",
+		"other":    "",
+		"":         "",
+	} {
+		if got := topicForName(name); got != want {
+			t.Errorf("topicForName(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

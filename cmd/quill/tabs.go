@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
-	"unicode"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -553,10 +552,12 @@ func (d *desk) tabMenu(id string, at fyne.Position) {
 
 // tabMenuItems is the session menu; a topic tab (docs/design/topic-tabs.md
 // §3.3) has no Rename or Restore original name, its title is the topic, and
-// gets "Switch topic..." instead.
+// gets "Switch topic..." instead. An old-name tab (merging into a topic) also
+// loses them: its title is the old name until it ends.
 func (d *desk) tabMenuItems(id string) []*fyne.MenuItem {
 	items := d.sessionMenuItems(id)
-	if d.topicOf(id) == "" {
+	_, old := d.mergeTarget(id)
+	if d.topicOf(id) == "" && !old {
 		return items
 	}
 	var out []*fyne.MenuItem
@@ -566,7 +567,7 @@ func (d *desk) tabMenuItems(id string) []*fyne.MenuItem {
 			continue
 		}
 		out = append(out, it)
-		if it.Label == "Open in split view" {
+		if it.Label == "Open in split view" && !old {
 			out = append(out, fyne.NewMenuItem("Switch topic...", func() { d.switchTopic(id) }))
 		}
 	}
@@ -582,28 +583,31 @@ func (d *desk) switchTopic(id string) {
 	d.newSessionDialog()
 }
 
+// topicForName: the topic a kmem name belongs to. A name that is itself a
+// topic maps to itself; an old name only through kmem's config
+// "sessions": {"NAME": {"topic": ...}}, never by guessing from its words.
+func topicForName(name string) string {
+	if name == "" {
+		return ""
+	}
+	if _, ok := cachedTopic(name); ok {
+		return name
+	}
+	return strings.TrimSpace(kmemSessions()[name].Topic)
+}
+
 // mergeTarget: the topic an old-name session (a kmem name that is not a
-// topic) will be merged into, by matching the name's words against the
-// topics' scopes ("zomboid-launcher" and "launcher" -> Zomboid). Only in kmem
-// memory mode, only for live sessions; ok is false when no topic fits.
+// topic) will be merged into: the explicit mapping in kmem's config
+// "sessions" only. Only in kmem memory mode, only for live sessions; ok is
+// false when the name has no mapping or the mapped topic is unknown.
 func (d *desk) mergeTarget(id string) (topicInfo, bool) {
 	k := d.org.Kmem[id]
 	if k == "" || d.sessions[id] == nil || d.topicOf(id) != "" || !d.kmemMemory() {
 		return topicInfo{}, false
 	}
-	topicCache.mu.Lock()
-	list := append([]topicInfo(nil), topicCache.list...)
-	topicCache.mu.Unlock()
-	for _, w := range strings.FieldsFunc(k, func(r rune) bool { return r == '-' || r == '_' || r == '/' || r == '.' || unicode.IsDigit(r) }) {
-		for _, t := range list {
-			if !t.Labeled || t.Slug == "kmem" {
-				continue
-			}
-			for _, sc := range append([]string{t.Slug}, t.Scope...) {
-				if w == sc || len(sc) >= 4 && strings.HasPrefix(w, sc) {
-					return t, true
-				}
-			}
+	if t := topicForName(k); t != "" {
+		if ti, ok := cachedTopic(t); ok && ti.Labeled && ti.Slug != "kmem" {
+			return ti, true
 		}
 	}
 	return topicInfo{}, false
