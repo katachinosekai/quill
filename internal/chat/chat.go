@@ -251,7 +251,7 @@ func yesNoProposal(line string) bool {
 // cancel, kill) are left out on purpose: a Yes there is not a go-ahead.
 const actionVerbs = `fix|merge|release|ship|run|rerun|re-run|commit|push|delete|remove|apply|add|update|create|start|rename|revert|deploy|publish|install|build|restart|rebase|implement|continue|proceed|tag|cut|bump|land|move|switch|enable|disable|reset|drop|archive|write|rewrite|save|refactor|migrate|port|replace|retry|redo|upload|send|patch|squash|cherry-pick|finish|go ahead|go with|do it|do that|do this|do both|do all|clean up|set up|turn on|turn off`
 
-var namesWork = regexp.MustCompile(`(?i)\b(?:` + actionVerbs + `|execute|launch|perform|approve)\b`)
+var namesWork = regexp.MustCompile(`(?i)\b(?:` + actionVerbs + `|execute|launch|perform|approve|go out|go live)\b`)
 
 // NamesWork: s names work to do ("Ship as v0.1.18", "replace the files"), as
 // a pick between things to approve does; a pick between preferences doesn't.

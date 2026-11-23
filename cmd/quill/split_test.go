@@ -2182,7 +2182,7 @@ func TestDragPassThroughAndChoiceRefresh(t *testing.T) {
 		count := func() int {
 			n := 0
 			deepWalk(h.d.chat.views[msg.Seq].holder, func(o fyne.CanvasObject) {
-				if b, ok := o.(*widget.Button); ok && (b.Text == "Push now" || b.Text == "Wait") {
+				if b, ok := o.(*widget.Button); ok && (b.Text == "Push now" || b.Text == "Wait") && !b.Disabled() {
 					n++
 				}
 			})
@@ -2193,7 +2193,7 @@ func TestDragPassThroughAndChoiceRefresh(t *testing.T) {
 		}
 		h.d.sendTo(s, "my own answer")
 		if count() != 0 {
-			t.Fatal("replying removes the old card's buttons right away")
+			t.Fatal("replying greys the old reply's buttons right away")
 		}
 	})
 }

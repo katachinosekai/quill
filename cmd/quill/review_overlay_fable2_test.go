@@ -53,6 +53,9 @@ func shownText(o fyne.CanvasObject) string {
 
 func allDisabled(bs []*widget.Button) bool {
 	for _, b := range bs {
+		if b.Text == "Show as written" || b.Text == "Answer in place" {
+			continue // the toggle stays live
+		}
 		if !b.Disabled() {
 			return false
 		}
@@ -341,8 +344,8 @@ func TestReviewOK_ShowAsWrittenAndControls(t *testing.T) {
 				entry++
 			}
 		})
-		if radio != 1 || check != 1 || entry != 1 {
-			t.Errorf("controls: %d radio, %d check, %d entry", radio, check, entry)
+		if radio != 2 || check != 1 || entry != 1 {
+			t.Errorf("controls: %d radio (the approval question is one), %d check, %d entry", radio, check, entry)
 		}
 		v.planPlain = map[*chat.Item]bool{plan: true}
 		if got := buttonLabels(v.renderPlanReply(reply)); len(got) != 1 || got[0] != "Answer in place" {

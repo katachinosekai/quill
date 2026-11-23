@@ -117,8 +117,14 @@ func TestPlanCardQuestionForm(t *testing.T) {
 	// Approved: the reply is plain again and the card shows its state.
 	h.ui(func() {
 		c = findPlanControls(h.d.chat.views[reply.Seq].holder)
-		if len(c.radios)+len(c.checks)+len(c.entries) != 0 || !h.d.chat.views[plan.Seq].holder.Visible() {
-			t.Errorf("after approval the reply has no controls (%d) and the card shows", len(c.radios)+len(c.checks)+len(c.entries))
+		n := len(c.radios) + len(c.checks) + len(c.entries)
+		if n == 0 || h.d.chat.views[plan.Seq].holder.Visible() {
+			t.Errorf("after approval the reply keeps its controls (%d), greyed, and no card shows", n)
+		}
+		for _, r := range c.radios {
+			if !r.Disabled() {
+				t.Error("an answered plan's radio group is live")
+			}
 		}
 	})
 }

@@ -50,8 +50,11 @@ func TestPlanCardAnswersTheChoice(t *testing.T) {
 			it := s.conv.AddPlan()
 			h.d.chat.show(s)
 			deepWalk(h.d.chat.planUI(it), func(o fyne.CanvasObject) {
-				if b, ok := o.(*widget.Button); ok && b.Visible() && b.Text != "Show as written" {
+				if b, ok := o.(*widget.Button); ok && b.Visible() && b.Text != "Show as written" && b.Text != "Send answers" {
 					labels = append(labels, b.Text)
+				}
+				if r, ok := o.(*widget.RadioGroup); ok {
+					labels = append(labels, r.Options...)
 				}
 			})
 		})

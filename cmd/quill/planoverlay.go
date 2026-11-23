@@ -77,6 +77,9 @@ func planOverlayQs(s *deskSession, plan, reply *chat.Item) []planQ {
 		return nil
 	}
 	if len(qs) == 0 {
+		if start, _ := approvalSpan(reply.Text, planQuestion(s.conv, plan)); start < 0 && strings.TrimSpace(s.conv.PlanText(plan)) != strings.TrimSpace(reply.Text) {
+			return nil // the plan's text is elsewhere
+		}
 		return []planQ{} // the approval question, or the buttons closing the reply
 	}
 	n, at, prev := len(strings.Split(reply.Text, "\n")), 0, -1
@@ -86,7 +89,7 @@ func planOverlayQs(s *deskSession, plan, reply *chat.Item) []planQ {
 			return nil
 		}
 		// Two questions on one numbered line share its lines.
-		if r.line == prev && r.end != at || r.line != prev && r.line < at || r.end > n || r.line >= r.end {
+		if r.line == prev && (r.end != at || r.Num == 0) || r.line != prev && r.line < at || r.end > n || r.line >= r.end {
 			return nil
 		}
 		prev = r.line
@@ -190,7 +193,6 @@ func keepNumbers(lines []string) string {
 }
 
 var numLeadMD = regexp.MustCompile(`^(\s*)(\d+)([.)])\s+`)
-
 
 // planStatus: the small caption an inactive plan shows under its controls.
 func planStatus(plan *chat.Item, state string) string {

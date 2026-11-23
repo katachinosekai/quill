@@ -11,7 +11,15 @@ import (
 func disabledAll(t *testing.T, h *harness, plan *chat.Item) []string {
 	t.Helper()
 	var labels []string
-	for _, b := range swapButtons(h.d.chat.renderPlan(plan)) {
+	// The card, or the reply the controls are drawn in.
+	o := h.d.chat.renderPlan(plan)
+	if r := planReply(h.d.chat.s.conv, plan); r != nil && h.d.chat.planOverlaid(plan) {
+		o = h.d.chat.renderPlanReply(r)
+	}
+	for _, b := range swapButtons(o) {
+		if b.Text == "Show as written" {
+			continue
+		}
 		if !b.Disabled() {
 			t.Errorf("button %q is still active on a stale card", b.Text)
 		}

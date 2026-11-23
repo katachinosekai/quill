@@ -45,10 +45,10 @@ func TestPlanKindsOverlayTheReply(t *testing.T) {
 		absent     string   // text the reply no longer shows (its buttons answer it)
 		present    string   // text the reply keeps
 	}{
-		{"approval buttons", yesNoPlan, []string{"Yes (recommended)", "No"}, "", "Can I run steps 1"},
+		{"approval radio", yesNoPlan, []string{"Send answers"}, "", "Can I run steps 1"},
 		{"approve card", "1. Edit x.\n2. Build.\n\n**Do you approve steps 1–2?**", []string{"Approve plan & run all", "Don't run"}, "", "Do you approve"},
 		{"unnumbered questions", "Plan:\n1. Bundle x.\n\nShould rule 21 stay as it is?\nWhat should the title say?\n\n**Do you approve step 1?**", []string{"Approve plan & send answers", "Don't run"}, "Do you approve", "What should the title say?"},
-		{"approval and questions", mixedPlan, []string{"Yes (recommended)", "No", "Send answers"}, "", "What should the tag say?"},
+		{"approval and questions", mixedPlan, []string{"Send answers"}, "", "What should the tag say?"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -119,7 +119,7 @@ func TestPlanOverlayFallsBackWithoutApprovalQuestion(t *testing.T) {
 		if h.d.chat.planOverlaid(plan) || h.d.chat.renderPlanReply(reply) != nil {
 			t.Fatal("no overlay when the reply has no approval question")
 		}
-		if got := buttonLabels(h.d.chat.renderPlan(plan)); !reflect.DeepEqual(got, []string{"Yes (recommended)", "No"}) {
+		if got := radioOptions(h.d.chat.renderPlan(plan)); !reflect.DeepEqual(got, []string{"Yes (recommended)", "No"}) {
 			t.Fatalf("the card: %q", got)
 		}
 	})
@@ -180,9 +180,24 @@ func TestChoiceRepliesOverlay(t *testing.T) {
 		if got := lastUserText(s); !strings.Contains(got, "On disk A") || !strings.Contains(got, "Large") {
 			t.Fatalf("Send answers: %q", got)
 		}
-		// Answered (a user turn after it): the reply is plain text, no buttons.
-		if o, plain := v.renderChoiceReply(msg); o != nil || !plain {
-			t.Fatal("an answered reply draws as plain text")
+		// Answered (a user turn after it): the buttons stay, greyed, with the picks marked.
+		o, plain = v.renderChoiceReply(msg)
+		if o == nil || plain {
+			t.Fatal("an answered reply keeps its buttons")
+		}
+		for _, b := range swapButtons(o) {
+			if !b.Disabled() {
+				t.Errorf("button %q is live on an answered reply", b.Text)
+			}
+		}
+		marked := 0
+		for _, b := range swapButtons(o) {
+			if b.Icon != nil && b.Text != "Send answers" {
+				marked++
+			}
+		}
+		if marked != 2 {
+			t.Errorf("picks marked: %d, want 2", marked)
 		}
 	})
 }
