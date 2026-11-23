@@ -95,19 +95,11 @@ func (d *desk) voiceItems() []*fyne.MenuItem {
 
 const stopEverythingLabel = "Stop everything (reply and background tasks)"
 
+// taskItems: the "Show background tasks..." entry and, when it applies, Stop
+// everything; used by the subagent strip's context menu and the session/tab
+// menu.
 func (d *desk) taskItems(s *deskSession) []*fyne.MenuItem {
-	var out []*fyne.MenuItem
-	for _, t := range s.conv.BackgroundTasks() {
-		what := t.What
-		if what == "" {
-			what = t.Tool
-		}
-		out = append(out, fyne.NewMenuItem(shortLabel(what, 60), func() { d.cmdTasks(s) }))
-	}
-	if len(out) > 0 {
-		out = append(out, fyne.NewMenuItemSeparator())
-	}
-	out = append(out, fyne.NewMenuItem("Show background tasks...", func() { d.cmdTasks(s) }))
+	out := []*fyne.MenuItem{fyne.NewMenuItem("Show background tasks...", func() { d.cmdTasks(s) })}
 	// Stop keeps background subagents running; this is the way to end them all.
 	if len(s.conv.BackgroundTasks()) > 0 && s.remote == nil && s.running() {
 		out = append(out, fyne.NewMenuItem(stopEverythingLabel, func() { d.interruptAll(s) }))

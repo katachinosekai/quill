@@ -196,8 +196,11 @@ func (d *desk) sessionMenuItems(id string) []*fyne.MenuItem {
 	if s := d.sessions[id]; s == nil || !s.running() {
 		items = append(items, fyne.NewMenuItem("Start", func() { d.resumeSession(id) }))
 	}
+	items = append(items, d.sessionToolsItem(id))
+	if s := d.sessions[id]; s != nil && s.conv != nil {
+		items = append(items, d.taskItems(s)...)
+	}
 	items = append(items,
-		d.sessionToolsItem(id),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),
 		fyne.NewMenuItem("End session", func() { d.closeTab(id); d.endWithSave(id, d.endPlace()) }),

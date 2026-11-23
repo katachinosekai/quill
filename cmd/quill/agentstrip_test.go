@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 // stripTexts: the chip texts the strip shows.
@@ -71,7 +72,7 @@ func TestAgentStrip(t *testing.T) {
 		h.d.agentStrip.sync()
 		got := stripTexts(h.d.agentStrip)
 		if !h.d.agentStrip.root.Visible() || len(got) != 2 || got[0] != "● Fix join stall" || got[1] != "● Release build" {
-			t.Fatalf("running subagents listed, shells not: %q", got)
+			t.Fatalf("running subagents listed (a CLI-only shell task is not a tracked job): %q", got)
 		}
 		// Tokens follow task_progress; the time follows the clock.
 		h.d.agentStrip.now = func() time.Time { return start.Add(6*time.Minute + 10*time.Second) }
@@ -403,4 +404,43 @@ func TestAgentTipPointerPath(t *testing.T) {
 	if opens != 1 || closes != 1 {
 		t.Fatalf("after leaving: %d opens, %d closes", opens, closes)
 	}
+}
+
+// A background shell job (a long test run) shows in the strip after the
+// agents, with its label; a tap opens a menu with the tasks dialog, a
+// right-click offers Stop everything only for a running local session.
+func TestAgentStripShellJob(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		s := h.d.createSession(h.proj, "default", "default")
+		h.d.current = s
+		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bg1","name":"Bash","input":{"command":"go test ./...","run_in_background":true}}]`)}})
+		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bg1","content":"Command running in background with ID: job1. Output is being written to: /tmp/job1.output"}]`)}})
+		h.d.agentStrip.sync()
+		got := stripTexts(h.d.agentStrip)
+		if !h.d.agentStrip.root.Visible() || len(got) != 1 || got[0] != "● go test ./..." {
+			t.Fatalf("the strip lists the shell job: %q", got)
+		}
+		c := h.d.agentStrip.row.Objects[0].(*agentChip)
+		if tip := c.tip(); !strings.Contains(tip, "job1") || !strings.Contains(tip, "/tmp/job1.output") {
+			t.Fatalf("tooltip: %q", tip)
+		}
+		labels := menuLabels(h.d.agentStrip.shellItems(s, s.conv.BackgroundTasks()[0]))
+		if len(labels) < 2 || labels[0] != "Open log" || labels[1] != "Show background tasks..." {
+			t.Fatalf("job menu: %v", labels)
+		}
+		// Not running: no Stop everything anywhere.
+		for _, l := range menuLabels(c.onMenu()) {
+			if l == stopEverythingLabel && !s.running() {
+				t.Fatalf("Stop everything offered for a session that is not running")
+			}
+		}
+		// The job ends: the strip hides again.
+		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"stop1","name":"TaskStop","input":{"task_id":"job1"}}]`)}})
+		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"stop1","content":"stopped"}]`)}})
+		h.d.agentStrip.sync()
+		if h.d.agentStrip.root.Visible() {
+			t.Fatalf("hidden once the job ended: %q", stripTexts(h.d.agentStrip))
+		}
+	})
 }

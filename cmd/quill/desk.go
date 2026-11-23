@@ -336,7 +336,6 @@ type desk struct {
 	kmemPanelNow  *kmemPanel
 	remotes       map[string]*remoteLink
 	settingsDlg   dialog.Dialog
-	tasksBtn      *tasksChip
 	phoneSync     *phoneSync
 	buildChk      *widget.Check // Settings → General "Ask before building", kept in line by settingsChanged
 	coordChk      *widget.Check // Settings → General "Coordinate with subagents"
@@ -1048,7 +1047,6 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.note.Hide()
 	d.rcStatus = mutedText("", fontMeta)
 	d.rcStatus.Hide()
-	d.tasksBtn = newTasksButton(func() *deskSession { return d.current }, func(s *deskSession) { menuAbove(d.tasksBtn, d.taskItems(s)) })
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.reloadBtn = d.newRemoteReloadButton("Reload", func() *deskSession { return d.current })
 	d.headPad = canvas.NewRectangle(color.Transparent)
@@ -1125,7 +1123,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		}
 		return d.modeItems(d.current)
 	})
-	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.stt.langBtn, d.tasksBtn), d.chipsBtn)
+	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.stt.langBtn), d.chipsBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	d.verLine = d.newVerLine()
 	d.statsRow = container.New(hintsLayout{}, d.verLine.slot, d.folder)
@@ -1273,9 +1271,6 @@ func (d *desk) updateChrome() {
 	mirror(d.modelBtn, d.modelSel)
 	mirror(d.modeBtn, d.modeSel)
 	if d.syncBarButtons(s) && d.mainPane != nil {
-		relayoutTree(d.mainPane)
-	}
-	if syncTasksButton(d.tasksBtn, s) && d.mainPane != nil {
 		relayoutTree(d.mainPane)
 	}
 	if d.usage != nil {

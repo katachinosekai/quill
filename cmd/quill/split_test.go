@@ -1841,34 +1841,19 @@ func TestUIPassMenusSettingsTasks(t *testing.T) {
 		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgx","name":"Bash","input":{"command":"./test.sh","run_in_background":true}}]`)}})
 		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgx","content":"Command running in background with ID: tsk1. Output is being written to: /tmp/o"}]`)}})
 		h.d.updateChrome()
-		if !h.d.tasksBtn.Visible() || h.d.tasksBtn.Text() != "Background Task" {
-			t.Fatalf("the message bar shows this session's background task: %q %v", h.d.tasksBtn.Text(), h.d.tasksBtn.Visible())
-		}
-		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"bgy","name":"Bash","input":{"command":"./other.sh","run_in_background":true}}]`)}})
-		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"bgy","content":"Command running in background with ID: tsk2. Output is being written to: /tmp/o2"}]`)}})
-		h.d.updateChrome()
-		if h.d.tasksBtn.Text() != "Background Tasks" {
-			t.Fatalf("two tasks read as plural, without names: %q", h.d.tasksBtn.Text())
-		}
-		relayout(h.d.mainPane)
-		if w := h.d.tasksBtn.Size().Width; w > h.d.tasksBtn.natural()+1 || w < 60 {
-			t.Fatalf("the tasks box is as wide as its text, not the row: %v (natural %v)", w, h.d.tasksBtn.natural())
-		}
-		var row *fyne.Container
+		// The message bar has no tasks button; the subagent strip lists the job.
+		var chips int
 		deepWalk(h.d.mainPane, func(o fyne.CanvasObject) {
-			if c, ok := o.(*fyne.Container); ok {
-				for i, x := range c.Objects {
-					if x == fyne.CanvasObject(h.d.tasksBtn) && i > 0 && c.Objects[i-1] == fyne.CanvasObject(h.d.stt.langBtn) {
-						row = c
-					}
-				}
+			if _, ok := o.(*tasksChip); ok {
+				chips++
 			}
 		})
-		if row == nil {
-			t.Fatal("the tasks box sits right after Voice in the options row")
+		if chips != 0 {
+			t.Fatalf("the message bar has no background tasks button: %d", chips)
 		}
-		if h.d.tasksBtn.Position().X <= h.d.stt.langBtn.Position().X {
-			t.Fatal("to its right")
+		h.d.agentStrip.sync()
+		if got := stripTexts(h.d.agentStrip); len(got) != 1 || got[0] != "● ./test.sh" {
+			t.Fatalf("the strip lists the background job: %q", got)
 		}
 		h.d.rewindTo(s, user, true)
 	})

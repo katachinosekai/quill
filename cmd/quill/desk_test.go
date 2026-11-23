@@ -455,6 +455,9 @@ func TestStopKeepsBackgroundSubagents(t *testing.T) {
 		if stopAll == nil {
 			t.Fatalf("tasks menu has no stop-everything item: %v", menuLabels(h.d.taskItems(s)))
 		}
+		if l := strings.Join(menuLabels(h.d.sessionMenuItems(s.id)), "|"); !strings.Contains(l, stopEverythingLabel) || !strings.Contains(l, "Show background tasks...") {
+			t.Fatalf("the session menu has Stop everything and Show background tasks: %s", l)
+		}
 		test.Tap(h.d.stopBtn)
 	})
 	// The session still shows as working: its background subagent runs on.
@@ -483,6 +486,9 @@ func TestStopKeepsBackgroundSubagents(t *testing.T) {
 			if it.Label == stopEverythingLabel {
 				t.Fatal("no stop-everything item without background tasks")
 			}
+		}
+		if l := strings.Join(menuLabels(h.d.sessionMenuItems(s.id)), "|"); strings.Contains(l, stopEverythingLabel) || !strings.Contains(l, "Show background tasks...") {
+			t.Fatalf("the session menu: Show only: %s", l)
 		}
 	})
 }

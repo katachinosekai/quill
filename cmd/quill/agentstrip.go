@@ -25,8 +25,10 @@ import (
 //
 // Finished ones stay greyed for a while; the row hides when nothing ran
 // lately. A chip opens a menu with the agent's details, its log and "Stop
-// this subagent" (TaskStop only, kmem task tf0ac88). The "Background
-// Task(s)" button and "Stop everything" stay; the strip complements them.
+// this subagent" (TaskStop only, kmem task tf0ac88). Background shell jobs
+// (long test runs, ...) are listed after the agents in the same style; a
+// click opens the tasks dialog. Right-click on a chip: "Show background
+// tasks..." and "Stop everything" (the message bar has no tasks button).
 //
 // The data comes from internal/chat (Conversation.Agents, fed by the CLI's
 // task_started / task_progress / task_notification events). The strip polls
@@ -181,6 +183,79 @@ func agentChipText(g chat.AgentUse, _ time.Time) string {
 	return mark + " " + cutTo(agentName(g), agentDescMax)
 }
 
+// shellJobs: the session's running background jobs that are not subagents
+// (those are listed from Agents), in launch order.
+func shellJobs(s *deskSession) []chat.BgTask {
+	if s == nil || s.conv == nil {
+		return nil
+	}
+	var out []chat.BgTask
+	for _, t := range s.conv.BackgroundTasks() {
+		if t.Tool != "Agent" && t.Tool != "Task" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func shellName(t chat.BgTask) string {
+	what := strings.Join(strings.Fields(t.What), " ")
+	if what == "" {
+		what = t.Tool
+	}
+	return what
+}
+
+func shellChipText(t chat.BgTask) string { return "● " + cutTo(shellName(t), agentDescMax) }
+
+func shellTip(t chat.BgTask) string {
+	lines := []string{shellName(t), "Background job " + t.ID}
+	if t.Log != "" {
+		lines = append(lines, t.Log)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// stripEntry: one chip of the strip, an agent or a shell job.
+type stripEntry struct {
+	text  string
+	col   color.Color
+	items func() []*fyne.MenuItem // the chip's menu (tap)
+	tip   func() string
+}
+
+func (a *agentStrip) entries(s *deskSession) []stripEntry {
+	now := a.now()
+	var out []stripEntry
+	for _, g := range a.listed(s) {
+		g := g
+		col := color.Color(colIdle)
+		if !g.Running() {
+			col = colMuted
+		}
+		out = append(out, stripEntry{agentChipText(g, now), col,
+			func() []*fyne.MenuItem { return a.items(s, g) },
+			func() string { return agentTip(g, a.now()) }})
+	}
+	for _, t := range shellJobs(s) {
+		t := t
+		out = append(out, stripEntry{shellChipText(t), colIdle,
+			func() []*fyne.MenuItem { return a.shellItems(s, t) },
+			func() string { return shellTip(t) }})
+	}
+	return out
+}
+
+// shellItems: a shell job's menu: its log and the tasks dialog.
+func (a *agentStrip) shellItems(s *deskSession, t chat.BgTask) []*fyne.MenuItem {
+	var out []*fyne.MenuItem
+	if t.Log != "" {
+		log := t.Log
+		out = append(out, fyne.NewMenuItem("Open log", func() { a.d.openPath(log) }))
+	}
+	return append(out, a.d.taskItems(s)...)
+}
+
 func (a *agentStrip) sync() {
 	// A hovered chip's tooltip follows time and tokens in place (no resize).
 	for _, o := range a.row.Objects {
@@ -189,18 +264,17 @@ func (a *agentStrip) sync() {
 		}
 	}
 	s := a.d.current
-	if (s == nil || s.conv == nil || s.conv.AgentsRev() == 0) && !a.root.Visible() {
+	if (s == nil || s.conv == nil || (s.conv.AgentsRev() == 0 && s.conv.Background() == 0)) && !a.root.Visible() {
 		return
 	}
-	list := a.listed(s)
-	now := a.now()
+	list := a.entries(s)
 	texts := make([]string, 0, len(list)+1)
-	for i, g := range list {
+	for i, e := range list {
 		if i == agentStripMax && len(list) > agentStripMax+1 {
 			texts = append(texts, fmt.Sprintf("+%d", len(list)-agentStripMax))
 			break
 		}
-		texts = append(texts, agentChipText(g, now))
+		texts = append(texts, e.text)
 	}
 	sig := fmt.Sprintf("%p|", s) + strings.Join(texts, "\x00")
 	if len(list) == 0 {
@@ -212,18 +286,19 @@ func (a *agentStrip) sync() {
 	a.shown = sig
 	wasVisible := a.root.Visible()
 	objs := make([]fyne.CanvasObject, 0, len(texts))
+	menu := func() []*fyne.MenuItem { return a.d.taskItems(s) }
 	for i, t := range texts {
 		if strings.HasPrefix(t, "+") && i == agentStripMax {
 			rest := list[agentStripMax:]
-			objs = append(objs, a.chip(t, colMuted, func(c fyne.CanvasObject) { a.moreMenu(c, s, rest) }, nil))
+			c := a.chip(t, colMuted, func(c fyne.CanvasObject) { a.moreMenu(c, rest) }, nil)
+			c.onMenu = menu
+			objs = append(objs, c)
 			break
 		}
-		g := list[i]
-		col := color.Color(colIdle)
-		if !g.Running() {
-			col = colMuted
-		}
-		objs = append(objs, a.chip(t, col, func(c fyne.CanvasObject) { menuAbove(c, a.items(s, g)) }, func() string { return agentTip(g, a.now()) }))
+		e := list[i]
+		c := a.chip(t, e.col, func(c fyne.CanvasObject) { menuAbove(c, e.items()) }, e.tip)
+		c.onMenu = menu
+		objs = append(objs, c)
 	}
 	a.tips.hideNow() // a rebuilt chip must not leave its tooltip up
 	a.row.Objects = objs
@@ -289,13 +364,11 @@ func (a *agentStrip) items(s *deskSession, g chat.AgentUse) []*fyne.MenuItem {
 	return out
 }
 
-func (a *agentStrip) moreMenu(c fyne.CanvasObject, s *deskSession, rest []chat.AgentUse) {
-	now := a.now()
+func (a *agentStrip) moreMenu(c fyne.CanvasObject, rest []stripEntry) {
 	var out []*fyne.MenuItem
-	for _, g := range rest {
-		g := g
-		it := fyne.NewMenuItem(agentChipText(g, now), nil)
-		it.ChildMenu = fyne.NewMenu("", a.items(s, g)...)
+	for _, e := range rest {
+		it := fyne.NewMenuItem(e.text, nil)
+		it.ChildMenu = fyne.NewMenu("", e.items()...)
 		out = append(out, it)
 	}
 	menuAbove(c, out)
@@ -306,11 +379,12 @@ func (a *agentStrip) moreMenu(c fyne.CanvasObject, s *deskSession, rest []chat.A
 // the strip's chips.
 type agentChip struct {
 	widget.BaseWidget
-	text  *canvas.Text
-	col   color.Color
-	onTap func(fyne.CanvasObject)
-	tip   func() string // the tooltip text, built on hover (times move)
-	host  *agentTipHost
+	text   *canvas.Text
+	col    color.Color
+	onTap  func(fyne.CanvasObject)
+	tip    func() string // the tooltip text, built on hover (times move)
+	host   *agentTipHost
+	onMenu func() []*fyne.MenuItem // right-click menu
 }
 
 func newAgentChip(text string, col color.Color, onTap func(fyne.CanvasObject), tip func() string) *agentChip {
@@ -329,6 +403,19 @@ func (c *agentChip) Tapped(*fyne.PointEvent) {
 	c.host.hideNow()
 	if c.onTap != nil {
 		c.onTap(c)
+	}
+}
+
+func (c *agentChip) TappedSecondary(e *fyne.PointEvent) {
+	c.host.hideNow()
+	if c.onMenu == nil {
+		return
+	}
+	if it := c.onMenu(); len(it) > 0 {
+		cv := fyne.CurrentApp().Driver().CanvasForObject(c)
+		if cv != nil {
+			widget.ShowPopUpMenuAtPosition(fyne.NewMenu("", it...), cv, e.AbsolutePosition)
+		}
 	}
 }
 
