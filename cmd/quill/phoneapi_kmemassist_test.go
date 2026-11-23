@@ -244,7 +244,9 @@ func TestPhoneKmemAssistant(t *testing.T) {
 		t.Fatalf("save now: %d %v", code, m)
 	}
 	h.ui(func() {
-		if s.kmemSave == nil || !strings.HasPrefix(lastUser(s), "Save your kmem handoff now") {
+		// The fake turn can finish (clearing kmemSave) before this runs, so
+		// check what stays: the notice and the message sent.
+		if !hasNotice(s, "Asked this session to save its kmem handoff") || !strings.HasPrefix(lastUser(s), "Save your kmem handoff now") {
 			t.Fatal("Save now asks the assistant to save")
 		}
 	})
