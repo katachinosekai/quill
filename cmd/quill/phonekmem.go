@@ -106,7 +106,7 @@ func (a *phoneAPI) kmemData(ctx context.Context, w http.ResponseWriter, phone st
 		ch = make(chan struct{})
 		k.loading = ch
 		go func() {
-			data, ok := a.d.readKmemPanelData(false)
+			data, ok := a.d.readKmemPanelDataWith(false, a.d.kmemJSON, func(args ...string) (string, error) { return a.d.runKmem("kmem", args...) })
 			if ok {
 				a.d.do(func() { a.d.setKmemNeeds(data.needs) }) // the PC's bubble follows too
 			}

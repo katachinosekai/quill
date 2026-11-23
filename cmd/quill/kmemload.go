@@ -54,12 +54,16 @@ func (c *kmemCoalescer) invalidate() {
 	c.mu.Unlock()
 }
 
+// runKmemShared runs a read-only kmem command for the window's loaders (the
+// panel, the badge, the bin, the rename scan): identical calls share one run.
+// Pollers that wait for a change (handoff saves) use runKmem, never this.
+func (d *desk) runKmemShared(args ...string) (string, error) {
+	return d.kmemCo.run(d, args)
+}
+
 func (c *kmemCoalescer) run(d *desk, args []string) (string, error) {
 	if !kmemReadOnly(args) {
-		c.invalidate()
-		out, err := d.runKmemRaw("kmem", args...)
-		c.invalidate() // a command that ran long may have been joined by readers
-		return out, err
+		return d.runKmem("kmem", args...)
 	}
 	key := strings.Join(args, "\x00")
 	c.mu.Lock()

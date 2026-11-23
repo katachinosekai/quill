@@ -148,8 +148,8 @@ func TestKmemWindow(t *testing.T) {
 				t.Fatalf("%q fills the chat input; hidden while the chat is off", b)
 			}
 		}
-		if h.d.kmemBubble.text.Text != "4" {
-			t.Fatalf("bubble counts bin, audit, issue and rollout: %q", h.d.kmemBubble.text.Text)
+		if h.d.kmemBubble.box.Visible() {
+			t.Fatalf("the open window lists the issue and the rollout, so they count as seen: %q", h.d.kmemBubble.text.Text)
 		}
 		var filled []string
 		w.setChat(wrapLabel("(operator chat)"))

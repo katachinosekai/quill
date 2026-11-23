@@ -54,8 +54,9 @@ func TestKmemBubble(t *testing.T) {
 		if h.d.kmemBubble == nil || h.d.kmemBubble.box.Visible() {
 			t.Fatal("the bubble is hidden while kmem asks for nothing")
 		}
-		h.d.setKmemNeeds(kmemNeeds{Bin: 2, Audit: "chain broken", Maint: 3})
-		if !h.d.kmemBubble.box.Visible() || h.d.kmemBubble.text.Text != "4" {
+		h.d.setKmemNeeds(kmemNeeds{Bin: 2, Audit: "chain broken", Maint: 3, MaintSig: "w:x", RolloutWait: "stage x",
+			Issues: []kmemTask{{ID: "t1", Status: "open", Title: "kmem issue: a", Topic: "kmem"}}})
+		if !h.d.kmemBubble.box.Visible() || h.d.kmemBubble.text.Text != "3" { // bin and audit do not badge
 			t.Fatalf("bubble: %q", h.d.kmemBubble.text.Text)
 		}
 	})

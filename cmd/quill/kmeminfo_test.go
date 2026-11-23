@@ -168,6 +168,7 @@ func TestReadKmemNeedsBinAndMaint(t *testing.T) {
 	}
 	// no bin: trash list is never asked
 	calls = nil
+	h.d.kmemCo.invalidate() // the shared reads of the first call are not reused
 	h.d.kmemRun = fakeInfoKmem("maint: 1 h ago, 0 warnings (/x/maint-20261123-110000.txt)\n", "", &calls)
 	n, _ = h.d.readKmemNeeds()
 	for _, c := range calls {

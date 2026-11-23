@@ -336,7 +336,7 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 	if !d.kmemAvailable() {
 		d.kmemBinSetBtn.Disable()
 	}
-	return container.NewVBox(status, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.kmemAssistSetting(), widget.NewSeparator(), d.defaultRulesSettings(),
+	return container.NewVBox(status, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.kmemAssistSetting(), d.kmemBadgeSetting(), widget.NewSeparator(), d.defaultRulesSettings(),
 		widget.NewSeparator(), caption("Facts and tasks sessions moved to kmem's recycle bin: review, restore, or delete them for good."), d.kmemBinSetBtn)
 }
 
@@ -433,4 +433,15 @@ func (d *desk) kmemAssistSetting() fyne.CanvasObject {
 	}
 	return container.NewVBox(boldLabel("kmem assistant"), sel,
 		caption("The model of kmem-lock-audit, Quill Desktop's kmem assistant (always running in the background). By default it runs on Online Claude, even when new sessions start on a local model; a local model runs it only when picked here and must be able to use tools. Off: it doesn't run and the kmem window shows its panels only. A change applies the next time it starts."))
+}
+
+// kmemBadgeSetting: the switch for the badge on the kmem button (kmemseen.go).
+func (d *desk) kmemBadgeSetting() fyne.CanvasObject {
+	chk := widget.NewCheck("Badge on the kmem button", func(on bool) {
+		d.app.Preferences().SetBool(prefKmemBadge, on)
+		d.updateKmemBadge()
+	})
+	chk.SetChecked(d.kmemBadgeOn())
+	return container.NewVBox(widget.NewSeparator(), chk,
+		caption("The badge shows only what needs you: a question or plan from the kmem assistant, a paused rollout, new maintenance warnings and open \"kmem issue:\" tasks. Each shows once after it is listed in the kmem window; it comes back when it changes."))
 }

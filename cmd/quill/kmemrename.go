@@ -100,8 +100,14 @@ type kmemRenameScan struct {
 // scanKmemRenames runs kmem (off the UI thread): the handoff list, then a
 // resolve for each linked name missing from it.
 func (d *desk) scanKmemRenames(links map[string]string, skip map[string]bool) kmemRenameScan {
+	return d.scanKmemRenamesWith(links, skip, d.kmemHandoffListShared)
+}
+
+// scanKmemRenamesWith reads the list with list: shared for the window's
+// refresh, fresh (kmemHandoffList) when the user asked for a name.
+func (d *desk) scanKmemRenamesWith(links map[string]string, skip map[string]bool, list func() ([]kmemHandoff, error)) kmemRenameScan {
 	sc := kmemRenameScan{renames: map[string]string{}}
-	hs, err := d.kmemHandoffList()
+	hs, err := list()
 	if err != nil {
 		return sc
 	}
@@ -211,7 +217,7 @@ func (d *desk) resumeNamedFromCLI(name string) {
 	}
 	links := d.liveKmemLinks()
 	go func() {
-		sc := d.scanKmemRenames(links, nil)
+		sc := d.scanKmemRenamesWith(links, nil, d.kmemHandoffList)
 		target, renamed := name, false
 		if sc.listOK && !slices.ContainsFunc(sc.listed, func(h kmemHandoff) bool { return h.Name == name }) {
 			if cur, ok := d.kmemResolve(name); ok && cur != name {

@@ -82,10 +82,19 @@ func (d *desk) kmemFeatureCached(f string) bool {
 }
 
 func (d *desk) kmemJSON(out any, args ...string) bool {
+	return d.kmemJSONWith(d.runKmem, out, args...)
+}
+
+// kmemJSONShared is kmemJSON through the shared loader (runKmemShared).
+func (d *desk) kmemJSONShared(out any, args ...string) bool {
+	return d.kmemJSONWith(func(_ string, a ...string) (string, error) { return d.runKmemShared(a...) }, out, args...)
+}
+
+func (d *desk) kmemJSONWith(run func(string, ...string) (string, error), out any, args ...string) bool {
 	if d.kmemAPILevel() != kmemAPI {
 		return false
 	}
-	raw, err := d.runKmem("kmem", append(args, "--json")...)
+	raw, err := run("kmem", append(args, "--json")...)
 	if err != nil {
 		return false
 	}
@@ -97,13 +106,22 @@ func (d *desk) kmemJSON(out any, args ...string) bool {
 }
 
 func (d *desk) kmemHandoffList() ([]kmemHandoff, error) {
+	return d.kmemHandoffListWith(d.runKmem, d.kmemJSON)
+}
+
+// kmemHandoffListShared is for the window's loaders (runKmemShared).
+func (d *desk) kmemHandoffListShared() ([]kmemHandoff, error) {
+	return d.kmemHandoffListWith(func(_ string, a ...string) (string, error) { return d.runKmemShared(a...) }, d.kmemJSONShared)
+}
+
+func (d *desk) kmemHandoffListWith(run func(string, ...string) (string, error), js func(any, ...string) bool) ([]kmemHandoff, error) {
 	var r struct {
 		Handoffs []struct {
 			Name  string `json:"name"`
 			Saved string `json:"saved"`
 		} `json:"handoffs"`
 	}
-	if d.kmemJSON(&r, "handoff", "list") {
+	if js(&r, "handoff", "list") {
 		var hs []kmemHandoff
 		for _, h := range r.Handoffs {
 			if t, err := time.Parse(time.RFC3339, h.Saved); err == nil {
@@ -112,7 +130,7 @@ func (d *desk) kmemHandoffList() ([]kmemHandoff, error) {
 		}
 		return hs, nil
 	}
-	out, err := d.runKmem("kmem", "handoff", "list")
+	out, err := run("kmem", "handoff", "list")
 	if err != nil {
 		return nil, err
 	}

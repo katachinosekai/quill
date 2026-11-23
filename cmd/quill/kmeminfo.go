@@ -88,9 +88,44 @@ func newestMaintReport(dir string) (string, int) {
 	return newest, count
 }
 
+// maintWarnings: the warning lines of a maint report ("" when unreadable).
+func maintWarnings(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var out []string
+	warn := false
+	for _, l := range strings.Split(string(b), "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case l == "WARNINGS:":
+			warn = true
+		case warn && strings.HasSuffix(l, ":") && strings.ToUpper(l) == l:
+			warn = false
+		case warn && l != "" && l != "none":
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// maintSig identifies the warnings of a report: a new report with the same
+// warnings has the same signature (it is not news); "" when there are none.
+func maintSig(path string, count int) string {
+	if count <= 0 {
+		return ""
+	}
+	if w := maintWarnings(path); w != "" {
+		return "w:" + w
+	}
+	return fmt.Sprintf("n:%d", count)
+}
+
 // kmemMaintInfo fills the maintenance age of n from the brief, falling back
 // to the newest report in the maint folder when the brief has no maint line.
 func kmemMaintInfo(n *kmemNeeds, brief string) {
+	defer func() { n.MaintSig = maintSig(n.MaintReport, n.Maint) }()
 	if m := briefMaintAge.FindStringSubmatch(brief); m != nil {
 		n.MaintAgeText = strings.TrimSpace(m[1])
 	}
@@ -226,7 +261,7 @@ func (d *desk) kmemBinInfo(n *kmemNeeds) {
 	if n.Bin <= 0 {
 		return
 	}
-	out, err := d.runKmem("kmem", "trash", "list")
+	out, err := d.runKmemShared("trash", "list")
 	if err != nil && strings.TrimSpace(out) == "" {
 		return
 	}

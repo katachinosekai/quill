@@ -147,6 +147,7 @@ func (d *desk) newKmemPanel(w *kmemWindow) *kmemPanel {
 		container.NewTabItem("Memory", p.memoryTab()),
 	)
 	d.kmemPanelNow = p
+	p.tabs.OnSelected = func(*container.TabItem) { p.shown() }
 	return p
 }
 
@@ -214,19 +215,25 @@ func (p *kmemPanel) reload() {
 // kmem didn't answer `kmem brief --json`. withStatus also reads each
 // "TOPIC/status" fact (the Topics tab).
 func (d *desk) readKmemPanelData(withStatus bool) (*kmemPanelData, bool) {
+	return d.readKmemPanelDataWith(withStatus, d.kmemJSONShared, d.runKmemShared)
+}
+
+// readKmemPanelDataWith reads through js and run: the shared loader for the
+// window, the plain runner for the phone API (its own cache decides).
+func (d *desk) readKmemPanelDataWith(withStatus bool, js func(any, ...string) bool, run func(...string) (string, error)) (*kmemPanelData, bool) {
 	var brief struct {
 		Brief string `json:"brief"`
 	}
-	ok := d.kmemJSON(&brief, "brief")
-	topicsOut, _ := d.runKmem("kmem", "topics")
+	ok := js(&brief, "brief")
+	topicsOut, _ := run("topics")
 	var hs struct {
 		Handoffs []kmemHandoffRow `json:"handoffs"`
 	}
-	d.kmemJSON(&hs, "handoff", "list")
+	js(&hs, "handoff", "list")
 	var tr struct {
 		Tasks []topicTask `json:"tasks"`
 	}
-	d.kmemJSON(&tr, "task", "list")
+	js(&tr, "task", "list")
 	tasks := make([]kmemTask, len(tr.Tasks))
 	for i, t := range tr.Tasks {
 		tasks[i] = t.kmemTask
@@ -245,6 +252,20 @@ func (d *desk) readKmemPanelData(withStatus bool) (*kmemPanelData, bool) {
 		}
 	}
 	return data, ok
+}
+
+// shown: the Overview is on screen (the window is open and the tab selected),
+// so what it lists counts as seen (kmemseen.go). The Mark all read button
+// goes away with it, so the rows are drawn again.
+func (p *kmemPanel) shown() {
+	if p.data == nil || p.w == nil || p.w.closed || p.tabs.SelectedIndex() != kmemTabOverview {
+		return
+	}
+	d := p.d
+	if d.kmemUnread() == 0 {
+		return
+	}
+	d.markKmemSeen(false)
 }
 
 // render fills Overview, Handoffs and Tasks from the last reload (again when
@@ -303,6 +324,7 @@ func (p *kmemPanel) render() {
 		}
 	}
 	setBox(p.tasks, trows...)
+	p.shown()
 }
 
 // waitingRows: "Waiting for you" at the top of Overview, one row per thing
@@ -334,7 +356,13 @@ func (p *kmemPanel) waitingRows(n kmemNeeds) []fyne.CanvasObject {
 		}
 		return container.NewBorder(nil, nil, nil, container.NewHBox(box...), wrapLabel(text))
 	}
-	rows := []fyne.CanvasObject{boldLabel(fmt.Sprintf("Waiting for you (%d)", n.Count()))}
+	head := fyne.CanvasObject(boldLabel(fmt.Sprintf("Waiting for you (%d)", n.Count())))
+	if d.kmemUnread() > 0 {
+		mark := widget.NewButtonWithIcon("Mark all read", theme.ConfirmIcon(), func() { d.markKmemSeen(true) })
+		mark.Importance = widget.LowImportance
+		head = container.NewBorder(nil, nil, nil, mark, head)
+	}
+	rows := []fyne.CanvasObject{head}
 	if len(n.Issues) > 0 {
 		var titles, ids []string
 		for _, t := range n.Issues {

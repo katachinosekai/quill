@@ -139,13 +139,13 @@ func (d *desk) kmemAvailable() bool {
 }
 
 func (d *desk) runKmem(prog string, args ...string) (string, error) {
-	if prog == "kmem" {
-		return d.kmemCo.run(d, args)
+	if prog == "kmem" && !kmemReadOnly(args) {
+		d.kmemCo.invalidate() // a write: the shared reads (runKmemShared) are stale
 	}
 	return d.runKmemRaw(prog, args...)
 }
 
-// runKmemRaw runs the command with no coalescing (kmemload.go).
+// runKmemRaw runs the command (prog "kmem" goes through the bundled kmem).
 func (d *desk) runKmemRaw(prog string, args ...string) (string, error) {
 	if d.kmemRun != nil {
 		return d.kmemRun(prog, args...)

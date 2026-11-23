@@ -465,6 +465,7 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 
 // kmemAssistRefresh updates the header: state, model, subagent note, Restart.
 func (d *desk) kmemAssistRefresh(a *kmemAssist) {
+	d.updateKmemBadge() // a question or plan may have come or been answered
 	s := a.s
 	if s == nil || a.stateLbl == nil {
 		return

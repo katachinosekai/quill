@@ -56,7 +56,7 @@ func (d *desk) newBinView() *binView {
 func (b *binView) reload() {
 	d := b.d
 	go func() {
-		out, _ := d.runKmem("kmem", "trash", "list")
+		out, _ := d.runKmemShared("trash", "list")
 		bin := parseBin(out)
 		d.do(func() { b.fill(bin) })
 	}()

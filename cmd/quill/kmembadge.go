@@ -15,15 +15,10 @@ import (
 	"fyne.io/fyne/v2/theme"
 )
 
-// The kmem button's bubble counts what kmem is asking the user for (user
-// 2026-11-22, replaces the kmem banner): items in the recycle bin, audit
-// problems (kmem rules 21 and 26), maintenance warnings, and tasks waiting for
-// the user (topic "user" or a title starting "USER:"). Audit problems and
-// maintenance warnings count once each. Since 2026-11-22 it also counts open
-// "kmem issue:" tasks other sessions filed for the kmem operator and a staged
-// rollout paused for the user (docs/design/kmem-window.md §8). The kmem
-// window's Overview lists them under "Waiting for you"; the recycle bin lives
-// in Settings → General → Memory (kmem).
+// The kmem button's bubble counts only what needs the user and is new
+// (kmemseen.go). Count() below is the window's "Waiting for you" total: it
+// still lists the recycle bin, audit problems and user tasks, which do not
+// badge the button. The recycle bin lives in Settings → General → Memory (kmem).
 
 var kmemBannerEvery = 30 * time.Minute
 
@@ -48,6 +43,7 @@ type kmemNeeds struct {
 	Audit        string
 	Maint        int       // maintenance warnings
 	MaintReport  string    // the report file named in the brief
+	MaintSig     string    // the report's warnings (the badge compares it with the last seen)
 	MaintSeen    bool      // the brief (or the maint folder) named a newest report
 	MaintAt      time.Time // when that report ran (from its file name)
 	MaintAgeText string    // kmem's own age wording ("14 h ago"), when the time is unknown
@@ -216,9 +212,8 @@ func (d *desk) setKmemRunDot(on bool) {
 // setKmemNeeds updates the bubble and the Settings bin button (UI thread).
 func (d *desk) setKmemNeeds(n kmemNeeds) {
 	d.kmemNeedsNow = n
-	if d.kmemBubble != nil {
-		d.kmemBubble.set(n.Count())
-	}
+	d.kmemGot = true
+	d.updateKmemBadge()
 	if d.kmemBinSetBtn != nil {
 		d.kmemBinSetBtn.SetText(binButtonText(n.Bin))
 	}
@@ -236,13 +231,13 @@ func (d *desk) readKmemNeeds() (kmemNeeds, bool) {
 	var brief struct {
 		Brief string `json:"brief"`
 	}
-	if !d.kmemJSON(&brief, "brief") {
+	if !d.kmemJSONShared(&brief, "brief") {
 		return kmemNeeds{}, false
 	}
 	var ts struct {
 		Tasks []kmemTask `json:"tasks"`
 	}
-	d.kmemJSON(&ts, "task", "list")
+	d.kmemJSONShared(&ts, "task", "list")
 	n := parseKmemNeeds(brief.Brief, ts.Tasks)
 	kmemMaintInfo(&n, brief.Brief)
 	d.kmemBinInfo(&n)
@@ -261,7 +256,7 @@ func (d *desk) readRolloutWait() string {
 			Err   string `json:"err"`
 		} `json:"paused"`
 	}
-	if !d.kmemJSON(&r, "rollout", "status") || r.Paused == nil {
+	if !d.kmemJSONShared(&r, "rollout", "status") || r.Paused == nil {
 		return ""
 	}
 	var parts []string

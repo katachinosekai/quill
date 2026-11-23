@@ -257,6 +257,7 @@ type desk struct {
 	kmemBtnBox    fyne.CanvasObject
 	kmemNeedsNow  kmemNeeds
 	kmemCo        kmemCoalescer // read-only kmem commands: one load per event (kmemload.go)
+	kmemGot       bool          // kmem has answered once (the badge may prune seen records)
 	kmemBinSetBtn *widget.Button
 	kmemBinNow    *binView
 	verLine       *verLine    // kmem version under the message box; kmemverline.go
@@ -1614,6 +1615,9 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 			d.flushUI()
 		} else if d.kmemWin.session() == s {
 			d.flushWinUI()
+		}
+		if d.kmemAssistIs(s) {
+			d.updateKmemBadge()
 		}
 		d.refreshSidebarSoon()
 	}
