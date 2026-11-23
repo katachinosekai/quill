@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
@@ -104,7 +105,7 @@ func TestPlanCardQuestionForm(t *testing.T) {
 			t.Errorf("Approve's message lacks %q:\n%s", w, want)
 		}
 	}
-	h.ui(func() { approve.OnTapped() })
+	h.ui(func() { h.d.chat.btnChanged = time.Time{}; approve.OnTapped() })
 	h.eventually("Approve sends the answers", func() bool {
 		for _, it := range h.d.sessions[editsID].conv.Items {
 			if it.Kind == chat.User && it.Text == want {

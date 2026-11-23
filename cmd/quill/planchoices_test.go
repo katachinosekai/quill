@@ -49,8 +49,8 @@ func TestPlanCardAnswersTheChoice(t *testing.T) {
 			s.conv.Items = append(s.conv.Items, &chat.Item{Kind: chat.Assistant, Text: "Plan:\n1. a\n2. b\n\n**" + q + "**"})
 			it := s.conv.AddPlan()
 			h.d.chat.show(s)
-			deepWalk(h.d.chat.views[it.Seq].holder, func(o fyne.CanvasObject) {
-				if b, ok := o.(*widget.Button); ok && b.Visible() {
+			deepWalk(h.d.chat.planUI(it), func(o fyne.CanvasObject) {
+				if b, ok := o.(*widget.Button); ok && b.Visible() && b.Text != "Show as written" {
 					labels = append(labels, b.Text)
 				}
 			})

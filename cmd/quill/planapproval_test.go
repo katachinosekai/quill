@@ -87,9 +87,25 @@ func planCardSession(t *testing.T, h *harness, text string) (*deskSession, *chat
 	return s, plan
 }
 
+// planUI: what the user sees for a plan: its reply with the controls in place,
+// or the card when the overlay can't be drawn.
+func (v *chatView) planUI(plan *chat.Item) fyne.CanvasObject {
+	if v.s != nil && !v.planPlain[plan] {
+		if r := planReply(v.s.conv, plan); r != nil {
+			if o := v.renderPlanReply(r); o != nil {
+				return o
+			}
+		}
+	}
+	return v.renderPlan(plan)
+}
+
 func buttonLabels(o fyne.CanvasObject) []string {
 	var out []string
 	for _, b := range swapButtons(o) {
+		if b.Text == "Show as written" {
+			continue
+		}
 		out = append(out, b.Text)
 	}
 	return out
@@ -122,14 +138,14 @@ func TestApprovalQuestionButtonsOrApproveCard(t *testing.T) {
 	h := newHarness(t)
 	_, plan := planCardSession(t, h, yesNoPlan)
 	h.ui(func() {
-		if got := buttonLabels(h.d.chat.renderPlan(plan)); !reflect.DeepEqual(got, []string{"Yes (recommended)", "No"}) {
+		if got := buttonLabels(h.d.chat.planUI(plan)); !reflect.DeepEqual(got, []string{"Yes (recommended)", "No"}) {
 			t.Fatalf("the question's own buttons: %q", got)
 		}
 	})
 	h2 := newHarness(t)
 	_, plan2 := planCardSession(t, h2, "1. Edit x.\n2. Build.\n\n**Do you approve steps 1–2?**")
 	h2.ui(func() {
-		if got := buttonLabels(h2.d.chat.renderPlan(plan2)); !reflect.DeepEqual(got, []string{"Approve plan & run all", "Don't run"}) {
+		if got := buttonLabels(h2.d.chat.planUI(plan2)); !reflect.DeepEqual(got, []string{"Approve plan & run all", "Don't run"}) {
 			t.Fatalf("no options: today's Approve card: %q", got)
 		}
 	})
@@ -139,7 +155,7 @@ func TestApprovalYesApprovesPlan(t *testing.T) {
 	h := newHarness(t)
 	s, plan := planCardSession(t, h, yesNoPlan)
 	h.ui(func() {
-		tapLabel(t, h, h.d.chat.renderPlan(plan), "Yes (recommended)")
+		tapLabel(t, h, h.d.chat.planUI(plan), "Yes (recommended)")
 		if plan.PermState != chat.PermAllowed || !s.runAll {
 			t.Fatalf("Yes approves: state %v runAll %v", plan.PermState, s.runAll)
 		}
@@ -162,7 +178,7 @@ func TestApprovalNoIsDontRun(t *testing.T) {
 	s, plan := planCardSession(t, h, yesNoPlan)
 	h.ui(func() {
 		before := len(s.conv.Items)
-		tapLabel(t, h, h.d.chat.renderPlan(plan), "No")
+		tapLabel(t, h, h.d.chat.planUI(plan), "No")
 		if plan.PermState != chat.PermDenied || s.runAll || !s.planRevoked {
 			t.Fatalf("No is Don't run: state %v runAll %v revoked %v", plan.PermState, s.runAll, s.planRevoked)
 		}
@@ -463,7 +479,7 @@ func TestApprovalPicksWithoutStop(t *testing.T) {
 	h := newHarness(t)
 	s, plan := directPlan(t, h, shipPlan)
 	h.ui(func() {
-		o := h.d.chat.renderPlan(plan)
+		o := h.d.chat.planUI(plan)
 		if got := buttonLabels(o); !reflect.DeepEqual(got, []string{"Ship as v0.1.18 (recommended)", "Replace the v0.1.17 files", "Don't run"}) {
 			t.Fatalf("buttons %q", got)
 		}
@@ -479,7 +495,7 @@ func TestApprovalPicksWithoutStop(t *testing.T) {
 	s2, plan2 := directPlan(t, h2, shipPlan)
 	h2.ui(func() {
 		n := len(s2.conv.Items)
-		tapLabel(t, h2, h2.d.chat.renderPlan(plan2), "Don't run")
+		tapLabel(t, h2, h2.d.chat.planUI(plan2), "Don't run")
 		if plan2.PermState != chat.PermDenied || s2.runAll || len(s2.conv.Items) != n {
 			t.Fatalf("Don't run, nothing sent without questions: %v %v %d", plan2.PermState, s2.runAll, len(s2.conv.Items)-n)
 		}
@@ -501,16 +517,16 @@ func TestApprovalPicksWithoutStopMixed(t *testing.T) {
 		}
 		ans := v.planAnswers(plan, qs)
 		ans[qs[1].ID] = planAnswer{Choice: -1, Text: "v2"}
-		o := v.renderPlan(plan)
+		o := v.planUI(plan)
 		if got := buttonLabels(o); !reflect.DeepEqual(got, []string{"Ship as v0.1.18 (recommended)", "Replace the v0.1.17 files", "Don't run", "Send answers"}) {
 			t.Fatalf("buttons %q", got)
 		}
 		tapLabel(t, h, o, "Replace the v0.1.17 files")
-		tapLabel(t, h, v.renderPlan(plan), "Ship as v0.1.18 (recommended)") // changed
+		tapLabel(t, h, v.planUI(plan), "Ship as v0.1.18 (recommended)") // changed
 		if plan.PermState != chat.PermPending {
 			t.Fatal("picks wait for Send")
 		}
-		tapLabel(t, h, v.renderPlan(plan), "Send answers")
+		tapLabel(t, h, v.planUI(plan), "Send answers")
 		got := lastUserText(s)
 		if plan.PermState != chat.PermAllowed || !strings.HasPrefix(got, planGoWith("Ship as v0.1.18")+" Answers: 1 → no answer; 2 → \"v2\".") {
 			t.Fatalf("approved with the pick and the answers: %v %q", plan.PermState, got)
@@ -523,7 +539,7 @@ func TestApprovalPicksWithoutStopMixed(t *testing.T) {
 		v.planPlain = map[*chat.Item]bool{plan2: true}
 		qs := planItemQuestions(s2, plan2)
 		v.planAnswers(plan2, qs)[qs[1].ID] = planAnswer{Choice: -1, Text: "v2"}
-		tapLabel(t, h2, v.renderPlan(plan2), "Don't run")
+		tapLabel(t, h2, v.planUI(plan2), "Don't run")
 		got := lastUserText(s2)
 		if plan2.PermState != chat.PermDenied || s2.runAll || !strings.HasPrefix(got, planStopText+" Answers: ") || !strings.Contains(got, "→ \"v2\".") {
 			t.Fatalf("Don't run sends the answers: %v %v %q", plan2.PermState, s2.runAll, got)

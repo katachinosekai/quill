@@ -246,7 +246,11 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		if apprLine < 0 {
 			apprButtons() // the question wasn't found in the reply: its buttons close it
 		}
-		msg := widget.NewLabel(approvalCaption(appr) + " Unanswered questions are sent as \"no answer\".")
+		caption := approvalCaption(appr)
+		if len(qs) > 0 {
+			caption += " Unanswered questions are sent as \"no answer\"."
+		}
+		msg := widget.NewLabel(caption)
 		msg.Wrapping = fyne.TextWrapWord
 		msg.Alignment = v.align()
 		msg.SizeName = theme.SizeNameCaptionText
