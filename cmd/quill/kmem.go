@@ -139,6 +139,14 @@ func (d *desk) kmemAvailable() bool {
 }
 
 func (d *desk) runKmem(prog string, args ...string) (string, error) {
+	if prog == "kmem" {
+		return d.kmemCo.run(d, args)
+	}
+	return d.runKmemRaw(prog, args...)
+}
+
+// runKmemRaw runs the command with no coalescing (kmemload.go).
+func (d *desk) runKmemRaw(prog string, args ...string) (string, error) {
 	if d.kmemRun != nil {
 		return d.kmemRun(prog, args...)
 	}

@@ -428,6 +428,7 @@ func (a *phoneAPI) kmemWritten(kind string) {
 	a.kmem.mu.Lock()
 	a.kmem.ok, a.kmem.at = false, time.Time{}
 	a.kmem.mu.Unlock()
+	a.d.kmemCo.invalidate()
 	a.d.do(func() {
 		a.d.refreshKmemNeeds()
 		if p := a.d.kmemPanelNow; p != nil {

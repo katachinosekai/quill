@@ -256,6 +256,7 @@ type desk struct {
 	kmemRunDot    *canvas.Circle // the kmem assistant runs (kmembadge.go)
 	kmemBtnBox    fyne.CanvasObject
 	kmemNeedsNow  kmemNeeds
+	kmemCo        kmemCoalescer // read-only kmem commands: one load per event (kmemload.go)
 	kmemBinSetBtn *widget.Button
 	kmemBinNow    *binView
 	verLine       *verLine    // kmem version under the message box; kmemverline.go
