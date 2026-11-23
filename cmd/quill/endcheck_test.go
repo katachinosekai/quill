@@ -6,7 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/katachinosekai/quill/internal/chat")
+	"github.com/katachinosekai/quill/internal/chat"
+)
 
 // ecKmem stubs kmem for the end-of-session check: topics alpha and beta,
 // `kmem version` with or without the end-check feature, and per kmem name a
