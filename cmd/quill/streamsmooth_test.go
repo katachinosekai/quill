@@ -44,6 +44,7 @@ func TestStreamingIsSmooth(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
 		h.d.app.Preferences().SetBool(prefAnimateText, true)
+		h.d.app.Preferences().SetString(prefAnimateSpeed, "fast") // the timing must not depend on the user-facing default
 		h.d.app.Preferences().SetBool(prefShowTimes, false)
 		h.d.open(editsID)
 	})
