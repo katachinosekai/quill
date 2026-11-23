@@ -50,10 +50,12 @@ func TestReadRolloutWait(t *testing.T) {
 	if got := h.d.readRolloutWait(); got != "stage quill: review packet missing" {
 		t.Fatalf("paused rollout: %q", got)
 	}
+	h.d.kmemCo.invalidate() // reads within 400 ms are shared
 	paused = `{"paused": null, "api": 1}`
 	if got := h.d.readRolloutWait(); got != "" {
 		t.Fatalf("not paused: %q", got)
 	}
+	h.d.kmemCo.invalidate()
 	paused = ""
 	if got := h.d.readRolloutWait(); got != "" {
 		t.Fatalf("a kmem without rollouts: %q", got)
