@@ -81,7 +81,7 @@ func TestQuillOperatorHintNeedsSourceFolder(t *testing.T) {
 	if n := len([]rune(quillOperatorHintFor("/home/user/Projects/quill"))); n > 1000 {
 		t.Fatalf("operator hint too long: %d", n)
 	}
-	for _, want := range []string{"kmem --as quill", "`quill settings`", "never edit preference files", "Security settings", "`quill issue:` tasks (topic quill)", "Quill Desktop and Quill Android"} {
+	for _, want := range []string{"kmem --as quill", "`quill settings`", "set ID VALUE --why", "`undo [N]`", "never edit preference files", "Security settings", "`quill issue:` tasks (topic quill)", "Quill Desktop and Quill Android"} {
 		if !strings.Contains(quillOperatorHint, want) {
 			t.Fatalf("hint names %q", want)
 		}
