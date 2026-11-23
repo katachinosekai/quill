@@ -411,6 +411,12 @@ func (d *desk) afterSplit() {
 	if d.bottomBox != nil {
 		relayout(d.bottomBox)
 	}
+	if d.toolbarBox != nil {
+		// Hidden in split view, the toolbar may have been laid out for the
+		// split width meanwhile (divider drag, resize settle); its size is
+		// unchanged on Show, so lay out the whole tree again.
+		relayoutTree(d.toolbarBox)
+	}
 	if d.mainPane != nil {
 		relayout(d.mainPane)
 		relayout(d.usageBox)
