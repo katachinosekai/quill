@@ -259,6 +259,11 @@ func (d *desk) kmemSelect(apply func(*widget.Select)) *widget.Select {
 
 func (d *desk) applyKmemChoice(s *deskSession, choice, title string) {
 	if name := choiceHandoff(choice); name != "" {
+		if owner := d.liveKmemOwner(name, s); owner != nil {
+			d.refuseSecondSession(name, "tab picked the handoff", owner)
+			d.notify(s, fmt.Sprintf("The kmem handoff “%s” already has a live session; this tab did not take it over.", name))
+			return
+		}
 		d.org.Kmem[s.id] = name
 		d.saveOrg()
 		go func() {
@@ -558,8 +563,10 @@ func (d *desk) finishKmemRelaunch(old *deskSession, name, prompt string) {
 	d.org.Kmem[ns.id] = name
 	d.saveOrg()
 	d.notify(ns, fmt.Sprintf("Resuming from kmem handoff “%s”; the previous session was deleted.", name))
-	d.sendResume(ns, name, prompt)
-	d.deleteSession(old.id)
+	d.stopThen(old, func() { // the old session ends before the new one starts
+		d.sendResume(ns, name, prompt)
+		d.deleteSession(old.id)
+	})
 }
 
 func kmemEndMessage(name string) string {

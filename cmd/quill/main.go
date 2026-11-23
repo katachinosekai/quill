@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -41,6 +42,7 @@ func main() {
 	heapFlag := flag.Bool("heap", false, "write a heap profile of the running Quill into $XDG_RUNTIME_DIR/quill-heap-<pid>.pprof")
 	resumeAll := flag.Bool("resume-all", false, "ask the running Quill Desktop to reopen the kmem topics that were live when it last quit, as fresh sessions (before topic tabs: resume every ended kmem session in Inactive, or Archive with the argument archive, from its handoff)")
 	resumeOne := flag.String("resume", "", "ask the running Quill to open the session with this kmem name, or start one from its handoff")
+	kmemMessage := flag.String("kmem-message", "", "deliver this message (the Monday check-in) to Quill Desktop's running kmem assistant; starts it only when none runs")
 	kmemWindow := flag.Bool("kmem-window", false, "ask the running Quill Desktop to open its kmem window (the Monday check-in uses it)")
 	profile := flag.Bool("profile", false, "record 10 s of the running Quill's CPU use into $XDG_RUNTIME_DIR/quill-cpu-<pid>.pprof")
 	flag.Parse()
@@ -58,6 +60,13 @@ func main() {
 	}
 	if *profile {
 		if !sendCommand(sock, "profile") {
+			fmt.Fprintln(os.Stderr, "no running Quill answered")
+			os.Exit(1)
+		}
+		return
+	}
+	if *kmemMessage != "" {
+		if !sendCommand(sock, "kmem-message "+strings.Join(strings.Fields(*kmemMessage), " ")) {
 			fmt.Fprintln(os.Stderr, "no running Quill answered")
 			os.Exit(1)
 		}

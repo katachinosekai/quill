@@ -428,8 +428,10 @@ func (d *desk) finishTopicRotate(old *deskSession, slug string) {
 			d.org.Kmem[ns.id] = slug
 			d.saveOrg()
 			d.notify(ns, "Fresh topic session: the previous one passed its end-of-session check and was deleted.")
-			d.sendResume(ns, slug, prompt)
-			d.deleteSession(old.id)
+			d.stopThen(old, func() { // the old session ends before the new one starts
+				d.sendResume(ns, slug, prompt)
+				d.deleteSession(old.id)
+			})
 		})
 	}()
 }

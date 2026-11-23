@@ -95,6 +95,7 @@ type kmemAssist struct {
 	done        []func()
 	choice      dialog.Dialog
 	lastSave    time.Time
+	pending     []string // check-in messages waiting for the assistant to run
 
 	// The chat side, built once and shown again on every reopen.
 	chat     fyne.CanvasObject
@@ -253,6 +254,10 @@ func (d *desk) kmemAssistProbe(a *kmemAssist) {
 			d.kmemAssistAdopt(a, o) // handed over by a hot reload
 			return
 		}
+		if o.running() { // still stopping: never two at once
+			d.kmemAssistWaitStopped(a, o)
+			return
+		}
 	}
 	d.kmemAssistReason(a, "Starting kmem-lock-audit...")
 	go func() {
@@ -301,6 +306,10 @@ func (d *desk) kmemAssistStart(a *kmemAssist, model, prompt string, saved time.T
 			d.kmemAssistAdopt(a, o)
 			return
 		}
+		if isHiddenSession(o) && o.running() { // still stopping: never two at once
+			d.kmemAssistWaitStopped(a, o)
+			return
+		}
 		if !isHiddenSession(o) {
 			d.kmemAssistElsewhere(a, o)
 			return
@@ -332,6 +341,7 @@ func (d *desk) kmemAssistStart(a *kmemAssist, model, prompt string, saved time.T
 	}
 	d.sendResume(s, kmemAssistName, prompt+"\n\n"+kmemAssistStartNote)
 	a.state = asLive
+	d.kmemAssistFlush(a, s)
 	d.kmemAssistRefresh(a)
 	d.kmemAssistDot()
 }
@@ -341,6 +351,7 @@ func (d *desk) kmemAssistStart(a *kmemAssist, model, prompt string, saved time.T
 func (d *desk) kmemAssistAdopt(a *kmemAssist, s *deskSession) {
 	a.s, a.state = s, asLive
 	d.kmemAssistAttach(a)
+	d.kmemAssistFlush(a, s)
 	d.kmemAssistDot()
 }
 
@@ -894,6 +905,11 @@ func (d *desk) kmemAssistStopped(a *kmemAssist, s *deskSession) {
 	if reboot {
 		a.userStopped = false
 		d.kmemAssistProbe(a) // on the new model setting
+		return
+	}
+	if len(a.pending) > 0 && !quit { // a check-in arrived while it stopped
+		a.userStopped = false
+		d.kmemAssistProbe(a)
 		return
 	}
 	if a.w != nil && !quit {

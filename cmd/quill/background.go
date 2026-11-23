@@ -152,6 +152,11 @@ func (d *desk) listenInstance(path string) {
 					_, _ = c.Write([]byte("ok\n"))
 					return
 				}
+				if text, ok := strings.CutPrefix(cmdLine, "kmem-message "); ok {
+					d.do(func() { fmt.Fprintln(os.Stderr, "Quill Desktop: kmem message:", d.kmemAssistDeliver(text)) })
+					_, _ = c.Write([]byte("ok\n"))
+					return
+				}
 				switch cmdLine {
 				case "show":
 					d.do(d.showWindow)

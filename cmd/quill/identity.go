@@ -213,6 +213,10 @@ func (d *desk) resumeFromHandoff(id string) *deskSession {
 	if old == nil || name == "" {
 		return nil
 	}
+	if owner := d.liveKmemOwner(name, old); owner != nil {
+		d.refuseSecondSession(name, "resume from handoff", owner)
+		return owner
+	}
 	title, _, _ := d.rowText(id)
 	ns := d.createSession(old.cwd, old.model, old.mode)
 	ns.chrome, ns.addDirs = old.chrome, append([]string(nil), old.addDirs...)
