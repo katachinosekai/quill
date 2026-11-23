@@ -60,3 +60,12 @@ func TestPairQRIsPixelExact(t *testing.T) {
 		f.Close()
 	}
 }
+
+func TestPairShortCode(t *testing.T) {
+	if got := pairShortCode("0123456789abcdef0123456789abcdef"); got != "0123 4567 89ab cdef" {
+		t.Fatalf("got %q", got)
+	}
+	if got := pairShortCode("0123"); got != "" {
+		t.Fatalf("short fp gave %q", got)
+	}
+}

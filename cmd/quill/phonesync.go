@@ -231,6 +231,15 @@ func (d *desk) stopPhone() {
 	}
 }
 
+// pairShortCode is the certificate code both apps show when pairing: the first
+// 16 hex digits of the SHA-256 fingerprint in groups of 4. Empty if fp is too short.
+func pairShortCode(fp string) string {
+	if len(fp) < 16 {
+		return ""
+	}
+	return fp[0:4] + " " + fp[4:8] + " " + fp[8:12] + " " + fp[12:16]
+}
+
 func (d *desk) pairLink() string {
 	p := d.phone()
 	host, _ := os.Hostname()
@@ -422,6 +431,11 @@ func (d *desk) pairDialog() {
 		linkText.SetText(link)
 	}
 	show()
+	codeLabel := widget.NewLabel("")
+	codeLabel.Wrapping = fyne.TextWrapWord
+	if sc := pairShortCode(d.phone().fp); sc != "" {
+		codeLabel.SetText("Certificate code: " + sc + " \u2014 Quill Android shows the same code when pairing")
+	}
 	help := widget.NewLabel("In Quill Android: ⚙ → Scan pairing QR code, then point it at this code. Or copy the link and use \"Paste pairing link\" in the app's settings. The device reaches this computer on the same network, or anywhere over Tailscale.")
 	help.Wrapping = fyne.TextWrapWord
 	copyBtn := widget.NewButton("Copy pairing link", func() {
@@ -439,7 +453,7 @@ func (d *desk) pairDialog() {
 		d.app.Preferences().SetBool("phoneServe", false)
 		d.updatePhoneRow()
 	})
-	body := container.NewVBox(container.NewCenter(img), help, container.NewGridWithColumns(2, copyBtn, showBtn), stop, linkText)
+	body := container.NewVBox(container.NewCenter(img), codeLabel, help, container.NewGridWithColumns(2, copyBtn, showBtn), stop, linkText)
 	dlg := dialog.NewCustom("Pair device", "Close", body, d.win)
 	dlg.Resize(fyne.NewSize(460, 600))
 	dlg.SetOnClosed(func() {
