@@ -9,6 +9,8 @@ require (
 	rsc.io/qr v0.2.0
 )
 
+require github.com/rivo/uniseg v0.4.7 // indirect
+
 require (
 	fyne.io/systray v1.12.3-0.20260810170012-af4e8e793ec4 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect

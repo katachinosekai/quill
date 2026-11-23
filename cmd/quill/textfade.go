@@ -1,12 +1,13 @@
 package main
 
 import (
+	"strings"
 	"time"
-	"unicode/utf8"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/rivo/uniseg"
 )
 
 // Fade-in of newly revealed characters (user 2026-11-23): while a reply is
@@ -34,14 +35,14 @@ var fadeNames = [textFadeSteps]fyne.ThemeColorName{"quillFade0", "quillFade1", "
 func fadeAlpha(k int) uint8 { return uint8(255 * (k + 1) / (textFadeSteps + 1)) }
 
 type reveal struct {
-	runes int
-	at    time.Time
+	letters int
+	at      time.Time
 }
 
 // noteReveal logs n newly shown characters.
-func (st *streamView) noteReveal(runes int, at time.Time) {
-	if runes > 0 {
-		st.reveals = append(st.reveals, reveal{runes, at})
+func (st *streamView) noteReveal(letters int, at time.Time) {
+	if letters > 0 {
+		st.reveals = append(st.reveals, reveal{letters, at})
 	}
 }
 
@@ -55,8 +56,8 @@ func (st *streamView) fadeCounts(now time.Time) (c [textFadeSteps]int, total int
 			continue
 		}
 		k := int(age * textFadeSteps / textFade)
-		c[max(k, 0)] += r.runes
-		total += r.runes
+		c[max(k, 0)] += r.letters
+		total += r.letters
 		keep = append(keep, r)
 	}
 	st.reveals = keep
@@ -77,6 +78,15 @@ func (b *fadeBudget) empty() bool {
 		}
 	}
 	return true
+}
+
+// drop removes up to n characters (from the lowest steps first).
+func (b *fadeBudget) drop(n int) {
+	for k := range b.n {
+		d := min(b.n[k], n)
+		b.n[k] -= d
+		n -= d
+	}
 }
 
 // take removes up to max characters from the lowest step with any left.
@@ -100,25 +110,30 @@ func fadeSegs(segs []widget.RichTextSegment, b *fadeBudget) []widget.RichTextSeg
 		switch s := segs[i-1].(type) {
 		case *widget.TextSegment:
 			if !s.Style.Inline { // a block of its own: not cut
-				b.take(utf8.RuneCountInString(s.Text))
+				b.take(uniseg.GraphemeClusterCount(s.Text))
 				rev = append(rev, s)
 				continue
 			}
-			runes := []rune(s.Text)
+			cs := clusters(s.Text)              // whole letters, never half of one
 			var pieces []widget.RichTextSegment // last first
-			for len(runes) > 0 && !b.empty() {
-				step, n := b.take(len(runes))
+			for len(cs) > 0 && !b.empty() {
+				step, n := b.take(len(cs))
+				// Shaped scripts (Arabic, Indic...) are not cut inside a
+				// word: the piece grows to its start (those letters leave
+				// the older steps' share).
+				cut := snapRun(cs, len(cs)-n)
+				b.drop(len(cs) - cut - n)
 				c := *s
-				c.Text = string(runes[len(runes)-n:])
+				c.Text = strings.Join(cs[cut:], "")
 				if s.Style.ColorName == theme.ColorNameForeground {
 					c.Style.ColorName = fadeNames[step]
 				}
 				pieces = append(pieces, &c)
-				runes = runes[:len(runes)-n]
+				cs = cs[:cut]
 			}
-			if len(runes) > 0 {
+			if len(cs) > 0 {
 				c := *s
-				c.Text = string(runes)
+				c.Text = strings.Join(cs, "")
 				pieces = append(pieces, &c)
 			}
 			rev = append(rev, pieces...)
@@ -130,7 +145,7 @@ func fadeSegs(segs []widget.RichTextSegment, b *fadeBudget) []widget.RichTextSeg
 			rev = append(rev, s)
 		default:
 			// Not text we can colour (a link, a rule): its characters count.
-			b.take(utf8.RuneCountInString(s.Textual()))
+			b.take(uniseg.GraphemeClusterCount(s.Textual()))
 			rev = append(rev, s)
 		}
 	}

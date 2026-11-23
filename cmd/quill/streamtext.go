@@ -4,11 +4,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/rivo/uniseg"
 
 	"github.com/katachinosekai/quill/internal/chat"
 )
@@ -59,8 +60,8 @@ func speedName(key string) string {
 	return "Normal"
 }
 
-// revealRate is how many bytes the reveal advances per frame (can be below
-// one) when gap bytes are still hidden, at a speed (stored value; unknown
+// revealRate is how many letters the reveal advances per frame (can be below
+// one) when gap bytes are still hidden (the gap in bytes: >= its letters), at a speed (stored value; unknown
 // means normal).
 func revealRate(speed string, gap int) float64 {
 	scale := speedScaleNormal
@@ -237,28 +238,38 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 	}
 }
 
-// advance reveals one frame's worth of text (a steady pace, character by
-// character, never in the middle of a multi-byte one) and logs it for the
+// advance reveals one frame's worth of text (a steady pace, letter by
+// letter: grapheme clusters, never in the middle of one) and logs it for the
 // fade.
 func (st *streamView) advance(text string) {
 	gap := len(text) - st.pos
 	st.carry += revealRate(st.speed, gap)
 	step := int(st.carry)
 	st.carry -= float64(step)
-	// Markers take no time: step counts the bytes that show.
+	// Markers take no time: step counts the letters (grapheme clusters)
+	// that show; a letter is never split.
 	marks := st.markers(text)
-	n, shown, runes := st.pos, 0, 0
-	for n < len(text) && (shown < step || marks[n] || !utf8.RuneStart(text[n])) {
-		if !marks[n] {
-			shown++
-			if utf8.RuneStart(text[n]) {
-				runes++
+	n, shown, letters := st.pos, 0, 0
+	for n < len(text) && (shown < step || marks[n]) {
+		if marks[n] {
+			n++
+			continue
+		}
+		c, _, _, _ := uniseg.FirstGraphemeClusterInString(text[n:], -1)
+		// A marker byte inside the cluster (ASCII, so after a base letter
+		// only) ends it: markers are not shown.
+		for k := 1; k < len(c); k++ {
+			if marks[n+k] {
+				c = c[:k]
+				break
 			}
 		}
-		n++
+		n += len(c)
+		shown++
+		letters++
 	}
 	if st.animated {
-		st.noteReveal(runes, streamNow())
+		st.noteReveal(letters, streamNow())
 	}
 	st.pos = n
 }
