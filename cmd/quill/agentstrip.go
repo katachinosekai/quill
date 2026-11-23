@@ -19,9 +19,9 @@ import (
 
 // Subagent strip (topic tabs §3.4, decision 13; kmem task t4cb4ee): a thin
 // row under the tab header, in both layouts, listing the current session's
-// subagents with their running time and tokens so far:
+// subagents by description (time, tokens, type and model in the tooltip):
 //
-//	● Fix join stall (Explore) · 41k tok · 6 min   ● ELTF build · 2 min   +3
+//	Fix join stall   ELTF build   +3
 //
 // Finished ones stay greyed for a while; the row hides when nothing ran
 // lately. A chip opens a menu with the agent's details, its log and "Stop
@@ -109,34 +109,62 @@ func agentDur(d time.Duration) string {
 	return fmt.Sprintf("%d h %d min", int(d/time.Hour), int(d%time.Hour/time.Minute))
 }
 
+// agentDescMax: the description's width in a chip, in characters.
+const agentDescMax = 32
+
+// agentName: the agent's full description on one line, the type when the
+// call gave none.
 func agentName(g chat.AgentUse) string {
-	name := strings.TrimSpace(g.Name)
+	name := strings.Join(strings.Fields(g.Name), " ")
+	if name == "" {
+		name = g.Type
+	}
 	if name == "" {
 		name = "Subagent"
-	}
-	name = oneLine(name, 40)
-	if g.Type != "" && g.Type != "general-purpose" {
-		name += " (" + g.Type + ")"
 	}
 	return name
 }
 
-// agentChipText: "● part A (Explore) · 41k tok · 6 min".
-func agentChipText(g chat.AgentUse, now time.Time) string {
-	mark := "●"
-	end := now
+// cutTo shortens s to n characters, ending in "…" when it was cut.
+func cutTo(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return strings.TrimRight(string(r[:n-1]), " ") + "…"
+	}
+	return s
+}
+
+// agentTip: the chip's tooltip: the full description, then type and model,
+// then the state, time and tokens.
+func agentTip(g chat.AgentUse, now time.Time) string {
+	lines := []string{agentName(g)}
+	var more []string
+	if g.Type != "" {
+		more = append(more, g.Type)
+	}
+	if g.Model != "" {
+		more = append(more, g.Model)
+	}
+	if len(more) > 0 {
+		lines = append(lines, strings.Join(more, " · "))
+	}
+	st := "Running for " + agentDur(now.Sub(g.Started))
 	if !g.Running() {
-		mark, end = "✓", g.Done
-		if g.Status != "completed" {
-			mark = "✕"
+		w := g.Status
+		if w == "" {
+			w = "finished"
 		}
+		st = strings.ToUpper(w[:1]) + w[1:] + " after " + agentDur(g.Done.Sub(g.Started))
 	}
-	parts := []string{mark + " " + agentName(g)}
 	if g.Tokens > 0 {
-		parts = append(parts, kfmt(g.Tokens)+" tok")
+		st += " · " + kfmt(g.Tokens) + " tok"
 	}
-	parts = append(parts, agentDur(end.Sub(g.Started)))
-	return strings.Join(parts, " · ")
+	return strings.Join(append(lines, st), "\n")
+}
+
+// agentChipText: the description only, cut to the chip width; time and
+// tokens are in the tooltip.
+func agentChipText(g chat.AgentUse, _ time.Time) string {
+	return cutTo(agentName(g), agentDescMax)
 }
 
 func (a *agentStrip) sync() {
@@ -167,7 +195,7 @@ func (a *agentStrip) sync() {
 	for i, t := range texts {
 		if strings.HasPrefix(t, "+") && i == agentStripMax {
 			rest := list[agentStripMax:]
-			objs = append(objs, newAgentChip(t, colMuted, func(c fyne.CanvasObject) { a.moreMenu(c, s, rest) }))
+			objs = append(objs, newAgentChip(t, colMuted, func(c fyne.CanvasObject) { a.moreMenu(c, s, rest) }, nil))
 			break
 		}
 		g := list[i]
@@ -175,7 +203,7 @@ func (a *agentStrip) sync() {
 		if !g.Running() {
 			col = colMuted
 		}
-		objs = append(objs, newAgentChip(t, col, func(c fyne.CanvasObject) { menuAbove(c, a.items(s, g)) }))
+		objs = append(objs, newAgentChip(t, col, func(c fyne.CanvasObject) { menuAbove(c, a.items(s, g)) }, func() string { return agentTip(g, a.now()) }))
 	}
 	a.row.Objects = objs
 	a.row.Refresh()
@@ -200,6 +228,9 @@ func (a *agentStrip) items(s *deskSession, g chat.AgentUse) []*fyne.MenuItem {
 		return it
 	}
 	out := []*fyne.MenuItem{info(agentName(g))}
+	if g.Type != "" && g.Type != agentName(g) {
+		out = append(out, info(g.Type))
+	}
 	use := kfmt(g.Tokens) + " tokens"
 	if g.ToolUses > 0 {
 		use += fmt.Sprintf(" · %d tool uses", g.ToolUses)
@@ -248,12 +279,14 @@ type agentChip struct {
 	text  *canvas.Text
 	col   color.Color
 	onTap func(fyne.CanvasObject)
+	tip   func() string // the tooltip text, built on hover (times move)
+	pop   *widget.PopUp
 }
 
-func newAgentChip(text string, col color.Color, onTap func(fyne.CanvasObject)) *agentChip {
+func newAgentChip(text string, col color.Color, onTap func(fyne.CanvasObject), tip func() string) *agentChip {
 	t := canvas.NewText(text, col)
 	t.TextSize = fontMeta
-	c := &agentChip{text: t, col: col, onTap: onTap}
+	c := &agentChip{text: t, col: col, onTap: onTap, tip: tip}
 	c.ExtendBaseWidget(c)
 	return c
 }
@@ -263,8 +296,26 @@ func (c *agentChip) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (c *agentChip) Tapped(*fyne.PointEvent) {
+	c.MouseOut()
 	if c.onTap != nil {
 		c.onTap(c)
+	}
+}
+
+// MouseIn shows the tooltip under the chip, MouseOut and a tap hide it.
+func (c *agentChip) MouseIn(*desktop.MouseEvent) {
+	cv := fyne.CurrentApp().Driver().CanvasForObject(c)
+	if c.tip == nil || cv == nil || c.pop != nil {
+		return
+	}
+	c.pop = widget.NewPopUp(widget.NewLabel(c.tip()), cv)
+	c.pop.ShowAtPosition(fyne.CurrentApp().Driver().AbsolutePositionForObject(c).Add(fyne.NewPos(0, c.Size().Height)))
+}
+func (c *agentChip) MouseMoved(*desktop.MouseEvent) {}
+func (c *agentChip) MouseOut() {
+	if c.pop != nil {
+		c.pop.Hide()
+		c.pop = nil
 	}
 }
 

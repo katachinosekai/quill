@@ -120,3 +120,12 @@ func TestAgentsReplayAndStop(t *testing.T) {
 		t.Fatalf("old finished agents pruned: %+v", c.Agents())
 	}
 }
+
+func TestAgentCallDescriptionAndModel(t *testing.T) {
+	c := New()
+	applyLine(t, c, `{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"toolu_D","name":"Agent","input":{"description":"Restore plan card overlay (both apps)","subagent_type":"general-purpose","model":"opus","prompt":"x"}}]},"parent_tool_use_id":null}`)
+	g := c.Agents()
+	if len(g) != 1 || g[0].Name != "Restore plan card overlay (both apps)" || g[0].Type != "general-purpose" || g[0].Model != "opus" {
+		t.Fatalf("agent from the call: %+v", g)
+	}
+}

@@ -96,6 +96,7 @@ func (a *phoneAPI) handoffSlug(w http.ResponseWriter, r *http.Request) {
 type apiAgent struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
+	Desc      string `json:"description,omitempty"` // the full description of the Agent call
 	Type      string `json:"type,omitempty"`
 	Tokens    int    `json:"tokens"`
 	StartedMs int64  `json:"startedMs"`
@@ -155,7 +156,7 @@ func (a *phoneAPI) topicFields(out *apiSession) {
 			list = s.conv.Agents()
 		}
 		for _, g := range list {
-			ag := apiAgent{ID: g.ID, Name: oneLine(strings.TrimSpace(g.Name), 80), Type: g.Type, Tokens: g.Tokens, StartedMs: g.Started.UnixMilli(), Done: !g.Running(), Status: g.Status}
+			ag := apiAgent{ID: g.ID, Name: oneLine(strings.TrimSpace(g.Name), 80), Desc: strings.Join(strings.Fields(g.Name), " "), Type: g.Type, Tokens: g.Tokens, StartedMs: g.Started.UnixMilli(), Done: !g.Running(), Status: g.Status}
 			if !g.Running() {
 				ag.DoneMs = g.Done.UnixMilli()
 			}

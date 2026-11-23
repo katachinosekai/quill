@@ -29,6 +29,7 @@ type AgentUse struct {
 	ToolID     string // the Agent call's tool_use_id
 	Name       string // description
 	Type       string // subagent_type ("Explore", "general-purpose", …)
+	Model      string // the Agent call's model override, when it names one
 	Tokens     int
 	ToolUses   int
 	LastTool   string
@@ -153,11 +154,12 @@ func (c *Conversation) noteAgentCall(ev *protocol.Event, b protocol.Block) {
 	var in struct {
 		Description string `json:"description"`
 		Type        string `json:"subagent_type"`
+		Model       string `json:"model"`
 		Background  bool   `json:"run_in_background"`
 	}
 	json.Unmarshal(b.Input, &in)
 	a := c.newAgent("", b.ID)
-	a.Name, a.Type, a.Background = in.Description, in.Type, in.Background
+	a.Name, a.Type, a.Model, a.Background = in.Description, in.Type, in.Model, in.Background
 	c.agentsRev++
 }
 

@@ -182,7 +182,7 @@ func TestPhoneTopicsAgentsAndEndWait(t *testing.T) {
 		t.Fatalf("agents: %v tokens %v", ss["agents"], ss["agentTokens"])
 	}
 	first := ag[0].(map[string]any)
-	if first["name"] != "Fix join stall" || first["type"] != "Explore" || first["tokens"] != float64(41000) || first["done"] != false || first["startedMs"].(float64) <= 0 {
+	if first["name"] != "Fix join stall" || first["description"] != "Fix join stall" || first["type"] != "Explore" || first["tokens"] != float64(41000) || first["done"] != false || first["startedMs"].(float64) <= 0 {
 		t.Fatalf("agent shape: %v", first)
 	}
 	ew, _ := ss["endWait"].(map[string]any)

@@ -491,13 +491,13 @@ Topic mode (topic tabs, docs/design/topic-tabs.md) is on while hello's `topics.o
 ### Session: agents, endWait
 
 ```json
-"agents": [{"id": "agentA", "name": "Fix join stall", "type": "Explore", "tokens": 41000, "startedMs": 1795000000000, "done": false, "status": "running"}],
+"agents": [{"id": "agentA", "name": "Fix join stall", "description": "Fix join stall", "type": "Explore", "tokens": 41000, "startedMs": 1795000000000, "done": false, "status": "running"}],
 "agentTokens": 50000,
 "endWait": {"why": "end", "checking": false, "asked": true,
   "blockers": [{"kind": "claim", "id": "t1", "title": "Ship it", "need": "checkpoint or release", "text": "claim t1 ..."}]}
 ```
 
-- `agents` are the subagents Quill Desktop's strip shows (running ones, then recently finished, `doneMs` when done); `agentTokens` sums their tokens ("3 subagents · 120k tok").
+- `agents` are the subagents Quill Desktop's strip shows (running ones, then recently finished, `doneMs` when done). `description` is the Agent call's full description (3-5 words, one line; `name` is the same cut to 80 characters); left out when the call gave none, then show `type`. It is additive; `agentTokens` sums their tokens ("3 subagents · 120k tok").
 - `endWait` exists only while the end-of-session check runs (kmem 1.10.0+, hello `topics.endCheck`). `why`: `end`, `rotate`, `quit` or `checkpoint`. `checking`: kmem is being asked now. `asked`: the session was sent the blockers and must resolve them. `blockers`: end-check's entries (`kind` claim, lock, job, files or status; `id`, `title`, `name`, `pid`, `what`, `repo`, `paths`, `need` as kmem gives them) plus `text`, the sentence Quill Desktop shows. Quill never resolves blockers itself; the phone only shows them. It changes like any session field (a `session` change arrives when it appears, changes or goes away).
 
 ### POST /phone/sessions/new with openTopic
