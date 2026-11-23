@@ -182,6 +182,9 @@ type apiTopic struct {
 	Status  string   `json:"status"`
 	Claimed int      `json:"claimed"`
 	Open    int      `json:"open"`
+	// Dormant: hidden in Quill Desktop's "Open a topic" list until opened
+	// (still listed here; Quill Android UI for it can come later).
+	Dormant bool `json:"dormant,omitempty"`
 }
 
 func (a *phoneAPI) topicEntry(t topicInfo) apiTopic {
@@ -190,7 +193,7 @@ func (a *phoneAPI) topicEntry(t topicInfo) apiTopic {
 		live = owner.id
 	}
 	return apiTopic{Slug: t.Slug, Title: t.Title, Scope: firstNonEmptyList(t.Scope, []string{t.Slug}), Live: live,
-		Status: kmemScrubber()(t.Status), Claimed: t.Claimed, Open: t.Open}
+		Status: kmemScrubber()(t.Status), Claimed: t.Claimed, Open: t.Open, Dormant: a.d.isDormant(t.Slug)}
 }
 
 // topicList: the topics for the sessions body, from the cache only (UI

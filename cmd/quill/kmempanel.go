@@ -442,6 +442,7 @@ func (p *kmemPanel) resumeHandoff(name string) {
 // assistant (if started yet) or the live owner comes back, else an empty
 // session.
 func (d *desk) resumeHandoffNamed(name string) *deskSession {
+	d.setDormant(name, false)
 	if name == kmemWinOperator {
 		d.openKmemWindow()
 		if s := d.kmemWin.session(); s != nil {

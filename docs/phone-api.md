@@ -491,6 +491,8 @@ Topic mode (topic tabs, docs/design/topic-tabs.md) is on while hello's `topics.o
 {"slug": "alpha", "title": "Alpha", "scope": ["alpha"], "live": "3f2a...", "status": "alpha is half done", "claimed": 1, "open": 4}
 ```
 
+`"dormant": true` appears (omitted otherwise) when the user hid the topic under Dormant in the desktop "Open a topic" card. Hidden topics stay listed; Quill Android may show them folded later. Opening the topic un-hides it.
+
 `live` is the id of the topic's live session, `""` when none. `status` is the first line of the `<topic>/status` fact (may be empty). `claimed` / `open`: task counts over the topic's scope. The kmem window's own topic (`kmem`) is not listed. Left out: `statusMs` (the age of the status fact; kmem 1.8.1 does not report it).
 
 ### Session: agents, endWait

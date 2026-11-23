@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -366,6 +367,7 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 	if !s.pickPending {
 		return
 	}
+	d.setDormant(t.Slug, false)
 	if owner := d.topicOwner(t.Slug, s); owner != nil {
 		d.open(owner.id)
 		return
@@ -430,6 +432,7 @@ func (d *desk) openTopic(slug string) *deskSession {
 // coordinator starts in cwd (isNew: the topic has no facts yet).
 func (d *desk) openTopicInfo(t topicInfo, isNew bool, cwd string) *deskSession {
 	if owner := d.topicOwner(t.Slug, &deskSession{}); owner != nil {
+		d.setDormant(t.Slug, false)
 		d.open(owner.id)
 		return owner
 	}
@@ -440,6 +443,44 @@ func (d *desk) openTopicInfo(t topicInfo, isNew bool, cwd string) *deskSession {
 	ns.pickPending = true
 	d.pickTopic(ns, t, isNew)
 	return ns
+}
+
+// isDormant: the topic is hidden from the "Open a topic" list until opened.
+func (d *desk) isDormant(slug string) bool { return slices.Contains(d.org.Dormant, slug) }
+
+// setDormant hides (or shows again) a topic; opening a topic in any way
+// calls it with false. Saves the org only on a change.
+func (d *desk) setDormant(slug string, on bool) {
+	if d.isDormant(slug) == on {
+		return
+	}
+	if on {
+		d.org.Dormant = append(d.org.Dormant, slug)
+	} else {
+		d.org.Dormant = slices.DeleteFunc(d.org.Dormant, func(x string) bool { return x == slug })
+	}
+	d.saveOrg()
+	for _, refresh := range dormantCards {
+		refresh()
+	}
+}
+
+// dormantCards: the open "Open a topic" cards' list refreshers (UI thread).
+var dormantCards = map[*deskSession]func(){}
+
+// dormantCommand: `quill --hide-topic` / `--show-topic` (UI thread): a
+// comma-separated slug list. false when a slug is not a kmem name.
+func (d *desk) dormantCommand(hide bool, list string) bool {
+	slugs := strings.Split(list, ",")
+	for _, sl := range slugs {
+		if !validKmemName(sl) {
+			return false
+		}
+	}
+	for _, sl := range slugs {
+		d.setDormant(sl, hide)
+	}
+	return true
 }
 
 // topicButtonLabel: "Title · <status> · 1 claimed · 4 open".

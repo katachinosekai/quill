@@ -52,6 +52,9 @@ type sideOrg struct {
 	// Desktop never writes kmem's config, so a title in any language, which
 	// slugs to "topic-N", lives here).
 	TopicTitles map[string]string `json:"topicTitles,omitempty"`
+	// Dormant: topic slugs hidden from the "Open a topic" list until opened
+	// (Quill Desktop only; kmem never knows).
+	Dormant []string `json:"dormant,omitempty"`
 	// KmemTitles: kmem handoff name -> the title typed for it, for names
 	// that are generated ("session-1") because the title has no Latin letter
 	// or digit. kmem names stay ASCII; the title is only shown.

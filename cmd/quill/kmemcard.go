@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -74,7 +75,7 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 	// The new-topic row sits above the list so dozens of topics never push
 	// it out of view.
 	body := container.NewVBox(head, sub, widget.NewSeparator(), mutedText("New topic…", fontMeta), newRow, preview,
-		widget.NewSeparator(), mutedText("Topics", fontMeta), scroll)
+		widget.NewSeparator(), mutedText("Topics (the eye hides one until you open it)", fontMeta), scroll)
 	bgr := canvas.NewRectangle(colCard)
 	bgr.CornerRadius = 14
 	card := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(12, 12, 16, 16), body))
@@ -83,10 +84,25 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 		if d.kmemHasFeature(extSessionsFeature) {
 			d.loadExtSessions() // on demand: the card decides what is live
 		}
-		d.do(func() {
-			var rows []fyne.CanvasObject
+		var fill func()
+		foldOpen := false
+		var foldAcc *widget.Accordion
+		fill = func() {
+			if foldAcc != nil {
+				foldOpen = foldAcc.Items[0].Open // keep the fold as the user left it
+				foldAcc = nil
+			}
+			var rows, dormant []fyne.CanvasObject
 			for _, t := range ts {
 				t := t
+				if d.isDormant(t.Slug) {
+					open := widget.NewButton(t.Title, func() { d.pickTopic(s, t, false) })
+					open.Alignment = widget.ButtonAlignLeading
+					show := widget.NewButton("Show again", func() { d.setDormant(t.Slug, false) })
+					show.Importance = widget.LowImportance
+					dormant = append(dormant, container.NewBorder(nil, nil, nil, show, open))
+					continue
+				}
 				var b *widget.Button
 				if owner := d.topicOwner(t.Slug, s); owner != nil {
 					b = widget.NewButton(t.Title+" · "+d.ownerLabel(owner), func() { d.open(owner.id) })
@@ -103,10 +119,21 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 					b = widget.NewButton(topicButtonLabel(t), func() { d.pickTopic(s, t, false) })
 				}
 				b.Alignment = widget.ButtonAlignLeading
-				rows = append(rows, b)
+				hide := widget.NewButtonWithIcon("", theme.VisibilityOffIcon(), func() { d.setDormant(t.Slug, true) })
+				hide.Importance = widget.LowImportance
+				rows = append(rows, container.NewBorder(nil, nil, nil, hide, b))
 			}
-			if len(rows) == 0 {
+			if len(rows) == 0 && len(dormant) == 0 {
 				rows = append(rows, mutedText("No kmem topics yet: name a new one above.", fontMeta))
+			}
+			if len(dormant) > 0 {
+				acc := widget.NewAccordion(widget.NewAccordionItem(
+					fmt.Sprintf("Dormant (%d)", len(dormant)), container.NewVBox(dormant...)))
+				if foldOpen {
+					acc.Open(0)
+				}
+				foldAcc = acc
+				rows = append(rows, acc)
 			}
 			list.Objects = rows
 			list.Refresh()
@@ -119,6 +146,16 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 				}
 			}
 			relayoutTree(card)
+		}
+		d.do(func() {
+			dormantCards[s] = func() {
+				if !s.pickPending {
+					delete(dormantCards, s)
+					return
+				}
+				fill()
+			}
+			fill()
 		})
 	}()
 	return container.NewVBox(padTop(60), container.NewCenter(sized(560, 0, card)))

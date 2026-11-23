@@ -64,8 +64,11 @@ func TestKmemCardNewTopicVisible(t *testing.T) {
 						}
 					case *container.Scroll: // the topics list, not an entry's own scroller
 						if c, ok := x.Content.(*fyne.Container); ok && len(c.Objects) > 0 {
-							if b, ok := c.Objects[0].(*widget.Button); ok && strings.HasPrefix(b.Text, "Topic") {
-								list = x
+							// each row is a Border: the topic button plus its hide button
+							if r, ok := c.Objects[0].(*fyne.Container); ok && len(r.Objects) > 0 {
+								if b, ok := r.Objects[0].(*widget.Button); ok && strings.HasPrefix(b.Text, "Topic") {
+									list = x
+								}
 							}
 						}
 					}

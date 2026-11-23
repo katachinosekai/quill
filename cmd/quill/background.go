@@ -157,6 +157,16 @@ func (d *desk) listenInstance(path string) {
 					_, _ = c.Write([]byte("ok\n"))
 					return
 				}
+				for _, verb := range []string{"hide-topic ", "show-topic "} {
+					if list, ok := strings.CutPrefix(cmdLine, verb); ok {
+						res := make(chan bool, 1)
+						d.do(func() { res <- d.dormantCommand(verb == "hide-topic ", list) })
+						if <-res {
+							_, _ = c.Write([]byte("ok\n"))
+						}
+						return
+					}
+				}
 				switch cmdLine {
 				case "show":
 					d.do(d.showWindow)

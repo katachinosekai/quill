@@ -44,6 +44,8 @@ func main() {
 	resumeOne := flag.String("resume", "", "ask the running Quill to open the session with this kmem name, or start one from its handoff")
 	kmemMessage := flag.String("kmem-message", "", "deliver this message (the Monday check-in) to Quill Desktop's running kmem assistant; starts it only when none runs")
 	kmemWindow := flag.Bool("kmem-window", false, "ask the running Quill Desktop to open its kmem window (the Monday check-in uses it)")
+	hideTopic := flag.String("hide-topic", "", "ask the running Quill Desktop to hide these kmem topics (SLUG[,SLUG...]) under Dormant in its \"Open a topic\" card until they are opened")
+	showTopic := flag.String("show-topic", "", "ask the running Quill Desktop to show these hidden kmem topics (SLUG[,SLUG...]) in its \"Open a topic\" card again")
 	profile := flag.Bool("profile", false, "record 10 s of the running Quill's CPU use into $XDG_RUNTIME_DIR/quill-cpu-<pid>.pprof")
 	flag.Parse()
 	if *showVersion {
@@ -68,6 +70,16 @@ func main() {
 	if *kmemMessage != "" {
 		if !sendCommand(sock, "kmem-message "+strings.Join(strings.Fields(*kmemMessage), " ")) {
 			fmt.Fprintln(os.Stderr, "no running Quill answered")
+			os.Exit(1)
+		}
+		return
+	}
+	for verb, list := range map[string]string{"hide-topic": *hideTopic, "show-topic": *showTopic} {
+		if list == "" {
+			continue
+		}
+		if !sendCommand(sock, verb+" "+strings.Join(strings.Fields(strings.ReplaceAll(list, " ", "")), "")) {
+			fmt.Fprintln(os.Stderr, "no running Quill Desktop answered (or a topic name is not letters, digits and dashes)")
 			os.Exit(1)
 		}
 		return
