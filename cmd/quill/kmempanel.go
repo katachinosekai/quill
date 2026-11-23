@@ -724,6 +724,8 @@ func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
 	if len(hist) == 0 {
 		hist = append(hist, caption("No old handoffs."))
 	}
+	findOld := widget.NewButtonWithIcon("Find old conversation", theme.SearchIcon(), p.showFindOld)
+	findOld.Importance = widget.LowImportance
 	acc := widget.NewAccordion(widget.NewAccordionItem("History (read-only)", container.NewVBox(hist...)))
-	return append(rows, acc)
+	return append(rows, container.NewHBox(findOld), acc)
 }
