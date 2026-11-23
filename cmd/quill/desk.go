@@ -259,6 +259,7 @@ type desk struct {
 	kmemBinSetBtn *widget.Button
 	kmemBinNow    *binView
 	verLine       *verLine    // kmem version under the message box; kmemverline.go
+	saveGeom      func()      // saves the main window's size and maximised state now
 	kmemWin       *kmemWindow // the kmem operations window, nil while closed; kmemwindow*.go
 	statsRow      *fyne.Container
 	controlFn     func(s *deskSession, req map[string]any) (json.RawMessage, error)
@@ -2422,6 +2423,7 @@ func (d *desk) confirmClose() {
 }
 
 func (d *desk) confirmQuit() {
+	d.rememberGeom()
 	running := d.runningSessions()
 	if len(running) == 0 {
 		d.rememberTopicsAtQuit()

@@ -56,9 +56,15 @@ func (d *desk) openKmemWindow() {
 	}
 	w.split.Offset = off
 	w.win.SetContent(w.split)
-	w.win.Resize(fyne.NewSize(
-		float32(prefs.FloatWithFallback("kmemWinW", kmemWinDefaultW)),
-		float32(prefs.FloatWithFallback("kmemWinH", kmemWinDefaultH))))
+	setAppID(w.win, appIDKmem)
+	saved := loadGeom(prefs, geomKmem)
+	if !saved.valid() { // sizes saved before the geometry keys existed
+		saved.W = float32(prefs.FloatWithFallback("kmemWinW", kmemWinDefaultW))
+		saved.H = float32(prefs.FloatWithFallback("kmemWinH", kmemWinDefaultH))
+	}
+	g := geomOr(nil, saved, winGeom{W: kmemWinDefaultW, H: kmemWinDefaultH})
+	applyGeom(w.win, g)
+	w.saveGeom = trackGeom(w.win, prefs, geomKmem, g, func() bool { return w.closed })
 	w.setupKeys()
 	w.win.SetCloseIntercept(w.close)
 	d.kmemWin = w
@@ -80,9 +86,8 @@ func (w *kmemWindow) close() {
 	w.closed = true
 	d := w.d
 	prefs := d.app.Preferences()
-	if sz := w.win.Canvas().Size(); sz.Width > 100 && sz.Height > 100 {
-		prefs.SetFloat("kmemWinW", float64(sz.Width))
-		prefs.SetFloat("kmemWinH", float64(sz.Height))
+	if w.saveGeom != nil {
+		w.saveGeom()
 	}
 	if w.split != nil {
 		prefs.SetFloat("kmemWinSplit", w.split.Offset)

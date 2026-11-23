@@ -77,6 +77,7 @@ type window struct {
 	decorate  bool
 	closing   bool
 	fixedSize bool
+	appID     string // Wayland app_id / X11 class; empty means the app's unique ID
 
 	cursor       desktop.Cursor
 	customCursor *glfw.Cursor
@@ -154,6 +155,11 @@ func (w *window) RequestFullScreenSecondary() {
 		})
 	}
 }
+
+// SetAppID sets the Wayland app_id (X11 class) this window gets when it is
+// created, so a window manager rule can tell windows of one app apart. It
+// must be called before the window is first shown.
+func (w *window) SetAppID(id string) { w.appID = id }
 
 func (w *window) RequestPosition(x, y int) {
 	w.xpos = x
@@ -824,8 +830,15 @@ func (w *window) create() {
 	}
 	glfw.WindowHint(glfw.AutoIconify, glfw.False)
 	initWindowHints()
+	appID := w.appID
+	if appID == "" {
+		appID = fyne.CurrentApp().UniqueID()
+	}
 	if build.IsWayland {
-		glfw.WindowHintString(glfw.WaylandAppID, fyne.CurrentApp().UniqueID())
+		glfw.WindowHintString(glfw.WaylandAppID, appID)
+	} else if w.appID != "" {
+		glfw.WindowHintString(glfw.X11ClassName, appID)
+		glfw.WindowHintString(glfw.X11InstanceName, appID)
 	}
 
 	pixWidth, pixHeight := w.screenSize(w.canvas.size)

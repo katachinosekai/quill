@@ -20,13 +20,14 @@ type kmemWindow struct {
 	s    *deskSession // the assistant session shown on the right, or nil
 	view *chatView    // its chat view, or nil
 
-	d       *desk
-	win     fyne.Window
-	panel   *kmemPanel        // the left side
-	split   *container.Split  // panels | chat
-	right   *fyne.Container   // the chat, or its one-line reason
-	prefill func(text string) // puts text in the chat input; nil while the chat is off
-	closed  bool
+	d        *desk
+	win      fyne.Window
+	panel    *kmemPanel        // the left side
+	saveGeom func()            // saves the window size now
+	split    *container.Split  // panels | chat
+	right    *fyne.Container   // the chat, or its one-line reason
+	prefill  func(text string) // puts text in the chat input; nil while the chat is off
+	closed   bool
 }
 
 // session: the window's assistant session (nil-safe).

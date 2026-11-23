@@ -225,6 +225,7 @@ func (d *desk) trySwap() {
 	st.Width, st.Height = size.Width, size.Height
 	st.Max, st.X, st.Y = windowPlacement(d.win)
 	st.Split = d.saveSplit()
+	d.rememberGeom()
 	st.ScrollY = d.chat.scroll.Offset.Y
 	st.KmemWin = d.kmemWin != nil // hot reload keeps the assistant and reopens the window (§14 #8)
 	running := d.runningSessions()

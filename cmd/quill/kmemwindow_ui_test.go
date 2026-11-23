@@ -212,12 +212,15 @@ func TestKmemWindow(t *testing.T) {
 			t.Fatal("the close flow runs once")
 		}
 		prefs := h.d.app.Preferences()
-		if prefs.Float("kmemWinSplit") != 0.6 || prefs.Float("kmemWinW") != 1000 || prefs.Float("kmemWinH") != 700 {
-			t.Fatalf("size and split saved: %v %v %v", prefs.Float("kmemWinSplit"), prefs.Float("kmemWinW"), prefs.Float("kmemWinH"))
+		if prefs.Float("kmemWinSplit") != 0.6 || prefs.Float("win.kmem.w") != 1000 || prefs.Float("win.kmem.h") != 700 {
+			t.Fatalf("size and split saved: %v %v %v", prefs.Float("kmemWinSplit"), prefs.Float("win.kmem.w"), prefs.Float("win.kmem.h"))
 		}
 		h.d.openKmemWindow()
 		if h.d.kmemWin == nil || h.d.kmemWin == w || h.d.kmemWin.split.Offset != 0.6 || opened != 2 {
 			t.Fatal("reopening builds a new window with the saved split")
+		}
+		if sz := h.d.kmemWin.win.Canvas().Size(); sz.Width != 1000 || sz.Height != 700 {
+			t.Fatalf("reopening restores the saved size: %v", sz)
 		}
 		h.d.kmemWin.close()
 	})

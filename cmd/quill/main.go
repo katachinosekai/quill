@@ -149,16 +149,32 @@ func runWindowWith(claudeBin, sock string) int {
 	d.setupAtStart()
 	d.keeper = newKeeperClient()
 	w.SetContent(d.build())
-	w.Resize(fyne.NewSize(1280, 860))
 	startHidden := false
-	if st := takeRestore(); st != nil {
+	prefs := a.Preferences()
+	var first *winGeom
+	st := takeRestore()
+	if st != nil {
 		d.restore = st
 		startHidden = st.Hidden
-		if st.Width > 200 && st.Height > 200 {
-			w.Resize(fyne.NewSize(st.Width, st.Height))
+		first = &winGeom{W: st.Width, H: st.Height, Max: st.Max}
+		if st.Max { // the handed-over size is the screen: keep the normal size
+			if saved := loadGeom(prefs, geomMain); saved.valid() {
+				first.W, first.H = saved.W, saved.H
+			}
 		}
-		placeWindow(w, st)
 	}
+	g := geomOr(first, loadGeom(prefs, geomMain), winGeom{W: 1280, H: 860})
+	if first != nil && !first.valid() {
+		g.Max, g.Full = loadGeom(prefs, geomMain).Max, loadGeom(prefs, geomMain).Full
+	}
+	setAppID(w, appID)
+	applyGeom(w, g)
+	if st != nil {
+		pos := *st
+		pos.Max = false // applyGeom did it
+		placeWindow(w, &pos)
+	}
+	d.saveGeom = trackGeom(w, prefs, geomMain, g, func() bool { return false })
 	w.SetCloseIntercept(d.confirmClose)
 	if !d.setupBackground() {
 		startHidden = false

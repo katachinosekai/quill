@@ -224,6 +224,7 @@ func (d *desk) showWindow() {
 }
 
 func (d *desk) hideWindow() {
+	d.rememberGeom()
 	d.hidden = true
 	if d.cmds != nil {
 		d.cmds.hide()
