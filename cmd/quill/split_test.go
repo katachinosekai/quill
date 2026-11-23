@@ -2657,3 +2657,57 @@ func TestCaretSurvivesTabSwitch(t *testing.T) {
 		}
 	})
 }
+
+// Split view: no pane has a tasks button; the strip lists the focused pane's
+// background jobs and each pane's session menu carries the task entries.
+func TestSplitPanesHaveNoTasksButton(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		a.conv.AddUser("from a")
+		b := h.d.createSession(h.proj, "default", "default")
+		b.conv.AddUser("from b")
+		h.d.open(a.id)
+		h.d.openInSplit(b.id)
+		job := func(s *deskSession, id, cmd, tsk string) {
+			s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"` + id + `","name":"Bash","input":{"command":"` + cmd + `","run_in_background":true}}]`)}})
+			s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"` + id + `","content":"Command running in background with ID: ` + tsk + `. Output is being written to: /tmp/o"}]`)}})
+		}
+		job(a, "bga", "./a.sh", "tska")
+		job(b, "bgb", "./b.sh", "tskb")
+		h.d.updateChrome()
+		chips := 0
+		for _, p := range h.d.panes {
+			deepWalk(p.root, func(o fyne.CanvasObject) {
+				if _, ok := o.(*tasksChip); ok {
+					chips++
+				}
+			})
+		}
+		if chips != 0 {
+			t.Fatalf("a pane has a background tasks button: %d", chips)
+		}
+		for _, p := range h.d.panes {
+			h.d.focusPane(p)
+			h.d.agentStrip.sync()
+			want := "● ./a.sh"
+			if p.view.s == b {
+				want = "● ./b.sh"
+			}
+			if got := stripTexts(h.d.agentStrip); len(got) != 1 || got[0] != want {
+				t.Fatalf("the strip lists the focused pane's job: %q want %q", got, want)
+			}
+			l := strings.Join(menuLabels(h.d.sessionMenuItems(p.view.s.id)), "|")
+			if !strings.Contains(l, "Show background tasks...") {
+				t.Fatalf("pane menu lacks Show background tasks: %s", l)
+			}
+			if p.view.s.running() && !strings.Contains(l, stopEverythingLabel) {
+				t.Fatalf("pane menu lacks Stop everything: %s", l)
+			}
+		}
+		if os.Getenv("DESK_SHOTS") != "" {
+			os.MkdirAll("/tmp/quill-splittasks-shots", 0o755)
+			shot(t, h.w, "/tmp/quill-splittasks-shots", "split-no-tasks-button.png")
+		}
+	})
+}

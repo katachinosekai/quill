@@ -23,7 +23,6 @@ const (
 
 type pane struct {
 	slot    *fyne.Container
-	tasks   *tasksChip
 	auto    *autoChip
 	d       *desk
 	view    *chatView
@@ -164,9 +163,8 @@ func (d *desk) newPane() *pane {
 		d.setAllChips(false)
 	})
 	closeAll.Importance = widget.MediumImportance
-	p.tasks = newTasksButton(func() *deskSession { return p.view.s }, d.cmdTasks)
 	p.auto = newAutoChip(func() { d.setAutoApprove(p.view.s, false) })
-	controls := container.NewBorder(nil, nil, container.NewHBox(p.backend, boxed(p.model), boxed(p.mode), p.tasks, p.auto), container.NewHBox(openAll, closeAll))
+	controls := container.NewBorder(nil, nil, container.NewHBox(p.backend, boxed(p.model), boxed(p.mode), p.auto), container.NewHBox(openAll, closeAll))
 	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
 	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
 	p.stats = mutedText("", fontMeta)
@@ -733,9 +731,6 @@ func (d *desk) syncPaneControls(p *pane) {
 	p.mode.Enable()
 	p.backend.Enable()
 	p.mic.Enable()
-	if syncTasksButton(p.tasks, s) && d.mainPane != nil {
-		relayoutTree(d.mainPane)
-	}
 	if d.syncAutoChip(p.auto, s) && d.mainPane != nil {
 		relayoutTree(d.mainPane)
 	}
