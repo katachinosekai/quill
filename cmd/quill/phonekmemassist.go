@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/folders"
 )
 
@@ -63,28 +64,88 @@ func (d *desk) kmemAssistQuestion(a *kmemAssist) map[string]any {
 // kmemAssistItems serves GET /phone/kmem/assistant/items: the same query and
 // item JSON as /phone/session/{id}/items, plus the assistant's state.
 func (a *phoneAPI) kmemAssistItems(w http.ResponseWriter, r *http.Request) {
+	a.assistItems(w, r, kmemAssistPhoneID, "assistant", func() *assistant { return a.d.assist() },
+		func() map[string]any { return a.kmemAssistSummary(true) })
+}
+
+// assistItems serves an assistant's items read (kmem and Quill operator
+// share it): the session's items body plus the summary under key.
+func (a *phoneAPI) assistItems(w http.ResponseWriter, r *http.Request, id, key string, as func() *assistant, summary func() map[string]any) {
 	iq, ok := parseItemsQuery(w, r)
 	if !ok {
 		return
 	}
 	var body map[string]any
 	a.ui(func() {
-		if s := a.d.assist().s; s != nil {
-			body = a.itemsBody(s, kmemAssistPhoneID, iq)
+		if s := as().s; s != nil {
+			body = a.itemsBody(s, id, iq)
 		} else {
-			body = map[string]any{"v": 1, "id": kmemAssistPhoneID, "epoch": 0, "rev": 0, "reset": iq.hasEpoch && iq.epoch != 0,
+			body = map[string]any{"v": 1, "id": id, "epoch": 0, "rev": 0, "reset": iq.hasEpoch && iq.epoch != 0,
 				"hasMore": false, "items": []map[string]any{}, "queue": []map[string]any{}}
 		}
-		body["assistant"] = a.kmemAssistSummary(true)
+		body[key] = summary()
 	})
 	folders.WriteJSON(w, http.StatusOK, body)
+}
+
+// assistWaiting: what the assistant's session waits for: "plan", "question",
+// "permission" or "" (a pending request; the plan wins, then a question).
+func assistWaiting(s *deskSession) string {
+	waiting := ""
+	if s != nil && s.running() {
+		for _, it := range s.conv.PendingPermissions() {
+			switch {
+			case it.Kind == chat.Plan:
+				waiting = "plan"
+			case isQuestion(it):
+				if waiting != "plan" {
+					waiting = "question"
+				}
+			default:
+				if waiting == "" {
+					waiting = "permission"
+				}
+			}
+		}
+	}
+	return waiting
+}
+
+// assistStateName: the assistant's state as phones see it.
+func assistStateName(as *assistant) string {
+	switch as.state {
+	case asProbing, asStarting:
+		return "starting"
+	case asPanels:
+		return "panels"
+	case asElsewhere:
+		return "elsewhere"
+	case asLive:
+		if s := as.s; s == nil || !s.running() {
+			return "failed"
+		}
+		return "live"
+	case asSaving:
+		return "saving"
+	case asStopping:
+		return "stopping"
+	}
+	return "off"
 }
 
 var kmemAssistOps = []string{"send", "answer", "interrupt", "queue/delete", "queue/send-now", "start", "stop", "restart", "save", "choose"}
 
 // kmemAssistWrite serves POST /phone/kmem/assistant/{op}.
 func (a *phoneAPI) kmemAssistWrite(w http.ResponseWriter, r *http.Request, op string) {
-	if !slices.Contains(kmemAssistOps, op) {
+	a.assistWrite(w, r, op, kmemAssistOps, "assistant", a.kmemAssistDo, func() map[string]any { return a.kmemAssistSummary(true) })
+}
+
+// assistWrite serves one write of an assistant's route (kmem and Quill
+// operator share it): control mode, the body, the op, then the summary under
+// key in the answer.
+func (a *phoneAPI) assistWrite(w http.ResponseWriter, r *http.Request, op string, ops []string, key string,
+	do func(op string, in writeBody) (map[string]any, *apiErr), summary func() map[string]any) {
+	if !slices.Contains(ops, op) {
 		folders.WriteError(w, http.StatusNotFound, "not_found", "unknown path")
 		return
 	}
@@ -105,12 +166,12 @@ func (a *phoneAPI) kmemAssistWrite(w http.ResponseWriter, r *http.Request, op st
 			fail = &apiErr{http.StatusForbidden, "control_off", "Let paired devices control sessions is off"}
 			return
 		}
-		out, fail = a.kmemAssistDo(op, in)
+		out, fail = do(op, in)
 		if fail == nil {
 			if out == nil {
 				out = map[string]any{}
 			}
-			out["assistant"] = a.kmemAssistSummary(true)
+			out[key] = summary()
 		}
 	})
 	if fail != nil {
@@ -120,6 +181,29 @@ func (a *phoneAPI) kmemAssistWrite(w http.ResponseWriter, r *http.Request, op st
 	a.d.do(a.scan)
 	out["v"] = 1
 	folders.WriteJSON(w, http.StatusOK, out)
+}
+
+// assistSessionWrite: the ops every assistant shares (send, answer,
+// interrupt, queue) on its session; what is the name for the errors (UI thread).
+func (a *phoneAPI) assistSessionWrite(as *assistant, what, op string, in writeBody, offered func(string) *apiErr) (map[string]any, *apiErr) {
+	s := as.s
+	if s == nil {
+		return nil, &apiErr{http.StatusConflict, "not_running", "the " + what + " has not started"}
+	}
+	if op == "send" {
+		if fail := offered("send"); fail != nil {
+			return nil, fail
+		}
+	}
+	action, sub := op, ""
+	if op == "queue/delete" || op == "queue/send-now" {
+		action, sub = "queue", op[len("queue/"):]
+	}
+	out, fail := a.sessionWrite(s, action, sub, in)
+	if fail == nil && op == "send" {
+		a.d.assistRefresh(as)
+	}
+	return out, fail
 }
 
 // kmemAssistDo runs one assistant write (UI thread).
@@ -178,22 +262,5 @@ func (a *phoneAPI) kmemAssistDo(op string, in writeBody) (map[string]any, *apiEr
 		d.kmemAssistChoose(as, *in.Choice)
 		return nil, nil
 	}
-	s := as.s
-	if s == nil {
-		return nil, &apiErr{http.StatusConflict, "not_running", "the kmem assistant has not started"}
-	}
-	if op == "send" {
-		if fail := offered("send"); fail != nil {
-			return nil, fail
-		}
-	}
-	action, sub := op, ""
-	if op == "queue/delete" || op == "queue/send-now" {
-		action, sub = "queue", op[len("queue/"):]
-	}
-	out, fail := a.sessionWrite(s, action, sub, in)
-	if fail == nil && op == "send" {
-		d.kmemAssistRefresh(as)
-	}
-	return out, fail
+	return a.assistSessionWrite(as, "kmem assistant", op, in, offered)
 }

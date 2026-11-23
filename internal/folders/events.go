@@ -33,7 +33,7 @@ type EventPage struct {
 	Events  []Event `json:"events"`
 }
 
-var eventTypes = map[string]bool{"approval": true, "question": true, "plan": true, "finished": true, "error": true, "kmem": true}
+var eventTypes = map[string]bool{"approval": true, "question": true, "plan": true, "finished": true, "error": true, "kmem": true, "quill": true}
 
 func newBoot() string {
 	b := make([]byte, 8)

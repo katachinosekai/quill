@@ -57,6 +57,8 @@ type writeBody struct {
 	Title         *string `json:"title"`
 	Project       *string `json:"project"`
 	Old           bool    `json:"old"`
+	// Change: POST /phone/quill/settings/undo, the number of a Changes entry.
+	Change *int `json:"change"`
 }
 
 func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, parts []string) {

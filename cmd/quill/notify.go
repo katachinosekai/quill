@@ -152,6 +152,18 @@ func (d *desk) kmemPhoneEvent(body string) {
 	p.server.Emit(folders.Event{Type: "kmem", Title: "kmem assistant", Body: body})
 }
 
+// quillPhoneEvent: the phone event for the Quill operator waiting for the
+// user (type "quill", titled "Quill operator", no session id; old Quill
+// Android drops unknown types).
+func (d *desk) quillPhoneEvent(body string) {
+	p := d.phoneSync
+	if p == nil || p.server == nil {
+		return
+	}
+	body, _ = capText(kmemScrubber()(body), 300)
+	p.server.Emit(folders.Event{Type: "quill", Title: "Quill operator", Body: body})
+}
+
 func lastReply(c *chat.Conversation) string {
 	for i := len(c.Items) - 1; i >= 0; i-- {
 		if it := c.Items[i]; it.Kind == chat.Assistant && it.Text != "" {

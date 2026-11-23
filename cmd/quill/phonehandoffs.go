@@ -195,6 +195,9 @@ func (a *phoneAPI) topicEntry(t topicInfo) apiTopic {
 	if owner := a.d.topicOwner(t.Slug, &deskSession{}); owner != nil && !isHiddenSession(owner) {
 		live = owner.id
 	}
+	if live == "" && t.Slug == quillOpName && a.d.quillOpOn() {
+		live = "operator" // the hidden Quill operator holds the topic (not a session id)
+	}
 	return apiTopic{Slug: t.Slug, Title: t.Title, Scope: firstNonEmptyList(t.Scope, []string{t.Slug}), Live: live,
 		Status: kmemScrubber()(t.Status), Claimed: t.Claimed, Open: t.Open, Dormant: a.d.isDormant(t.Slug), Recent: a.isRecent(t)}
 }
@@ -411,6 +414,14 @@ func (a *phoneAPI) openTopicWrite(in writeBody) (map[string]any, *apiErr) {
 		rememberNewTopic(t)
 	}
 	s := d.openTopicInfo(t, isNew, cwd)
+	if t.Slug == quillOpName && (s == nil || isHiddenSession(s)) && d.quillOpOn() {
+		// The operator never opens a tab: switched to its box; nil while it starts.
+		return map[string]any{"switched": true, "operator": true, "starting": s == nil || !s.running(),
+			"topic": map[string]string{"slug": t.Slug, "title": t.Title}}, nil
+	}
+	if s == nil { // live outside Quill Desktop (K6)
+		return nil, &apiErr{http.StatusConflict, "blocked", "that topic is live outside Quill Desktop; take it over there"}
+	}
 	_, group := a.sessionIDs()
 	return map[string]any{"session": a.session(s.id, firstNonEmpty(group[s.id], t.Title)), "switched": owner != nil, "topic": map[string]string{"slug": t.Slug, "title": t.Title}}, nil
 }

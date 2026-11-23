@@ -56,6 +56,8 @@ type phoneAPI struct {
 	kmem     phoneKmem // /phone/kmem/* reads (phonekmem.go)
 	lastKmem string    // the last "kmem" stream change
 
+	lastQuill string // the last "quill" stream change (phonequillop.go)
+
 	files     *fileGuard      // /phone/session/{id}/file (phonefiles.go)
 	lastFiles map[string]bool // per phone: the last "files" capability sent
 }
@@ -132,6 +134,10 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.kmemWrite(w, r, path)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "kmem/"):
 		a.kmemRoute(w, r, path)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "quill"):
+		a.quillRoute(w, r, path)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "quill/"):
+		a.quillWrite(w, r, path)
 	case r.Method == http.MethodGet && path == "stream":
 		a.stream(w, r)
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "items":
@@ -186,7 +192,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 	}
 	phone := folders.PhoneID(r)
 	conn, snap := lanConnOf(r), lanSnapshot()
-	var ctl, unlock, lan, kmemOn, files, endCheck, topics bool
+	var ctl, unlock, lan, kmemOn, files, endCheck, topics, quillOn bool
 	a.ui(func() {
 		list := a.d.phones()
 		changed := false
@@ -219,10 +225,12 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		kmemOn = a.d.kmemOn()
 		endCheck = kmemOn && a.d.kmemFeatureCached(endCheckFeature)
 		topics = a.d.topicMode()
+		quillOn = a.d.quillOpOn()
 	})
 	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan,
 		"kmem": map[string]any{"api": kmemPhoneAPI, "on": kmemOn}, "files": map[string]any{"api": filesPhoneAPI, "on": files},
-		"topics": map[string]any{"api": topicsPhoneAPI, "on": topics, "endCheck": endCheck}})
+		"topics":        map[string]any{"api": topicsPhoneAPI, "on": topics, "endCheck": endCheck},
+		"quillOperator": map[string]any{"api": quillOpPhoneAPI, "on": quillOn}})
 }
 
 type apiSession struct {
@@ -438,7 +446,7 @@ func (a *phoneAPI) sessions(w http.ResponseWriter, phone string) {
 			"v": 1, "boot": a.boot, "cursor": cursor, "usage": a.usage(), "sessions": list, "control": a.control(phone),
 			"models":   map[string]any{"online": modelChoices, "local": a.d.localModelList()},
 			"modes":    map[string]any{"online": modeChoices, "local": localModes},
-			"projects": a.projects(), "actions": menuActions, "settings": a.d.phoneSettings(),
+			"projects": a.projects(), "actions": a.d.phoneActions(), "settings": a.d.phoneSettings(),
 		}
 		if topics != nil {
 			body["topics"] = topics
@@ -617,8 +625,12 @@ func (a *phoneAPI) scan() {
 	if s := d.sessions[assistID]; s != nil && s.loaded {
 		a.track(s)
 	}
+	quillID := a.quillOpTrackID()
+	if s := d.sessions[quillID]; s != nil && s.loaded {
+		a.track(s)
+	}
 	for id := range a.tracks {
-		if id == assistID {
+		if id == assistID || id == quillID {
 			continue // kept while stopped too: its chat stays readable on the phone
 		}
 		if d.sessions[id] == nil || d.hiddenID(id, "") {
@@ -659,6 +671,9 @@ func (a *phoneAPI) scan() {
 		}
 	}
 	if c := a.kmemChange(); c != nil {
+		changes = append(changes, c)
+	}
+	if c := a.quillChange(); c != nil {
 		changes = append(changes, c)
 	}
 	for _, p := range d.phones() {

@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/folders"
 )
 
@@ -352,42 +351,10 @@ func (a *phoneAPI) kmemAssistSummary(full bool) map[string]any {
 	d := a.d
 	as := d.assist()
 	s := as.s
-	state := "off"
-	switch as.state {
-	case asProbing, asStarting:
-		state = "starting"
-	case asPanels:
-		state = "panels"
-	case asElsewhere:
-		state = "elsewhere"
-	case asLive:
-		state = "live"
-		if s == nil || !s.running() {
-			state = "failed"
-		}
-	case asSaving:
-		state = "saving"
-	case asStopping:
-		state = "stopping"
-	}
-	waiting := ""
+	state := assistStateName(as)
+	waiting := assistWaiting(s)
 	if as.state == asSaving && as.choice != nil {
 		waiting = "saveTimeout"
-	} else if s != nil && s.running() {
-		for _, it := range s.conv.PendingPermissions() {
-			switch {
-			case it.Kind == chat.Plan:
-				waiting = "plan"
-			case isQuestion(it):
-				if waiting != "plan" {
-					waiting = "question"
-				}
-			default:
-				if waiting == "" {
-					waiting = "permission"
-				}
-			}
-		}
 	}
 	out := map[string]any{"state": state, "waiting": waiting, "epoch": 0, "rev": 0}
 	if s != nil {

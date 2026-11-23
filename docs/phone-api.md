@@ -242,7 +242,7 @@ Assistant items with a choice card add:
 
 First call after pairing and after each app start. Body: `{"name": "Pixel 8", "app": "0.9.4"}`. Sets the phone's display name in Quill's phone list and its last-seen time.
 
-Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15", "unlock": true, "lanUnlock": false}`. `control` says whether writes are allowed for this phone right now. `unlock`: this device must unlock before anything else works (see "Device lock and unlock"). `lanUnlock`: right now this device may unlock with its hardware key instead of the password (home-network unlock); older Quill Desktop builds leave it out (treat as `false`). `quill` is the Quill Desktop version (`"dev"` in local builds). `topics`: `{"api": 1, "on": true, "endCheck": true}`: topic mode is on (see "Topics") and `endCheck` says kmem has the end-of-session check (1.10.0+) so `endWait` can appear; older Quill Desktop builds leave it out (no topics: use the handoff flow). `files`: `{"api": 1, "on": false}`: the file endpoint's version and whether this device may open files right now (a phone whose "Let this device open files" switch is on; always `false` for other PCs); older Quill Desktop builds leave it out (no file links). Needs an Idempotency-Key like every POST, but is allowed while control is off.
+Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15", "unlock": true, "lanUnlock": false}`. `control` says whether writes are allowed for this phone right now. `unlock`: this device must unlock before anything else works (see "Device lock and unlock"). `lanUnlock`: right now this device may unlock with its hardware key instead of the password (home-network unlock); older Quill Desktop builds leave it out (treat as `false`). `quill` is the Quill Desktop version (`"dev"` in local builds). `topics`: `{"api": 1, "on": true, "endCheck": true}`: topic mode is on (see "Topics") and `endCheck` says kmem has the end-of-session check (1.10.0+) so `endWait` can appear; older Quill Desktop builds leave it out (no topics: use the handoff flow). `files`: `{"api": 1, "on": false}`: the file endpoint's version and whether this device may open files right now (a phone whose "Let this device open files" switch is on; always `false` for other PCs); older Quill Desktop builds leave it out (no file links). `quillOperator`: `{"api": 1, "on": true}`: the Quill operator can run on this Quill Desktop (see "Quill operator"); older Quill Desktop builds leave it out. Needs an Idempotency-Key like every POST, but is allowed while control is off.
 
 ### GET /phone/sessions
 
@@ -495,7 +495,7 @@ Topic mode (topic tabs, docs/design/topic-tabs.md) is on while hello's `topics.o
 
 `"recent": true` appears (omitted otherwise) on the last five topics opened in Quill Desktop (its "Open a topic" card's Recent list); Quill Android can list them first.
 
-`live` is the id of the topic's live session, `""` when none. `status` is the first line of the `<topic>/status` fact (may be empty). `claimed` / `open`: task counts over the topic's scope. The kmem window's own topic (`kmem`) is not listed. Left out: `statusMs` (the age of the status fact; kmem 1.8.1 does not report it).
+`live` is the id of the topic's live session, `""` when none; for topic `quill` while the Quill operator can run it is the string `"operator"` (not a session id: open it with the Quill operator routes, see "Quill operator"). `status` is the first line of the `<topic>/status` fact (may be empty). `claimed` / `open`: task counts over the topic's scope. The kmem window's own topic (`kmem`) is not listed. Left out: `statusMs` (the age of the status fact; kmem 1.8.1 does not report it).
 
 ### Session: agents, endWait
 
@@ -515,7 +515,9 @@ Body: `{"openTopic": {"topic": "alpha"}}` (an existing topic) or `{"openTopic": 
 
 Response `{"v": 1, "session": {...}, "switched": false, "topic": {"slug": "alpha", "title": "Alpha"}}`. If the topic is live (a tab, the kmem window or a running session with that name) nothing new starts: `switched: true` and `session` is the live one (the desktop switches to it). Otherwise a fresh coordinator starts and gets the topic's first prompt.
 
-Errors: `422 bad_request` (both or neither field, `kmem`), `404 not_found` (unknown `topic`), `400 bad_request` (folder), `503 kmem_unavailable` (not in topic mode).
+`openTopic` `quill` (the Quill operator's topic) never opens a tab: the answer is `{"v": 1, "switched": true, "operator": true, "starting": false, "topic": {...}}` without `session`. `starting: true` while the operator is still starting (it has no session yet): show the Quill sheet and follow `GET /phone/quill`.
+
+Errors: `422 bad_request` (both or neither field, `kmem`), `404 not_found` (unknown `topic`), `400 bad_request` (folder), `409 blocked` (the topic is live outside Quill Desktop; take it over there), `503 kmem_unavailable` (not in topic mode).
 
 ### GET /phone/topics
 
@@ -537,6 +539,41 @@ The search of Quill Desktop's "Open a topic" card. `{"v": 1, "q": "garden", "mat
 - Topics screen from `GET /phone/topics`.
 - Show `endWait.blockers` while ending.
 - Handle `426 update_required` (an older flow) by telling the user to update.
+
+## Quill operator
+
+The Quill operator (docs/design/quill-operator.md) is Quill Desktop's hidden coordinator behind the Quill button. It never appears in `/phone/sessions` or under `/phone/session/{id}/...` (those answer 404 for it). Quill Android shows it as a bottom sheet with the chat, the status and a Changes list with Undo. The phone acts only as the user's hands: it chats, answers the operator's plan cards and undoes a settings change. There is **no route to change a setting** from the phone.
+
+Detect it with hello's `quillOperator` (`{"api": 1, "on": true}`) and the entry `"quillOperator"` in the `actions` of `GET /phone/sessions` (present only while the operator can run here). An older Quill Android knows neither and hides the operator until it updates. Every route below answers `503 quill_unavailable` when the operator is off, or kmem memory is off or kmem is not installed. Every write needs control mode (`403 control_off`).
+
+### GET /phone/quill
+
+```json
+{"v": 1, "api": 1, "state": "live", "status": "working", "waiting": "", "needs": {"count": 1, "unread": 1, "items": [{"key": "issue:t1", "title": "..."}]},
+ "actions": ["stop", "send"], "operator": {...}, "changes": [...]}
+```
+
+`state`: `off`, `starting`, `panels`, `elsewhere` (live in a tab or outside Quill Desktop), `live`, `failed`, `saving`, `stopping`. `status` (the status line): `off`, `idle`, `working` (a turn or subagents run) or `waiting`; `waiting` says for what: `plan`, `question`, `permission` or `""`. `needs`: what needs the user (its pending plan or question, `quill issue:` tasks); `unread` is what the Quill button's bubble counts. `actions` is what the writes accept now. `operator` is the summary also under `operator` in the other answers: `state`, `waiting`, `epoch`, `rev`, and (here and on items) `status`, `dot` (the button's running dot), `label` ("Quill operator"), `model`, `actions`, `unread`, and `reason` / `button` while it is not running.
+
+### GET /phone/quill/operator/items
+
+As `GET /phone/session/{id}/items` (same query: `limit`, `epoch`/`since`, `before`, delta; same item JSON, `id` is `"quill-operator"`), plus `operator` (the summary). Empty before it ever ran.
+
+### POST /phone/quill/operator/{op}
+
+`op`: `send {text}`, `answer {requestId, action, ...}` (the plan and question cards, as `/phone/session/{id}/answer`; plan-first rules apply unchanged), `interrupt`, `queue/delete`, `queue/send-now`, `start`, `stop`, `restart`. The answer has the session route's fields plus `operator`. `409 stale` when the state doesn't offer the op (`start` while it runs, `send` while off), `409 not_running` for a chat op before it started, `409 blocked` for commands that are desktop-only. A message sent here counts as started by the user. `stop` runs the operator's end-of-session check, as Quill Desktop's Stop does.
+
+### GET /phone/quill/settings/changes
+
+`{"v": 1, "changes": [...]}`: the settings change log, newest first, at most 50 (also under `changes` in `GET /phone/quill`). Entry: `{"n": 3, "id": "animateSpeed", "label": "Text animation speed", "old": "normal", "new": "fast", "timeMs": ..., "why": "the user's request", "by": "operator", "undone": false, "canUndo": true}`. `canUndo` is true while the change is not undone and the setting still has the value it set.
+
+### POST /phone/quill/settings/undo
+
+Body `{"change": 3}` (the `n` of an entry). Restores the old value, as the Undo button on Quill Desktop. Answer `{"v": 1, "undone": 3, "changes": [...], "operator": {...}}`. `400 bad_request` (no number), `404 not_found` (not in the log), `409 stale` (already undone, the setting changed again since, or it can't change on this computer).
+
+### Stream, notification
+
+Stream change `{"type": "quill", "needs": {"count", "unread"}, "operator": {"state", "waiting", "epoch", "rev"}, "lastChange": 3}`: sent when any of it changes; re-read `GET /phone/quill/settings/changes` when `lastChange` moves. The existing `settings` change carries the setting values. Notification event type `quill`, title "Quill operator", body `needs approval: ...` / `has a question: ...` / `has a plan to approve: ...`, no session id; sent only while it waits and Quill Desktop is not showing it. Older apps drop unknown types.
 
 ## Control setting
 

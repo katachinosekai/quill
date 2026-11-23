@@ -27,7 +27,7 @@ type hiddenRoleDef struct {
 
 var hiddenRoles = map[string]hiddenRoleDef{
 	roleKmem:  {title: "kmem assistant", owner: "live in the kmem window", phone: (*desk).kmemPhoneEvent},
-	roleQuill: {title: "Quill operator", owner: "live in the Quill operator"},
+	roleQuill: {title: "Quill operator", owner: "live in the Quill operator", phone: (*desk).quillPhoneEvent},
 }
 
 // hiddenRoleOr: role, or "kmem" for a hidden entry stored without one.
