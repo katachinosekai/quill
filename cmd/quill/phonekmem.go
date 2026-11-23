@@ -305,7 +305,23 @@ func kmemNeedsBody(n kmemNeeds, sc func(string) string) map[string]any {
 	if n.MaintReport != "" {
 		report = sc(filepath.Base(n.MaintReport))
 	}
+	// maintAge: the newest report's age ("today 11:46", "14 h ago"), "" when
+	// unknown; maintWarnings: its warning count (0 = nothing to show).
+	// binPurgeable: bin items `kmem trash empty` purges now (-1 = unknown);
+	// binFirstPurgeable: unix ms when the next item becomes purgeable (0 = none waits).
+	maintAge := formatMaintAge(n.MaintAt, kmemNow())
+	if maintAge == "" {
+		maintAge = n.MaintAgeText
+	}
+	binPurgeable, binFirst := -1, int64(0)
+	if n.BinKnown {
+		binPurgeable = n.BinPurgeable
+		if !n.BinFirst.IsZero() {
+			binFirst = n.BinFirst.UnixMilli()
+		}
+	}
 	return map[string]any{"count": n.Count(), "bin": n.Bin, "audit": sc(n.Audit), "maint": n.Maint, "maintReport": report,
+		"maintAge": sc(maintAge), "maintWarnings": n.Maint, "binPurgeable": binPurgeable, "binFirstPurgeable": binFirst,
 		"rolloutWait": sc(n.RolloutWait), "issues": list(n.Issues), "userTasks": list(n.UserTasks)}
 }
 

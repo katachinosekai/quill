@@ -91,7 +91,7 @@ func TestKmemPanel(t *testing.T) {
 		if !strings.Contains(over, "quill/decisions (13 KB)") || !strings.Contains(over, "rules: read") {
 			t.Fatalf("overview shows the brief and oversized sections: %s", over)
 		}
-		if !strings.Contains(over, "Waiting for you (1)") || !strings.Contains(over, "1 item(s) in the recycle bin") {
+		if !strings.Contains(over, "Waiting for you (1)") || !strings.Contains(over, "1 item in the recycle bin") {
 			t.Fatalf("overview lists what kmem waits on the user for: %s", over)
 		}
 		for _, ti := range p.tabs.Items {

@@ -232,6 +232,8 @@ func (d *desk) readKmemPanelData(withStatus bool) (*kmemPanelData, bool) {
 		tasks[i] = t.kmemTask
 	}
 	needs := parseKmemNeeds(brief.Brief, tasks)
+	kmemMaintInfo(&needs, brief.Brief)
+	d.kmemBinInfo(&needs)
 	needs.RolloutWait = d.readRolloutWait()
 	data := &kmemPanelData{brief: brief.Brief, topics: parseTopics(topicsOut), handoffs: hs.Handoffs, tasks: tasks, needs: needs, rows: tr.Tasks, status: map[string]string{}, read: time.Now()}
 	// Assumption (kmem 1.8.1 has no status facts yet): a topic's status
@@ -275,7 +277,7 @@ func (p *kmemPanel) render() {
 			ov = append(ov, list)
 		}
 	}
-	ov = append(ov, widget.NewSeparator(), caption(fmt.Sprintf("%d topics, %d handoffs, %d open tasks, %d item(s) in the recycle bin (Settings → General → Memory (kmem)).", len(data.topics), len(data.handoffs), len(data.tasks), needs.Bin)))
+	ov = append(ov, widget.NewSeparator(), caption(fmt.Sprintf("%d topics, %d handoffs, %d open tasks; %s (Settings → General → Memory (kmem)).", len(data.topics), len(data.handoffs), len(data.tasks), needs.binText(kmemNow()))))
 	setBox(p.over, ov...)
 	setBox(p.hand, p.topicsRows(data)...)
 	// Tasks, grouped by topic
@@ -347,7 +349,7 @@ func (p *kmemPanel) waitingRows(n kmemNeeds) []fyne.CanvasObject {
 		rows = append(rows, row(fmt.Sprintf("%d kmem issue(s) from other sessions: %s", len(n.Issues), strings.Join(titles, "; ")), btn))
 	}
 	if n.Bin > 0 {
-		rows = append(rows, row(fmt.Sprintf("%d item(s) in the recycle bin wait for you to restore or delete them.", n.Bin),
+		rows = append(rows, row(n.binText(kmemNow())+".",
 			widget.NewButtonWithIcon("Review bin", theme.DeleteIcon(), func() { d.showBinDialogOn(p.parent()) })))
 	}
 	if n.Audit != "" {
@@ -364,7 +366,7 @@ func (p *kmemPanel) waitingRows(n kmemNeeds) []fyne.CanvasObject {
 		if n.MaintReport != "" {
 			about += " (report " + n.MaintReport + ")"
 		}
-		rows = append(rows, row(fmt.Sprintf("Daily maintenance has %d warning(s).", n.Maint), open, ask("Explain", about+".")))
+		rows = append(rows, row(n.maintLine(kmemNow()), open, ask("Explain", about+".")))
 	}
 	if n.RolloutWait != "" {
 		rows = append(rows, row("A kmem rollout is paused, waiting for you: "+n.RolloutWait, nil))

@@ -72,6 +72,15 @@ func (b *binView) changed() {
 	}
 }
 
+// binLines turns bin items back into kmem's head lines for parseBinWait.
+func binLines(bin []binItem) string {
+	var sb strings.Builder
+	for _, it := range bin {
+		sb.WriteString("[" + it.ID + "] " + it.Head + "\n")
+	}
+	return sb.String()
+}
+
 func (b *binView) fill(bin []binItem) {
 	empty := widget.NewButtonWithIcon("Empty bin...", theme.DeleteIcon(), b.emptyBin)
 	empty.Importance = widget.DangerImportance
@@ -81,6 +90,11 @@ func (b *binView) fill(bin []binItem) {
 	if len(bin) == 0 {
 		rows = append(rows, widget.NewLabel("The recycle bin is empty."))
 		empty.Disable()
+	} else {
+		// kmem trash empty purges only items binned 7+ days, unless you
+		// override at its prompt: say what that means right now.
+		w := parseBinWait(binLines(bin), kmemNow())
+		rows = append(rows, boldLabel(w.binLine(kmemNow())+"."))
 	}
 	for _, it := range bin {
 		it := it
@@ -165,7 +179,7 @@ func (b *binView) showBinItem(it binItem) {
 func (b *binView) emptyBin() {
 	d := b.d
 	dialog.ShowConfirm("Empty the recycle bin?",
-		"A terminal opens and runs kmem's final purge (kmem trash empty). kmem lists what will be purged and asks you to type the confirmation there. Purged text is gone for good, also from backups.",
+		"A terminal opens and runs kmem's final purge (kmem trash empty). kmem purges only items binned 7+ days (you can override at its prompt), lists what will be purged and asks you to type the confirmation there. Purged text is gone for good, also from backups.",
 		func(ok bool) {
 			if !ok {
 				return

@@ -44,13 +44,20 @@ type kmemTask struct {
 
 // kmemNeeds is what kmem waits on the user for.
 type kmemNeeds struct {
-	Bin         int
-	Audit       string
-	Maint       int    // maintenance warnings
-	MaintReport string // the report file named in the brief
-	UserTasks   []kmemTask
-	Issues      []kmemTask // open "kmem issue:" tasks for the kmem operator
-	RolloutWait string     // a paused staged rollout ("stage: error"), or ""
+	Bin          int
+	Audit        string
+	Maint        int       // maintenance warnings
+	MaintReport  string    // the report file named in the brief
+	MaintSeen    bool      // the brief (or the maint folder) named a newest report
+	MaintAt      time.Time // when that report ran (from its file name)
+	MaintAgeText string    // kmem's own age wording ("14 h ago"), when the time is unknown
+	BinKnown     bool      // BinTotal/BinPurgeable/BinFirst were read from kmem trash list
+	BinTotal     int       // items in the bin
+	BinPurgeable int       // binned 7+ days (kmem trash empty purges these)
+	BinFirst     time.Time // when the next item becomes purgeable; zero when none waits
+	UserTasks    []kmemTask
+	Issues       []kmemTask // open "kmem issue:" tasks for the kmem operator
+	RolloutWait  string     // a paused staged rollout ("stage: error"), or ""
 }
 
 // kmemIssue: a report from a session for the kmem operator (user 2026-11-22).
@@ -71,8 +78,12 @@ func parseKmemNeeds(brief string, tasks []kmemTask) kmemNeeds {
 	}
 	if m := briefMaint.FindStringSubmatch(brief); m != nil {
 		n.Maint, _ = strconv.Atoi(m[1])
-		if n.Maint > 0 {
-			n.MaintReport = strings.TrimSpace(m[2])
+		n.MaintSeen = true
+		if p := strings.TrimSpace(m[2]); p != "" {
+			n.MaintAt = maintTimeFromPath(p)
+			if n.Maint > 0 {
+				n.MaintReport = p
+			}
 		}
 	}
 	for _, l := range strings.Split(brief, "\n") {
@@ -233,6 +244,8 @@ func (d *desk) readKmemNeeds() (kmemNeeds, bool) {
 	}
 	d.kmemJSON(&ts, "task", "list")
 	n := parseKmemNeeds(brief.Brief, ts.Tasks)
+	kmemMaintInfo(&n, brief.Brief)
+	d.kmemBinInfo(&n)
 	n.RolloutWait = d.readRolloutWait()
 	return n, true
 }
