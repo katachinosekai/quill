@@ -146,17 +146,26 @@ func fadeSegs(segs []widget.RichTextSegment, b *fadeBudget) []widget.RichTextSeg
 
 // drawLiveFaded draws the live paragraph md with the newest characters
 // faded. A left-aligned paragraph without a lettered list is drawn into one
-// reused RichText (re-parsed in place: no new objects per frame); centred
-// ones and lettered lists are laid out in blocks (markdown), which are built
-// anew like every redraw of the live paragraph was before.
+// reused RichText (re-parsed in place: no new objects per frame). Centred
+// ones and lettered lists are laid out in blocks (markdownFade); the blocks
+// of a frame are merged into the ones on screen (mergeBlocks) while the
+// layout keeps its shape, so the objects stay the same from frame to frame.
 func (v *chatView) drawLiveFaded(st *streamView, md string, counts [textFadeSteps]int) {
 	if v.d.center || hasLetteredRun(md) {
 		st.liveRT = nil
 		b := fadeBudget{counts}
-		st.live.Objects = []fyne.CanvasObject{msgText(v.markdownFade(md, &b))}
+		fresh := v.markdownFade(md, &b)
+		if st.liveTree != nil && sameBlocks(st.liveTree, fresh) {
+			mergeBlocks(st.liveTree, fresh)
+			st.liveTree.Refresh()
+			return
+		}
+		st.liveTree = fresh
+		st.live.Objects = []fyne.CanvasObject{msgText(fresh)}
 		st.live.Refresh()
 		return
 	}
+	st.liveTree = nil
 	if st.liveRT == nil {
 		rt := widget.NewRichText()
 		rt.Wrapping = fyne.TextWrapWord
@@ -187,4 +196,44 @@ func isFadeName(n fyne.ThemeColorName) bool {
 		}
 	}
 	return false
+}
+
+// sameBlocks: the blocks of a and b have the same shape (containers with as
+// many children, RichTexts at the leaves), so b's text can move into a.
+func sameBlocks(a, b fyne.CanvasObject) bool {
+	switch x := a.(type) {
+	case *widget.RichText:
+		_, ok := b.(*widget.RichText)
+		return ok
+	case *fyne.Container:
+		y, ok := b.(*fyne.Container)
+		if !ok || len(x.Objects) != len(y.Objects) {
+			return false
+		}
+		for i := range x.Objects {
+			if !sameBlocks(x.Objects[i], y.Objects[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// mergeBlocks moves the segments (and column layouts) of fresh blocks into
+// the matching shown ones (sameBlocks said they match); the caller refreshes.
+func mergeBlocks(cur, fresh fyne.CanvasObject) {
+	switch x := cur.(type) {
+	case *widget.RichText:
+		y := fresh.(*widget.RichText)
+		x.Segments, x.Wrapping = y.Segments, y.Wrapping
+	case *fyne.Container:
+		y := fresh.(*fyne.Container)
+		if y.Layout != nil {
+			x.Layout = y.Layout
+		}
+		for i := range x.Objects {
+			mergeBlocks(x.Objects[i], y.Objects[i])
+		}
+	}
 }

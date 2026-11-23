@@ -1244,6 +1244,7 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 		l.Wrapping = fyne.TextWrapWord
 		l.Alignment = v.align()
 		parts = append(parts, l)
+		v.noteButtons(it.Seq, "none")
 		return questionCard(parts, false)
 	}
 	type pick struct {
@@ -1285,7 +1286,7 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 		parts = append(parts, pk.other, padTop(4))
 		picks = append(picks, pk)
 	}
-	send := widget.NewButtonWithIcon("Send answers", theme.ConfirmIcon(), func() {
+	send := widget.NewButtonWithIcon("Send answers", theme.ConfirmIcon(), v.guarded(func() {
 		answers := map[string]string{}
 		for _, pk := range picks {
 			var chosen []string
@@ -1306,15 +1307,17 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 			return
 		}
 		v.d.answerQuestions(owner, it, answers)
-	})
+	}))
 	ok := v.d.canAnswer(v.s)
 	if !ok {
 		send.Disable()
 	}
 	sendG := glowWrap(send, colIdle, ok)
-	skip := glowButton("Skip", theme.CancelIcon(), colError, ok, func() { v.d.answer(owner, it, protocol.Deny) })
+	skip := glowButton("Skip", theme.CancelIcon(), colError, ok, v.guarded(func() { v.d.answer(owner, it, protocol.Deny) }))
 	parts = append(parts, v.buttonRow(sendG, skip))
-	return questionCard(parts, true)
+	card := v.fadeIn(it.Seq, questionCard(parts, true))
+	v.noteButtons(it.Seq, "question")
+	return card
 }
 
 func questionCard(parts []fyne.CanvasObject, pending bool) fyne.CanvasObject {
@@ -1353,9 +1356,9 @@ func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
 	parts = append(parts, permDetail(v, it)...)
 	if it.PermState == chat.PermPending {
 		ok := v.d.canAnswer(v.s)
-		allow := glowButton("Allow", theme.ConfirmIcon(), colIdle, ok, func() { v.d.answer(owner, it, protocol.Allow) })
-		always := glowButton("Allow always (this session)", nil, colAccent, ok, func() { v.d.answer(owner, it, protocol.AllowAlways) })
-		deny := glowButton("Deny", theme.CancelIcon(), colError, ok, func() { v.d.answer(owner, it, protocol.Deny) })
+		allow := glowButton("Allow", theme.ConfirmIcon(), colIdle, ok, v.guarded(func() { v.d.answer(owner, it, protocol.Allow) }))
+		always := glowButton("Allow always (this session)", nil, colAccent, ok, v.guarded(func() { v.d.answer(owner, it, protocol.AllowAlways) }))
+		deny := glowButton("Deny", theme.CancelIcon(), colError, ok, v.guarded(func() { v.d.answer(owner, it, protocol.Deny) }))
 		parts = append(parts, v.buttonRow(allow, always, deny))
 	} else {
 		parts = append(parts, v.muted(permStateText(it.PermState), fontBody))
@@ -1368,7 +1371,14 @@ func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
 	r.CornerRadius = 10
 	r.StrokeColor = border
 	r.StrokeWidth = 1.5
-	return container.NewVBox(padTop(4), container.NewStack(r, container.NewPadded(container.NewVBox(parts...))), padTop(4))
+	card := fyne.CanvasObject(container.NewVBox(padTop(4), container.NewStack(r, container.NewPadded(container.NewVBox(parts...))), padTop(4)))
+	if it.PermState == chat.PermPending {
+		card = v.fadeIn(it.Seq, card)
+		v.noteButtons(it.Seq, "permission")
+	} else {
+		v.noteButtons(it.Seq, "none")
+	}
+	return card
 }
 
 func permStateText(s chat.PermState) string {

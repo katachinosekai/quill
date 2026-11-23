@@ -96,6 +96,7 @@ type streamView struct {
 	fadeDirty bool               // the last draw had faded characters
 	lastFade  [textFadeSteps]int // the fade steps of the last draw
 	liveRT    *widget.RichText   // the live paragraph's one RichText, redrawn in place
+	liveTree  fyne.CanvasObject  // centred / lettered: the live blocks, updated in place
 }
 
 func (d *desk) animateText() bool {
@@ -275,7 +276,7 @@ func (v *chatView) drawStream(st *streamView, iv *itemView) {
 		}
 		st.box.Objects = append(objs, st.live)
 		st.done = len(done)
-		st.liveRT = nil // a new live paragraph starts
+		st.liveRT, st.liveTree = nil, nil // a new live paragraph starts
 		st.box.Refresh()
 	}
 	counts, total := st.fadeCounts(streamNow())
@@ -287,7 +288,7 @@ func (v *chatView) drawStream(st *streamView, iv *itemView) {
 		st.fadeDirty = total > 0
 		switch {
 		case strings.TrimSpace(live) == "":
-			st.liveRT = nil
+			st.liveRT, st.liveTree = nil, nil
 			st.live.Objects = nil
 			st.live.Refresh()
 		case st.animated:
