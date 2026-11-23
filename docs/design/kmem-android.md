@@ -255,6 +255,18 @@ As built (phase 3, `cmd/quill/phonekmemmemory.go`):
 `GET /phone/kmem/bin` (phase 4) → `{"v": 1, "items": [{"id", "kind",
 "days", "by", "reason", "title"}]}` (from `parseBin`).
 
+As built (phase 4, `cmd/quill/phonekmemwrite.go`): `GET /phone/kmem/bin` →
+`{"v": 1, "items": [{"id": "f1a2b3c", "kind": "fact|task", "days": 2.5, "by",
+"reason", "topic", "title"}], "truncated": false}` from `kmem trash list`
+(`title` is kmem's 200-character preview); `GET /phone/kmem/task/{id}` →
+`{"v": 1, "id", "text", "truncated"}` (`kmem show`, notices dropped, 32 KiB),
+`404 not_found` for an unknown or purged id. Both scrubbed, one kmem process
+per phone (`409 kmem_busy`), `503 kmem_unavailable`. The tasks list's
+`actions` is now real: `["done"]` for an open task, `["done", "release"]` for
+a claim that is `gone`, `leaseExpired` or `handoff` (and not blocked), `[]`
+for `live` and `lease` claims and done tasks. It follows the claim rules
+only: with control off every write is still `403 control_off`.
+
 ### 4.3 The assistant session
 
 It stays hidden: not in `/phone/sessions`, not in `order`, and the existing
@@ -333,6 +345,63 @@ event for finished turns or errors.
 dialog). Quill Desktop runs them as `kmem --as quill-phone ...`; the result
 records "from Quill Android (<phone name>)". Answers: `{"v": 1, "task": {…}}`
 or `{"v": 1, "restored": id}`.
+
+As built (phase 4, `cmd/quill/phonekmemwrite.go`; replaces the one-step
+routes above with a two-step confirm id):
+
+| Step | Route | Body | Answer |
+|---|---|---|---|
+| prepare | `POST /phone/kmem/task/{id}/done/prepare` | `{"result": "…"}` | `{"v": 1, "confirm": "c<16 hex>", "action", "id", "summary", "commands": ["kmem …"], "expiresS": 60}` |
+| prepare | `POST /phone/kmem/task/{id}/release/prepare` | `{}` | as above |
+| prepare | `POST /phone/kmem/bin/{id}/restore/prepare` | `{}` | as above |
+| commit | `POST /phone/kmem/task/{id}/done/commit` (`release`, `bin/{id}/restore` alike) | `{"confirm": "c…"}` | `{"v": 1, "action", "id", "output": "kmem's answer lines"}` |
+
+- prepare reads kmem fresh (`kmem task list --all --json`, `kmem trash
+  list`), checks the action and answers the exact kmem commands it will run
+  (`commands`, for the confirm dialog) and a human `summary`. Nothing is
+  written.
+- Confirm ids are single-use, live 60 s and are bound to the phone, the
+  action, the task or bin id and the state prepare saw (status, owner, claim
+  state, blocked; a bin item's line). commit with another phone's id or an
+  unknown one: `409 confirm_invalid` (another phone's id stays valid for its
+  phone); with the wrong action or target: `409 confirm_invalid` and the id is
+  spent; after 60 s: `409 confirm_expired`; used ids: `409 confirm_invalid`.
+  commit reads kmem again: a changed state is `409 stale` (prepare again).
+  At most 8 open ids per phone.
+- Claim rules (kmem rule 19; never `--force`). kmem lets only the claim's
+  owner release or finish a claimed task, and lets the same name take over a
+  gone, lease-expired or handed-over claim at once, so:
+  - open task, Done: `kmem --as "Quill Android" task done ID --verified-by
+    "user: from Quill Android (<phone name>)" -- RESULT`.
+  - claim `gone`, `leaseExpired` or `handoff` (Quill Desktop's own ended
+    sessions are `gone`): `kmem --as <owner> task claim ID`, then Done:
+    `kmem --as <owner> task done ID --verified-by "user: from Quill Android
+    (<phone name>)" -- RESULT`; Release: `kmem --as <owner> task note ID --
+    "released by the user from Quill Android (<phone name>)"` and `kmem --as
+    <owner> task release ID`. kmem's claim itself refuses a live or leased
+    claim, so a session that claimed in between is never overridden.
+  - `live` or `lease` (liveness unknown, lease running), blocked claims, done
+    tasks, Release of an open task: `409 stale` with the reason (a live
+    claim: "a live session's claim is never taken (kmem rule 19)").
+  - Restore: `kmem --as "Quill Android" trash restore ID`; an item no longer
+    in the bin is `409 stale`.
+- Done's result is required: control characters become spaces, runs of
+  spaces one, 1-300 characters, not `-h`/`--help` (kmem would print help);
+  it is passed after `--` so kmem never reads it as options. `400
+  bad_request` otherwise.
+- A kmem command that fails or doesn't print its success line (`CLAIMED`,
+  `noted`, `released`, `done`, `restored`) stops the run: `409 kmem_refused`
+  with kmem's message (and what already ran). A claim that succeeded before
+  a failed release stays with the owner's name like a handoff claim.
+- Every POST needs control mode (`403 control_off`), an unlocked phone, an
+  `Idempotency-Key` and the 10 writes/s limit (phone server), and kmem on
+  (`503 kmem_unavailable`); one kmem process per phone (`409 kmem_busy`).
+  Answers are scrubbed (§5.5). After a commit the overview cache is dropped,
+  the needs count is re-read (so the `kmem` stream change follows) and an open
+  kmem window reloads.
+- No other POST exists under `/phone/kmem/` besides the assistant's routes:
+  nothing runs `kmem trash empty` (a test posts the likely paths and checks
+  that kmem is never called with `empty` or `--force`).
 
 ## 5. Security
 
