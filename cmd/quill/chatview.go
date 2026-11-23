@@ -146,11 +146,12 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 		v.touched()
 		y := v.scroll.Offset.Y
 		switch {
-		case v.atBottom():
+		case y < v.lastY-2 && !v.pinned():
+			// Any upward scroll stops following, however small.
+			v.follow = false
+		case y >= v.lastY-2 && v.atBottom():
 			v.follow = true
 			v.newBelow = false
-		case y < v.lastY-2:
-			v.follow = false
 		}
 		v.lastY = y
 		v.syncJump()
@@ -675,12 +676,32 @@ func (v *chatView) refreshItem(it *chat.Item, iv *itemView) {
 			iv.holder.Refresh()
 		}
 	}
-	if h := iv.holder.MinSize().Height; h != iv.height {
-		iv.height = h
+	v.settleHeight(iv)
+}
+
+// settleHeight: after an item's content changed, relayout. Following, stay at
+// the bottom; reading, keep the view on the same message (an item wholly above
+// the viewport shifts the offset by its height change).
+func (v *chatView) settleHeight(iv *itemView) {
+	h := iv.holder.MinSize().Height
+	if h == iv.height {
+		return
+	}
+	old := iv.height
+	iv.height = h
+	if v.follow && !v.steps {
 		relayout(v.box)
-		if v.follow && !v.steps {
-			v.scrollBottom()
-		}
+		v.scrollBottom()
+		return
+	}
+	top := iv.holder.Position().Y + v.box.Position().Y
+	relayout(v.box)
+	if !v.follow && old > 0 && top+old <= v.scroll.Offset.Y {
+		v.autoScrolling = true
+		v.scroll.Offset = fyne.NewPos(0, max(0, v.scroll.Offset.Y+h-old))
+		v.reflow()
+		v.lastY = v.scroll.Offset.Y
+		v.autoScrolling = false
 	}
 }
 

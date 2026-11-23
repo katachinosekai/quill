@@ -271,11 +271,5 @@ func (v *chatView) drawStream(st *streamView, iv *itemView) {
 		}
 		st.live.Refresh()
 	}
-	if h := iv.holder.MinSize().Height; h != iv.height {
-		iv.height = h
-		relayout(v.box)
-		if v.follow && !v.steps {
-			v.scrollBottom()
-		}
-	}
+	v.settleHeight(iv)
 }
