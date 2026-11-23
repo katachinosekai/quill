@@ -145,14 +145,13 @@ func TestBadgeQuestionStaysUntilAnswered(t *testing.T) {
 			t.Fatal("the next plan badges")
 		}
 		d.markKmemSeen(true)
-		if d.kmemBubble.box.Visible() {
-			t.Fatal("Mark all read dismisses the question")
-		}
-		_ = p2
-		s.conv.AddPlan()
-		d.kmemAssistRefresh(a)
 		if d.kmemBubble.text.Text != "1" {
-			t.Fatal("a different question badges again")
+			t.Fatal("Mark all read leaves an unanswered question badged (user 2026-11-23)")
+		}
+		p2.PermState = chat.PermAllowed
+		d.kmemAssistRefresh(a)
+		if d.kmemBubble.box.Visible() {
+			t.Fatal("answered after Mark all read: the badge goes")
 		}
 	})
 }

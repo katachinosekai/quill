@@ -20,8 +20,8 @@ import (
 //
 // Every item has a seen record (signature and time, in the preferences). An
 // item is unread when it has no record or its signature changed since it was
-// seen. Showing it in the kmem window marks it seen; "Mark all read" also
-// dismisses the assistant's question. The recycle bin, audit problems and user
+// seen. Showing it in the kmem window marks it seen; "Mark all read"
+// only marks the other items read: the assistant's question or plan stays badged until answered. The recycle bin, audit problems and user
 // tasks stay on the window's Overview ("Waiting for you") but do not badge.
 // Settings → General → Memory (kmem) can turn the badge off.
 const (
@@ -38,7 +38,7 @@ type badgeItem struct {
 type seenRec struct {
 	Sig       string    `json:"sig"`
 	At        time.Time `json:"at"`
-	Dismissed bool      `json:"dismissed,omitempty"` // Mark all read on a sticky item
+	Dismissed bool      `json:"dismissed,omitempty"` // unused since 2026-11-23 (questions stay until answered); kept so old prefs parse
 }
 
 // badgeItems lists what needs the user. waitKind/waitSig: the assistant's
@@ -66,7 +66,9 @@ func unreadBadgeItems(items []badgeItem, seen map[string]seenRec) []badgeItem {
 	var out []badgeItem
 	for _, it := range items {
 		r, ok := seen[it.Key]
-		if !ok || r.Sig != it.Sig || it.Sticky && !r.Dismissed {
+		// A sticky item (the assistant's question or plan) badges until it is
+		// answered (gone), even after Mark all read (user 2026-11-23).
+		if !ok || r.Sig != it.Sig || it.Sticky {
 			out = append(out, it)
 		}
 	}
@@ -158,7 +160,7 @@ func (d *desk) updateKmemBadge() {
 }
 
 // markKmemSeen records that the items were shown in the kmem window (UI
-// thread). all (Mark all read) also dismisses the assistant's sticky question.
+// thread). all (Mark all read) marks every shown item; a pending question still badges until answered.
 func (d *desk) markKmemSeen(all bool) {
 	items := d.kmemBadgeNow()
 	seen := d.loadKmemSeen()
@@ -166,10 +168,10 @@ func (d *desk) markKmemSeen(all bool) {
 	changed := false
 	for _, it := range items {
 		old, ok := seen[it.Key]
-		if ok && old.Sig == it.Sig && (old.Dismissed || !all || !it.Sticky) {
+		if ok && old.Sig == it.Sig {
 			continue // already recorded: keep its first seen time
 		}
-		seen[it.Key] = seenRec{Sig: it.Sig, At: now, Dismissed: all && it.Sticky}
+		seen[it.Key] = seenRec{Sig: it.Sig, At: now}
 		changed = true
 	}
 	if changed {
