@@ -20,7 +20,7 @@ import (
 // task tc6efac, user decisions fd77947): read-only /phone/kmem/overview,
 // /phone/kmem/tasks and /phone/kmem/topics, the "kmem" entry in hello and the
 // "kmem" stream change that drives the kmem button's bubble and needs-you
-// mark (t90b538). The reads use the kmem window's loader
+// mark (t90b538). Phase 3 (phonekmemmemory.go) adds find, get and fact. The reads use the kmem window's loader
 // (readKmemPanelData), cached for kmemPhoneCacheFor and shared by all phones;
 // each phone runs at most one kmem read at a time (409 kmem_busy). Text that
 // leaves Quill Desktop has the home folder replaced by ~, the user name by
@@ -45,6 +45,7 @@ type phoneKmem struct {
 	at      time.Time
 	loading chan struct{}
 	busy    map[string]bool // phone id -> a kmem read of this phone runs
+	find    kmemFindLimit   // phase 3: find at most once a second per phone
 }
 
 // begin marks a kmem read for phone; false when one already runs (409).
@@ -157,6 +158,12 @@ func (a *phoneAPI) kmemRoute(w http.ResponseWriter, r *http.Request, path string
 			return
 		}
 		folders.WriteJSON(w, http.StatusOK, kmemTopicsBody(data.topics, kmemScrubber()))
+	case "kmem/find":
+		a.kmemFind(w, r, phone)
+	case "kmem/get":
+		a.kmemGet(w, r, phone)
+	case "kmem/fact":
+		a.kmemFact(w, r, phone)
 	default:
 		folders.WriteError(w, http.StatusNotFound, "not_found", "unknown path")
 	}
