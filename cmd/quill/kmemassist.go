@@ -498,7 +498,7 @@ func (d *desk) kmemAssistRefresh(a *kmemAssist) {
 	}
 	src := "kmem assistant setting"
 	if d.app.Preferences().String(prefKmemAssistModel) == "" {
-		src = "New sessions"
+		src = optAssistSame // "Online Claude (default)": the setting is unset
 	}
 	m := "model: " + s.model + " (" + src + ")"
 	if d.kmemAssistModelChanged(a) {

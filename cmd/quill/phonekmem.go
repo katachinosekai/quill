@@ -389,7 +389,7 @@ func (a *phoneAPI) kmemAssistSummary(full bool) map[string]any {
 	}
 	src := "kmem assistant setting"
 	if d.app.Preferences().String(prefKmemAssistModel) == "" {
-		src = "New sessions"
+		src = optAssistSame // "Online Claude (default)": the setting is unset
 	}
 	out["model"], out["modelSource"] = model, src
 	out["actions"] = d.kmemAssistActions(as) // phase 2: what /phone/kmem/assistant/* accepts now
