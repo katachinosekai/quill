@@ -1091,7 +1091,7 @@ func (v *chatView) toolBody(it *chat.Item, iv *itemView) []fyne.CanvasObject {
 		if it.HasResult && (len(it.Diff) == 0 || it.ResultError) {
 			res := it.Result
 			if len(res) > maxResultLen {
-				res = res[:maxResultLen] + "\n... (truncated)"
+				res = headText(res, maxResultLen) + "\n... (truncated)"
 			}
 			if strings.TrimSpace(res) == "" {
 				res = "(no output)"
@@ -1124,7 +1124,7 @@ func toolInputText(it *chat.Item) string {
 	}
 	s := buf.String()
 	if len(s) > maxResultLen {
-		s = s[:maxResultLen] + "\n... (truncated)"
+		s = headText(s, maxResultLen) + "\n... (truncated)"
 	}
 	return s
 }
@@ -1475,7 +1475,7 @@ func permDetail(v *chatView, it *chat.Item) []fyne.CanvasObject {
 		return nil
 	}
 	if len(in) > 1500 {
-		in = in[:1500] + "\n..."
+		in = headText(in, 1500) + "\n..."
 	}
 	return []fyne.CanvasObject{mono(in)}
 }
@@ -1874,7 +1874,7 @@ func toolNaturalWidth(it *chat.Item) float32 {
 	if it.HasResult {
 		res := it.Result
 		if len(res) > maxResultLen {
-			res = res[:maxResultLen]
+			res = headText(res, maxResultLen)
 		}
 		text += "\n" + res
 	}

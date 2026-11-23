@@ -247,7 +247,7 @@ func redact(text string, o redactOptions) string {
 func reportBody(r crashReport) string {
 	out := r.Output
 	if len(out) > crashBodyMax {
-		out = "...\n" + out[len(out)-crashBodyMax:]
+		out = "...\n" + tailText(out, crashBodyMax)
 	}
 	return fmt.Sprintf("Quill closed unexpectedly and restarted on its own. Reported from inside Quill after the user reviewed this text.\n\n"+
 		"- Version: %s (%s)\n- OS: %s\n- Desktop: %s\n- Exit: %s\n- When: %s\n\n```\n%s\n```\n",
@@ -344,7 +344,7 @@ func ghCreate(title, body string) (string, error) {
 
 func issueURL(title, body string) *url.URL {
 	if len(body) > crashURLBodyMax {
-		body = body[:crashURLBodyMax] + "\n...(cut to fit a link; the full report is in Quill's crash folder)\n```"
+		body = headText(body, crashURLBodyMax) + "\n...(cut to fit a link; the full report is in Quill's crash folder)\n```"
 	}
 	u, _ := url.Parse("https://github.com/" + crashRepo + "/issues/new")
 	q := u.Query()
@@ -479,7 +479,7 @@ func (d *desk) crashPreviewStep(path, title, body, sig string) {
 		t := redact(titleE.Text, redactOptions{})
 		b := redact(bodyE.Text, redactOptions{})
 		if len(b) > crashBodyMax+4096 {
-			b = b[:crashBodyMax+4096]
+			b = headText(b, crashBodyMax+4096)
 		}
 		send.Disable()
 		go func() {

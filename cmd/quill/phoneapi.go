@@ -793,6 +793,27 @@ func capText(s string, n int) (string, bool) {
 	return s[:cut], true
 }
 
+// headText keeps at most n bytes of s, never ending inside a UTF-8 character.
+func headText(s string, n int) string {
+	h, _ := capText(s, n)
+	return h
+}
+
+// tailText keeps at most n trailing bytes of s, never starting inside a UTF-8 character.
+func tailText(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if len(s) <= n {
+		return s
+	}
+	cut := len(s) - n
+	for cut < len(s) && !utf8Start(s[cut]) {
+		cut++
+	}
+	return s[cut:]
+}
+
 func utf8Start(b byte) bool { return b&0xc0 != 0x80 }
 
 func requestID(it *chat.Item) string {

@@ -256,7 +256,7 @@ func gitDiff(dir string) (string, error) {
 		diff, _ = run("--no-pager", "diff")
 	}
 	if len(diff) > 400000 {
-		diff = diff[:400000] + "\n… (cut at 400 KB)"
+		diff = headText(diff, 400000) + "\n… (cut at 400 KB)"
 	}
 	if strings.TrimSpace(status) == "" {
 		return "No changes in " + tildePath(dir) + ".", nil

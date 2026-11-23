@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/katachinosekai/quill/internal/chat"
 )
@@ -450,5 +451,35 @@ func TestPhoneAPIWrites(t *testing.T) {
 	h.ui(func() { h.d.app.Preferences().SetBool("phoneControl", false) })
 	if code, m, _ := a.do("POST", "/phone/usage/resume", key(), map[string]any{}); code != 403 || errCode(m) != "control_off" {
 		t.Fatalf("turning control off stops writes: %d %v", code, m)
+	}
+}
+
+func TestHeadTailTextWholeChars(t *testing.T) {
+	for _, s := range []string{strings.Repeat("😀", 10), strings.Repeat("日本語", 7), "ab" + strings.Repeat("é😀日", 6)} {
+		for n := 0; n <= len(s)+1; n++ {
+			h, tl := headText(s, n), tailText(s, n)
+			if !utf8.ValidString(h) || !strings.HasPrefix(s, h) || len(h) > n {
+				t.Fatalf("headText(%q, %d) = %q", s, n, h)
+			}
+			if !utf8.ValidString(tl) || !strings.HasSuffix(s, tl) || len(tl) > n {
+				t.Fatalf("tailText(%q, %d) = %q", s, n, tl)
+			}
+			if n >= len(s) && (h != s || tl != s) {
+				t.Fatalf("short text changed at n=%d", n)
+			}
+		}
+	}
+	if got := headText("a😀", 2); got != "a" {
+		t.Fatalf("got %q", got)
+	}
+	if got := tailText("😀b", 2); got != "b" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestIssueURLBodyCutKeepsRunes(t *testing.T) {
+	u := issueURL("t", strings.Repeat("日", crashURLBodyMax))
+	if !utf8.ValidString(u.Query().Get("body")) || strings.ContainsRune(u.Query().Get("body"), utf8.RuneError) {
+		t.Fatal("body has a split character")
 	}
 }
