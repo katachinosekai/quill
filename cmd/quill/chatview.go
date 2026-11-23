@@ -2163,6 +2163,7 @@ func numberedChoiceQs(text string) (string, []numChoiceQ) {
 		first = i
 	}
 	var qs []numChoiceQ
+	body := lines[:first:first]
 	for _, l := range lines[first:] {
 		l = strings.TrimSpace(l)
 		if l == "" {
@@ -2170,6 +2171,14 @@ func numberedChoiceQs(text string) (string, []numChoiceQ) {
 		}
 		m := numLead.FindStringSubmatch(l)
 		rest := strings.TrimSpace(l[len(m[0]):])
+		// A numbered line that asks nothing is a plan step, not a question:
+		// it stays message text (user 2026-11-23: five steps drew as cards
+		// above the one real question).
+		_, _, hasOpts := parseChoices(rest)
+		if !hasOpts && !strings.Contains(codeOrURL.ReplaceAllString(rest, " "), "?") {
+			body = append(body, l)
+			continue
+		}
 		q := numChoiceQ{num: m[1], title: m[1] + ". " + strings.Trim(rest, "*_ ")}
 		if title, opts, ok := parseChoices(rest); ok {
 			q.title, q.opts = m[1]+". "+title, opts
@@ -2179,7 +2188,7 @@ func numberedChoiceQs(text string) (string, []numChoiceQ) {
 	if len(qs) < 2 {
 		return "", nil
 	}
-	return strings.Join(lines[:first], "\n"), qs
+	return strings.Join(body, "\n"), qs
 }
 
 func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
