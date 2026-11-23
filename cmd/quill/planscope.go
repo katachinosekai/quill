@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"io"
+	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
@@ -48,6 +53,28 @@ import (
 //   - when the Claude process exits (its subagents and jobs are gone).
 //
 // A reload hands the live state over with the session (handedGate).
+//
+// A restart (t719201, user 2026-11-22). Quitting Quill Desktop stops every
+// Claude process, so a quit and start begins with fresh processes and no
+// grants. After a crash the keeper (keeper_unix.go) still holds the Claude
+// processes and reattaches them; it keeps the latest copy of this state with
+// each session (keepGate sends it whenever it changes, in order, so a revoke
+// also clears the kept copy). On such a restart (restoreRestart):
+//   - The copy is used only when it belongs to the same session and the same
+//     Claude process (its pid) the keeper reattaches. Otherwise, after a
+//     Stop / "Don't run" / denied prompt (revoked), or when no Claude
+//     process is reattached (a new one starts), nothing is restored.
+//   - Only the grants of subagents and the plan's own pending background
+//     work survive (with the approval, so that work's task notification
+//     still covers the turn it starts, and a SendMessage resume in that turn
+//     renews a grant as before). No turn is covered by the restart itself:
+//     the current turn, if one was running, goes on uncovered, and no call
+//     is presumed a subagent's until it ends (gateUnsure).
+//   - A subagent or job that finished while Quill Desktop was down is
+//     dropped: its task notification (or, for a foreground subagent, its
+//     result) in the session's transcript, written after the grant was made
+//     (dropFinished). Without a readable transcript every grant is dropped.
+//   - Peer, channel and scheduled messages still never grant or cover.
 
 // planCovers: the session's own call in the current turn is approved.
 func planCovers(s *deskSession) bool { return s.runAll && s.turnCovered }
@@ -69,11 +96,12 @@ func revokePlan(s *deskSession) {
 	endPlan(s)
 	s.agentGrants, s.agentCalls, s.agentIDs, s.planAgents = nil, nil, nil, nil
 	s.planRevoked = true
+	s.grantRev++
 }
 
 // turnEnded: the session's turn is over; the next one starts uncovered.
 func turnEnded(s *deskSession) {
-	s.turnCovered, s.autoTurn = false, false
+	s.turnCovered, s.autoTurn, s.gateUnsure = false, false, false
 }
 
 // notUserMessage classifies a message the user didn't write (notFromUser).
@@ -199,7 +227,8 @@ func resumeAgent(s *deskSession, to, id string) {
 	if s.agentGrants == nil {
 		s.agentGrants = map[string]agentGrant{}
 	}
-	s.agentGrants[g] = agentGrant{Background: true}
+	s.agentGrants[g] = agentGrant{Background: true, At: gateNow()}
+	s.grantRev++
 	for a, root := range s.planAgents {
 		if root == g {
 			addAgentID(s, a, g)
@@ -238,7 +267,8 @@ func learnPlanWork(s *deskSession, ev *protocol.Event) {
 	}
 }
 
-// handedGate: the plan-scope state a reload hands over with the session.
+// handedGate: the plan-scope state a reload hands over with the session,
+// and the copy the keeper holds for a restart after a crash.
 type handedGate struct {
 	Covered    bool                  `json:"covered,omitempty"`
 	AutoTurn   bool                  `json:"autoTurn,omitempty"`
@@ -249,11 +279,22 @@ type handedGate struct {
 	AgentIDs   map[string]string     `json:"agentIds,omitempty"`
 	Work       map[string]string     `json:"work,omitempty"`
 	PlanAgents map[string]string     `json:"planAgents,omitempty"`
+	Session    string                `json:"session,omitempty"` // whose state it is
+	PID        int                   `json:"pid,omitempty"`     // the Claude process it belongs to
+	At         time.Time             `json:"at,omitzero"`       // when it was taken
 }
 
+// gateNow is the clock for grants and snapshots (tests set it).
+var gateNow = time.Now
+
 func saveGate(s *deskSession) *handedGate {
-	return &handedGate{Covered: s.turnCovered, AutoTurn: s.autoTurn, InTurn: s.inTurn, Revoked: s.planRevoked,
-		Grants: s.agentGrants, Calls: s.agentCalls, AgentIDs: s.agentIDs, Work: s.planWork, PlanAgents: s.planAgents}
+	g := &handedGate{Covered: s.turnCovered, AutoTurn: s.autoTurn, InTurn: s.inTurn, Revoked: s.planRevoked,
+		Grants: s.agentGrants, Calls: s.agentCalls, AgentIDs: s.agentIDs, Work: s.planWork, PlanAgents: s.planAgents,
+		Session: s.id, At: gateNow()}
+	if s.proc != nil {
+		g.PID = s.proc.PID()
+	}
+	return g
 }
 
 func (g *handedGate) restore(s *deskSession) {
@@ -262,6 +303,155 @@ func (g *handedGate) restore(s *deskSession) {
 	}
 	s.turnCovered, s.autoTurn, s.inTurn, s.planRevoked = g.Covered, g.AutoTurn, g.InTurn, g.Revoked
 	s.agentGrants, s.agentCalls, s.agentIDs, s.planWork, s.planAgents = g.Grants, g.Calls, g.AgentIDs, g.Work, g.PlanAgents
+}
+
+// restoreRestart: the restart rule above. id and pid are the session and
+// Claude process the keeper reattached.
+func (g *handedGate) restoreRestart(s *deskSession, id string, pid int) {
+	s.turnCovered, s.inTurn, s.autoTurn, s.gateUnsure = false, false, false, false
+	s.agentGrants, s.agentCalls, s.agentIDs, s.planWork, s.planAgents = nil, nil, nil, nil, nil
+	if g == nil || g.Revoked || g.Session != id || g.PID == 0 || g.PID != pid {
+		s.runAll, s.runAllNext = false, false
+		s.planRevoked = g != nil && g.Revoked
+		return
+	}
+	s.agentGrants, s.agentCalls, s.agentIDs, s.planWork, s.planAgents = g.Grants, g.Calls, g.AgentIDs, g.Work, g.PlanAgents
+	if len(s.planWork) == 0 {
+		s.runAll, s.runAllNext = false, false // nothing left the approval could cover
+	}
+	// A turn that was running goes on, uncovered.
+	s.autoTurn = g.InTurn || g.AutoTurn
+	s.gateUnsure = true
+	s.grantRev++
+}
+
+// transcriptNote: a task notification, or the tool result of one of the
+// calls asked about, in a session's transcript.
+type transcriptNote struct {
+	At     time.Time
+	Text   string // the notification
+	Result string // the tool_use_id of a main-session tool result
+}
+
+// transcriptNotes reads path's task notifications and the main session's
+// tool results for the calls in results. ok is false when it can't be read.
+func transcriptNotes(path string, results map[string]bool) (notes []transcriptNote, ok bool) {
+	if path == "" {
+		return nil, false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(f, 1<<20)
+	for {
+		line, err := r.ReadBytes('\n')
+		notify := bytes.Contains(line, []byte("<task-notification>")) || bytes.Contains(line, []byte(`\u003ctask-notification`))
+		if notify || len(results) > 0 && bytes.Contains(line, []byte("tool_result")) {
+			if ev, perr := protocol.ParseLine(line); perr == nil {
+				at, _ := time.Parse(time.RFC3339Nano, ev.Timestamp)
+				if notify {
+					text := string(line) // the notification may sit outside the message too
+					if ev.Message != nil {
+						text += "\n" + protocol.ContentText(ev.Message.Content)
+					}
+					notes = append(notes, transcriptNote{At: at, Text: text})
+				}
+				if ev.Type == "user" && !ev.IsSubagent() && ev.Message != nil {
+					for _, b := range ev.Message.Blocks() {
+						if b.Type == "tool_result" && results[b.ToolUseID] {
+							notes = append(notes, transcriptNote{At: at, Result: b.ToolUseID})
+						}
+					}
+				}
+			}
+		}
+		if err == io.EOF {
+			return notes, true
+		}
+		if err != nil {
+			return nil, false
+		}
+	}
+}
+
+// restartSlack: transcript and Quill Desktop times may differ a little (the
+// stream is read after the transcript is written); a notification this close
+// before a grant counts as after it (dropping is the safe side).
+const restartSlack = time.Minute
+
+// dropFinishedAfterRestart ends the restored grants and plan work whose
+// subagent or job finished while Quill Desktop was down (restart rule).
+func dropFinishedAfterRestart(s *deskSession, g *handedGate, path string) {
+	if g == nil || len(s.agentGrants) == 0 && len(s.planWork) == 0 {
+		return
+	}
+	fg := map[string]bool{}
+	for id, gr := range s.agentGrants {
+		if !gr.Background {
+			fg[id] = true
+		}
+	}
+	notes, ok := transcriptNotes(path, fg)
+	dropFinished(s, g.At, notes, ok)
+}
+
+func dropFinished(s *deskSession, since time.Time, notes []transcriptNote, ok bool) {
+	if !ok {
+		for id := range s.agentGrants {
+			endAgentGrant(s, id)
+		}
+		s.planWork = nil
+		s.runAll, s.runAllNext = false, false
+		return
+	}
+	after := func(n transcriptNote, t time.Time) bool { return !n.At.Before(t.Add(-restartSlack)) }
+	for _, n := range notes {
+		var named []string
+		if n.Result != "" {
+			named = append(named, n.Result)
+		}
+		for _, m := range toolUseIDRe.FindAllStringSubmatch(n.Text, -1) {
+			named = append(named, m[1])
+		}
+		for _, m := range taskIDRe.FindAllStringSubmatch(n.Text, -1) {
+			if gid, ok := s.agentIDs[m[1]]; ok {
+				named = append(named, gid)
+			}
+		}
+		for _, id := range named {
+			if gr, live := s.agentGrants[id]; live && after(n, gr.At) {
+				endAgentGrant(s, id)
+			}
+		}
+		if n.Text != "" && after(n, since) {
+			planWorkDone(s, n.Text)
+		}
+	}
+	if len(s.planWork) == 0 {
+		s.runAll, s.runAllNext = false, false
+	}
+}
+
+// gateMark: what keepGate compares to know the plan-scope state changed.
+type gateMark struct {
+	rev, grants, calls, ids, work, agents      int
+	runAll, covered, inTurn, autoTurn, revoked bool
+}
+
+func markGate(s *deskSession) gateMark {
+	return gateMark{s.grantRev, len(s.agentGrants), len(s.agentCalls), len(s.agentIDs), len(s.planWork), len(s.planAgents),
+		s.runAll, s.turnCovered, s.inTurn, s.autoTurn, s.planRevoked}
+}
+
+// keepGate sends the session's state to the keeper again when its plan
+// scope changed, so a restart after a crash finds the latest copy.
+func (d *desk) keepGate(s *deskSession) {
+	if s == nil || s.proc == nil || markGate(s) == s.keptGate {
+		return
+	}
+	d.keepSession(s)
 }
 
 // isPermissionDeny: the user refused a permission prompt (not skipped a

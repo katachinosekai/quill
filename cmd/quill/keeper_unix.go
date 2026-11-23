@@ -326,6 +326,7 @@ func (k *keeper) writeRestore(handover bool) string {
 		hs.Handle.In = uintptr(3 + 2*i)
 		hs.Handle.Out = uintptr(4 + 2*i)
 		if !handover {
+			hs.Restarted = true // planscope.go: only the subagents' grants survive
 			hs.Handle.Leftover = nil
 			hs.Handle.Busy = false
 			hs.Handle.Seq += 1000
@@ -349,7 +350,40 @@ func (k *keeper) closeAll() {
 	}
 }
 
-type keeperClient struct{ path string }
+// keeperClient talks to the keeper. Hold and drop messages go out in order
+// (async): an older snapshot of a session must never overwrite a newer one,
+// e.g. the plan's grants after a Stop revoked them.
+type keeperClient struct {
+	path    string
+	mu      sync.Mutex
+	pending []func()
+	running bool
+}
+
+func (kc *keeperClient) async(f func()) {
+	kc.mu.Lock()
+	kc.pending = append(kc.pending, f)
+	if kc.running {
+		kc.mu.Unlock()
+		return
+	}
+	kc.running = true
+	kc.mu.Unlock()
+	go func() {
+		for {
+			kc.mu.Lock()
+			if len(kc.pending) == 0 {
+				kc.running = false
+				kc.mu.Unlock()
+				return
+			}
+			next := kc.pending[0]
+			kc.pending = kc.pending[1:]
+			kc.mu.Unlock()
+			next()
+		}
+	}()
+}
 
 func newKeeperClient() *keeperClient {
 	p := os.Getenv(keeperEnv)
@@ -399,8 +433,9 @@ func (d *desk) keepSession(s *deskSession) {
 	in, out, h := s.proc.Keep()
 	hs := handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL, Hidden: isHiddenSession(s)}
 	hs.savePending(s)
+	s.keptGate = markGate(s)
 	kc := d.keeper
-	go func() { _ = kc.send(keeperMsg{Op: "hold", Session: hs, Handle: h}, in, out) }()
+	kc.async(func() { _ = kc.send(keeperMsg{Op: "hold", Session: hs, Handle: h}, in, out) })
 }
 
 func (d *desk) unkeepSession(id string) {
@@ -408,7 +443,7 @@ func (d *desk) unkeepSession(id string) {
 		return
 	}
 	kc := d.keeper
-	go func() { _ = kc.send(keeperMsg{Op: "drop", ID: id}) }()
+	kc.async(func() { _ = kc.send(keeperMsg{Op: "drop", ID: id}) })
 }
 
 func (d *desk) keepView() {

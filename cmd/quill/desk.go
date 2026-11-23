@@ -97,6 +97,9 @@ type deskSession struct {
 	turnCovered    bool                  // the current turn is covered by the approved plan (planCovers)
 	autoTurn       bool                  // a turn started by a message the user didn't write is running
 	planRevoked    bool                  // the user stopped or refused since the last approval: no approval from the transcript
+	grantRev       int                   // bumped whenever a grant is made or ends (gateMark)
+	keptGate       gateMark              // the plan-scope state last sent to the keeper (keepGate)
+	gateUnsure     bool                  // restored after a restart: no call is presumed a subagent's until the turn ends
 	queue          []string
 	lastSent       string
 	inTurn         bool
@@ -1543,6 +1546,8 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	switch ev.Type {
 	case "control_request", "control_cancel_request", "result":
 		d.keepSession(s)
+	default:
+		d.keepGate(s)
 	}
 	if d.current == s {
 		d.queueUI(s, items)
@@ -1845,6 +1850,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 	}
 	s.lastSent = text
 	s.inTurn = true
+	defer d.keepGate(s) // the message may have ended or started the plan's approval
 	it := s.conv.AddUser(text)
 	d.refreshChoiceCards(s, it)
 	if s.title == "" {
@@ -1934,6 +1940,7 @@ func (d *desk) interrupt(s *deskSession) {
 	}
 	if s != nil {
 		revokePlan(s) // Stop ends the approval and its grants (planscope.go)
+		d.keepGate(s)
 	}
 	p := s.proc
 	if p == nil || p.Exited() {
@@ -1953,6 +1960,7 @@ func (d *desk) interruptAll(s *deskSession) {
 		return
 	}
 	revokePlan(s)
+	d.keepGate(s)
 	p := s.proc
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2709,7 +2717,9 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		// don't count on it): while this session's own turn is over, a call
 		// can only be a subagent's. A turn a peer message, a scheduled
 		// trigger or a notification started is a turn too (autoTurn).
-		if _, known := s.agentCalls[it.Request.ToolUseID]; !known && !s.inTurn && !s.autoTurn && len(s.agentGrants) > 0 {
+		// Not right after a restart either (gateUnsure): events lost in the
+		// crash may have started a turn.
+		if _, known := s.agentCalls[it.Request.ToolUseID]; !known && !s.inTurn && !s.autoTurn && !s.gateUnsure && len(s.agentGrants) > 0 {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}
@@ -3094,6 +3104,7 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 	if !ok {
 		// "Don't run": the user refused; any approval still in force ends.
 		revokePlan(s)
+		d.keepGate(s)
 		it.PermState = chat.PermDenied
 		d.chatFor(s, []*chat.Item{it})
 		d.updateChrome()
@@ -3152,7 +3163,8 @@ func isAgentTool(r *protocol.ControlRequest) bool {
 // agentGrant: a subagent an approved plan started. A background one ends
 // with its task notification, a foreground one with its tool result.
 type agentGrant struct {
-	Background bool `json:"background,omitempty"`
+	Background bool      `json:"background,omitempty"`
+	At         time.Time `json:"at,omitzero"` // when it was made (or renewed by a resume); a restart's stale check
 }
 
 // maxAgentCalls caps the calls remembered for live grants; past it, new
@@ -3170,7 +3182,8 @@ func grantAgentCall(s *deskSession, id string, input json.RawMessage) {
 	if s.agentGrants == nil {
 		s.agentGrants = map[string]agentGrant{}
 	}
-	s.agentGrants[id] = agentGrant{Background: in.Background}
+	s.agentGrants[id] = agentGrant{Background: in.Background, At: gateNow()}
+	s.grantRev++
 }
 
 func addAgentCall(s *deskSession, id, g string) {
@@ -3314,6 +3327,7 @@ var agentIDRe = regexp.MustCompile(`agentId: ([A-Za-z0-9_-]+)`)
 // endAgentGrant ends a grant and forgets the calls made under it.
 func endAgentGrant(s *deskSession, id string) {
 	delete(s.agentGrants, id)
+	s.grantRev++
 	for c, g := range s.agentCalls {
 		if g == id {
 			delete(s.agentCalls, c)

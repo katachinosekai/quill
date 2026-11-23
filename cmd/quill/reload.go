@@ -154,6 +154,9 @@ type handedSession struct {
 	Gate   *handedGate     `json:"gate,omitempty"` // the approved plan's scope (planscope.go)
 	Sugg   string          `json:"suggestion,omitempty"`
 	Hidden bool            `json:"hidden,omitempty"` // the kmem window's assistant
+	// Restarted: the keeper reattaches the session after Quill Desktop
+	// crashed (not a live reload); planscope.go's restart rule applies.
+	Restarted bool `json:"restarted,omitempty"`
 }
 
 type pendingAsk struct {
@@ -280,6 +283,13 @@ func (d *desk) reattach(s *deskSession, hs handedSession) bool {
 	s.rcOn, s.rcURL = hs.RCOn, hs.RCURL
 	s.conv.Busy = hs.Handle.Busy
 	hs.restorePending(s)
+	if hs.Restarted {
+		path := ""
+		if info, ok := d.infos[s.id]; ok {
+			path = info.Path
+		}
+		dropFinishedAfterRestart(s, hs.Gate, path)
+	}
 	d.reclaimRC(s)
 	return true
 }
@@ -306,7 +316,11 @@ func (hs *handedSession) savePending(s *deskSession) {
 
 func (hs handedSession) restorePending(s *deskSession) {
 	s.planWait, s.runAll = hs.Wait, hs.RunAll
-	hs.Gate.restore(s)
+	if hs.Restarted {
+		hs.Gate.restoreRestart(s, hs.ID, hs.Handle.PID)
+	} else {
+		hs.Gate.restore(s)
+	}
 	if hs.Sugg != "" && s.conv.Suggestion == "" && !s.conv.Busy {
 		s.conv.Suggestion = hs.Sugg
 	}
