@@ -46,6 +46,7 @@ func (d *desk) restartOnNext(s *deskSession, msg string) bool {
 	p := s.proc
 	s.proc = nil
 	s.inTurn, s.planWait = false, false
+	endAutoApprove(s)
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	d.unkeepSession(s.id)
 	go func() { _ = p.Stop(5 * time.Second) }()

@@ -217,6 +217,9 @@ func (d *desk) sessionMenuItems(id string) []*fyne.MenuItem {
 	if s := d.sessions[id]; s != nil && s.conv != nil {
 		items = append(items, d.taskItems(s)...)
 	}
+	if off := d.autoApproveItem(d.sessions[id]); off != nil {
+		items = append(items, off)
+	}
 	items = append(items,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Restart as new session...", func() { d.askRelaunch(id) }),

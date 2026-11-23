@@ -57,8 +57,8 @@ const planApprovalHint = "Quill Desktop approvals are short: \"Approved.\" may b
 
 // planSpecHint: plan format spec v1 (docs/plan-format.md, user 2026-11-23):
 // what a plan looks like so the plan-first gate and the plan card read it,
-// and what its approval covers.
-const planSpecHint = "Plan format: a numbered step list, one line per step saying what runs and why; a subagent step says what the subagent will run. End with the bold line \"**Can I run steps 1–N? Yes (recommended) or no?**\", optionally followed by numbered choice questions. Subagents started or resumed for the plan inherit its approval until they finish; a user message ends the approval for new work, not for them. Read-only checks need no plan."
+// and what its approval covers, auto-approve included (autoapprove.go).
+const planSpecHint = "Plan format: a numbered step list, one line per step saying what runs and why; a subagent step says what the subagent will run. End with the bold line \"**Can I run steps 1–N? Yes (recommended) or no?**\", optionally followed by numbered choice questions. Subagents started or resumed for the plan inherit its approval until they finish; a user message ends the approval for new work, not for them. Read-only checks need no plan. An approval with \"Auto-approve on\" lasts until the user turns it off, user messages included: write no plans and ask no approval in this session until a Quill Desktop note says auto-approve is off; commands that run as root still need a plan."
 
 // planGoReminder: the short form, for a session whose prompt lacks the hint.
 const planGoReminder = " After \"Approved.\", background commands and subagents you start stay approved until they finish; end your turn instead of waiting for them."

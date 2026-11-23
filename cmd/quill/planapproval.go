@@ -294,9 +294,13 @@ func (v *chatView) approvalSend(owner *deskSession, plan *chat.Item, a *approval
 	stop := pick == dontRunPick || pick >= 0 && a.Stop[pick]
 	enabled := active && pick != -1 && (stop || v.d.canAnswer(owner))
 	send := glowButton("Send answers", theme.MailSendIcon(), colIdle, enabled, v.guarded(func() {
-		v.d.answerPlanApproval(owner, plan, a, v.approvalPick(plan, a), qs, ans, "")
+		v.sendKeeping(plan, func() { v.d.answerPlanApproval(owner, plan, a, v.approvalPick(plan, a), qs, ans, "") })
 	}))
-	out := []fyne.CanvasObject{v.buttonRow(send)}
+	var out []fyne.CanvasObject
+	if keep := v.keepCheck(owner, plan, active); keep != nil {
+		out = append(out, keep) // auto-approve (autoapprove.go)
+	}
+	out = append(out, v.buttonRow(send))
 	if pick == -1 && active {
 		note := widget.NewLabel("Answer the approval question, then send.")
 		note.SizeName = theme.SizeNameCaptionText

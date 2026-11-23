@@ -28,6 +28,30 @@ and the plan card read plans in this format.
 - Read-only checks (`git status`, `ls`, `systemctl status`, `findmnt`,
   `kmem brief`, …) need no plan. Commands that run as root always need one.
 
+### Auto-approve: until the user turns it off
+
+The approval question on the plan card has a checkbox, "Keep approving in
+this tab until I turn it off". Sending a go-ahead with it ticked approves the
+plan as above and turns on auto-approve for that session (tab). The approval
+message then ends with `Auto-approve on: no plans needed in this tab until
+the user turns it off; commands that run as root still need one.`
+
+- While it is on, the gate lets every tool call of the session and its
+  subagents through without a plan, except commands that run as root: those
+  still need an approved plan. New user messages don't end it, and neither
+  do Stop, "Don't run" or a denied prompt (they end the current plan's
+  approval only).
+- An "Auto-approve on ×" chip by the message box shows it; clicking it, or
+  "Turn off auto-approve" in the session menu, turns it off. It also ends
+  when the session's Claude process ends or restarts, and it is not kept
+  across Quill Desktop restarts or reloads.
+- Once it is off, the user's next message carries a note for Claude:
+  `(Quill Desktop: auto-approve is off in this tab now; write a plan and wait
+  for approval again before running anything that needs one.)`
+- The phone API shows it as `autoApprove` on the session, takes
+  `keepApproving: true` with `approvePlan`, and turns it off with
+  `POST /phone/session/<id>/auto-approve-off` (docs/phone-api.md).
+
 A batch (one assistant message with several tool calls) is decided as a
 whole: if the gate refuses one call, the others are refused too, and a
 subagent started in that batch is stopped.

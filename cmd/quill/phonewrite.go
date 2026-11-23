@@ -48,18 +48,20 @@ type writeBody struct {
 	// approvePlan: answers to request.questions by id ("yes"/"no", option
 	// index, option indexes, or text)
 	PlanAnswers map[string]json.RawMessage `json:"planAnswers"`
-	Folder      string                     `json:"folder"`
-	Backend     string                     `json:"backend"`
-	Model       string                     `json:"model"`
-	Mode        string                     `json:"mode"`
-	Title       *string                    `json:"title"`
-	Project     *string                    `json:"project"`
-	Old         bool                       `json:"old"`
+	// approvePlan: also turn auto-approve on for the session (autoapprove.go)
+	KeepApproving bool    `json:"keepApproving"`
+	Folder        string  `json:"folder"`
+	Backend       string  `json:"backend"`
+	Model         string  `json:"model"`
+	Mode          string  `json:"mode"`
+	Title         *string `json:"title"`
+	Project       *string `json:"project"`
+	Old           bool    `json:"old"`
 }
 
 func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, parts []string) {
 	known := path == "usage/resume" || path == "sessions/new" ||
-		len(parts) == 3 && parts[0] == "session" && (slices.Contains([]string{"send", "answer", "interrupt"}, parts[2]) || slices.Contains(menuActions, parts[2])) ||
+		len(parts) == 3 && parts[0] == "session" && (slices.Contains([]string{"send", "answer", "interrupt", "auto-approve-off"}, parts[2]) || slices.Contains(menuActions, parts[2])) ||
 		len(parts) == 4 && parts[0] == "session" && parts[2] == "queue" && (parts[3] == "delete" || parts[3] == "send-now") ||
 		len(parts) == 3 && parts[0] == "handoffs" && (parts[2] == "resume" || parts[2] == "delete")
 	if !known {
@@ -148,6 +150,9 @@ func (a *phoneAPI) sessionWrite(s *deskSession, action, op string, in writeBody)
 		return map[string]any{"wasBusy": busy}, nil
 	case "queue":
 		return a.queueAction(s, op, in)
+	case "auto-approve-off":
+		a.d.setAutoApprove(s, false)
+		return map[string]any{"autoApprove": false}, nil
 	}
 	return a.menuAction(s, action, in)
 }
@@ -240,6 +245,10 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		}
 		if !pending || planSuperseded(s, it) {
 			return nil, stale("the plan is no longer pending")
+		}
+		if in.KeepApproving && in.Action == "approvePlan" {
+			d.keepNext = true // only a go-ahead's approval message uses it
+			defer func() { d.keepNext = false }()
 		}
 		if in.ApprovalChoice != nil {
 			appr := planItemApproval(s, it)

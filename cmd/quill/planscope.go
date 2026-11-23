@@ -481,11 +481,12 @@ func dropFinished(s *deskSession, since time.Time, notes []transcriptNote, ok bo
 type gateMark struct {
 	rev, grants, calls, ids, work, agents      int
 	runAll, covered, inTurn, autoTurn, revoked bool
+	auto                                       bool // auto-approve (autoapprove.go): a restart tells Claude it is off
 }
 
 func markGate(s *deskSession) gateMark {
 	return gateMark{s.grantRev, len(s.agentGrants), len(s.agentCalls), len(s.agentIDs), len(s.planWork), len(s.planAgents),
-		s.runAll, s.turnCovered, s.inTurn, s.autoTurn, s.planRevoked}
+		s.runAll, s.turnCovered, s.inTurn, s.autoTurn, s.planRevoked, s.autoApprove}
 }
 
 // keepGate sends the session's state to the keeper again when its plan

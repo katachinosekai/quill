@@ -91,6 +91,8 @@ type deskSession struct {
 	releaseTasks   []string // kmem task releases Quill asked for after a rewind (allowed for that turn)
 	runAll         bool
 	runAllNext     bool
+	autoApprove    bool                  // auto-approve: no plan needed until the user turns it off (autoapprove.go)
+	autoNote       string                // tells Claude with the next message that auto-approve is off
 	agentGrants    map[string]agentGrant // subagents an approved plan started, by tool_use_id, until they finish
 	agentCalls     map[string]string     // tool_use_id of a granted subagent's call (nested agents too) -> its grant
 	agentIDs       map[string]string     // agent id of a granted subagent (nested too) -> its grant
@@ -336,6 +338,8 @@ type desk struct {
 	kmemPanelNow  *kmemPanel
 	remotes       map[string]*remoteLink
 	settingsDlg   dialog.Dialog
+	autoBtn       *autoChip // "Auto-approve on" by the message box (autoapprove.go)
+	keepNext      bool      // the approval being sent turns auto-approve on (autoapprove.go)
 	phoneSync     *phoneSync
 	buildChk      *widget.Check // Settings → General "Ask before building", kept in line by settingsChanged
 	coordChk      *widget.Check // Settings → General "Coordinate with subagents"
@@ -1040,6 +1044,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.note.Hide()
 	d.rcStatus = mutedText("", fontMeta)
 	d.rcStatus.Hide()
+	d.autoBtn = newAutoChip(func() { d.setAutoApprove(d.current, false) })
 	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
 	d.reloadBtn = d.newRemoteReloadButton("Reload", func() *deskSession { return d.current })
 	d.headPad = canvas.NewRectangle(color.Transparent)
@@ -1116,7 +1121,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		}
 		return d.modeItems(d.current)
 	})
-	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn), d.chipsBtn)
+	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.autoBtn), d.chipsBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	d.verLine = d.newVerLine()
 	d.statsRow = container.New(hintsLayout{}, d.verLine.slot, d.folder)
@@ -1170,6 +1175,7 @@ func (d *desk) updateChrome() {
 		d.backendBtn.Disable()
 		d.modelBtn.Disable()
 		d.modeBtn.Disable()
+		d.syncAutoChip(d.autoBtn, nil)
 		setText(d.stats, "")
 		return
 	}
@@ -1264,6 +1270,9 @@ func (d *desk) updateChrome() {
 	mirror(d.modelBtn, d.modelSel)
 	mirror(d.modeBtn, d.modeSel)
 	if d.syncBarButtons(s) && d.mainPane != nil {
+		relayoutTree(d.mainPane)
+	}
+	if d.syncAutoChip(d.autoBtn, s) && d.mainPane != nil {
 		relayoutTree(d.mainPane)
 	}
 	if d.usage != nil {
@@ -1706,6 +1715,10 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	s.agentGrants, s.agentCalls, s.agentIDs = nil, nil, nil // the process and its subagents are gone
 	s.planWork, s.planAgents, s.turnCovered, s.autoTurn = nil, nil, false, false
 	s.refusedAgents, s.subRefused = nil, nil
+	if s.autoApprove {
+		endAutoApprove(s) // the session ended or restarts (autoapprove.go)
+		defer d.syncAutoApprove()
+	}
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
 		msg := "Claude process exited: " + err.Error()
@@ -1917,6 +1930,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 			s.turnCovered = true // the user's retry continues the approved plan
 		}
 	}
+	text = withAutoNote(s, text)
 	if s.resumeNext == "" {
 		s.resumeNext = d.firstTurnKmemName(s, text)
 	}
@@ -2129,6 +2143,7 @@ func (d *desk) setModel(s *deskSession, model string) {
 	if switchBackend {
 		s.proc = nil
 		s.inTurn, s.planWait = false, false
+		endAutoApprove(s)
 		s.rcOn, s.rcURL, s.rcName = false, "", ""
 		d.unkeepSession(s.id)
 		go func() { _ = p.Stop(5 * time.Second) }()
@@ -2777,10 +2792,14 @@ const (
 // planAsk: the plan-first refusal text; without the session hint (plan-first
 // turned on mid-session) it carries a one-line reminder of what an approval covers.
 func planAsk(s *deskSession) string {
-	if s != nil && s.approvalHint {
-		return planAskMessage
+	msg := planAskMessage
+	if s != nil && s.autoApprove {
+		msg = autoApproveRootAsk + msg
 	}
-	return planAskMessage + planGoReminder
+	if s != nil && s.approvalHint {
+		return msg
+	}
+	return msg + planGoReminder
 }
 
 func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
@@ -2836,6 +2855,14 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 			if s.proc.DenyWith(it.RequestID, it.Request, planAsk(s)) == nil {
 				it.PermState = chat.PermPlanAsked
 				s.planWait = true
+			}
+			return nil
+		}
+		// Auto-approve (autoapprove.go): no plan needed until the user turns
+		// it off, except for commands that run as root.
+		if d.planFirst && autoCovers(s, it.Request) {
+			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
+				it.PermState = chat.PermAutoAllowed
 			}
 			return nil
 		}
@@ -3053,7 +3080,7 @@ func isPlanGo(text string) bool {
 	}
 	// Exactly the approval, or followed by what Quill appends; "Approved.
 	// but not that" typed by hand is no approval.
-	return rest == "" || strings.HasPrefix(rest, " Choice: ") || strings.HasPrefix(rest, " Answers: ") || strings.HasPrefix(rest, " Also: ")
+	return rest == "" || strings.HasPrefix(rest, " Choice: ") || strings.HasPrefix(rest, " Answers: ") || strings.HasPrefix(rest, " Also: ") || strings.HasPrefix(rest, autoApproveOnText)
 }
 
 // planGoWith: the approval text carrying the chosen option.
@@ -3283,7 +3310,7 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {
 		startPlan(s)
 		s.cardGo = true
-		d.sendTo(s, msg)
+		d.sendTo(s, d.keepApproving(s, msg))
 		return
 	}
 	if it.PermState != chat.PermPending {
@@ -3303,7 +3330,7 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 	startPlan(s)
 	d.chatFor(s, []*chat.Item{it})
 	s.cardGo = true
-	d.sendTo(s, msg)
+	d.sendTo(s, d.keepApproving(s, msg))
 	if !s.running() {
 		endPlan(s)
 	}

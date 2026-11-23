@@ -266,6 +266,9 @@ type apiSession struct {
 	Agents      []apiAgent  `json:"agents,omitempty"`
 	AgentTokens int64       `json:"agentTokens,omitempty"`
 	EndWait     *apiEndWait `json:"endWait,omitempty"`
+	// AutoApprove: the session's auto-approve is on (no plan needed until
+	// the user turns it off; autoapprove.go).
+	AutoApprove bool `json:"autoApprove,omitempty"`
 }
 
 type apiContext struct {
@@ -375,6 +378,7 @@ func (a *phoneAPI) session(id, group string) apiSession {
 			}
 		}
 		out.Queue = len(s.queue)
+		out.AutoApprove = d.autoApproveShown(s)
 		out.Suggestion = d.shownSuggestion(s)
 		if s.running() {
 			out.Background = s.conv.Background()

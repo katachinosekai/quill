@@ -106,6 +106,7 @@ type chatView struct {
 	planAns       map[*chat.Item]map[int]planAnswer // plan card answers, kept across redraws
 	planPlain     map[*chat.Item]bool               // plans shown as written plus the card, not overlaid
 	planApprove   map[*chat.Item]int                // the approval question's pick on a plan card (planapproval.go)
+	planKeep      map[*chat.Item]bool               // the card's "Keep approving in this tab" checkbox (autoapprove.go)
 	btnKinds      map[int]string                    // buttons each item shows now (click guard)
 	choicePicks   map[*chat.Item]map[int]int        // picks on a multi-question reply (by question index), kept until sent
 	choiceTexts   map[*chat.Item]map[int]string     // typed answers on a multi-question reply

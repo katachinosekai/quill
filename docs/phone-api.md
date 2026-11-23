@@ -107,7 +107,7 @@ Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new ra
 | `allow` | `permission` | |
 | `allowAlways` | `permission` with `request.canAllowAlways` | |
 | `deny` | `permission`, `question` | `text`: optional reason sent to Claude |
-| `approvePlan` | `plan` | optional `choice` (index into `request.choices`), `planAnswers` (by `request.questions` id), `approvalChoice` (index into `request.approval.options`, see below), `text` (the card's "Changes (optional)": sent to Claude with the go-ahead, appended as "Also: <text>"; the approval counts as without it; with a stop `approvalChoice` it goes after the refusal as for `rejectPlan`) |
+| `approvePlan` | `plan` | optional `choice` (index into `request.choices`), `planAnswers` (by `request.questions` id), `approvalChoice` (index into `request.approval.options`, see below), `text` (the card's "Changes (optional)": sent to Claude with the go-ahead, appended as "Also: <text>"; the approval counts as without it; with a stop `approvalChoice` it goes after the refusal as for `rejectPlan`), `keepApproving` (true: a go-ahead also turns on the session's auto-approve, the card's "Keep approving in this tab" checkbox) |
 | `rejectPlan` | `plan` | `text`: optional feedback sent to Claude |
 | `answer` | `question` | `answers` (see below) |
 | `choice` | `assistant` item with open `choices` | `index` |
@@ -158,6 +158,7 @@ A plan whose approval question offers its own options, a go-ahead and a way to s
 - `project` (since 2026-11-21): the kmem project the session is grouped under. `group` holds the same value, so older phones group by project too. Quill Desktop has no folders any more (no Active, Inactive, Archive, Created by Claude or custom folders).
 - Topic fields (since topics level 1, only in topic mode; see "Topics"): `topic` (the kmem topic the session coordinates), `topicTitle`, `legacyName` (the old kmem name of a session that predates topic tabs; it is to be merged into a topic), `agents` (subagents), `agentTokens` (their summed tokens) and `endWait` (the end-of-session check). All are left out when empty. `kmem` stays as before for older phones.
 - `renamed: true` (optional) when the title was set by hand: offer "Restore original name".
+- `autoApprove: true` (optional, since 2026-11-23) while the session's auto-approve is on: plan-first lets its tool calls run without a plan until the user turns it off (docs/plan-format.md, "Auto-approve"). Left out when off. Turn it on with `keepApproving` on `approvePlan`, off with `auto-approve-off`.
 
 ### Item
 
@@ -403,6 +404,10 @@ Response: `{"v": 1, "item": {...}}` with the updated Item. `409 stale` when the 
 ### POST /phone/session/{id}/interrupt
 
 Body `{}`. Same as Escape / Stop on the desktop. Response `{"v": 1, "wasBusy": true}`. `409 not_running` without a process.
+
+### POST /phone/session/{id}/auto-approve-off
+
+Body `{}`. Turns the session's auto-approve off (as the desktop's chip and session menu do); a no-op when it is off. Response `{"v": 1, "autoApprove": false}`.
 
 ### POST /phone/session/{id}/queue/delete and /queue/send-now
 

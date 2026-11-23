@@ -154,7 +154,10 @@ type handedSession struct {
 	RunAll bool            `json:"runAll"`
 	Gate   *handedGate     `json:"gate,omitempty"` // the approved plan's scope (planscope.go)
 	Sugg   string          `json:"suggestion,omitempty"`
-	Hidden bool            `json:"hidden,omitempty"` // the kmem window's assistant
+	// AutoOff: auto-approve was on; it isn't kept, but Claude is told it is
+	// off with the next message (autoapprove.go).
+	AutoOff bool `json:"autoOff,omitempty"`
+	Hidden  bool `json:"hidden,omitempty"` // the kmem window's assistant
 	// Restarted: the keeper reattaches the session after Quill Desktop
 	// crashed (not a live reload); planscope.go's restart rule applies.
 	Restarted bool `json:"restarted,omitempty"`
@@ -307,6 +310,7 @@ func (d *desk) reclaimRC(s *deskSession) {
 
 func (hs *handedSession) savePending(s *deskSession) {
 	hs.Wait, hs.RunAll, hs.Sugg = s.planWait, s.runAll, s.conv.Suggestion
+	hs.AutoOff = s.autoApprove || s.autoNote != ""
 	hs.Gate = saveGate(s)
 	for _, it := range s.conv.PendingPermissions() {
 		if it.Kind == chat.Plan {
@@ -319,6 +323,9 @@ func (hs *handedSession) savePending(s *deskSession) {
 
 func (hs handedSession) restorePending(s *deskSession) {
 	s.planWait, s.runAll = hs.Wait, hs.RunAll
+	if hs.AutoOff {
+		s.autoNote = autoApproveOffNote
+	}
 	if hs.Restarted {
 		hs.Gate.restoreRestart(s, hs.ID, hs.Handle.PID)
 	} else {
