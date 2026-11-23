@@ -910,7 +910,7 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 		m["request"] = req
 	case chat.Assistant:
 		if !it.Streaming {
-			text := strings.TrimRight(it.Text, " \n")
+			text, _ := chat.SplitSources(it.Text)
 			if _, opts, ok := parseChoices(text[strings.LastIndex(text, "\n")+1:]); ok {
 				m["choices"] = opts
 				m["choicesOpen"] = it == open

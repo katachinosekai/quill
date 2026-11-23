@@ -310,7 +310,8 @@ func (c *Conversation) AsksApproval() bool {
 		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
 			continue
 		}
-		t := strings.TrimRight(strings.TrimSpace(JoinOptionLines(it.Text)), "*_ ")
+		body, _ := SplitSources(it.Text)
+		t := strings.TrimRight(strings.TrimSpace(JoinOptionLines(body)), "*_ ")
 		last := t[strings.LastIndex(t, "\n")+1:]
 		if strings.HasSuffix(t, "?") && asksToApprove(lastQuestion(last)) {
 			return true
@@ -477,7 +478,8 @@ func (c *Conversation) AsksQuestion() bool {
 		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
 			continue
 		}
-		t := strings.TrimSpace(JoinOptionLines(it.Text))
+		body, _ := SplitSources(it.Text)
+		t := strings.TrimSpace(JoinOptionLines(body))
 		return strings.Contains(t[strings.LastIndex(t, "\n")+1:], "?")
 	}
 	return false
@@ -513,7 +515,8 @@ func (c *Conversation) AwaitsReply() bool {
 	if last == nil || last.Streaming {
 		return false
 	}
-	return strings.HasSuffix(strings.TrimRight(strings.TrimSpace(last.Text), "*_ "), "?")
+	body, _ := SplitSources(last.Text)
+	return strings.HasSuffix(strings.TrimRight(strings.TrimSpace(body), "*_ "), "?")
 }
 
 func (c *Conversation) MarkPlanText() []*Item {

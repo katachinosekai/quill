@@ -805,7 +805,7 @@ func (d *desk) remotePlan(s *deskSession, it *chat.Item, ok bool, choice string,
 }
 
 func (d *desk) remoteChoice(s *deskSession, it *chat.Item, option string) {
-	text := strings.TrimRight(it.Text, " \n")
+	text, _ := chat.SplitSources(it.Text)
 	_, opts, ok := parseChoices(text[strings.LastIndex(text, "\n")+1:])
 	if !ok {
 		return

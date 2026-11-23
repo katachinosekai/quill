@@ -800,7 +800,11 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		}
 		if !plain {
 			if body, card := v.choiceCard(it); card != nil {
-				return container.NewVBox(msgText(v.markdownBlocks(body)), card)
+				parts := []fyne.CanvasObject{msgText(v.markdownBlocks(body)), card}
+				if _, src := chat.SplitSources(it.Text); src != "" {
+					parts = append(parts, msgText(v.markdownBlocks(src)))
+				}
+				return container.NewVBox(parts...)
 			}
 		}
 		md := msgText(v.markdownBlocks(it.Text))
@@ -2310,7 +2314,7 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 	if s == nil || it.Streaming {
 		return "", nil
 	}
-	text := strings.TrimRight(it.Text, " \n")
+	text, _ := chat.SplitSources(it.Text)
 	cut := strings.LastIndex(text, "\n")
 	line := text[cut+1:]
 	title, opts, ok := parseChoices(line)
@@ -2458,7 +2462,7 @@ func (d *desk) refreshChoiceCards(s *deskSession, reply *chat.Item) {
 	if prev == nil {
 		return
 	}
-	text := strings.TrimRight(prev.Text, " \n")
+	text, _ := chat.SplitSources(prev.Text)
 	if _, _, ok := parseChoices(text[strings.LastIndex(text, "\n")+1:]); !ok {
 		return
 	}

@@ -341,7 +341,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		if it.Kind != chat.Assistant || in.Index == nil {
 			return nil, badReq("choice needs an assistant item seq and an index")
 		}
-		text := strings.TrimRight(it.Text, " \n")
+		text, _ := chat.SplitSources(it.Text)
 		_, opts, ok := parseChoices(text[strings.LastIndex(text, "\n")+1:])
 		if !ok {
 			return nil, badReq("this message has no choices")

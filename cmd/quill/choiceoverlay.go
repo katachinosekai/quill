@@ -43,7 +43,7 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 	if s == nil || it.Streaming {
 		return nil, false
 	}
-	text := strings.TrimRight(it.Text, " \n")
+	text, sources := chat.SplitSources(it.Text)
 	lines := strings.Split(text, "\n")
 	line := lines[len(lines)-1]
 	_, opts, single := parseChoices(line)
@@ -99,6 +99,9 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 		}
 		box.Add(msgText(v.markdown(line)))
 		box.Add(v.fadeIn(it.Seq, v.buttonRow(btns...)))
+		if sources != "" {
+			box.Add(msgText(v.markdownBlocks(sources)))
+		}
 		v.noteButtons(it.Seq, kind)
 		return box, false
 	}
@@ -184,6 +187,9 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 		at = q.end
 	}
 	prose(at, len(lines))
+	if sources != "" {
+		box.Add(msgText(v.markdownBlocks(sources)))
+	}
 	send := glowButton("Send answers", theme.MailSendIcon(), colIdle, active && v.d.canAnswer(s) && missing == 0, v.guarded(func() {
 		v.d.pickChoice(s, it, multiChoiceReply(multi, picks, texts))
 	}))
