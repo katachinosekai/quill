@@ -357,7 +357,7 @@ func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
 // in the window (docs/design/kmem-window.md §4 #22).
 func (d *desk) replaceHidden(old *deskSession, title string) *deskSession {
 	ns := d.addSession(old.cwd, old.model, old.mode, false)
-	d.markHidden(ns)
+	d.markHiddenAs(ns, hiddenRole(old)) // keeps its role (hidden.go)
 	if title != "" {
 		d.org.Titles[ns.id] = title
 	}

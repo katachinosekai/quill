@@ -37,9 +37,12 @@ type sideOrg struct {
 	RC      map[string]rcTitle `json:"rc,omitempty"`
 	Kmem    map[string]string  `json:"kmem,omitempty"`
 	Ended   map[string]bool    `json:"ended,omitempty"`
-	// Hidden: ids of the kmem window's assistant sessions, kept out of the
-	// sidebar even after they end (docs/design/kmem-window.md §4).
+	// Hidden: ids of hidden sessions (kmem assistant, Quill operator), kept
+	// out of the sidebar even after they end (docs/design/kmem-window.md §4).
 	Hidden map[string]bool `json:"hidden,omitempty"`
+	// HiddenRoles: a hidden id's role when it is not "kmem" (hidden.go); old
+	// org files have none, so their hidden ids read as kmem.
+	HiddenRoles map[string]string `json:"hiddenRoles,omitempty"`
 	// Projects: kmem name (or session id) -> project shown in the sidebar.
 	Projects map[string]string `json:"projects,omitempty"`
 	// Dirs: project -> extra working folders every session of it gets

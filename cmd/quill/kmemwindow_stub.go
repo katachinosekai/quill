@@ -55,7 +55,4 @@ func isKmemWindowDir(cwd string) bool {
 	return filepath.Clean(strings.TrimSpace(cwd)) == filepath.Clean(kmemWindowDir())
 }
 
-// isHiddenSession: s is the kmem window's assistant (flag or folder).
-func isHiddenSession(s *deskSession) bool {
-	return s != nil && (s.hidden || isKmemWindowDir(s.cwd))
-}
+// isHiddenSession and hiddenRole are in hidden.go.

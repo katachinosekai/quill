@@ -156,8 +156,9 @@ type handedSession struct {
 	Sugg   string          `json:"suggestion,omitempty"`
 	// AutoOff: auto-approve was on; it isn't kept, but Claude is told it is
 	// off with the next message (autoapprove.go).
-	AutoOff bool `json:"autoOff,omitempty"`
-	Hidden  bool `json:"hidden,omitempty"` // the kmem window's assistant
+	AutoOff bool   `json:"autoOff,omitempty"`
+	Hidden  bool   `json:"hidden,omitempty"` // a hidden session (hidden.go)
+	Role    string `json:"role,omitempty"`   // its hidden role; "" = kmem (older builds)
 	// Restarted: the keeper reattaches the session after Quill Desktop
 	// crashed (not a live reload); planscope.go's restart rule applies.
 	Restarted bool `json:"restarted,omitempty"`
@@ -235,7 +236,8 @@ func (d *desk) trySwap() {
 	}
 	var metas []meta
 	for _, s := range running {
-		hs := handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL, Hidden: isHiddenSession(s)}
+		hs := handedSession{ID: s.id, Cwd: s.cwd, Model: s.model, Mode: s.mode, Title: s.title, RCOn: s.rcOn, RCURL: s.rcURL}
+		hs.Hidden, hs.Role = handedRole(s)
 		hs.savePending(s)
 		metas = append(metas, meta{s, hs})
 	}
@@ -425,7 +427,7 @@ func (d *desk) applyRestore(st *restoreState) {
 		}
 		s.model, s.mode = hs.Model, hs.Mode
 		if hs.Hidden {
-			d.markHidden(s) // before reattach: no tab, no Remote Control
+			d.markHiddenAs(s, hs.Role) // before reattach: no tab, no Remote Control
 		}
 		if info, ok := d.infos[hs.ID]; ok {
 			if conv, err := transcript.Load(info.Path); err == nil && conv != nil {

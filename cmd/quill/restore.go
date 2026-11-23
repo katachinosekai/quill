@@ -28,7 +28,8 @@ type sessMeta struct {
 	RotateNo    bool            `json:"rotateNo,omitempty"`
 	Chrome      string          `json:"chrome,omitempty"`
 	AddDirs     []string        `json:"addDirs,omitempty"`
-	Hidden      bool            `json:"hidden,omitempty"` // the kmem window's assistant
+	Hidden      bool            `json:"hidden,omitempty"` // a hidden session (hidden.go)
+	Role        string          `json:"role,omitempty"`   // its hidden role; "" = kmem (older files)
 	ResumeAt    string          `json:"resumeAt,omitempty"`
 	ForkOf      string          `json:"forkOf,omitempty"`
 }
@@ -48,7 +49,8 @@ func (d *desk) saveSessions(st *restoreState) {
 		m := sessMeta{Cwd: s.cwd, Model: s.model, Mode: s.mode, Persisted: s.persisted, KmemNew: s.kmemNew, KmemPick: s.pickPending,
 			RotateAsk: s.rotateAsk, RotateTried: s.rotateTried, LastClaude: s.lastClaude, RestoreMode: s.restoreMode,
 			RetryCmd: s.retryCmd, RetryRules: s.retryRules, RetryDest: s.retryDest, CompactFrom: s.compactFrom, RotateNo: s.rotateNo,
-			Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, ForkOf: s.forkOf, Hidden: isHiddenSession(s)}
+			Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, ForkOf: s.forkOf}
+		m.Hidden, m.Role = handedRole(s)
 		if ks := s.kmemSave; ks != nil {
 			m.KmemSave = &savedKmem{Name: ks.name, Asked: ks.asked, Spare: ks.spare, End: ks.end}
 		}
@@ -100,7 +102,7 @@ func (d *desk) restoreSessions(st *restoreState) {
 			s.kmemSave = &kmemSave{name: k.Name, asked: k.Asked, spare: k.Spare, end: k.End}
 		}
 		if m.Hidden {
-			d.markHidden(s)
+			d.markHiddenAs(s, m.Role)
 		}
 	}
 	for id, text := range st.Drafts {

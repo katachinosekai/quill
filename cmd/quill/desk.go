@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,7 +78,8 @@ type deskSession struct {
 	loaded         bool
 	loadedMod      time.Time
 	persisted      bool
-	hidden         bool // the kmem window's assistant: not in the session list, tabs or phone API (docs/design/kmem-window.md §4)
+	hidden         bool   // a hidden session (kmem assistant, Quill operator): not in the session list, tabs or phone API (docs/design/kmem-window.md §4)
+	role           string // its hidden role (hidden.go); "" with hidden = kmem
 	proc           *session.Process
 	model          string
 	mode           string
@@ -260,9 +262,10 @@ type desk struct {
 	kmemGot       bool          // kmem has answered once (the badge may prune seen records)
 	kmemBinSetBtn *widget.Button
 	kmemBinNow    *binView
-	verLine       *verLine    // kmem version under the message box; kmemverline.go
-	saveGeom      func()      // saves the main window's size and maximised state now
-	kmemWin       *kmemWindow // the kmem operations window, nil while closed; kmemwindow*.go
+	verLine       *verLine               // kmem version under the message box; kmemverline.go
+	saveGeom      func()                 // saves the main window's size and maximised state now
+	kmemWin       *kmemWindow            // the kmem operations window, nil while closed; kmemwindow*.go
+	hiddenHosts   map[string]*hiddenHost // hidden role -> where it shows (hidden.go); kmem defaults to kmemWin
 	statsRow      *fyne.Container
 	controlFn     func(s *deskSession, req map[string]any) (json.RawMessage, error)
 	pingLocal     func(host string) bool
@@ -2305,40 +2308,7 @@ func (d *desk) runningVisible() []*deskSession {
 	return out
 }
 
-// hiddenID: id (with working folder cwd, may be empty) is a kmem window
-// assistant session, by its flag, the org's Hidden list or its folder.
-func (d *desk) hiddenID(id, cwd string) bool {
-	if d.org.Hidden[id] || isKmemWindowDir(cwd) || isHiddenSession(d.sessions[id]) {
-		return true
-	}
-	info, ok := d.infos[id]
-	return ok && isKmemWindowDir(info.Cwd)
-}
-
-// markHidden makes s the kmem window's assistant: flagged, and remembered in
-// the org so its id stays out of the sidebar after it ends.
-func (d *desk) markHidden(s *deskSession) {
-	if s == nil {
-		return
-	}
-	s.hidden = true
-	if d.org.Hidden == nil {
-		d.org.Hidden = map[string]bool{}
-	}
-	if !d.org.Hidden[s.id] {
-		d.org.Hidden[s.id] = true
-		d.saveOrgQuiet()
-	}
-	for i, t := range d.tabs {
-		if t == s.id {
-			d.tabs = append(d.tabs[:i:i], d.tabs[i+1:]...)
-			d.saveTabs()
-			d.tabSig = ""
-			d.syncTabs()
-			break
-		}
-	}
-}
+// hiddenID and markHidden are in hidden.go.
 
 func (d *desk) refresh() {
 	if !d.refreshMu.TryLock() {
@@ -2715,6 +2685,11 @@ func (d *desk) allViews() []*chatView {
 		out = append(out, a.view)
 	} else if w := d.kmemWin; w != nil && w.view != nil {
 		out = append(out, w.view)
+	}
+	for _, v := range d.hostViews() {
+		if !slices.Contains(out, v) {
+			out = append(out, v)
+		}
 	}
 	return out
 }

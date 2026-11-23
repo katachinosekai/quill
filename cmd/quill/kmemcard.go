@@ -22,7 +22,7 @@ func (d *desk) handoffOwner(name string, self *deskSession) *deskSession {
 		for _, t := range d.tabs {
 			open = open || t == id
 		}
-		if open || s != nil && (s.running() || s == d.kmemWin.session()) {
+		if open || s != nil && (s.running() || d.hostHolds(s)) {
 			return d.session(id)
 		}
 	}
@@ -31,8 +31,8 @@ func (d *desk) handoffOwner(name string, self *deskSession) *deskSession {
 
 // ownerLabel: where a live handoff or topic runs, for the start card.
 func (d *desk) ownerLabel(owner *deskSession) string {
-	if isHiddenSession(owner) {
-		return "live in the kmem window"
+	if role := hiddenRole(owner); role != "" {
+		return roleDef(role).owner
 	}
 	title, _, _ := d.rowText(owner.id)
 	return "open in tab " + title

@@ -38,8 +38,8 @@ func (d *desk) seen(s *deskSession) bool {
 	if !d.foreground {
 		return false
 	}
-	if s != nil && d.kmemWin.session() == s {
-		return true // shown in the open kmem window (its own window, so not tied to d.hidden)
+	if d.hostShown(s) {
+		return true // shown in its open host, e.g. the kmem window (its own window, so not tied to d.hidden)
 	}
 	if d.hidden {
 		return false
@@ -95,18 +95,19 @@ var alertTitles = map[string]string{
 
 func (d *desk) alert(s *deskSession, kind, body string) {
 	body = clip(body, 200)
-	if isHiddenSession(s) {
-		// The kmem window's assistant: never a session event on the phone
-		// (§4 #25); a "kmem" event when it waits for the user, unseen
-		// (docs/design/kmem-android.md §4.5).
+	if role := hiddenRole(s); role != "" {
+		// A hidden session: never a session event on the phone (kmem-window
+		// §4 #25); its role's event when it waits for the user, unseen
+		// (kmem: docs/design/kmem-android.md §4.5), titled by its role.
 		if d.seen(s) {
 			return
 		}
-		if kind == "plan" || kind == "question" || kind == "approval" {
-			d.kmemPhoneEvent(strings.TrimSpace(alertTitles[kind]) + ": " + body)
+		def := roleDef(role)
+		if def.phone != nil && (kind == "plan" || kind == "question" || kind == "approval") {
+			def.phone(d, strings.TrimSpace(alertTitles[kind])+": "+body)
 		}
 		if d.notifyOn() {
-			d.desktopNotify(s.id, "kmem assistant"+alertTitles[kind], body)
+			d.desktopNotify(s.id, def.title+alertTitles[kind], body)
 		}
 		return
 	}
@@ -211,7 +212,7 @@ func (d *desk) startNotifier() {
 			}
 			d.do(func() {
 				if d.hiddenID(sid, "") {
-					d.openKmemWindow() // raises the kmem window
+					d.openHidden(sid) // raises its role's host, e.g. the kmem window
 					return
 				}
 				d.showWindow()
