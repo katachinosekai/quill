@@ -188,7 +188,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		at = q.end
 	}
 	prose(at, len(lines))
-	msg := widget.NewLabel("Approving runs all of it: every command and change for this request is approved automatically until Claude finishes. Unanswered questions are sent as \"no answer\".")
+	msg := widget.NewLabel("Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done. Unanswered questions are sent as \"no answer\".")
 	msg.Wrapping = fyne.TextWrapWord
 	msg.Alignment = v.align()
 	msg.SizeName = theme.SizeNameCaptionText

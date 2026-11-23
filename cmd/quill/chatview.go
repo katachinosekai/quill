@@ -1710,7 +1710,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	title.Alignment = v.align()
 	title.Wrapping = fyne.TextWrapWord
 	title.TextStyle = fyne.TextStyle{Bold: true}
-	msg := widget.NewLabel("Claude's plan is above. Approving runs all of it: every command and change for this request is approved automatically until Claude finishes.")
+	msg := widget.NewLabel("Claude's plan is above. Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done.")
 	msg.Wrapping = fyne.TextWrapWord
 	msg.Alignment = v.align()
 	msg.SizeName = theme.SizeNameCaptionText
