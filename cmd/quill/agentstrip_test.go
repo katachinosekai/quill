@@ -67,14 +67,14 @@ func TestAgentStrip(t *testing.T) {
 		feed(t, h, s, `{"type":"system","subtype":"task_started","task_id":"sh1","tool_use_id":"toolu_S","description":"go test","task_type":"local_bash"}`)
 		h.d.agentStrip.sync()
 		got := stripTexts(h.d.agentStrip)
-		if !h.d.agentStrip.root.Visible() || len(got) != 2 || got[0] != "Fix join stall" || got[1] != "Release build" {
+		if !h.d.agentStrip.root.Visible() || len(got) != 2 || got[0] != "● Fix join stall" || got[1] != "● Release build" {
 			t.Fatalf("running subagents listed, shells not: %q", got)
 		}
 		// Tokens follow task_progress; the time follows the clock.
 		h.d.agentStrip.now = func() time.Time { return start.Add(6*time.Minute + 10*time.Second) }
 		feed(t, h, s, `{"type":"system","subtype":"task_progress","task_id":"agentA","tool_use_id":"toolu_A","description":"Fix join stall","subagent_type":"Explore","usage":{"total_tokens":41000,"tool_uses":7,"duration_ms":360000},"last_tool_name":"Grep"}`)
 		h.d.agentStrip.sync()
-		if got := stripTexts(h.d.agentStrip); got[0] != "Fix join stall" {
+		if got := stripTexts(h.d.agentStrip); got[0] != "● Fix join stall" {
 			t.Fatalf("tokens update from events: %q", got)
 		}
 		items := h.d.agentStrip.items(s, s.conv.Agents()[0])
@@ -160,19 +160,23 @@ func TestAgentStripAlignment(t *testing.T) {
 func TestAgentChipDescription(t *testing.T) {
 	now := time.Now()
 	g := chat.AgentUse{Name: "Restore plan card overlay (both apps) and more", Type: "general-purpose", Model: "opus", Started: now.Add(-3 * time.Minute), Tokens: 12000, Status: "running"}
-	if got := agentChipText(g, now); got != "Restore plan card overlay (both…" {
+	if got := agentChipText(g, now); got != "● Restore plan card overlay (both…" {
 		t.Fatalf("truncated chip: %q", got)
 	}
 	if tip := agentTip(g, now); tip != "Restore plan card overlay (both apps) and more\ngeneral-purpose · opus\nRunning for 3 min · 12.0k tok" {
 		t.Fatalf("tooltip: %q", tip)
 	}
 	g.Name = "  "
-	if got := agentChipText(g, now); got != "general-purpose" || agentTip(g, now) != "general-purpose\ngeneral-purpose · opus\nRunning for 3 min · 12.0k tok" {
+	if got := agentChipText(g, now); got != "● general-purpose" || agentTip(g, now) != "general-purpose\ngeneral-purpose · opus\nRunning for 3 min · 12.0k tok" {
 		t.Fatalf("type fallback: %q %q", got, agentTip(g, now))
 	}
 	g.Name, g.Type, g.Model, g.Tokens = "Quill Desktop RAM usage review", "", "", 0
 	g.Done, g.Status = now, "completed"
-	if got := agentChipText(g, now); got != "Quill Desktop RAM usage review" || agentTip(g, now) != "Quill Desktop RAM usage review\nCompleted after 3 min" {
+	if got := agentChipText(g, now); got != "✓ Quill Desktop RAM usage review" || agentTip(g, now) != "Quill Desktop RAM usage review\nCompleted after 3 min" {
 		t.Fatalf("short: %q %q", got, agentTip(g, now))
+	}
+	g.Status = "failed"
+	if got := agentChipText(g, now); got != "✕ Quill Desktop RAM usage review" {
+		t.Fatalf("failed mark: %q", got)
 	}
 }

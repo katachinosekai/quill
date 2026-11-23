@@ -161,10 +161,17 @@ func agentTip(g chat.AgentUse, now time.Time) string {
 	return strings.Join(append(lines, st), "\n")
 }
 
-// agentChipText: the description only, cut to the chip width; time and
-// tokens are in the tooltip.
+// agentChipText: the status mark (● running, ✓ done, ✕ failed) and the
+// description, cut to the chip width; time and tokens are in the tooltip.
 func agentChipText(g chat.AgentUse, _ time.Time) string {
-	return cutTo(agentName(g), agentDescMax)
+	mark := "●"
+	if !g.Running() {
+		mark = "✓"
+		if g.Status != "" && g.Status != "completed" {
+			mark = "✕"
+		}
+	}
+	return mark + " " + cutTo(agentName(g), agentDescMax)
 }
 
 func (a *agentStrip) sync() {
