@@ -183,6 +183,7 @@ func TestAsksApprovalRequestsYes(t *testing.T) {
 		"Say yes and I'll start.": true,
 		// Zomboid 2026-11-23: the ask after another sentence on its line.
 		"Plan:\n1. Build it locally.\n2. Check memory.\n\nThe author reports (t1) stay for later. Reply **yes** to run it.": true,
+		"Plan:\n1. Edit a.go.\n2. Run the tests.\n\nReply **Approved.** to run it.":                                         true,
 		"I ran it. Reply with the file name to continue.":                                                                   false,
 		"**Plan (needs your yes):**\n1. Write the script.\n\nI'll check the logs first.":                                    false,
 		"Plan:\n1. Write the script.\n2. Run it.":                                                                           false,
@@ -194,6 +195,20 @@ func TestAsksApprovalRequestsYes(t *testing.T) {
 		c.Items = append(c.Items, &Item{Kind: Assistant, Text: text})
 		if got := c.AsksApproval(); got != want {
 			t.Errorf("AsksApproval(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+// Plan format spec v1 (docs/plan-format.md): the closing bold question, with
+// or without numbered choice questions after it, asks for approval.
+func TestPlanFormatV1AsksApproval(t *testing.T) {
+	plan := "Plan:\n1. Edit `readonly.go`: add `findmnt`, so mount checks need no plan.\n2. Start a background subagent that runs `go test ./...` and reports failures.\n\n**Can I run steps 1–2? Yes (recommended) or no?**"
+	for _, text := range []string{plan, plan + "\n1. Commit message style: short (recommended) or detailed?"} {
+		c := New()
+		c.AddUser("hi")
+		c.Items = append(c.Items, &Item{Kind: Assistant, Text: text})
+		if !c.AsksApproval() {
+			t.Errorf("AsksApproval(%q) = false", text)
 		}
 	}
 }

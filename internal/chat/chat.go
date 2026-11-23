@@ -401,14 +401,22 @@ func asksToApprove(q string) bool {
 // that end a message ("1. Do you approve steps 1–6? …", "2. …?"), or "".
 func ClosingApproval(text string) string {
 	lines := strings.Split(strings.TrimRight(strings.TrimSpace(JoinOptionLines(text)), "*_ "), "\n")
+	seen := false
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := strings.TrimSpace(lines[i])
 		if l == "" {
 			continue
 		}
 		if !numberedQ.MatchString(l) || !strings.Contains(l, "?") {
+			// Plan format v1 (docs/plan-format.md): the bold approval line
+			// ("**Can I run steps 1–N? Yes (recommended) or no?**") may be
+			// followed by numbered choice questions.
+			if q := firstQuestion(strings.Trim(l, "*_ ")); seen && q != "" && asksToApprove(q) {
+				return q
+			}
 			return ""
 		}
+		seen = true
 		q := strings.TrimSpace(strings.Trim(numberedQ.ReplaceAllString(l, ""), "*_ "))
 		if lq := lastQuestionOf(q); lq != "" && asksToApprove(lq) || yesNoProposal(q) {
 			return q
