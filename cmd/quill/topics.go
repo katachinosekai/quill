@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Topic tabs (docs/design/topic-tabs.md §3.1-§3.2, user 2026-11-22): a tab
@@ -42,11 +44,12 @@ var topicCache struct {
 	busy   bool
 	list   []topicInfo
 	extra  map[string]string // topics named in "New topic" this run: slug -> title
+	saved  map[string]string // titles persisted in Quill Desktop's org file: slug -> title
 }
 
 func resetTopicCache() {
 	topicCache.mu.Lock()
-	topicCache.at, topicCache.loaded, topicCache.busy, topicCache.list, topicCache.extra = time.Time{}, false, false, nil, nil
+	topicCache.at, topicCache.loaded, topicCache.busy, topicCache.list, topicCache.extra, topicCache.saved = time.Time{}, false, false, nil, nil, nil
 	topicCache.mu.Unlock()
 }
 
@@ -153,6 +156,7 @@ func (d *desk) loadTopics() []topicInfo {
 		}
 	}
 	list := buildTopics(topicsOut, labels, ts.Tasks, status)
+	applySavedTitles(list, labels)
 	topicCache.mu.Lock()
 	topicCache.list, topicCache.at, topicCache.loaded, topicCache.busy = list, time.Now(), true, false
 	topicCache.mu.Unlock()
@@ -190,7 +194,81 @@ func cachedTopic(slug string) (topicInfo, bool) {
 	if title, ok := topicCache.extra[slug]; ok {
 		return topicInfo{Slug: slug, Title: title, Scope: []string{slug}}, true
 	}
+	if title, ok := topicCache.saved[slug]; ok {
+		return topicInfo{Slug: slug, Title: title, Scope: []string{slug}}, true
+	}
 	return topicInfo{}, false
+}
+
+// seedSavedTitles / applySavedTitles: the titles typed in "New topic" and
+// persisted in the org file. kmem's config title or label still wins.
+func seedSavedTopicTitles(m map[string]string) {
+	topicCache.mu.Lock()
+	topicCache.saved = map[string]string{}
+	for k, v := range m {
+		topicCache.saved[k] = v
+	}
+	topicCache.mu.Unlock()
+}
+
+func applySavedTitles(list []topicInfo, labels map[string]kmemSessionCfg) {
+	topicCache.mu.Lock()
+	defer topicCache.mu.Unlock()
+	for i := range list {
+		c := labels[list[i].Slug]
+		if title, ok := topicCache.saved[list[i].Slug]; ok && c.Title == "" && c.As == "" {
+			list[i].Title = title
+		}
+	}
+}
+
+// titleKey: a title compared for "same topic": trimmed, NFC, case-folded,
+// inner spaces collapsed.
+func titleKey(s string) string {
+	s = norm.NFC.String(strings.Join(strings.Fields(s), " "))
+	return strings.ToLower(strings.ToUpper(s))
+}
+
+// topicSlugByTitle: the slug of a known topic (loaded list, persisted titles,
+// this run's) whose title equals title, "" if none.
+func topicSlugByTitle(title string) string {
+	key := titleKey(title)
+	topicCache.mu.Lock()
+	defer topicCache.mu.Unlock()
+	for _, t := range topicCache.list {
+		if titleKey(t.Title) == key {
+			return t.Slug
+		}
+	}
+	var hit []string
+	for _, m := range []map[string]string{topicCache.saved, topicCache.extra} {
+		for slug, t := range m {
+			if titleKey(t) == key {
+				hit = append(hit, slug)
+			}
+		}
+	}
+	sort.Strings(hit) // the first-created topic-N
+	if len(hit) > 0 {
+		return hit[0]
+	}
+	return ""
+}
+
+// promptTitle: a title made safe to sit inside a prompt or a quoted shell-ish
+// command: no quotes, backticks, $, backslashes or control characters;
+// spaces collapsed. The displayed title stays as typed.
+func promptTitle(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '"' || r == '`' || r == '$' || r == '\\' || r == '\'':
+			return ' '
+		case unicode.IsControl(r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r):
+			return ' '
+		}
+		return r
+	}, s)
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // topicSlugFor is the slug "New topic" gives a typed title, for the card's
@@ -200,6 +278,9 @@ func cachedTopic(slug string) (topicInfo, bool) {
 func topicSlugFor(title string) string {
 	if strings.Trim(slugJunk.ReplaceAllString(strings.ToLower(title), "-"), "-") != "" {
 		return kmemSlug(title, func(string) bool { return false })
+	}
+	if slug := topicSlugByTitle(title); slug != "" {
+		return slug // the same title reopens its topic
 	}
 	for n := 1; ; n++ {
 		slug := fmt.Sprintf("topic-%d", n)
@@ -258,13 +339,13 @@ func topicPromptFor(t topicInfo, briefing bool, isNew bool) string {
 	} else {
 		// kmem before the topic briefing: --topic only ranks, so ask for the
 		// claimed and open tasks explicitly and name the whole scope.
-		load = fmt.Sprintf("Run `kmem brief`, `kmem task list` and `kmem context \"%s coordinator: claimed tasks, open tasks, status, next steps\" --topic %s`", t.Title, scope)
+		load = fmt.Sprintf("Run `kmem brief`, `kmem task list` and `kmem context \"%s coordinator: claimed tasks, open tasks, status, next steps\" --topic %s`", promptTitle(t.Title), scope)
 		sub = fmt.Sprintf("`kmem context \"<task>\" --topic %s`", scope)
 	}
 	p := fmt.Sprintf("You are the %s coordinator; kmem name %q (`kmem --as %s`). %s; "+
 		"continue the claimed tasks from their checkpoints and take the open ones as next steps; "+
 		"keep `%s/status` current (one fact, updated with `--replaces`); brief every subagent with %s. "+
-		"Follow the shared rules (`kmem rules`).", t.Title, t.Slug, t.Slug, load, t.Slug, sub)
+		"Follow the shared rules (`kmem rules`).", promptTitle(t.Title), t.Slug, t.Slug, load, t.Slug, sub)
 	if isNew {
 		p += fmt.Sprintf(" This topic is new and has no facts yet: write its first `%s/status` fact once there is something to record.", t.Slug)
 	}
@@ -294,6 +375,13 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 		return
 	}
 	s.pickPending = false
+	if isNew && t.Title != "" {
+		if d.org.TopicTitles == nil {
+			d.org.TopicTitles = map[string]string{}
+		}
+		d.org.TopicTitles[t.Slug] = t.Title
+		seedSavedTopicTitles(d.org.TopicTitles)
+	}
 	s.kmemNew = false // the topic prompt names the kmem name itself
 	d.org.Titles[s.id] = t.Title
 	d.org.Kmem[s.id] = t.Slug

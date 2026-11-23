@@ -37,7 +37,13 @@ func TestTopicSlugForNonLatin(t *testing.T) {
 		t.Errorf("first free N: %q", got)
 	}
 	rememberNewTopic(topicInfo{Slug: "topic-2", Title: "!!!"})
-	if got := topicSlugFor("日本語"); got != "topic-4" {
+	if got := topicSlugFor("日本語"); got != "topic-1" { // same title: reopens it
+		t.Errorf("same title reopens: %q", got)
+	}
+	if got := topicSlugFor("日本語 2"); got != "2" {
+		t.Errorf("latin digit slug: %q", got)
+	}
+	if got := topicSlugFor("新しい"); got != "topic-4" {
 		t.Errorf("skips remembered: %q", got)
 	}
 }

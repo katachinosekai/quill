@@ -45,6 +45,10 @@ type sideOrg struct {
 	// Dirs: project -> extra working folders every session of it gets
 	// (/add-dir "every session of this project", user 2026-11-21).
 	Dirs map[string][]string `json:"dirs,omitempty"`
+	// TopicTitles: topic slug -> the title typed in "New topic" (Quill
+	// Desktop never writes kmem's config, so a title in any language, which
+	// slugs to "topic-N", lives here).
+	TopicTitles map[string]string `json:"topicTitles,omitempty"`
 }
 
 func (d *desk) loadOrg() {
@@ -67,6 +71,7 @@ func (d *desk) loadOrg() {
 	if d.org.Hidden == nil {
 		d.org.Hidden = map[string]bool{}
 	}
+	seedSavedTopicTitles(d.org.TopicTitles)
 	for id, place := range d.org.Place {
 		var n int
 		if _, err := fmt.Sscanf(d.org.Titles[id], "New session %d", &n); err == nil && place == placeActive {
