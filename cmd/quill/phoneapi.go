@@ -43,12 +43,13 @@ type phoneAPI struct {
 	streams map[string]chan struct{}
 	stop    chan struct{}
 
-	tracks   map[string]*itemTrack
-	lastSess map[string]string
-	lastIDs  string
-	lastUse  string
-	lastCtl  map[string]bool
-	lastSet  string
+	tracks     map[string]*itemTrack
+	lastSess   map[string]string
+	lastIDs    string
+	lastUse    string
+	lastCtl    map[string]bool
+	lastSet    string
+	lastTopics string // the topics list last sent as a "topics" change
 
 	lan *lanMem // home-network unlock (phoneunlock.go)
 
@@ -112,7 +113,11 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "sessions":
 		a.sessions(w, folders.PhoneID(r))
 	case r.Method == http.MethodGet && path == "folders":
-		a.folders(w)
+		a.folders(w, r)
+	case r.Method == http.MethodGet && path == "topics":
+		a.topicsView(w, r)
+	case r.Method == http.MethodGet && path == "topics/slug":
+		a.topicSlug(w, r)
 	case r.Method == http.MethodGet && path == "handoffs":
 		a.handoffs(w)
 	case r.Method == http.MethodGet && path == "handoffs/slug":
@@ -179,7 +184,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 	}
 	phone := folders.PhoneID(r)
 	conn, snap := lanConnOf(r), lanSnapshot()
-	var ctl, unlock, lan, kmemOn, files bool
+	var ctl, unlock, lan, kmemOn, files, endCheck bool
 	a.ui(func() {
 		list := a.d.phones()
 		changed := false
@@ -210,9 +215,11 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		ctl = a.control(phone)
 		lan = a.lanHello(phone, conn, snap)
 		kmemOn = a.d.kmemOn()
+		endCheck = kmemOn && a.d.kmemFeatureCached(endCheckFeature)
 	})
 	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan,
-		"kmem": map[string]any{"api": kmemPhoneAPI, "on": kmemOn}, "files": map[string]any{"api": filesPhoneAPI, "on": files}})
+		"kmem": map[string]any{"api": kmemPhoneAPI, "on": kmemOn}, "files": map[string]any{"api": filesPhoneAPI, "on": files},
+		"topics": map[string]any{"api": topicsPhoneAPI, "on": kmemOn, "endCheck": endCheck}})
 }
 
 type apiSession struct {
@@ -247,6 +254,17 @@ type apiSession struct {
 	// the session's empty message box (shownSuggestion, incl. the /clear
 	// rule); left out when there is none.
 	Suggestion string `json:"suggestion,omitempty"`
+	// Topic fields (phone API topics level 1, docs/phone-api.md): the topic
+	// the session coordinates (its kmem name), its title, the old kmem name
+	// of a session that predates topic tabs (to merge), the subagents
+	// (the strip's list) with their summed tokens, and the end-of-session
+	// check while the session is ending.
+	Topic       string      `json:"topic,omitempty"`
+	TopicTitle  string      `json:"topicTitle,omitempty"`
+	LegacyName  string      `json:"legacyName,omitempty"`
+	Agents      []apiAgent  `json:"agents,omitempty"`
+	AgentTokens int64       `json:"agentTokens,omitempty"`
+	EndWait     *apiEndWait `json:"endWait,omitempty"`
 }
 
 type apiContext struct {
@@ -266,16 +284,33 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 	d := a.d
 	group := map[string]string{}
 	var ids []string
+	// Topic mode (kmem memory on): only live sessions, grouped by topic.
+	topicMode := d.kmemOn()
+	live := func(id string) bool {
+		if !topicMode {
+			return true
+		}
+		if s := d.sessions[id]; s != nil && s.running() {
+			return true
+		}
+		return contains(d.tabs, id)
+	}
+	title := func(id, g string) string {
+		if t, ok := cachedTopic(d.topicOf(id)); topicMode && ok {
+			return t.Title
+		}
+		return g
+	}
 	for _, g := range d.groups {
 		if g.key == placeArchive {
 			continue
 		}
 		for _, id := range g.ids {
-			if strings.HasPrefix(id, remotePrefix) || d.hiddenID(id, "") {
+			if strings.HasPrefix(id, remotePrefix) || d.hiddenID(id, "") || !live(id) {
 				continue
 			}
 			if _, ok := group[id]; !ok {
-				group[id] = g.title
+				group[id] = title(id, g.title)
 				ids = append(ids, id)
 			}
 		}
@@ -285,7 +320,7 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 			continue
 		}
 		if _, ok := group[id]; !ok {
-			group[id] = "Open"
+			group[id] = title(id, "Open")
 			ids = append(ids, id)
 		}
 	}
@@ -352,6 +387,7 @@ func (a *phoneAPI) session(id, group string) apiSession {
 		}
 	}
 	_, out.Renamed = d.org.Titles[id]
+	a.topicFields(&out)
 	out.Project = d.projectOf(id)
 	out.FolderName = filepath.Base(out.Folder)
 	return out
@@ -390,11 +426,15 @@ func (a *phoneAPI) sessions(w http.ResponseWriter, phone string) {
 		a.mu.Lock()
 		cursor := a.next
 		a.mu.Unlock()
+		topics := a.topicList()
 		body = map[string]any{
 			"v": 1, "boot": a.boot, "cursor": cursor, "usage": a.usage(), "sessions": list, "control": a.control(phone),
 			"models":   map[string]any{"online": modelChoices, "local": a.d.localModelList()},
 			"modes":    map[string]any{"online": modeChoices, "local": localModes},
 			"projects": a.projects(), "actions": menuActions, "settings": a.d.phoneSettings(),
+		}
+		if topics != nil {
+			body["topics"] = topics
 		}
 	})
 	folders.WriteJSON(w, http.StatusOK, body)
@@ -423,10 +463,32 @@ func (a *phoneAPI) knownFolders() []map[string]string {
 	return out
 }
 
-func (a *phoneAPI) folders(w http.ResponseWriter) {
+// folders: every folder Quill Desktop knows; with ?topic=SLUG in topic mode
+// the topic's working folders (topicFolders).
+func (a *phoneAPI) folders(w http.ResponseWriter, r *http.Request) {
 	var list []map[string]string
-	a.ui(func() { list = a.knownFolders() })
-	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "folders": list})
+	slug := r.URL.Query().Get("topic")
+	var fail *apiErr
+	a.ui(func() {
+		if slug != "" && a.d.kmemOn() {
+			if _, ok := cachedTopic(slug); !ok {
+				fail = notFound("no topic " + slug)
+				return
+			}
+			list = a.topicFolders(slug)
+			return
+		}
+		list = a.knownFolders()
+	})
+	if fail != nil {
+		folders.WriteError(w, fail.status, fail.code, fail.msg)
+		return
+	}
+	out := map[string]any{"v": 1, "folders": list}
+	if slug != "" {
+		out["topic"] = slug
+	}
+	folders.WriteJSON(w, http.StatusOK, out)
 }
 
 type itemTrack struct {
@@ -577,6 +639,16 @@ func (a *phoneAPI) scan() {
 		a.lastSet = string(sb)
 		if !first {
 			changes = append(changes, map[string]any{"type": "settings", "settings": json.RawMessage(sb)})
+		}
+	}
+	if tl := a.topicList(); tl != nil {
+		tb, _ := json.Marshal(tl)
+		if string(tb) != a.lastTopics {
+			first := a.lastTopics == ""
+			a.lastTopics = string(tb)
+			if !first {
+				changes = append(changes, map[string]any{"type": "topics", "topics": json.RawMessage(tb)})
+			}
 		}
 	}
 	if c := a.kmemChange(); c != nil {

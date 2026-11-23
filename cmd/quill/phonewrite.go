@@ -25,8 +25,16 @@ func badReq(msg string) *apiErr   { return &apiErr{http.StatusBadRequest, "bad_r
 func notFound(msg string) *apiErr { return &apiErr{http.StatusNotFound, "not_found", msg} }
 func stale(msg string) *apiErr    { return &apiErr{http.StatusConflict, "stale", msg} }
 
+// apiOpenTopic: new-session "openTopic": an existing topic's slug, or the
+// title of a new one (exactly one).
+type apiOpenTopic struct {
+	Topic string `json:"topic"`
+	New   string `json:"new"`
+}
+
 type writeBody struct {
 	Start     *apiStart           `json:"start"`
+	OpenTopic *apiOpenTopic       `json:"openTopic"`
 	Text      string              `json:"text"`
 	RequestID string              `json:"requestId"`
 	Seq       int                 `json:"seq"`
@@ -71,6 +79,9 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 	if len(parts) >= 3 && parts[0] == "session" {
 		a.preload(parts[1])
 	}
+	if in.OpenTopic != nil && path == "sessions/new" {
+		a.ensureTopics() // reads kmem: off the UI thread
+	}
 	var out map[string]any
 	var fail *apiErr
 	a.ui(func() {
@@ -85,6 +96,10 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 		case path == "sessions/new":
 			out, fail = a.newSession(in)
 		case parts[0] == "handoffs":
+			if a.d.kmemOn() { // handoffs are history only now
+				fail = updateRequired()
+				return
+			}
 			out, fail = a.handoffAction(parts[1], parts[2])
 		default:
 			s := a.d.sessions[parts[1]]
@@ -367,6 +382,12 @@ func (a *phoneAPI) queueAction(s *deskSession, op string, in writeBody) (map[str
 
 func (a *phoneAPI) newSession(in writeBody) (map[string]any, *apiErr) {
 	d := a.d
+	if in.OpenTopic != nil {
+		return a.openTopicWrite(in)
+	}
+	if in.Start != nil && d.kmemOn() { // an older Quill Android: handoff start
+		return nil, updateRequired()
+	}
 	ok := false
 	for _, f := range a.knownFolders() {
 		ok = ok || f["path"] == in.Folder

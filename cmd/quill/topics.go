@@ -313,20 +313,27 @@ func (d *desk) pickNewTopic(s *deskSession, text string) {
 // card (phone, --resume-all, kmem window): switch to its live session, or
 // start a fresh one. nil when the topic is live outside Quill Desktop.
 func (d *desk) openTopic(slug string) *deskSession {
-	if owner := d.topicOwner(slug, &deskSession{}); owner != nil {
-		d.open(owner.id)
-		return owner
-	}
 	t, ok := cachedTopic(slug)
 	if !ok {
 		t = topicInfo{Slug: slug, Title: topicTitle(slug), Scope: []string{slug}}
 	}
-	if _, ext := d.topicExternal(slug); ext {
+	return d.openTopicInfo(t, false, homeDir())
+}
+
+// openTopicInfo is openTopic for a known topic: a live one switches, a topic
+// live outside Quill Desktop (K6) is refused (nil), otherwise a fresh
+// coordinator starts in cwd (isNew: the topic has no facts yet).
+func (d *desk) openTopicInfo(t topicInfo, isNew bool, cwd string) *deskSession {
+	if owner := d.topicOwner(t.Slug, &deskSession{}); owner != nil {
+		d.open(owner.id)
+		return owner
+	}
+	if _, ext := d.topicExternal(t.Slug); ext {
 		return nil // live outside Quill Desktop (K6): refused, no tab
 	}
-	ns := d.createSession(homeDir(), "default", "default")
+	ns := d.createSession(cwd, "default", "default")
 	ns.pickPending = true
-	d.pickTopic(ns, t, false)
+	d.pickTopic(ns, t, isNew)
 	return ns
 }
 
