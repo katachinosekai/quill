@@ -355,6 +355,7 @@ type desk struct {
 	hideChips     bool
 	sizesCard     fyne.CanvasObject
 	usageRow      fyne.CanvasObject
+	agentStrip    *agentStrip // subagent strip (agentstrip.go)
 	updRelease    *updater.Release
 	// update line (updline.go): never update or restart without the user
 	updLine       *fyne.Container
@@ -1002,7 +1003,8 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.tabRow = d.buildTabs()
 	d.usage = newUsagePanel(d)
 	d.usageRow = d.usage.buildStrip()
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.usageRow, widget.NewSeparator())
+	d.agentStrip = newAgentStrip(d) // subagent strip under the tabs, both layouts (agentstrip.go)
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.agentStrip.root, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)

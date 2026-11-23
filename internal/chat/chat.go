@@ -91,6 +91,11 @@ type Conversation struct {
 	seq        int
 	bgTasks    map[string]BgTask
 	CacheTTL   time.Duration
+	// subagents and their tokens (agents.go)
+	agents      map[string]*AgentUse
+	agentByTool map[string]string
+	agentSeq    int
+	agentsRev   int
 }
 
 func New() *Conversation {
@@ -456,7 +461,7 @@ func (c *Conversation) Apply(ev *protocol.Event) []*Item {
 		c.at = t.Local()
 	}
 	defer func() { c.at = time.Time{} }()
-	if len(c.bgTasks) > 0 && bytes.Contains(ev.Raw, []byte("<task-notification>")) {
+	if (len(c.bgTasks) > 0 || len(c.agents) > 0) && bytes.Contains(ev.Raw, []byte("<task-notification>")) {
 		c.NoteNotifications(string(ev.Raw))
 	}
 	if ev.IsSidechain || ev.IsSubagent() {
@@ -505,6 +510,8 @@ func (c *Conversation) applySystem(ev *protocol.Event) []*Item {
 		return []*Item{c.AddNotice("Retrying API request...")}
 	case "compact_boundary":
 		return []*Item{c.AddNotice("Conversation compacted")}
+	case "task_started", "task_progress", "task_notification", "task_updated":
+		c.applyTaskEvent(ev)
 	}
 	return nil
 }
@@ -595,6 +602,12 @@ func (c *Conversation) applyUser(ev *protocol.Event) []*Item {
 		return nil
 	}
 	var out []*Item
+	results := 0
+	for _, b := range ev.Message.Blocks() {
+		if b.Type == "tool_result" {
+			results++
+		}
+	}
 	for _, b := range ev.Message.Blocks() {
 		switch b.Type {
 		case "tool_result":
@@ -606,6 +619,9 @@ func (c *Conversation) applyUser(ev *protocol.Event) []*Item {
 			it.ResultError = b.IsError
 			it.HasResult = true
 			c.trackTask(it)
+			if len(c.agents) > 0 {
+				c.agentResult(ev, it, results == 1)
+			}
 			out = append(out, it)
 		case "text":
 			t, ok := CleanUserText(b.Text)
@@ -692,6 +708,7 @@ func (c *Conversation) applyAssistant(ev *protocol.Event) []*Item {
 			it.ToolName = b.Name
 			it.Streaming = false
 			c.setToolInput(it, b.Input)
+			c.noteAgentCall(ev, b)
 			out = append(out, it)
 		}
 	}
@@ -943,6 +960,9 @@ func (c *Conversation) trackTask(it *Item) {
 	case "TaskStop", "KillShell", "KillBash":
 		for _, k := range []string{in.TaskID, in.ShellID, in.BashID} {
 			delete(c.bgTasks, k)
+			if a := c.agents[k]; k != "" && a != nil {
+				c.endAgent(a, "stopped")
+			}
 		}
 		return
 	case "TaskOutput", "BashOutput":
@@ -1001,6 +1021,9 @@ func (c *Conversation) NoteNotifications(text string) {
 		}
 		id := notifyID.FindStringSubmatch(part)
 		st := notifyState.FindStringSubmatch(part)
+		if id != nil && st != nil && len(c.agents) > 0 {
+			c.agentNotification(part, id[1], st[1])
+		}
 		if id == nil || st == nil || !taskDone[st[1]] {
 			continue
 		}
@@ -1024,4 +1047,5 @@ func (c *Conversation) Working() int {
 
 func (c *Conversation) ClearBackground() {
 	c.bgTasks = nil
+	c.stopAgents()
 }
