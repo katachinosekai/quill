@@ -567,7 +567,7 @@ func (d *desk) topicTitleTexts(name string) []string {
 // case folding as the name search (foldContains; q is already foldKey'd).
 func titlesMatch(titles []string, q string) bool {
 	for _, t := range titles {
-		if foldContains(titleKey(t), q) {
+		if foldContains(titleKey(t), titleKey(q)) {
 			return true
 		}
 	}
