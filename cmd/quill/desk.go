@@ -612,6 +612,9 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
 	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, coordNote, animChk, speedRow, motionRows, chipChk, updChk, notifyChk, d.kwinSetting(), widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Voice input"), d.voiceSettings(), widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
+	d.setGeneral.Add(widget.NewSeparator()) // quilloperator.go
+	d.setGeneral.Add(heading("Quill operator"))
+	d.setGeneral.Add(d.quillOpSettings())
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
@@ -1730,8 +1733,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	s.restarting = false
 	defer func() {
 		if isHiddenSession(s) {
-			d.kmemAssistDot()
-			d.kmemAssistExited(s)
+			d.assistantsExited(s)
 		}
 	}()
 	var items []*chat.Item
@@ -2372,7 +2374,7 @@ func (d *desk) watch(ctx context.Context) {
 	}
 	d.do(d.pruneStaleTabs)
 	d.do(d.reopenLastTab)
-	d.do(d.kmemAssistBoot) // the always-running kmem assistant, after a reload's restore adopts its session
+	d.do(d.assistantsBoot) // the always-running assistants (kmem, Quill operator), after a reload's restore adopts their sessions
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
 	go d.usageLoop(ctx)
@@ -2445,9 +2447,9 @@ func (d *desk) quitConfirmed(checks []*deskSession) {
 		}()
 	}
 	stopAll := func() {
-		if d.kmemQuitFlow != nil && len(d.runningSessions()) > len(d.runningVisible()) {
-			// The kmem assistant saves its handoff first (§5, bounded by its 60 s cap).
-			d.kmemQuitFlow(func() { d.do(stop) })
+		if len(d.runningSessions()) > len(d.runningVisible()) {
+			// The assistants stop first (kmem saves its handoff, bounded by its 60 s cap).
+			d.assistantsQuit(func() { d.do(stop) })
 			return
 		}
 		stop()

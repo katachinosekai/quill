@@ -370,7 +370,13 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 	d.setDormant(t.Slug, false)
 	if owner := d.topicOwner(t.Slug, s); owner != nil {
 		d.noteRecentTopic(t.Slug)
-		d.open(owner.id)
+		d.openOwner(owner)
+		return
+	}
+	if t.Slug == quillOpName && d.quillOpOn() {
+		d.noteRecentTopic(t.Slug)
+		d.notify(s, "Quill is the Quill operator's topic: it runs behind the Quill button, not in a tab.")
+		d.openQuillOperator()
 		return
 	}
 	if e, ok := d.topicExternal(t.Slug); ok {
@@ -436,8 +442,18 @@ func (d *desk) openTopicInfo(t topicInfo, isNew bool, cwd string) *deskSession {
 	if owner := d.topicOwner(t.Slug, &deskSession{}); owner != nil {
 		d.setDormant(t.Slug, false)
 		d.noteRecentTopic(t.Slug)
-		d.open(owner.id)
+		d.openOwner(owner)
 		return owner
+	}
+	if t.Slug == quillOpName && d.quillOpOn() {
+		// The operator's topic never opens a tab; it may still be starting (nil).
+		d.setDormant(t.Slug, false)
+		d.noteRecentTopic(t.Slug)
+		d.openQuillOperator()
+		if a := d.quillAssist(); a.s != nil && a.s.running() {
+			return a.s
+		}
+		return nil
 	}
 	if _, ext := d.topicExternal(t.Slug); ext {
 		return nil // live outside Quill Desktop (K6): refused, no tab
@@ -446,6 +462,16 @@ func (d *desk) openTopicInfo(t topicInfo, isNew bool, cwd string) *deskSession {
 	ns.pickPending = true
 	d.pickTopic(ns, t, isNew)
 	return ns
+}
+
+// openOwner brings the topic's live session forward: its tab, or the host of
+// a hidden one (the Quill operator's box).
+func (d *desk) openOwner(owner *deskSession) {
+	if isHiddenSession(owner) {
+		d.openHidden(owner.id)
+		return
+	}
+	d.open(owner.id)
 }
 
 // isDormant: the topic is hidden from the "Open a topic" list until opened.

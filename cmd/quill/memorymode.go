@@ -137,10 +137,14 @@ const kmemAssistantHint = `You are kmem-lock-audit, Quill Desktop's kmem develop
 
 // sessionPromptFor: the prompt Quill Desktop appends for s. The hidden kmem
 // assistant gets its own hint and always the kmem memory hint, without the
-// coordinator and build-gate hints (its hint asks before every write).
+// coordinator and build-gate hints (its hint asks before every write). The
+// hidden Quill operator gets the topic hints and its own (quilloperator.go).
 func (d *desk) sessionPromptFor(s *deskSession, kmemMem bool) string {
-	if isHiddenSession(s) {
+	switch hiddenRole(s) {
+	case roleKmem:
 		return sessionPrompt(true, false, false) + " " + kmemAssistantHint
+	case roleQuill:
+		return d.quillOperatorPrompt(s)
 	}
 	var t topicHints
 	if kmemMem && d.kmemFeatureCached("topic-context") {

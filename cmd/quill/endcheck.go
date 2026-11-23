@@ -39,6 +39,7 @@ const (
 	endForRotate                   // rotation (auto, cold cache, Rotate now, /clear, restart)
 	endForQuit                     // Quill Desktop quits
 	endForCheckpoint               // /export "Checkpoint now": report only, the session goes on
+	endForStop                     // the hidden Quill operator's Stop: the outcome goes to done
 )
 
 // endBlocker is one entry of end-check's "blockers" (K4).
@@ -75,10 +76,11 @@ type endWait struct {
 	done     func(ok bool, err string) // Quit: the outcome, called once
 }
 
-// endCheckFor: s ends through the end-of-session check (a local, visible,
-// running topic session and a kmem that has the check). UI thread.
+// endCheckFor: s ends through the end-of-session check (a local, running
+// topic session, visible or the hidden Quill operator, and a kmem that has
+// the check; the kmem assistant keeps its handoff save). UI thread.
 func (d *desk) endCheckFor(s *deskSession) bool {
-	return s != nil && s.remote == nil && !isHiddenSession(s) && s.running() &&
+	return s != nil && s.remote == nil && (!isHiddenSession(s) || hiddenRole(s) == roleQuill) && s.running() &&
 		d.topicOf(s.id) != "" && d.kmemAvailable() && d.kmemFeatureCached(endCheckFeature)
 }
 
@@ -192,6 +194,8 @@ func endCheckMessage(why endWhy, name string, bs []endBlocker) string {
 		head = "Quill is rotating this topic to a fresh session that starts from kmem, and this session will then be deleted."
 	case endForQuit:
 		head = "Quill Desktop is quitting and will stop this session."
+	case endForStop:
+		head = "Quill Desktop is stopping the Quill operator; it is stopped once its end-of-session check passes."
 	default:
 		head = "Quill is ending this session; it is stopped once its end-of-session check passes."
 	}
@@ -337,7 +341,7 @@ func (d *desk) endPassed(s *deskSession, ew *endWait, r endCheckResult) {
 		d.finishTopicEnd(s, ew.place)
 	case endForRotate:
 		d.finishTopicRotate(s, ew.name)
-	case endForQuit:
+	case endForQuit, endForStop:
 		ew.finish(true, "")
 	case endForCheckpoint:
 		msg := "End-of-session check passed: nothing is left to record."
@@ -352,7 +356,7 @@ func (d *desk) endPassed(s *deskSession, ew *endWait, r endCheckResult) {
 func (d *desk) endNotPassed(s *deskSession, ew *endWait, why string) {
 	list := blockerList(ew.blockers, "; ")
 	switch ew.why {
-	case endForQuit:
+	case endForQuit, endForStop:
 		ew.finish(false, why)
 		return
 	case endForCheckpoint:
@@ -374,7 +378,7 @@ func (d *desk) endNotPassed(s *deskSession, ew *endWait, why string) {
 // endFallback: kmem could not run the check; End, rotation and Checkpoint now
 // use the handoff save flows, Quit lists the topic for the second confirm.
 func (d *desk) endFallback(s *deskSession, ew *endWait, err string) {
-	if ew.why == endForQuit {
+	if ew.why == endForQuit || ew.why == endForStop {
 		ew.finish(false, "kmem error: "+err)
 		return
 	}
@@ -422,11 +426,15 @@ func (d *desk) finishTopicRotate(old *deskSession, slug string) {
 				return
 			}
 			title, _, _ := d.rowText(old.id)
-			ns := d.replaceWith(old, title)
+			ns := d.replaceWith(old, title) // a hidden operator stays hidden (replaceHidden)
 			ns.restarting = true
 			delete(d.org.Kmem, old.id)
 			d.org.Kmem[ns.id] = slug
 			d.saveOrg()
+			if a := d.assistOf(old); a != nil {
+				a.s = ns // the box shows the fresh session (kmem-window §4 #22)
+				d.assistAttach(a)
+			}
 			d.notify(ns, "Fresh topic session: the previous one passed its end-of-session check and was deleted.")
 			d.stopThen(old, func() { // the old session ends before the new one starts
 				d.sendResume(ns, slug, prompt)
@@ -468,6 +476,10 @@ func (d *desk) quitCheckSessions() []*deskSession {
 		if d.endCheckFor(s) && s.endWait == nil {
 			out = append(out, s)
 		}
+	}
+	// The Quill operator checks in parallel with the topic tabs (§3.1).
+	if s := d.quillAssist().s; d.endCheckFor(s) && s.endWait == nil && !s.stopping {
+		out = append(out, s)
 	}
 	return out
 }

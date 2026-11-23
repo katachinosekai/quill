@@ -53,6 +53,7 @@ type kmemNeeds struct {
 	BinFirst     time.Time // when the next item becomes purgeable; zero when none waits
 	UserTasks    []kmemTask
 	Issues       []kmemTask // open "kmem issue:" tasks for the kmem operator
+	QuillIssues  []kmemTask // "quill issue:" tasks for the Quill operator (quilloperator.go)
 	RolloutWait  string     // a paused staged rollout ("stage: error"), or ""
 }
 
@@ -93,6 +94,8 @@ func parseKmemNeeds(brief string, tasks []kmemTask) kmemNeeds {
 		}
 		if kmemIssue(t) {
 			n.Issues = append(n.Issues, t)
+		} else if quillIssue(t) {
+			n.QuillIssues = append(n.QuillIssues, t)
 		} else if userTask(t) {
 			n.UserTasks = append(n.UserTasks, t)
 		}
@@ -214,6 +217,7 @@ func (d *desk) setKmemNeeds(n kmemNeeds) {
 	d.kmemNeedsNow = n
 	d.kmemGot = true
 	d.updateKmemBadge()
+	d.updateAssistBadge(d.quillAssist()) // quill issue: tasks
 	if d.kmemBinSetBtn != nil {
 		d.kmemBinSetBtn.SetText(binButtonText(n.Bin))
 	}

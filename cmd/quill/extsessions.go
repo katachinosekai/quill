@@ -191,6 +191,9 @@ func (d *desk) offerTakeOver(e extSession, pending *deskSession) {
 	}
 	p := d.terms[e.ID]
 	msg := "Take over " + t.Title + " from " + extWhere(p) + "? The terminal session stops and continues here."
+	if slug == quillOpName && d.quillOpOn() {
+		msg = "Take over the Quill operator from " + extWhere(p) + "? The terminal session stops and continues behind the Quill button."
+	}
 	if p.Busy() {
 		msg += " It is in the middle of a turn; that turn is stopped."
 	}
@@ -222,8 +225,20 @@ func (d *desk) takeOverTopic(e extSession, t topicInfo, pending *deskSession) {
 	d.org.Kmem[s.id] = t.Slug
 	s.kmemNew = false
 	d.saveOrg()
+	operator := t.Slug == quillOpName && d.quillOpOn()
+	if operator {
+		d.markHiddenAs(s, roleQuill) // it starts with the operator's prompt, never as a tab
+	}
 	d.takeOverThen(s, p, "", func(err error) {
 		if err != nil {
+			return
+		}
+		if operator {
+			d.quillAdopt(d.quillAssist(), s, "Taken over from "+extWhere(p)+"; it keeps running here.")
+			if pending != nil && pending.pickPending {
+				d.closeTab(pending.id)
+			}
+			d.refreshExtSessions(true)
 			return
 		}
 		d.afterPick(s, false)

@@ -66,6 +66,19 @@ type assistRole struct {
 	dot     func(d *desk, running bool) // the button's run dot
 	ask     func(d *desk, a *assistant) // the save timed out: ask the user
 	stopped func(d *desk, a *assistant) // after Stop assistant: "Start assistant"
+
+	// Role flows; nil = the kmem assistant's handoff flows. prompt: the first
+	// prompt (off the UI thread) instead of the handoff resume prompt. stop:
+	// replaces the handoff save of Stop / Quit / Restart (the state is
+	// asSaving; it ends in assistStop, assistStopWith or assistKeep).
+	// elsewhere: the live owner o is a tab (replaces the save-there,
+	// resume-here offer). blocked: the role cannot start now and has set its
+	// reason (live in a terminal).
+	prompt    func(d *desk) string
+	dirFor    func(d *desk) string // the working folder from a setting (overrides dir)
+	stop      func(d *desk, a *assistant, s *deskSession)
+	elsewhere func(d *desk, a *assistant, o *deskSession)
+	blocked   func(d *desk, a *assistant) bool
 }
 
 type assistant struct {
@@ -466,6 +479,9 @@ func (d *desk) assistProbe(a *assistant) {
 			return
 		}
 	}
+	if a.role.blocked != nil && a.role.blocked(d, a) {
+		return
+	}
 	d.assistReason(a, "Starting "+a.role.name+"...")
 	go func() {
 		reason := ""
@@ -478,7 +494,9 @@ func (d *desk) assistProbe(a *assistant) {
 		}
 		var saved time.Time
 		prompt := ""
-		if reason == "" {
+		if reason == "" && a.role.prompt != nil {
+			prompt = a.role.prompt(d)
+		} else if reason == "" {
 			for _, h := range d.kmemHandoffs() {
 				if h.Name == a.role.name {
 					saved = h.Saved
@@ -522,15 +540,23 @@ func (d *desk) assistStart(a *assistant, model, prompt string, saved time.Time) 
 			return
 		}
 	}
-	dir := a.role.dir()
+	var dir string
+	if a.role.dirFor != nil {
+		dir = a.role.dirFor(d)
+	} else {
+		dir = a.role.dir()
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		a.state = asPanels
 		d.assistReason(a, "The "+a.role.label+" can't start: "+err.Error()+".")
 		return
 	}
-	prefs := d.app.Preferences()
-	note := assistCrashNote(a.role.name, prefs.String(a.role.startedPref), saved)
-	prefs.SetString(a.role.startedPref, time.Now().Format(time.RFC3339))
+	note := ""
+	if a.role.startedPref != "" {
+		prefs := d.app.Preferences()
+		note = assistCrashNote(a.role.name, prefs.String(a.role.startedPref), saved)
+		prefs.SetString(a.role.startedPref, time.Now().Format(time.RFC3339))
+	}
 	s := d.addSession(dir, model, "default", false)
 	d.markHiddenAs(s, a.role.hidden)
 	s.title = a.role.name
@@ -575,6 +601,10 @@ func assistCrashNote(name, started string, saved time.Time) string {
 // window offers to move it in (save there, resume here; user 2026-11-22).
 func (d *desk) assistElsewhere(a *assistant, o *deskSession) {
 	a.state = asElsewhere
+	if a.role.elsewhere != nil {
+		a.role.elsewhere(d, a, o)
+		return
+	}
 	title, _, _ := d.rowText(o.id)
 	d.assistReasonWith(a, fmt.Sprintf("%s is live in the tab “%s”. Move it here: it saves its handoff there and resumes as the background %s.", a.role.name, title, a.role.label),
 		"Move it here", func() { d.assistMoveIn(a, o) })
@@ -685,6 +715,11 @@ func (d *desk) assistSaveStop(a *assistant, quit bool, done func()) {
 	a.state = asSaving
 	a.untilSaved = false
 	a.saveBy = time.Now().Add(kmemWinSaveWait)
+	if a.role.stop != nil {
+		d.assistRefresh(a)
+		a.role.stop(d, a, s)
+		return
+	}
 	asked := time.Now().Add(-2 * time.Second)
 	// prompt set: kmemAfterTurn leaves this save to the close flow below;
 	// kmemSaveAllowed still lets `kmem handoff save` through plan-first.
@@ -825,6 +860,20 @@ func (d *desk) assistKeep(a *assistant) {
 // (the hidden session has no tab and no place; docs §4 #23).
 func (d *desk) assistStop(a *assistant, saved bool) {
 	s := a.s
+	note := "Saved kmem handoff “" + a.role.name + "”."
+	if !saved {
+		note = fmt.Sprintf(a.role.name+" did not save its handoff within %s; it was stopped. %s", waitText(), d.assistLastSave(a))
+		if !s.running() {
+			note = a.role.name + " stopped before it saved its handoff. " + d.assistLastSave(a)
+		}
+	}
+	d.assistStopWith(a, note)
+}
+
+// assistStopWith is assistStop with the role's own note (the operator's
+// end-of-session check instead of a handoff save).
+func (d *desk) assistStopWith(a *assistant, note string) {
+	s := a.s
 	if a.choice != nil {
 		a.choice.Hide()
 		a.choice = nil
@@ -833,13 +882,6 @@ func (d *desk) assistStop(a *assistant, saved bool) {
 	a.state = asStopping
 	a.run++
 	d.assistRefresh(a)
-	note := "Saved kmem handoff “" + a.role.name + "”."
-	if !saved {
-		note = fmt.Sprintf(a.role.name+" did not save its handoff within %s; it was stopped. %s", waitText(), d.assistLastSave(a))
-		if !s.running() {
-			note = a.role.name + " stopped before it saved its handoff. " + d.assistLastSave(a)
-		}
-	}
 	d.notify(s, note)
 	d.flashHint(d.folder, note)
 	d.markEnded(s.id)
