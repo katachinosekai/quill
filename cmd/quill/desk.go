@@ -1647,6 +1647,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	defer func() {
 		if isHiddenSession(s) {
 			d.kmemAssistDot()
+			d.kmemAssistExited(s)
 		}
 	}()
 	var items []*chat.Item

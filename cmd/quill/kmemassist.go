@@ -86,9 +86,11 @@ type kmemAssist struct {
 	run         int          // bumped on every probe and stop: stale lifecycle callbacks drop out
 	tickGen     int
 	reason      string
-	userStopped bool // the user pressed Stop assistant: opening the window doesn't start it
-	untilSaved  bool // the user chose to keep it running until it saves
-	quit        bool // stopping for Quit: no question on timeout
+	userStopped bool      // the user pressed Stop assistant: opening the window doesn't start it
+	untilSaved  bool      // the user chose to keep it running until it saves
+	rebootNext  bool      // Restart (new model setting): start again once stopped
+	saveBy      time.Time // the save deadline while saving (the header's countdown)
+	quit        bool      // stopping for Quit: no question on timeout
 	done        []func()
 	choice      dialog.Dialog
 	lastSave    time.Time
@@ -101,6 +103,7 @@ type kmemAssist struct {
 	modelLbl *widget.Label
 	note     *widget.Label
 	restart  *widget.Button
+	reboot   *widget.Button // Restart on the changed model setting
 	stopBtn  *widget.Button
 }
 
@@ -429,12 +432,17 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 	save.Importance = widget.LowImportance
 	a.restart = widget.NewButtonWithIcon("Restart", theme.ViewRefreshIcon(), func() { d.kmemAssistRestart(a) })
 	a.restart.Hide()
+	// The model setting changed while it runs: save, stop and start again on
+	// the new setting (td7337f, t9249e3).
+	a.reboot = widget.NewButtonWithIcon("Restart", theme.ViewRefreshIcon(), func() { d.kmemAssistReboot(a) })
+	a.reboot.Importance = widget.HighImportance
+	a.reboot.Hide()
 	// Stop assistant: the save-and-stop flow (closing the window only hides it).
 	a.stopBtn = widget.NewButton("Stop assistant", func() { d.kmemAssistStopNow(a) })
 	a.stopBtn.Importance = widget.LowImportance
 	head := container.NewVBox(
 		container.NewBorder(nil, nil, title, a.stateLbl),
-		container.NewBorder(nil, nil, nil, container.NewHBox(a.restart, save, a.stopBtn), a.modelLbl),
+		container.NewBorder(nil, nil, nil, container.NewHBox(a.restart, a.reboot, save, a.stopBtn), a.modelLbl),
 		widget.NewSeparator())
 	a.input = newSendEntry(d.kmemAssistSend)
 	a.input.hint = "Ask kmem-lock-audit..."
@@ -466,6 +474,9 @@ func (d *desk) kmemAssistRefresh(a *kmemAssist) {
 		st = "stopped"
 	case a.state == asSaving:
 		st = "● saving its handoff, then stopping"
+		if left := time.Until(a.saveBy); !a.untilSaved && a.choice == nil && left > 0 {
+			st += fmt.Sprintf(" · %d s", int((left+time.Second-1)/time.Second))
+		}
 	case a.state == asStopping:
 		st = "● stopping"
 	case s.status() == stNone:
@@ -487,8 +498,14 @@ func (d *desk) kmemAssistRefresh(a *kmemAssist) {
 		src = "New sessions"
 	}
 	m := "model: " + s.model + " (" + src + ")"
-	if want := d.kmemAssistModel(); want != s.model {
-		m += " · the new setting applies the next time it starts"
+	if d.kmemAssistModelChanged(a) {
+		m += " · Restart to use the new setting"
+		a.reboot.Show()
+	} else {
+		if want := d.kmemAssistModel(); want != s.model {
+			m += " · the new setting applies the next time it starts"
+		}
+		a.reboot.Hide()
 	}
 	setLabel(a.modelLbl, m)
 	if len(s.agentGrants) > 0 {
@@ -503,7 +520,7 @@ func (d *desk) kmemAssistTick(a *kmemAssist, gen int, every time.Duration) {
 	for {
 		time.Sleep(every)
 		alive := false
-		d.do(func() {
+		d.doWait(func() { // doWait: fyne.Do returns before f runs
 			if a.gen == gen && a.w != nil {
 				alive = true
 				d.kmemAssistRefresh(a)
@@ -513,6 +530,38 @@ func (d *desk) kmemAssistTick(a *kmemAssist, gen int, every time.Duration) {
 			return
 		}
 	}
+}
+
+// kmemAssistModelChanged: the model setting differs from the running
+// assistant's model (the header's Restart).
+func (d *desk) kmemAssistModelChanged(a *kmemAssist) bool {
+	s := a.s
+	return s != nil && s.running() && !s.stopping && (a.state == asLive || a.state == asStarting) && d.kmemAssistModel() != s.model
+}
+
+// kmemAssistReboot (Restart after a model setting change) runs the
+// save-and-stop flow, then starts the assistant again on the new setting.
+func (d *desk) kmemAssistReboot(a *kmemAssist) {
+	if !d.kmemAssistModelChanged(a) {
+		return
+	}
+	a.rebootNext = true
+	d.kmemAssistSaveStop(false, nil)
+}
+
+// kmemAssistExited: the assistant's process ended (handleExit). While it was
+// saving, the stop flow ends at once (the window shows "Start assistant");
+// otherwise the header shows it stopped.
+func (d *desk) kmemAssistExited(s *deskSession) {
+	a := d.assist()
+	if a.s != s {
+		return
+	}
+	if a.state == asSaving {
+		d.kmemAssistStop(a, false)
+		return
+	}
+	d.kmemAssistRefresh(a)
 }
 
 // kmemAssistRestart (FAILED → Restart) starts a fresh session.
@@ -615,6 +664,7 @@ func (d *desk) kmemAssistSaveStop(quit bool, done func()) {
 	}
 	a.state = asSaving
 	a.untilSaved = false
+	a.saveBy = time.Now().Add(kmemWinSaveWait)
 	asked := time.Now().Add(-2 * time.Second)
 	// prompt set: kmemAfterTurn leaves this save to the close flow below;
 	// kmemSaveAllowed still lets `kmem handoff save` through plan-first.
@@ -639,7 +689,7 @@ func (d *desk) kmemAssistSaveStop(quit bool, done func()) {
 	} else {
 		d.sendTo(s, msg)
 	}
-	go d.kmemAssistWaitSave(a, s, ks, time.Now().Add(kmemWinSaveWait), kmemWinSavePoll)
+	go d.kmemAssistWaitSave(a, s, ks, a.saveBy, kmemWinSavePoll)
 }
 
 // kmemSavedSince: the same save-time check as kmemAfterTurn (kmem.go): saved
@@ -668,7 +718,10 @@ func (d *desk) kmemAssistWaitSave(a *kmemAssist, s *deskSession, ks *kmemSave, d
 	for {
 		saved, last := d.kmemSavedSince(ks.name, s.id, ks.asked)
 		stop, ran := false, false
-		d.do(func() {
+		// doWait, not do: fyne.Do returns before f runs, so ran was still
+		// false and the loop ended after one poll (the window stayed at
+		// "saving its handoff" after the process died; t9249e3).
+		d.doWait(func() {
 			ran = true
 			if s.kmemSave != ks || a.s != s || a.state != asSaving {
 				stop = true // reopened, or already stopped
@@ -721,6 +774,7 @@ func (d *desk) kmemAssistAsk(a *kmemAssist) {
 	dlg.Resize(fyne.NewSize(560, 200))
 	a.choice = dlg
 	dlg.Show()
+	d.kmemAssistRefresh(a) // the countdown ends
 }
 
 // kmemAssistChoose: 0 stop without saving, 1 keep running until saved, 2 keep
@@ -750,7 +804,7 @@ func (d *desk) kmemAssistKeep(a *kmemAssist) {
 		a.choice.Hide()
 		a.choice = nil
 	}
-	a.userStopped = false
+	a.userStopped, a.rebootNext = false, false
 	s := a.s
 	if s == nil || !s.running() {
 		a.state = asClosed
@@ -802,10 +856,15 @@ func (d *desk) kmemAssistStopped(a *kmemAssist, s *deskSession) {
 	if a.s != s || a.state != asStopping {
 		return
 	}
-	quit := a.quit
-	a.state, a.untilSaved, a.quit = asClosed, false, false
+	quit, reboot := a.quit, a.rebootNext && !a.quit
+	a.state, a.untilSaved, a.quit, a.rebootNext = asClosed, false, false, false
 	d.kmemAssistDot()
 	d.kmemAssistFinished(a)
+	if reboot {
+		a.userStopped = false
+		d.kmemAssistProbe(a) // on the new model setting
+		return
+	}
 	if a.w != nil && !quit {
 		d.kmemAssistStoppedReason(a)
 	}

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -727,4 +728,82 @@ func TestKmemAssistBootSkips(t *testing.T) {
 	if resumeCalls(k) != 0 {
 		t.Fatal("nothing resumed")
 	}
+}
+
+// td7337f/t9249e3: a changed model setting shows Restart in the header; it
+// saves, stops and starts the assistant again on the new model.
+func TestKmemAssistRestartOnNewModel(t *testing.T) {
+	h, k, _ := assistSetup(t)
+	w := &kmemWindow{}
+	s := openAssist(h, w)
+	h.ui(func() {
+		a := h.d.assist()
+		if a.reboot.Visible() || strings.Contains(a.modelLbl.Text, "Restart") {
+			t.Fatal("no Restart while the setting matches")
+		}
+		h.d.app.Preferences().SetString(prefKmemAssistModel, "sonnet")
+		h.d.kmemAssistRefresh(a)
+		if !a.reboot.Visible() || !strings.Contains(a.modelLbl.Text, "Restart to use the new setting") {
+			t.Fatalf("Restart offered: %q", a.modelLbl.Text)
+		}
+		a.reboot.OnTapped()
+		if a.state != asSaving || s.kmemSave == nil {
+			t.Fatal("Restart saves first")
+		}
+	})
+	k.save(kmemAssistName, time.Now().Add(time.Minute))
+	h.eventually("started again on the new model", func() bool {
+		a := h.d.assist()
+		return a.s != nil && a.s != s && a.s.model == "sonnet" && a.s.running() && a.state == asLive && !a.userStopped
+	})
+	h.ui(func() {
+		if s.running() || runningHidden(h.d) != 1 || h.d.assist().reboot.Visible() {
+			t.Fatal("the old one stopped, one assistant runs, no Restart")
+		}
+	})
+}
+
+// t9249e3: the header counts down the save; with fyne.Do-like (async) UI
+// calls the save loop still asks at the deadline, and a process that dies
+// while saving ends the flow at once with "Start assistant".
+func TestKmemAssistSaveCountdownAndExit(t *testing.T) {
+	h, _, rec := assistSetup(t)
+	kmemWinSaveWait = 1500 * time.Millisecond
+	ended := false // guarded by uiMu: no late UI calls once the test ends
+	doWait := h.d.doWait
+	h.d.do = func(f func()) { // fyne.Do returns before f runs
+		go doWait(func() {
+			if !ended {
+				f()
+			}
+		})
+	}
+	t.Cleanup(func() {
+		uiMu.Lock()
+		ended = true
+		uiMu.Unlock()
+	})
+	w := &kmemWindow{}
+	s := openAssist(h, w)
+	stopAssist(h)
+	h.ui(func() {
+		if got := h.d.assist().stateLbl.Text; !strings.Contains(got, "saving its handoff, then stopping · ") || !strings.HasSuffix(got, " s") {
+			t.Fatalf("a countdown while saving: %q", got)
+		}
+	})
+	h.eventually("asks at the deadline", func() bool { return h.d.assist().choice != nil })
+	h.ui(func() {
+		if strings.Contains(h.d.assist().stateLbl.Text, " · ") {
+			t.Fatal("no countdown once asked")
+		}
+		h.d.kmemAssistChoose(h.d.assist(), 1) // keep running until saved
+	})
+	var pid int
+	h.ui(func() { pid = s.proc.PID() })
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	h.eventually("stopped with Start assistant", func() bool {
+		return h.d.assist().state == asClosed && !s.running() && rec.button == "Start assistant"
+	})
 }
