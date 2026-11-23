@@ -915,6 +915,9 @@ func (a *phoneAPI) preload(id string) bool {
 	a.ui(func() {
 		info, known := a.d.infos[id]
 		s := a.d.sessions[id]
+		if s != nil {
+			s.touched = time.Now() // a phone read keeps it loaded (unload.go)
+		}
 		if !known && s == nil || a.d.hiddenID(id, "") {
 			found = false // the kmem window's assistant is not on the phone
 			return
@@ -933,6 +936,7 @@ func (a *phoneAPI) preload(id string) bool {
 			return
 		}
 		s.conv, s.loaded, s.loadedMod = conv, true, mod
+		s.touched = time.Now()
 		a.d.noteWindow(s)
 		if conv.Cwd != "" {
 			s.cwd = conv.Cwd

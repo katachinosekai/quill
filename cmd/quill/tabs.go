@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -81,6 +82,10 @@ func (d *desk) closeTab(id string) {
 	}
 	d.tabs = append(d.tabs[:idx], d.tabs[idx+1:]...)
 	d.saveTabs()
+	if s := d.sessions[id]; s != nil {
+		s.touched = time.Now() // the idle unload counts from here
+	}
+	memReturn.request()
 	wasCurrent := d.current != nil && d.current.id == id
 	if wasCurrent && len(d.tabs) > 0 {
 		d.open(d.tabs[min(idx, len(d.tabs)-1)])

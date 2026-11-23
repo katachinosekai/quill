@@ -144,6 +144,7 @@ type deskSession struct {
 	rcOn           bool
 	rcName         string
 	created        time.Time
+	touched        time.Time // last time the session was shown, read by the phone or busy (unload.go)
 }
 
 func (s *deskSession) running() bool {
@@ -1366,6 +1367,7 @@ func (d *desk) open(id string) {
 		return
 	}
 	d.current = s
+	s.touched = time.Now()
 	d.addTab(s.id)
 	if s.persisted || d.infos[s.id].ID != "" {
 		d.app.Preferences().SetString("lastTab", s.id)
@@ -2380,6 +2382,7 @@ func (d *desk) watch(ctx context.Context) {
 			return
 		case <-t.C:
 			d.refresh()
+			d.do(func() { d.unloadIdle(time.Now()) })
 			if n++; n%12 == 0 {
 				d.refreshAccount()
 				d.do(func() { d.reconcileKmemNames(false, nil) })
