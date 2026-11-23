@@ -2,6 +2,7 @@ package main
 
 import (
 	"image/color"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -45,7 +46,7 @@ func (v *chatView) fadeIn(seq int, o fyne.CanvasObject) fyne.CanvasObject {
 func (v *chatView) startFades(seq int, first bool, kind string) {
 	pend := v.fadePend
 	v.fadePend = nil
-	if !first || kind == "none" {
+	if !first || strings.HasPrefix(kind, "none") {
 		for _, r := range pend {
 			r.Hide()
 		}

@@ -860,9 +860,18 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 }
 
 func (v *chatView) markdown(text string) fyne.CanvasObject {
+	return v.markdownFade(text, nil)
+}
+
+// markdownFade is markdown with the last characters (b's budget) in the
+// colours of newly revealed text (textfade.go); b nil: no fade.
+func (v *chatView) markdownFade(text string, b *fadeBudget) fyne.CanvasObject {
 	rt := widget.NewRichTextFromMarkdown(hardBreaks(autolinks(text)))
 	rt.Wrapping = fyne.TextWrapWord
 	wrapCodeBlocks(rt)
+	if b != nil {
+		rt.Segments = fadeSegs(rt.Segments, b)
+	}
 	if v.d.center {
 		return centeredBlocks(rt.Segments)
 	}

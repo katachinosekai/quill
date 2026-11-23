@@ -92,9 +92,10 @@ type streamView struct {
 	carry    float64 // fraction of a byte not yet revealed
 	renders  int     // live redraws (tests)
 
-	reveals   []reveal         // characters shown in the last textFade (textfade.go)
-	fadeDirty bool             // the last draw had faded characters
-	liveRT    *widget.RichText // the live paragraph's one RichText, redrawn in place
+	reveals   []reveal           // characters shown in the last textFade (textfade.go)
+	fadeDirty bool               // the last draw had faded characters
+	lastFade  [textFadeSteps]int // the fade steps of the last draw
+	liveRT    *widget.RichText   // the live paragraph's one RichText, redrawn in place
 }
 
 func (d *desk) animateText() bool {
@@ -213,20 +214,7 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 			}
 			text := st.it.Text
 			if st.pos < len(text) {
-				gap := len(text) - st.pos
-				st.carry += revealRate(st.speed, gap)
-				step := int(st.carry)
-				st.carry -= float64(step)
-				n := min(st.pos+step, len(text))
-				// Character by character (user 2026-11-22: not whole words),
-				// never in the middle of a multi-byte character.
-				for n < len(text) && !utf8.RuneStart(text[n]) {
-					n++
-				}
-				if st.animated {
-					st.noteReveal(utf8.RuneCountInString(text[st.pos:n]), streamNow())
-				}
-				st.pos = n
+				st.advance(text)
 				v.drawStream(st, iv)
 			} else if st.fadeActive() {
 				v.drawStream(st, iv) // the last characters finish fading in
@@ -245,6 +233,24 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 			return
 		}
 	}
+}
+
+// advance reveals one frame's worth of text (a steady pace, character by
+// character, never in the middle of a multi-byte one) and logs it for the
+// fade.
+func (st *streamView) advance(text string) {
+	gap := len(text) - st.pos
+	st.carry += revealRate(st.speed, gap)
+	step := int(st.carry)
+	st.carry -= float64(step)
+	n := min(st.pos+step, len(text))
+	for n < len(text) && !utf8.RuneStart(text[n]) {
+		n++
+	}
+	if st.animated {
+		st.noteReveal(utf8.RuneCountInString(text[st.pos:n]), streamNow())
+	}
+	st.pos = n
 }
 
 // drawStream shows st.it.Text[:st.pos]: new finished paragraphs are added
@@ -273,8 +279,10 @@ func (v *chatView) drawStream(st *streamView, iv *itemView) {
 		st.box.Refresh()
 	}
 	counts, total := st.fadeCounts(streamNow())
-	if live != st.shown || total > 0 || st.fadeDirty {
-		st.shown = live
+	// A frame is redrawn when the text changed or a character moved to the
+	// next fade step (not every frame: at Slow most frames change nothing).
+	if live != st.shown || counts != st.lastFade || st.fadeDirty && total == 0 {
+		st.shown, st.lastFade = live, counts
 		st.renders++
 		st.fadeDirty = total > 0
 		switch {
@@ -282,7 +290,8 @@ func (v *chatView) drawStream(st *streamView, iv *itemView) {
 			st.liveRT = nil
 			st.live.Objects = nil
 			st.live.Refresh()
-		case st.animated && v.drawLiveFaded(st, closeOpenMarkdown(live), counts):
+		case st.animated:
+			v.drawLiveFaded(st, closeOpenMarkdown(live), counts)
 		default:
 			st.live.Objects = []fyne.CanvasObject{msgText(v.markdown(closeOpenMarkdown(live)))}
 			st.live.Refresh()

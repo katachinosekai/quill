@@ -139,13 +139,18 @@ func fadeSegs(segs []widget.RichTextSegment, b *fadeBudget) []widget.RichTextSeg
 	return out
 }
 
-// drawLiveFaded draws the live paragraph md into its one reused RichText,
-// the newest characters faded. False when this paragraph can't be done so
-// (centred layout, lettered list): the caller draws it plainly.
-func (v *chatView) drawLiveFaded(st *streamView, md string, counts [textFadeSteps]int) bool {
+// drawLiveFaded draws the live paragraph md with the newest characters
+// faded. A left-aligned paragraph without a lettered list is drawn into one
+// reused RichText (re-parsed in place: no new objects per frame); centred
+// ones and lettered lists are laid out in blocks (markdown), which are built
+// anew like every redraw of the live paragraph was before.
+func (v *chatView) drawLiveFaded(st *streamView, md string, counts [textFadeSteps]int) {
 	if v.d.center || hasLetteredRun(md) {
 		st.liveRT = nil
-		return false
+		b := fadeBudget{counts}
+		st.live.Objects = []fyne.CanvasObject{msgText(v.markdownFade(md, &b))}
+		st.live.Refresh()
+		return
 	}
 	if st.liveRT == nil {
 		rt := widget.NewRichText()
@@ -159,7 +164,6 @@ func (v *chatView) drawLiveFaded(st *streamView, md string, counts [textFadeStep
 	b := fadeBudget{counts}
 	st.liveRT.Segments = fadeSegs(st.liveRT.Segments, &b)
 	st.liveRT.Refresh()
-	return true
 }
 
 // wrapCodeBlocks: code blocks wrap their lines (as markdown does).
