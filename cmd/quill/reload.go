@@ -138,6 +138,7 @@ type handedSession struct {
 	Plan   bool            `json:"plan"`
 	Wait   bool            `json:"planWait"`
 	RunAll bool            `json:"runAll"`
+	Gate   *handedGate     `json:"gate,omitempty"` // the approved plan's scope (planscope.go)
 	Sugg   string          `json:"suggestion,omitempty"`
 	Hidden bool            `json:"hidden,omitempty"` // the kmem window's assistant
 }
@@ -277,6 +278,7 @@ func (d *desk) reclaimRC(s *deskSession) {
 
 func (hs *handedSession) savePending(s *deskSession) {
 	hs.Wait, hs.RunAll, hs.Sugg = s.planWait, s.runAll, s.conv.Suggestion
+	hs.Gate = saveGate(s)
 	for _, it := range s.conv.PendingPermissions() {
 		if it.Kind == chat.Plan {
 			hs.Plan = true
@@ -288,6 +290,7 @@ func (hs *handedSession) savePending(s *deskSession) {
 
 func (hs handedSession) restorePending(s *deskSession) {
 	s.planWait, s.runAll = hs.Wait, hs.RunAll
+	hs.Gate.restore(s)
 	if hs.Sugg != "" && s.conv.Suggestion == "" && !s.conv.Busy {
 		s.conv.Suggestion = hs.Sugg
 	}

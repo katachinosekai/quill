@@ -50,8 +50,14 @@ func TestApprovedPlanCoversItsSubagents(t *testing.T) {
 		userEvent(h, s, "subagent prompt", &parent)
 		userEvent(h, s, `<cross-session-message from="x">hi</cross-session-message>`, nil)
 		if s.inTurn {
-			t.Fatal("not the user: no new turn")
+			t.Fatal("not the user: no user turn")
 		}
+		// The peer message starts a turn of its own: an unknown call in it
+		// may be the session's, so the idle fallback doesn't apply (t2debee).
+		if e := gateCall(h, s, "e0", "Edit", `{"file_path":"/tmp/wt/x.go"}`, ""); e.PermState == chat.PermAutoAllowed {
+			t.Fatal("a call in a peer-started turn is gated")
+		}
+		h.d.planGate(s, &protocol.Event{Type: "result", Subtype: "success"}, nil)
 		edit := gateCall(h, s, "e1", "Edit", `{"file_path":"/tmp/wt/x.go"}`, "")
 		if edit.PermState != chat.PermAutoAllowed {
 			t.Fatalf("a subagent's call while this session's turn is over goes ahead: %v", edit.PermState)
@@ -266,7 +272,7 @@ func TestBackgroundSubagentKnownByAgentID(t *testing.T) {
 		// B is launched the same way but its id only shows in task_started.
 		feed(t, h, s, `{"type":"assistant","message":{"id":"msg_2","type":"message","role":"assistant","model":"m","content":[{"type":"tool_use","id":"toolu_agentB","name":"Agent","input":{"description":"part B","prompt":"do part B","run_in_background":true}}]},"parent_tool_use_id":null,"session_id":"s1"}`)
 		feed(t, h, s, `{"type":"system","subtype":"task_started","task_id":"agentPH2","tool_use_id":"toolu_agentB","description":"part B","session_id":"s1"}`)
-		if !s.agentGrants["toolu_agentA"].background || s.agentIDs["agentPH1"] != "toolu_agentA" || s.agentIDs["agentPH2"] != "toolu_agentB" {
+		if !s.agentGrants["toolu_agentA"].Background || s.agentIDs["agentPH1"] != "toolu_agentA" || s.agentIDs["agentPH2"] != "toolu_agentB" {
 			t.Fatalf("grants and agent ids learnt: %v %v", s.agentGrants, s.agentIDs)
 		}
 		feed(t, h, s, `{"type":"result","subtype":"success","is_error":false,"result":"working","session_id":"s1"}`)

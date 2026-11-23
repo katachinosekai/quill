@@ -92,6 +92,11 @@ type deskSession struct {
 	agentGrants    map[string]agentGrant // subagents an approved plan started, by tool_use_id, until they finish
 	agentCalls     map[string]string     // tool_use_id of a granted subagent's call (nested agents too) -> its grant
 	agentIDs       map[string]string     // agent id of a granted subagent (nested too) -> its grant
+	planWork       map[string]string     // background work an approved plan started (tool_use, task and agent ids) -> its root call (planscope.go)
+	planAgents     map[string]string     // agent id or name of a subagent a plan started -> its grant, for SendMessage resumes
+	turnCovered    bool                  // the current turn is covered by the approved plan (planCovers)
+	autoTurn       bool                  // a turn started by a message the user didn't write is running
+	planRevoked    bool                  // the user stopped or refused since the last approval: no approval from the transcript
 	queue          []string
 	lastSent       string
 	inTurn         bool
@@ -1661,6 +1666,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	s.conv.Busy = false
 	s.inTurn, s.planWait = false, false
 	s.agentGrants, s.agentCalls, s.agentIDs = nil, nil, nil // the process and its subagents are gone
+	s.planWork, s.planAgents, s.turnCovered, s.autoTurn = nil, nil, false, false
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
 		msg := "Claude process exited: " + err.Error()
@@ -1816,8 +1822,11 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		if approvesPlan(s, text) && !isPlanGo(text) {
 			d.approveByText(s)
 		} else if !isPlanGo(text) && !isRetry(text) && !s.inTurn {
-			s.runAll, s.runAllNext = false, false
+			endPlan(s)
 			d.chatFor(s, s.conv.CancelPlans())
+		}
+		if !isRetry(text) {
+			s.planRevoked = false // the user's newest message decides from here
 		}
 	}
 	if s.resumeNext == "" {
@@ -1915,6 +1924,9 @@ func (d *desk) interrupt(s *deskSession) {
 		d.remoteWrite(s, "interrupt", map[string]any{})
 		return
 	}
+	if s != nil {
+		revokePlan(s) // Stop ends the approval and its grants (planscope.go)
+	}
 	p := s.proc
 	if p == nil || p.Exited() {
 		return
@@ -1932,6 +1944,7 @@ func (d *desk) interruptAll(s *deskSession) {
 	if s == nil || s.remote != nil || s.proc == nil || s.proc.Exited() {
 		return
 	}
+	revokePlan(s)
 	p := s.proc
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1954,6 +1967,9 @@ func (d *desk) answer(s *deskSession, it *chat.Item, dec protocol.Decision) {
 	if err := s.proc.Respond(it.RequestID, dec, it.Request); err != nil {
 		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not answer: " + err.Error())})
 		return
+	}
+	if isPermissionDeny(it, dec) {
+		revokePlan(s) // the user refused: the approval and its grants end
 	}
 	switch dec {
 	case protocol.Allow:
@@ -2614,6 +2630,10 @@ func (d *desk) setCenter(on bool) {
 const (
 	planAskMessage = "Quill plan-first approval: nothing was run. Before running anything that needs approval, list everything you are going to do for this request (every command, file change and tool, in order, with a short reason), then stop and wait. The user will approve the whole plan at once. If you have questions, end the plan with them numbered, one per line, options in each line and a recommended option marked \"(recommended)\"."
 	planGoMessage  = "Plan approved. Go ahead and carry out the whole plan; every tool call for this request is pre-approved."
+	// planGoScope follows planGoMessage in the approval Quill sends (t2debee,
+	// planscope.go): the coordinator held its turn open with wait loops to
+	// keep the approval alive.
+	planGoScope = " Background commands and subagents you start for it stay approved until they finish, and so do the plan's remaining steps in the turn their completion notice starts, unless the user writes something else meanwhile: end your turn instead of waiting for them."
 )
 
 func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
@@ -2648,11 +2668,13 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			return nil
 		}
-		if s.runAll || d.kmemSaveAllowed(s, it.Request) || d.kmemResumeAllowed(s, it.Request) || kmemReleaseAllowed(s, it.Request) {
+		// The approved plan covers this turn's calls (planscope.go has the
+		// whole rule).
+		if planCovers(s) || d.kmemSaveAllowed(s, it.Request) || d.kmemResumeAllowed(s, it.Request) || kmemReleaseAllowed(s, it.Request) {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
-				if s.runAll && isAgentTool(it.Request) {
-					grantAgent(s, it.Request)
+				if r := it.Request; r.AgentID == "" {
+					planCall(s, r.ToolName, r.ToolUseID, r.Input)
 				}
 			}
 			return nil
@@ -2677,8 +2699,9 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		// Fallback for a call whose assistant event hasn't been seen yet (the
 		// stream sends the tool_use before its can_use_tool request, but
 		// don't count on it): while this session's own turn is over, a call
-		// can only be a subagent's.
-		if _, known := s.agentCalls[it.Request.ToolUseID]; !known && !s.inTurn && len(s.agentGrants) > 0 {
+		// can only be a subagent's. A turn a peer message, a scheduled
+		// trigger or a notification started is a turn too (autoTurn).
+		if _, known := s.agentCalls[it.Request.ToolUseID]; !known && !s.inTurn && !s.autoTurn && len(s.agentGrants) > 0 {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}
@@ -2693,12 +2716,16 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			return nil
 		}
-		if d.approvedInTranscript(s) {
+		// An approval Quill didn't see go out (the user's last message in
+		// the transcript) counts in a turn the user started, never in one a
+		// peer message, trigger or notification started, nor after a Stop or
+		// refusal.
+		if !s.autoTurn && !s.planRevoked && d.approvedInTranscript(s) {
 			d.approveNow(s)
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
-				if isAgentTool(it.Request) {
-					grantAgent(s, it.Request)
+				if r := it.Request; r.AgentID == "" {
+					planCall(s, r.ToolName, r.ToolUseID, r.Input)
 				}
 			}
 			return nil
@@ -2707,11 +2734,12 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			it.PermState = chat.PermPlanAsked
 			s.planWait = true
 		}
-	case ev.Type == "user" && d.planFirst:
+	case ev.Type == "user":
 		// A subagent's own messages, peer messages and background-task
 		// notifications are not the user: they neither approve nor end an
 		// approved plan (Kmem Lock Audit, 2026-11-22: they re-armed the gate
-		// between steps). A finished subagent's grant ends.
+		// between steps). A finished subagent's grant ends; what the turn
+		// they start may do is notUserMessage's.
 		if ev.ParentToolUseID != nil {
 			return nil
 		}
@@ -2720,18 +2748,22 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 				continue
 			}
 			if notFromUser(it.Text) {
-				endAgentGrants(s, it.Text)
+				notUserMessage(s, it.Text)
+				continue
+			}
+			if !d.planFirst {
 				continue
 			}
 			if approvesPlan(s, it.Text) {
 				d.approveNow(s)
 			} else if !isRetry(it.Text) && !s.inTurn {
-				s.runAll, s.runAllNext = false, false
+				endPlan(s)
 			}
 			s.inTurn = true
 		}
 	case ev.Type == "result":
 		s.inTurn = false
+		turnEnded(s)
 		s.releaseTasks = nil
 		if s.restoreMode != "" {
 			mode := s.restoreMode
@@ -2764,7 +2796,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		}
 		if s.planWait || asks {
 			s.planWait = false
-			s.runAll, s.runAllNext = false, false
+			endPlan(s)
 			out := s.conv.CancelPlans()
 			out = append(out, s.conv.MarkPlanText()...)
 			return append(out, s.conv.AddPlan())
@@ -2803,7 +2835,7 @@ func (d *desk) approveNow(s *deskSession) {
 			d.chatFor(s, []*chat.Item{it})
 		}
 	}
-	s.runAll, s.runAllNext = true, false
+	startPlan(s)
 }
 
 var approvalWords = map[string]bool{
@@ -2833,9 +2865,9 @@ func isPlanGo(text string) bool { return strings.HasPrefix(text, planGoMessage) 
 // planGoWith: the approval text carrying the chosen option.
 func planGoWith(choice string) string {
 	if choice == "" {
-		return planGoMessage
+		return planGoMessage + planGoScope
 	}
-	return planGoMessage + " Answer to your question: " + choice + "."
+	return planGoMessage + planGoScope + " Answer to your question: " + choice + "."
 }
 
 var stepList = regexp.MustCompile(`(?i)^(steps?\s*)?#?\d+(\s*(-|–|—|\bto\b|,|\band\b|&|\s)\s*#?\d+)+$`)
@@ -3007,7 +3039,7 @@ func (d *desk) approveByText(s *deskSession) {
 			d.chatFor(s, []*chat.Item{it})
 		}
 	}
-	s.runAll, s.runAllNext = true, false
+	startPlan(s)
 }
 
 func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
@@ -3044,7 +3076,7 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 		return
 	}
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {
-		s.runAll = true
+		startPlan(s)
 		d.sendTo(s, msg)
 		return
 	}
@@ -3052,6 +3084,8 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 		return
 	}
 	if !ok {
+		// "Don't run": the user refused; any approval still in force ends.
+		revokePlan(s)
 		it.PermState = chat.PermDenied
 		d.chatFor(s, []*chat.Item{it})
 		d.updateChrome()
@@ -3059,11 +3093,11 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 		return
 	}
 	it.PermState = chat.PermAllowed
-	s.runAll = true
+	startPlan(s)
 	d.chatFor(s, []*chat.Item{it})
 	d.sendTo(s, msg)
 	if !s.running() {
-		s.runAll = false
+		endPlan(s)
 	}
 }
 
@@ -3110,19 +3144,12 @@ func isAgentTool(r *protocol.ControlRequest) bool {
 // agentGrant: a subagent an approved plan started. A background one ends
 // with its task notification, a foreground one with its tool result.
 type agentGrant struct {
-	background bool
+	Background bool `json:"background,omitempty"`
 }
 
 // maxAgentCalls caps the calls remembered for live grants; past it, new
 // calls fall to the gate (asking is the safe side).
 const maxAgentCalls = 4096
-
-func grantAgent(s *deskSession, r *protocol.ControlRequest) {
-	if r == nil {
-		return
-	}
-	grantAgentCall(s, r.ToolUseID, r.Input)
-}
 
 func grantAgentCall(s *deskSession, id string, input json.RawMessage) {
 	if id == "" {
@@ -3135,7 +3162,7 @@ func grantAgentCall(s *deskSession, id string, input json.RawMessage) {
 	if s.agentGrants == nil {
 		s.agentGrants = map[string]agentGrant{}
 	}
-	s.agentGrants[id] = agentGrant{background: in.Background}
+	s.agentGrants[id] = agentGrant{Background: in.Background}
 }
 
 func addAgentCall(s *deskSession, id, g string) {
@@ -3156,6 +3183,7 @@ func addAgentID(s *deskSession, agent, g string) {
 		s.agentIDs = map[string]string{}
 	}
 	s.agentIDs[agent] = g
+	addPlanAgent(s, agent, g) // for a SendMessage resume later
 }
 
 // grantedRequest: the request was made by a subagent under a live grant,
@@ -3204,13 +3232,14 @@ func grantFor(s *deskSession, id string) (string, bool) {
 // An Agent call the session makes while an approved plan is in force is
 // granted from its assistant event too: the CLI need not ask for it.
 func trackAgentCalls(s *deskSession, ev *protocol.Event) {
-	if ev.Type == "assistant" && !ev.IsSubagent() && s.runAll && ev.Message != nil {
+	if ev.Type == "assistant" && !ev.IsSubagent() && planCovers(s) && ev.Message != nil {
 		for _, b := range ev.Message.Blocks() {
-			if b.Type == "tool_use" && (b.Name == "Agent" || b.Name == "Task") {
-				grantAgentCall(s, b.ID, b.Input)
+			if b.Type == "tool_use" {
+				planCall(s, b.Name, b.ID, b.Input)
 			}
 		}
 	}
+	learnPlanWork(s, ev)
 	if len(s.agentGrants) == 0 {
 		return
 	}
@@ -3264,7 +3293,7 @@ func trackAgentCalls(s *deskSession, ev *protocol.Event) {
 			if ev.IsSubagent() {
 				continue
 			}
-			if gr, ok := s.agentGrants[b.ToolUseID]; ok && !gr.background {
+			if gr, ok := s.agentGrants[b.ToolUseID]; ok && !gr.Background {
 				endAgentGrant(s, b.ToolUseID)
 			}
 		}

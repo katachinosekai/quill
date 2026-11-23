@@ -24,7 +24,7 @@ func TestPlanApprovalGoesToCardOwner(t *testing.T) {
 	count := func(s *deskSession) int {
 		n := 0
 		for _, it := range s.conv.Items {
-			if it.Kind == chat.User && it.Text == planGoMessage {
+			if it.Kind == chat.User && isPlanGo(it.Text) {
 				n++
 			}
 		}

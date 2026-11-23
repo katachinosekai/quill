@@ -418,10 +418,10 @@ type planAnswer struct {
 // Claude reads them against its numbered questions.
 func planGoAnswers(qs []planQ, ans map[int]planAnswer) string {
 	if len(qs) == 0 {
-		return planGoMessage
+		return planGoMessage + planGoScope
 	}
 	var b strings.Builder
-	b.WriteString(planGoMessage)
+	b.WriteString(planGoMessage + planGoScope)
 	b.WriteString(" Answers to your questions:")
 	for i, q := range qs {
 		a, ok := ans[q.ID]

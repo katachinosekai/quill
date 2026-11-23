@@ -1196,7 +1196,7 @@ func TestPlanFirstApproval(t *testing.T) {
 	h.eventually("approval turn done", func() bool { return !s.conv.Busy })
 	h.ui(func() {
 		h.d.send("write")
-		s.runAll = true
+		startPlan(s)
 	})
 	h.eventually("tool auto-approved", func() bool {
 		it := lastItem(s)
