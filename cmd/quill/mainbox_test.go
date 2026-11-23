@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -96,7 +95,7 @@ func TestMainBoxSuggestionsPerTarget(t *testing.T) {
 		}
 		d.handleEvent(op, &protocol.Event{Type: "prompt_suggestion", Suggestion: "op next"})
 		d.updateChrome()
-		if d.input.suggestion != "op next" || !strings.Contains(d.input.PlaceHolder, "op next") {
+		if d.input.suggestion != "op next" || d.input.PlaceHolder != "Message the Quill operator: op next   (Tab)" {
 			t.Fatalf("the operator's suggestion: %q", d.input.PlaceHolder)
 		}
 		d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyTab})
@@ -113,7 +112,7 @@ func TestMainBoxSuggestionsPerTarget(t *testing.T) {
 		if k := d.input.known(); k != nil && k("zorbleflux") {
 			t.Fatal("the tab's words again")
 		}
-		if d.input.suggestion != "tab next" || !strings.Contains(d.input.PlaceHolder, "tab next") {
+		if d.input.suggestion != "tab next" || d.input.PlaceHolder != "tab next   (Tab)" {
 			t.Fatalf("closing brings the tab's back: %q", d.input.PlaceHolder)
 		}
 		d.openAssistBox(boxQuill)

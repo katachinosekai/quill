@@ -78,7 +78,7 @@ func (d *desk) syncMainTarget() {
 	if old := d.main; old.role != "" && old.in != nil && d.strip != nil {
 		d.strip.keepBox(assistDraftKey(old.role), old.in)
 		d.strip.fillBox(tabDraftKey(old.key), old.in)
-		setHint(old.in, "Message Claude", d.tabSuggestion(d.entrySession(old.in)))
+		setHint(old.in, "Message Claude", d.tabSuggestion(d.entrySession(old.in)), false)
 		if old.in == d.input && d.strip != nil {
 			d.strip.lastCur = old.key
 		}
@@ -88,7 +88,7 @@ func (d *desk) syncMainTarget() {
 		d.strip.keepBox(tabDraftKey(key), in)
 		d.strip.fillBox(assistDraftKey(want), in)
 		d.main = mainTarget{role: want, in: in, key: key}
-		setHint(in, targetLabel(want), d.targetSuggestion(want))
+		setHint(in, targetLabel(want), d.targetSuggestion(want), true)
 		if d.cmds != nil {
 			d.cmds.hide()
 		}
@@ -125,9 +125,15 @@ func (d *desk) syncBoxInputs() {
 // docking the box brings the tab's back. Autocorrect learns from the
 // target's conversation the same way.
 
-// setHint sets in's placeholder to hint and its suggestion to sug.
-func setHint(in *sendEntry, hint, sug string) {
+// setHint sets in's placeholder to hint and its suggestion to sug; named
+// puts hint before the suggestion too, so a split pane still says whom it
+// messages ("Message the Quill operator: <suggestion>   (Tab)").
+func setHint(in *sendEntry, hint, sug string, named bool) {
 	in.hint = hint
+	in.sugName = ""
+	if named {
+		in.sugName = hint
+	}
 	in.suggestion = ""
 	in.SetPlaceHolder(hint)
 	in.setSuggestion(sug)

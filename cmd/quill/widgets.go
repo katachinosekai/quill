@@ -154,6 +154,7 @@ type sendEntry struct {
 	onSend     func(string)
 	suggestion string
 	hint       string
+	sugName    string // "Message the Quill operator": named before a suggestion (te68cb1)
 	onKey      func(*fyne.KeyEvent) bool
 	onSendNow  func(string)
 	ctrl       bool
@@ -205,7 +206,9 @@ func (e *sendEntry) setSuggestion(s string) {
 		return
 	}
 	e.suggestion = s
-	if s != "" {
+	if s != "" && e.sugName != "" {
+		e.SetPlaceHolder(e.sugName + ": " + s + "   (Tab)")
+	} else if s != "" {
 		e.SetPlaceHolder(s + "   (Tab)")
 	} else {
 		e.SetPlaceHolder(e.hint)
