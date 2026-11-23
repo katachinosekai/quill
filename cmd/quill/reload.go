@@ -196,40 +196,18 @@ func (d *desk) trySwap() {
 		return
 	}
 	d.swapNow = false
-	noticed := d.swapNotice
+	restart := d.restartAsked
+	noticed := d.swapNotice || restart
 	if noticed {
 		d.swapNotice = false
-		d.setUpdLine("Switching to the new Quill Desktop build…")
-	}
-	d.swapping = true
-	d.stopMedia()
-	d.flushUI()
-	// Other PCs' sessions are memory only: never handed over or restored.
-	d.stopRemotes()
-	d.closeAssistOverlay() // the main message box's text is the tab's draft again (mainbox.go)
-	st := d.restoreHead()
-	if d.current != nil && !d.split() {
-		d.strip.keepBox(d.current.id, d.input)
-		d.strip.keepDraft(d.current.id, st.Draft)
-	}
-	for _, p := range d.panes {
-		if p.view.s != nil {
-			d.strip.keepBox(p.view.s.id, p.input)
-			d.strip.keepDraft(p.view.s.id, d.boxDraft(p.view.s, p.input))
+		if restart {
+			d.setUpdLine("Restarting Quill Desktop…")
+		} else {
+			d.setUpdLine("Switching to the new Quill Desktop build…")
 		}
 	}
-	d.saveQueues(&st)
-	d.saveSessions(&st)
-	if d.usagePaused {
-		st.Paused = &pauseState{Until: d.pauseUntil.Unix(), IDs: d.pausedIDs, Text: d.pauseText.Text}
-	}
-	size := d.win.Canvas().Size()
-	st.Width, st.Height = size.Width, size.Height
-	st.Max, st.X, st.Y = windowPlacement(d.win)
-	st.Split = d.saveSplit()
-	d.rememberGeom()
-	st.ScrollY = d.chat.scroll.Offset.Y
-	st.KmemWin = d.kmemWin != nil // hot reload keeps the assistant and reopens the window (§14 #8)
+	d.swapping = true
+	st := d.handoverState()
 	running := d.runningSessions()
 	type meta struct {
 		s  *deskSession
@@ -273,7 +251,7 @@ func (d *desk) trySwap() {
 			if ok {
 				env = append(env, kv)
 			}
-			err = execSelf(target, os.Args, env)
+			err = execQuill(target, os.Args, env)
 			if ok {
 				undo()
 			}
@@ -286,6 +264,12 @@ func (d *desk) trySwap() {
 			for _, m := range handed {
 				d.reattach(m.s, m.hs)
 			}
+			if restart {
+				// No handover: a clean restart resumes the sessions (trayrestart.go).
+				d.restartAsked = false
+				d.restartFallback(err)
+				return
+			}
 			if noticed {
 				d.setUpdLine("")
 			}
@@ -294,6 +278,44 @@ func (d *desk) trySwap() {
 			}
 		})
 	}()
+}
+
+// execQuill replaces this process with Quill's program file (tests replace it).
+var execQuill = execSelf
+
+// handoverState stops what can't be handed over and returns what a new
+// Quill Desktop restores: the current tab and drafts, queues, session
+// details, window size, place and scroll. Sessions are added by the caller.
+func (d *desk) handoverState() restoreState {
+	d.stopMedia()
+	d.flushUI()
+	// Other PCs' sessions are memory only: never handed over or restored.
+	d.stopRemotes()
+	d.closeAssistOverlay() // the main message box's text is the tab's draft again (mainbox.go)
+	st := d.restoreHead()
+	if d.current != nil && !d.split() {
+		d.strip.keepBox(d.current.id, d.input)
+		d.strip.keepDraft(d.current.id, st.Draft)
+	}
+	for _, p := range d.panes {
+		if p.view.s != nil {
+			d.strip.keepBox(p.view.s.id, p.input)
+			d.strip.keepDraft(p.view.s.id, d.boxDraft(p.view.s, p.input))
+		}
+	}
+	d.saveQueues(&st)
+	d.saveSessions(&st)
+	if d.usagePaused {
+		st.Paused = &pauseState{Until: d.pauseUntil.Unix(), IDs: d.pausedIDs, Text: d.pauseText.Text}
+	}
+	size := d.win.Canvas().Size()
+	st.Width, st.Height = size.Width, size.Height
+	st.Max, st.X, st.Y = windowPlacement(d.win)
+	st.Split = d.saveSplit()
+	d.rememberGeom()
+	st.ScrollY = d.chat.scroll.Offset.Y
+	st.KmemWin = d.kmemWin != nil // hot reload keeps the assistant and reopens the window (§14 #8)
+	return st
 }
 
 func (d *desk) reattach(s *deskSession, hs handedSession) bool {
@@ -552,6 +574,9 @@ func typingHolds(why []string) bool {
 func (d *desk) swapWaits(why []string) {
 	d.swapNotice = true
 	text := "Quill Desktop switches to the new build when this clears: " + strings.Join(why, "; ") + "."
+	if d.restartAsked {
+		text = "Quill Desktop restarts when this clears: " + strings.Join(why, "; ") + "."
+	}
 	if typingHolds(why) {
 		d.setUpdLine(text, lineBtn("Reload now", func() {
 			d.swapNow = true

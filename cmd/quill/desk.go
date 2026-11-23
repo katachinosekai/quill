@@ -423,6 +423,10 @@ type desk struct {
 	swapNow       bool        // "Reload now": switch without waiting for typing to pause
 	swapRetry     *time.Timer // retries a switch held by typing
 	swapNotice    bool        // the update line shows why a switch waits
+	restartAsked  bool        // the tray's "Restart Quill Desktop" runs the switch (trayrestart.go)
+	restartWait   string      // a clean restart waits for running turns; why the handover failed
+	restartRetry  *time.Timer // re-checks the running turns for a waiting clean restart
+	restarting    bool        // a clean restart stops the sessions and starts a new Quill Desktop
 	binMu         sync.Mutex
 	bin           *binWatch // Quill's own program file (watchBinary), under binMu
 	flushTimer    *time.Timer

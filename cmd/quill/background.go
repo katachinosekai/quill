@@ -254,6 +254,7 @@ func (d *desk) setupBackground() bool {
 	da.SetSystemTrayIcon(appIcon)
 	da.SetSystemTrayMenu(fyne.NewMenu("Quill",
 		fyne.NewMenuItem("Show Quill", d.showWindow),
+		fyne.NewMenuItem(restartLabel, d.restartQuill),
 		fyne.NewMenuItem("Quit", func() {
 			d.showWindow()
 			d.confirmQuit()
