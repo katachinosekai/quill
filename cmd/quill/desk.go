@@ -2562,14 +2562,21 @@ func setText(t *canvas.Text, text string) {
 
 func (d *desk) setInputCenter(on bool) {
 	d.app.Preferences().SetBool("centerInput", on)
-	if d.input == nil {
-		return
+	if d.input != nil {
+		d.alignInput(d.input)
 	}
-	d.input.Alignment = fyne.TextAlignLeading
-	if on {
-		d.input.Alignment = fyne.TextAlignCenter
+	if a := d.assist(); a.input != nil {
+		d.alignInput(a.input)
 	}
-	d.input.Refresh()
+}
+
+// alignInput gives a message box the "Typing" alignment preference.
+func (d *desk) alignInput(e *sendEntry) {
+	e.Alignment = fyne.TextAlignLeading
+	if d.app.Preferences().Bool("centerInput") {
+		e.Alignment = fyne.TextAlignCenter
+	}
+	e.Refresh()
 }
 
 func (d *desk) syncCenterAll() {
@@ -2618,7 +2625,10 @@ func (d *desk) allViews() []*chatView {
 	for _, p := range d.panes {
 		out = append(out, p.view)
 	}
-	if w := d.kmemWin; w != nil && w.view != nil {
+	// The kmem assistant chat keeps its view while its window is closed.
+	if a := d.assist(); a.view != nil {
+		out = append(out, a.view)
+	} else if w := d.kmemWin; w != nil && w.view != nil {
 		out = append(out, w.view)
 	}
 	return out

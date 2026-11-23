@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -43,14 +44,18 @@ type agentStrip struct {
 	d     *desk
 	root  *fyne.Container // hidden while nothing is listed
 	row   *fyne.Container
-	shown string // the texts on screen, to skip unchanged refreshes
+	col   *fyne.Container // the row inside the chat-width column
+	shown string          // the texts on screen, to skip unchanged refreshes
 	now   func() time.Time
 }
 
 func newAgentStrip(d *desk) *agentStrip {
 	a := &agentStrip{d: d, now: time.Now}
 	a.row = container.NewHBox()
-	a.root = container.New(layout.NewCustomPaddedLayout(0, 2, 8, 8), container.New(&clipLayout{}, a.row))
+	// The chat column's width and shift (chatview.go), so the strip sits over
+	// the chat: chips centred with centring on, else on its left edge.
+	a.col = windowCentered(d.chatWidth, d.sidebarWidth, container.New(&stripLayout{center: func() bool { return d.center }}, a.row))
+	a.root = container.New(layout.NewCustomPaddedLayout(0, 2, 8, 8), a.col)
 	a.root.Hide()
 	a.schedule()
 	return a
@@ -264,3 +269,28 @@ func (c *agentChip) Tapped(*fyne.PointEvent) {
 }
 
 func (c *agentChip) Cursor() desktop.Cursor { return desktop.PointerCursor }
+
+// stripLayout puts the chip row at its natural width (never wider than the
+// column), centred or at the column's left edge.
+type stripLayout struct{ center func() bool }
+
+func (*stripLayout) MinSize(objs []fyne.CanvasObject) fyne.Size {
+	var h float32
+	for _, o := range objs {
+		h = max(h, o.MinSize().Height)
+	}
+	return fyne.NewSize(10, h)
+}
+
+func (l *stripLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
+	pad := theme.Padding()
+	for _, o := range objs {
+		w := min(o.MinSize().Width, size.Width-2*pad)
+		x := pad
+		if l.center != nil && l.center() {
+			x = (size.Width - w) / 2
+		}
+		o.Move(fyne.NewPos(x, 0))
+		o.Resize(fyne.NewSize(w, size.Height))
+	}
+}

@@ -811,3 +811,26 @@ func TestKmemAssistSaveCountdownAndExit(t *testing.T) {
 		return h.d.assist().state == asClosed && !s.running() && rec.button == "Start assistant"
 	})
 }
+
+// The kmem chat follows the same centring settings as a session chat: the
+// text (d.center), the status line and the typing box.
+func TestKmemChatCentering(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.assist()
+		a.chat = h.d.kmemAssistChat(a)
+		if !slices.Contains(h.d.allViews(), a.view) {
+			t.Fatal("the kmem chat view takes the centring settings")
+		}
+		h.d.centerAll.SetChecked(true)
+		if a.view.align() != h.d.chat.align() || a.view.align() != fyne.TextAlignCenter ||
+			a.view.live.Alignment != h.d.chat.live.Alignment || a.view.live.Alignment != fyne.TextAlignCenter ||
+			a.input.Alignment != h.d.input.Alignment || a.input.Alignment != fyne.TextAlignCenter {
+			t.Fatal("centred like the main chat")
+		}
+		h.d.centerAll.SetChecked(false)
+		if a.view.align() != fyne.TextAlignLeading || a.view.live.Alignment != fyne.TextAlignLeading || a.input.Alignment != fyne.TextAlignLeading {
+			t.Fatal("left like the main chat")
+		}
+	})
+}

@@ -451,6 +451,7 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 	a.input.hint = "Ask kmem-lock-audit..."
 	a.input.SetPlaceHolder(a.input.hint)
 	a.input.SetMinRowsVisible(2)
+	d.alignInput(a.input)
 	send := widget.NewButtonWithIcon("", theme.MailSendIcon(), func() { d.kmemAssistSend(a.input.Text) })
 	send.Importance = widget.HighImportance
 	stop := widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {

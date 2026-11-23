@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 )
 
 // stripTexts: the chip texts the strip shows.
@@ -119,6 +121,36 @@ func TestAgentStrip(t *testing.T) {
 		h.d.agentStrip.sync()
 		if h.d.agentStrip.root.Visible() {
 			t.Fatalf("hidden once none runs: %q", stripTexts(h.d.agentStrip))
+		}
+	})
+}
+
+// The strip sits in the chat column: centred with centring on, on the chat's
+// left edge otherwise, never wider than the chat width.
+func TestAgentStripAlignment(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.agentStrip
+		a.row.Objects = []fyne.CanvasObject{widget.NewLabel("chip")}
+		colW := float32(500)
+		a.col.Layout = maxWidthLayout{width: func() float32 { return colW }}
+		a.root.Show()
+		a.root.Resize(fyne.NewSize(1400, 30))
+		a.root.Refresh()
+		inner := a.col.Objects[0]
+		colX := (1400 - 16 - colW) / 2
+		rowX := func() float32 { return a.row.Position().X }
+		h.d.center = false
+		a.root.Refresh()
+		a.col.Layout.Layout(a.col.Objects, a.col.Size())
+		inner.(*fyne.Container).Layout.Layout(inner.(*fyne.Container).Objects, inner.Size())
+		if got := inner.Position().X; got < colX-1 || got > colX+1 || rowX() > theme.Padding()+0.5 {
+			t.Fatalf("left: column at %v (want %v), row at %v", got, colX, rowX())
+		}
+		h.d.center = true
+		inner.(*fyne.Container).Layout.Layout(inner.(*fyne.Container).Objects, inner.Size())
+		if rowX() <= theme.Padding()+1 || inner.Size().Width > colW+0.5 {
+			t.Fatalf("centred: row at %v in width %v", rowX(), inner.Size().Width)
 		}
 	})
 }
