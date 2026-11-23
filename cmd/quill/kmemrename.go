@@ -136,13 +136,16 @@ func (d *desk) applyKmemRenames(sc kmemRenameScan) []string {
 	if len(moved) == 0 {
 		return nil
 	}
-	never := func(string) bool { return false }
 	ids := slices.Sorted(maps.Keys(moved))
 	for _, id := range ids {
 		old, next := d.org.Kmem[id], moved[id]
 		title, _, _ := d.rowText(id)
 		d.org.Kmem[id] = next
-		if kmemSlug(title, never) == old {
+		if t, ok := d.org.KmemTitles[old]; ok && d.org.KmemTitles[next] == "" {
+			d.org.KmemTitles[next] = t
+			delete(d.org.KmemTitles, old)
+		}
+		if followsTitle(title, old) {
 			d.org.Titles[id] = next // tab, session and kmem name are one identity
 		}
 		d.moveKmemProject(old, next)

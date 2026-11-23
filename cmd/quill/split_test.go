@@ -525,7 +525,7 @@ func TestKmemNamesAndParsing(t *testing.T) {
 	if got := kmemSlug("PZ Launcher!", taken); got != "pz-launcher-3" {
 		t.Fatalf("slug avoids names in use: %q", got)
 	}
-	if got := kmemSlug("  ", func(string) bool { return false }); got != "session" {
+	if got := kmemSlug("  ", func(string) bool { return false }); got != "session-1" {
 		t.Fatalf("empty title slug: %q", got)
 	}
 	if choiceHandoff(kmemChoices(hs)[2]) != "quill" || choiceHandoff(kmemNewChoice) != "" {

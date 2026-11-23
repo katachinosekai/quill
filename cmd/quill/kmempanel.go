@@ -544,11 +544,41 @@ func (p *kmemPanel) memoryTab() fyne.CanvasObject {
 	return split
 }
 
+// topicTitleTexts: the titles known for a kmem topic: the one typed in New
+// topic, kmem's config label (title, as) and the title of a handoff name.
+func (d *desk) topicTitleTexts(name string) []string {
+	var out []string
+	add := func(s string) {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	top := topLevel(name)
+	add(d.org.TopicTitles[top])
+	add(d.org.KmemTitles[name])
+	c := kmemSessions()[top]
+	add(c.Title)
+	add(c.As)
+	return out
+}
+
+// titlesMatch: some title contains the query (already lower-cased and
+// trimmed), compared with titleKey normalising (NFC, spaces) and the same
+// case folding as the name search (foldContains; q is already foldKey'd).
+func titlesMatch(titles []string, q string) bool {
+	for _, t := range titles {
+		if foldContains(titleKey(t), q) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *kmemPanel) filterTopics(q string) {
 	q = foldKey(strings.TrimSpace(q))
 	p.topicShown = p.topicShown[:0]
 	for _, t := range p.topicList {
-		if q == "" || foldContains(t.Name, q) {
+		if q == "" || foldContains(t.Name, q) || titlesMatch(p.d.topicTitleTexts(t.Name), q) {
 			p.topicShown = append(p.topicShown, t)
 		}
 	}

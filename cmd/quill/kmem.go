@@ -69,13 +69,63 @@ func kmemSlug(title string, taken func(string) bool) string {
 		base = strings.TrimRight(base[:40], "-")
 	}
 	if base == "" {
-		base = "session"
+		// Nothing Latin to slugify (Japanese, "!!!"): session-1, session-2...
+		// The typed title stays the tab title (and KmemTitles keeps it).
+		for n := 1; ; n++ {
+			if name := fmt.Sprintf("session-%d", n); !taken(name) {
+				return name
+			}
+		}
 	}
 	name := base
 	for n := 2; taken(name); n++ {
 		name = fmt.Sprintf("%s-%d", base, n)
 	}
 	return name
+}
+
+// slugless: a title with no Latin letter or digit, so kmemSlug can only
+// invent "session-N" for it.
+func slugless(title string) bool {
+	return strings.Trim(slugJunk.ReplaceAllString(strings.ToLower(title), "-"), "-") == ""
+}
+
+var generatedKmemName = regexp.MustCompile(`^session-\d+$`)
+
+// kmemNameFor: the kmem name a title gives a session that has the name old
+// ("" = none yet). A title without slug letters keeps old (never churns
+// session-3 to session-1; kmem names stay ASCII).
+func kmemNameFor(title, old string, taken func(string) bool) string {
+	if old != "" && slugless(title) {
+		return old
+	}
+	return kmemSlug(title, taken)
+}
+
+// followsTitle: the kmem name old is the one title would give (a generated
+// session-N for a slugless title), so title and name are one identity.
+func followsTitle(title, old string) bool {
+	if slugless(title) {
+		return generatedKmemName.MatchString(old)
+	}
+	return kmemSlug(title, func(string) bool { return false }) == old
+}
+
+// rememberKmemTitle keeps the typed title of a kmem name whose slug lost it
+// (name -> title, like TopicTitles); a name that spells its title needs none.
+func (d *desk) rememberKmemTitle(name, title string) {
+	title = strings.TrimSpace(title)
+	if name == "" {
+		return
+	}
+	if title == "" || !slugless(title) {
+		delete(d.org.KmemTitles, name)
+		return
+	}
+	if d.org.KmemTitles == nil {
+		d.org.KmemTitles = map[string]string{}
+	}
+	d.org.KmemTitles[name] = title
 }
 
 func (d *desk) kmemAvailable() bool {
@@ -156,10 +206,18 @@ func kmemSaveMessage(name string) string {
 		"Don't start other work. Reply with one line once it is saved.", name)
 }
 
-func kmemChoices(hs []kmemHandoff) []string {
+func kmemChoices(hs []kmemHandoff) []string { return kmemChoicesTitled(hs, nil) }
+
+// kmemChoicesTitled: the choices, a handoff whose name lost its typed title
+// (session-1) shown with it.
+func kmemChoicesTitled(hs []kmemHandoff, titles map[string]string) []string {
 	out := []string{kmemNewChoice}
 	for _, h := range hs {
-		out = append(out, kmemResumeOf+h.Name+" (saved "+localDate(h.Saved.Local(), dateMD)+" "+h.Saved.Local().Format("15:04")+")")
+		label := h.Name
+		if t := promptTitle(titles[h.Name]); t != "" {
+			label += " · " + t
+		}
+		out = append(out, kmemResumeOf+label+" (saved "+localDate(h.Saved.Local(), dateMD)+" "+h.Saved.Local().Format("15:04")+")")
 	}
 	return out
 }
@@ -169,7 +227,7 @@ func choiceHandoff(choice string) string {
 		return ""
 	}
 	name := strings.TrimPrefix(choice, kmemResumeOf)
-	if i := strings.Index(name, " ("); i >= 0 {
+	if i := strings.IndexAny(name, " "); i >= 0 { // names have no spaces
 		name = name[:i]
 	}
 	return name
@@ -181,7 +239,7 @@ func (d *desk) kmemSelect(apply func(*widget.Select)) *widget.Select {
 	go func() {
 		hs := d.kmemHandoffs()
 		d.do(func() {
-			sel.Options = kmemChoices(hs)
+			sel.Options = kmemChoicesTitled(hs, d.org.KmemTitles)
 			sel.Refresh()
 			if apply != nil {
 				apply(sel)
@@ -209,6 +267,7 @@ func (d *desk) applyKmemChoice(s *deskSession, choice, title string) {
 	known := d.lastHandoffs
 	d.hsMu.Unlock()
 	d.org.Kmem[s.id] = kmemSlug(title, d.kmemTaken(known))
+	d.rememberKmemTitle(d.org.Kmem[s.id], title)
 	s.kmemNew = true
 	d.saveOrg()
 	go func() {
@@ -225,6 +284,7 @@ func (d *desk) applyKmemChoice(s *deskSession, choice, title string) {
 				return
 			}
 			d.org.Kmem[s.id] = kmemSlug(title, taken)
+			d.rememberKmemTitle(d.org.Kmem[s.id], title)
 			d.saveOrg()
 		})
 	}()
@@ -255,7 +315,7 @@ func (d *desk) askKmemName(id string) {
 	e.SetText(d.org.Kmem[id])
 	if e.Text == "" {
 		title, _, _ := d.rowText(id)
-		e.SetPlaceHolder(kmemSlug(title, func(string) bool { return false }))
+		e.SetPlaceHolder(kmemNameFor(title, "", d.kmemTaken(nil)))
 	}
 	go func() {
 		hs := d.kmemHandoffs()
@@ -269,11 +329,22 @@ func (d *desk) askKmemName(id string) {
 	}()
 	note := widget.NewLabel("The kmem handoff this session saves to and resumes from. Restart as new session then saves the handoff, starts a fresh session from it and deletes this one. Leave empty to unlink.")
 	note.Wrapping = fyne.TextWrapWord
-	dlg := dialog.NewForm("kmem name", "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Name", e), widget.NewFormItem("", note)}, func(ok bool) {
+	hint := widget.NewLabel("")
+	hint.Wrapping = fyne.TextWrapWord
+	e.OnChanged = func(t string) {
+		if t = strings.TrimSpace(t); t != "" && !plainKmemName(t) {
+			hint.SetText("A kmem name uses a-z, A-Z, 0-9, . _ - (no spaces or other scripts). Rename the session to keep a title in any language.")
+		} else {
+			hint.SetText("")
+		}
+	}
+	dlg := dialog.NewForm("kmem name", "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Name", e), widget.NewFormItem("", hint), widget.NewFormItem("", note)}, func(ok bool) {
 		if !ok {
 			return
 		}
-		if name := strings.TrimSpace(e.Text); name == "" {
+		if name := strings.TrimSpace(e.Text); name != "" && !plainKmemName(name) {
+			dialog.ShowInformation("Quill Desktop", "“"+name+"” is not a kmem name: use a-z, A-Z, 0-9, . _ - only.", d.win)
+		} else if name == "" {
 			d.org.Kmem[id] = ""
 		} else {
 			d.org.Kmem[id] = name

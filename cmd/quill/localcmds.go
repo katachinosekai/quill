@@ -117,7 +117,7 @@ func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
 			note("Renamed this session to “" + arg + "”.")
 		} else {
 			title, _, _ := d.rowText(s.id)
-			d.askName("Rename session", title, func(name string) { d.renameSession(s.id, name) })
+			d.askSessionName(s.id, title)
 		}
 	case "remote-control", "rc":
 		if s == nil {

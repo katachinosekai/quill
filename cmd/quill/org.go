@@ -49,6 +49,10 @@ type sideOrg struct {
 	// Desktop never writes kmem's config, so a title in any language, which
 	// slugs to "topic-N", lives here).
 	TopicTitles map[string]string `json:"topicTitles,omitempty"`
+	// KmemTitles: kmem handoff name -> the title typed for it, for names
+	// that are generated ("session-1") because the title has no Latin letter
+	// or digit. kmem names stay ASCII; the title is only shown.
+	KmemTitles map[string]string `json:"kmemTitles,omitempty"`
 }
 
 func (d *desk) loadOrg() {
@@ -152,9 +156,22 @@ func (d *desk) folderTitle(key, fallback string) string {
 }
 
 func (d *desk) askName(title, current string, onOK func(string)) {
+	d.askNameFor(title, current, nil, onOK)
+}
+
+// askNameFor: askName with a line under the entry that previews what the
+// typed name leads to (preview returns "" for nothing to say).
+func (d *desk) askNameFor(title, current string, preview func(string) string, onOK func(string)) {
 	e := widget.NewEntry()
 	e.SetText(current)
-	dlg := dialog.NewForm(title, "Save", "Cancel", []*widget.FormItem{widget.NewFormItem("Name", e)}, func(ok bool) {
+	items := []*widget.FormItem{widget.NewFormItem("Name", e)}
+	if preview != nil {
+		note := widget.NewLabel("")
+		note.Wrapping = fyne.TextWrapWord
+		e.OnChanged = func(t string) { note.SetText(preview(t)) }
+		items = append(items, widget.NewFormItem("", note))
+	}
+	dlg := dialog.NewForm(title, "Save", "Cancel", items, func(ok bool) {
 		if name := strings.TrimSpace(e.Text); ok && name != "" {
 			onOK(name)
 		}
@@ -181,7 +198,7 @@ func (d *desk) sessionMenuItems(id string) []*fyne.MenuItem {
 	title, _, _ := d.rowText(id)
 	items := []*fyne.MenuItem{
 		fyne.NewMenuItem("Rename...", func() {
-			d.askName("Rename session", title, func(name string) { d.renameSession(id, name) })
+			d.askSessionName(id, title)
 		}),
 	}
 	if _, ok := d.org.Titles[id]; ok {

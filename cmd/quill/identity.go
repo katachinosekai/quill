@@ -37,6 +37,7 @@ func (d *desk) ensureKmem(id string) string {
 	d.hsMu.Unlock()
 	name := kmemSlug(title, d.kmemTaken(known))
 	d.org.Kmem[id] = name
+	d.rememberKmemTitle(name, title)
 	d.saveOrg()
 	return name
 }
@@ -236,6 +237,30 @@ func (d *desk) renameSession(id, name string) {
 	d.retitled(id)
 }
 
+// kmemNamePreview: the line the rename dialog shows under the typed title.
+func (d *desk) kmemNamePreview(id, typed string) string {
+	typed = strings.TrimSpace(typed)
+	if typed == "" || !d.kmemAvailable() {
+		return ""
+	}
+	old := d.org.Kmem[id]
+	next := kmemNameFor(typed, old, func(n string) bool { return n != old && d.kmemTaken(nil)(n) })
+	switch {
+	case old == "":
+		return "kmem name: " + next
+	case next == old && slugless(typed):
+		return "kmem name stays " + old + " (kmem names use a-z, 0-9 and -); the title is shown as typed."
+	case next == old:
+		return "kmem name stays " + old
+	}
+	return "kmem name: " + old + " becomes " + next
+}
+
+func (d *desk) askSessionName(id, current string) {
+	d.askNameFor("Rename session", current, func(t string) string { return d.kmemNamePreview(id, t) },
+		func(name string) { d.renameSession(id, name) })
+}
+
 // restoreTitle drops the custom title. The kmem name follows the restored
 // title, because a tab, its session and its kmem name are one identity.
 func (d *desk) restoreTitle(id string) {
@@ -250,9 +275,11 @@ func (d *desk) retitled(id string) {
 	d.saveOrg()
 	name, _, _ := d.rowText(id)
 	if old := d.org.Kmem[id]; old != "" && d.kmemAvailable() {
-		next := kmemSlug(name, func(n string) bool { return n != old && d.kmemTaken(nil)(n) })
+		next := kmemNameFor(name, old, func(n string) bool { return n != old && d.kmemTaken(nil)(n) })
 		if next != old {
 			d.renameKmem(id, old, next)
+		} else {
+			d.rememberKmemTitle(old, name)
 		}
 	} else {
 		d.ensureKmem(id)
