@@ -1185,7 +1185,9 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.targetLbl = caption("")
 	d.targetLbl.Truncation = fyne.TextTruncateEllipsis
 	d.targetLbl.Hide()
-	inputCard := bg(colInput, 12, container.NewBorder(d.targetLbl, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
+	cue := d.newCue(d.input, d.sendBtn)
+	inputCard := bg(colInput, 12, container.NewBorder(d.targetLbl, controls, cue.chip, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, cue.send), d.input))
+	cue.attach(inputCard)
 	d.verLine = d.newVerLine()
 	d.statsRow = container.New(hintsLayout{}, d.verLine.slot, d.folder)
 	statsRow := container.NewGridWithColumns(2, container.New(&clipLayout{}, d.stats), d.statsRow)

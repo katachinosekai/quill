@@ -95,7 +95,8 @@ type assistBox struct {
 	layer   *fyne.Container // the overlay slot over the chat history
 	panel   *fyne.Container // the docked slot
 	handle  *dockHandle
-	ghostL  *fyne.Container
+	ghostL  *fyne.Container // the animation layer: the dimming, then the ghost
+	dim     *dimLayer
 	ghost   *canvas.Rectangle
 	card    *fyne.Container
 	body    *fyne.Container
@@ -148,7 +149,8 @@ func (d *desk) box() *assistBox {
 	b.ghost.StrokeColor = fade(colAccent, 0.5)
 	b.ghost.StrokeWidth = 1
 	b.ghost.Hide()
-	b.ghostL = container.NewWithoutLayout(b.ghost)
+	b.dim = &dimLayer{root: container.NewWithoutLayout()}
+	b.ghostL = container.NewWithoutLayout(b.dim.root, b.ghost)
 	b.title = boldLabel("")
 	b.status = caption("")
 	b.status.Truncation = fyne.TextTruncateEllipsis
@@ -623,6 +625,7 @@ func (l *assistRootLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	}
 	ghostL.Move(fyne.NewPos(0, 0))
 	ghostL.Resize(size)
+	defer d.queueDim()
 	if !b.docked || pw <= 0 {
 		main.Move(fyne.NewPos(0, 0))
 		main.Resize(size)
@@ -661,6 +664,7 @@ func (l *boxAreaLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		o.Move(pos)
 		o.Resize(sz)
 	}
+	l.d.queueDim()
 }
 
 // overlayRect: the box's rect in the chat history area: the history with a

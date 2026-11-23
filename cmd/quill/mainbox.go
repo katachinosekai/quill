@@ -99,6 +99,7 @@ func (d *desk) syncMainTarget() {
 // syncBoxInputs: an assistant's own message box shows unless the main one
 // messages it (the overlay); the main box's label says who it messages.
 func (d *desk) syncBoxInputs() {
+	defer d.syncCues()
 	if b := d.abox; b != nil {
 		for role, v := range b.views {
 			if v.inRow == nil {

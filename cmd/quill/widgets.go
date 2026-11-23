@@ -154,7 +154,8 @@ type sendEntry struct {
 	onSend     func(string)
 	suggestion string
 	hint       string
-	sugName    string // "Message the Quill operator": named before a suggestion (te68cb1)
+	sugName    string     // "Message the Quill operator": named before a suggestion (te68cb1)
+	cue        *targetCue // frame, chip and send button while it messages an assistant (boxcues.go)
 	onKey      func(*fyne.KeyEvent) bool
 	onSendNow  func(string)
 	ctrl       bool

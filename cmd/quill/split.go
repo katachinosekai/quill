@@ -210,8 +210,10 @@ func (d *desk) newPane() *pane {
 	closeAll.Importance = widget.MediumImportance
 	p.auto = newAutoChip(func() { d.setAutoApprove(p.view.s, false) })
 	controls := container.NewBorder(nil, nil, container.NewHBox(p.backend, boxed(p.model), boxed(p.mode), p.auto), container.NewHBox(openAll, closeAll))
-	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, sendBtn)
-	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), nil, side, p.input))
+	cue := d.newCue(p.input, sendBtn)
+	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, cue.send)
+	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), cue.chip, side, p.input))
+	cue.attach(card)
 	p.stats = mutedText("", fontMeta)
 	p.slot = container.NewHBox()
 	slotPad := canvas.NewRectangle(color.Transparent)
