@@ -52,6 +52,7 @@ func TestNewTabKmemCard(t *testing.T) {
 		}
 	})
 	var labels []string
+	browseAll(h)
 	h.eventually("topic rows", func() bool {
 		labels = nil
 		deepWalk(h.d.chat.box, func(o fyne.CanvasObject) {
@@ -62,7 +63,7 @@ func TestNewTabKmemCard(t *testing.T) {
 		return strings.Contains(strings.Join(labels, "|"), "Quill")
 	})
 	joined := strings.Join(labels, "|")
-	if !strings.Contains(joined, "Networking · open in tab") || !strings.Contains(joined, "Open") || strings.Contains(joined, "saved") {
+	if !strings.Contains(joined, "Networking · open in tab") || !strings.Contains(joined, "Show recent only") || strings.Contains(joined, "saved") {
 		t.Fatalf("card buttons: %v", labels)
 	}
 	h.ui(func() {

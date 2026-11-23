@@ -138,10 +138,11 @@ func TestOpenTopicCard(t *testing.T) {
 		h.d.newSessionDialog()
 		s = h.d.current
 	})
+	browseAll(h)
 	h.eventually("topic buttons", func() bool {
 		return strings.Contains(strings.Join(cardButtons(h), "|"), "Alpha · alpha is half done · 1 claimed · 0 open")
 	})
-	if j := strings.Join(cardButtons(h), "|"); !strings.Contains(j, "Beta") || !strings.Contains(j, "Open") {
+	if j := strings.Join(cardButtons(h), "|"); !strings.Contains(j, "Beta") || !strings.Contains(j, "Browse") && !strings.Contains(j, "Show recent") {
 		t.Fatalf("card buttons: %s", j)
 	}
 	h.ui(func() {

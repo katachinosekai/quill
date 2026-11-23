@@ -369,6 +369,7 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 	}
 	d.setDormant(t.Slug, false)
 	if owner := d.topicOwner(t.Slug, s); owner != nil {
+		d.noteRecentTopic(t.Slug)
 		d.open(owner.id)
 		return
 	}
@@ -377,6 +378,7 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 		d.notify(s, extNotice(t, e)) // the card stays: pick another topic
 		return
 	}
+	d.noteRecentTopic(t.Slug)
 	s.pickPending = false
 	if isNew && t.Title != "" {
 		if d.org.TopicTitles == nil {
@@ -433,6 +435,7 @@ func (d *desk) openTopic(slug string) *deskSession {
 func (d *desk) openTopicInfo(t topicInfo, isNew bool, cwd string) *deskSession {
 	if owner := d.topicOwner(t.Slug, &deskSession{}); owner != nil {
 		d.setDormant(t.Slug, false)
+		d.noteRecentTopic(t.Slug)
 		d.open(owner.id)
 		return owner
 	}

@@ -16,11 +16,11 @@ func cardWidgets(h *harness) (*widget.Entry, *widget.Button) {
 	deepWalk(h.d.chat.box, func(o fyne.CanvasObject) {
 		switch x := o.(type) {
 		case *widget.Entry:
-			if strings.HasPrefix(x.PlaceHolder, "New topic") {
+			if strings.HasPrefix(x.PlaceHolder, "Search topics") {
 				e = x
 			}
 		case *widget.Button:
-			if x.Text == "Open" {
+			if strings.HasPrefix(x.Text, "New topic:") || strings.HasPrefix(x.Text, "Open topic:") {
 				b = x
 			}
 		}
@@ -37,15 +37,17 @@ func TestNewTopicFromCardButton(t *testing.T) {
 			h.d.newSessionDialog()
 			s = h.d.current
 		})
+		browseAll(h)
 		h.eventually("card", func() bool {
 			return strings.Contains(strings.Join(cardButtons(h), "|"), "Beta")
 		})
 		h.ui(func() {
 			e, b := cardWidgets(h)
-			if e == nil || b == nil {
+			if e == nil {
 				t.Fatal("card has no new-topic field or Open button")
 			}
 			e.SetText(name)
+			_, b = cardWidgets(h)
 			test.Tap(b)
 			if s.pickPending {
 				t.Fatalf("%s: tab still on the card after Open", name)
@@ -73,10 +75,12 @@ func TestNewTopicFromCardWithSessionsFeature(t *testing.T) {
 		h.d.newSessionDialog()
 		s = h.d.current
 	})
+	browseAll(h)
 	h.eventually("card", func() bool { return strings.Contains(strings.Join(cardButtons(h), "|"), "Beta") })
 	h.ui(func() {
 		e, b := cardWidgets(h)
 		e.SetText("Garden Planner")
+		_, b = cardWidgets(h)
 		test.Tap(b)
 		if s.pickPending || h.d.org.Kmem[s.id] != "garden-planner" || h.d.org.Titles[s.id] != "Garden Planner" {
 			t.Fatalf("not opened: %v %q", s.pickPending, h.d.org.Kmem[s.id])
@@ -96,19 +100,22 @@ func TestRefusedNewTopicKeepsCard(t *testing.T) {
 		h.d.newSessionDialog()
 		s = h.d.current
 	})
+	browseAll(h)
 	h.eventually("card", func() bool { return strings.Contains(strings.Join(cardButtons(h), "|"), "Beta") })
 	h.ui(func() {
 		e, b := cardWidgets(h)
 		e.SetText("kmem")
+		_, b = cardWidgets(h)
 		test.Tap(b)
 		if !s.pickPending || !strings.Contains(sentText(s), "kmem window's topic") {
 			t.Fatalf("refused with a notice, tab still pending: %v %q", s.pickPending, sentText(s))
 		}
 		e, b = cardWidgets(h)
-		if e == nil || b == nil {
+		if e == nil {
 			t.Fatal("the card is gone after the refusal: the tab is stuck")
 		}
 		e.SetText("Garden Planner")
+		_, b = cardWidgets(h)
 		test.Tap(b)
 		if s.pickPending || h.d.org.Kmem[s.id] != "garden-planner" {
 			t.Fatal("a second try opens the topic")

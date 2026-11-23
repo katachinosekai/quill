@@ -46,6 +46,8 @@ func TestKmemCardNewTopicVisible(t *testing.T) {
 				h.w.Resize(tc.win)
 				h.d.newSessionDialog()
 			})
+			browseAll(h)
+			h.ui(func() { cardSearchEntry(h).SetText("Topic") }) // all of them match; New topic shows
 			var entry *widget.Entry
 			var open *widget.Button
 			var list *container.Scroll
@@ -57,7 +59,7 @@ func TestKmemCardNewTopicVisible(t *testing.T) {
 					case *widget.Entry:
 						entry = x
 					case *widget.Button:
-						if x.Text == "Open" {
+						if strings.HasPrefix(x.Text, "New topic:") {
 							open = x
 						} else if strings.HasPrefix(x.Text, "Topic") {
 							n++

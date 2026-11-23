@@ -116,6 +116,8 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.folders(w, r)
 	case r.Method == http.MethodGet && path == "topics":
 		a.topicsView(w, r)
+	case r.Method == http.MethodGet && path == "topics/search":
+		a.topicSearch(w, r)
 	case r.Method == http.MethodGet && path == "topics/slug":
 		a.topicSlug(w, r)
 	case r.Method == http.MethodGet && path == "handoffs":

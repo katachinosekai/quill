@@ -185,6 +185,9 @@ type apiTopic struct {
 	// Dormant: hidden in Quill Desktop's "Open a topic" list until opened
 	// (still listed here; Quill Android UI for it can come later).
 	Dormant bool `json:"dormant,omitempty"`
+	// Recent: one of the last five topics opened in Quill Desktop (the
+	// search-first "Open a topic" card's Recent list).
+	Recent bool `json:"recent,omitempty"`
 }
 
 func (a *phoneAPI) topicEntry(t topicInfo) apiTopic {
@@ -193,7 +196,7 @@ func (a *phoneAPI) topicEntry(t topicInfo) apiTopic {
 		live = owner.id
 	}
 	return apiTopic{Slug: t.Slug, Title: t.Title, Scope: firstNonEmptyList(t.Scope, []string{t.Slug}), Live: live,
-		Status: kmemScrubber()(t.Status), Claimed: t.Claimed, Open: t.Open, Dormant: a.d.isDormant(t.Slug)}
+		Status: kmemScrubber()(t.Status), Claimed: t.Claimed, Open: t.Open, Dormant: a.d.isDormant(t.Slug), Recent: a.isRecent(t)}
 }
 
 // topicList: the topics for the sessions body, from the cache only (UI
@@ -435,4 +438,67 @@ func (a *phoneAPI) applyStart(s *deskSession, st *apiStart) {
 		return
 	}
 	a.d.pickNew(s, st.Title)
+}
+
+// isRecent: t is among the topics the desktop card lists under Recent (UI
+// thread).
+func (a *phoneAPI) isRecent(t topicInfo) bool {
+	topicCache.mu.Lock()
+	list := append([]topicInfo(nil), topicCache.list...)
+	topicCache.mu.Unlock()
+	for _, r := range a.d.recentTopics(list, recentTopicsShow) {
+		if r.Slug == t.Slug {
+			return true
+		}
+	}
+	return false
+}
+
+// apiTopicMatch is one result of GET /phone/topics/search.
+type apiTopicMatch struct {
+	Name    string `json:"name"` // the topic's slug, what openTopic takes
+	Title   string `json:"title"`
+	Match   string `json:"match"` // "name", "title", "content" or "recent" (empty q)
+	Content string `json:"content,omitempty"`
+	Dormant bool   `json:"dormant,omitempty"`
+	Live    string `json:"live"`
+}
+
+// topicSearch is GET /phone/topics/search?q=: the desktop card's search.
+// Empty q answers the Recent list.
+func (a *phoneAPI) topicSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	on := false
+	a.ui(func() { on = a.d.topicMode() })
+	if !on {
+		folders.WriteError(w, http.StatusServiceUnavailable, "kmem_unavailable", "kmem memory is off or kmem is not installed on Quill Desktop")
+		return
+	}
+	a.ensureTopics()
+	topicCache.mu.Lock()
+	ts := append([]topicInfo(nil), topicCache.list...)
+	topicCache.mu.Unlock()
+	var res topicSearchResult
+	if q == "" {
+		a.ui(func() {
+			for _, t := range a.d.recentTopics(ts, recentTopicsShow) {
+				res.Hits = append(res.Hits, topicHit{Topic: t, Why: "recent"})
+			}
+		})
+	} else {
+		res = a.d.searchTopics(q, ts)
+	}
+	sc := kmemScrubber()
+	matches := []apiTopicMatch{}
+	var dym any
+	a.ui(func() {
+		for _, h := range res.Hits {
+			matches = append(matches, apiTopicMatch{Name: h.Topic.Slug, Title: h.Topic.Title, Match: h.Why,
+				Content: sc(h.Snippet), Dormant: h.Dormant, Live: a.topicEntry(h.Topic).Live})
+		}
+		if res.DidYouMean != nil {
+			dym = map[string]string{"name": res.DidYouMean.Slug, "title": res.DidYouMean.Title}
+		}
+	})
+	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "q": q, "matches": matches, "didYouMean": dym})
 }

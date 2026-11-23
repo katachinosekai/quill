@@ -493,6 +493,8 @@ Topic mode (topic tabs, docs/design/topic-tabs.md) is on while hello's `topics.o
 
 `"dormant": true` appears (omitted otherwise) when the user hid the topic under Dormant in the desktop "Open a topic" card. Hidden topics stay listed; Quill Android may show them folded later. Opening the topic un-hides it.
 
+`"recent": true` appears (omitted otherwise) on the last five topics opened in Quill Desktop (its "Open a topic" card's Recent list); Quill Android can list them first.
+
 `live` is the id of the topic's live session, `""` when none. `status` is the first line of the `<topic>/status` fact (may be empty). `claimed` / `open`: task counts over the topic's scope. The kmem window's own topic (`kmem`) is not listed. Left out: `statusMs` (the age of the status fact; kmem 1.8.1 does not report it).
 
 ### Session: agents, endWait
@@ -518,6 +520,10 @@ Errors: `422 bad_request` (both or neither field, `kmem`), `404 not_found` (unkn
 ### GET /phone/topics
 
 Read-only Topics view: `{"v": 1, "topics": [...], "history": [...], "readMs": ...}`. Each topic is a `topics[]` entry plus `tasks`: its claimed tasks `{id, prio, title, owner, claim, checkpoint}` (`claim` as in `/phone/kmem/tasks`; `checkpoint` may be empty). `history`: the old kmem handoffs `{name, items, savedMs}`, newest first (read only; no Delete). `503 kmem_unavailable` outside topic mode. Cached up to 10 s like `/phone/kmem/*`.
+
+### GET /phone/topics/search?q=...
+
+The search of Quill Desktop's "Open a topic" card. `{"v": 1, "q": "garden", "matches": [...], "didYouMean": null}`. Each match: `name` (the topic's slug, what `openTopic` takes), `title`, `match` (`name`, `title` or `content`), `content` (only for `content`: one line of the kmem fact that mentions the query; show it as "mentions ..."), `dormant` (omitted unless true; dormant topics appear only because the query was typed), `live` (the live session id, `""` when none). Order: exact, prefix, then substring matches of the slug and title, then content matches (`kmem recall`, one per top-level topic); dormant ones last. `didYouMean`: `{"name", "title"}` of an existing topic that the query resembles (close spelling or a prefix) when the query itself is not a topic yet; `null` otherwise. Show it above "New topic". An empty `q` answers the Recent list (`match: "recent"`, newest first, at most 5). `503 kmem_unavailable` outside topic mode. Not cached (it asks kmem).
 
 ### GET /phone/topics/slug?title=...
 

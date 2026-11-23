@@ -37,6 +37,7 @@ func openDormantCard(t *testing.T, h *harness) *deskSession {
 		h.d.newSessionDialog()
 		s = h.d.current
 	})
+	browseAll(h)
 	h.eventually("card", func() bool { return strings.Contains(strings.Join(cardButtons(h), "|"), "Beta") })
 	return s
 }

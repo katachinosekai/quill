@@ -311,6 +311,7 @@ func TestTakeOverCardEntry(t *testing.T) {
 		s.pickPending = true
 		h.d.open(s.id)
 	})
+	browseAll(h)
 	h.eventually("card entry offers take over", func() bool {
 		var ok bool
 		walk(h.d.chat.box, func(x fyne.CanvasObject) {
