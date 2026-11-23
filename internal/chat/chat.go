@@ -221,6 +221,27 @@ func JoinOptionLineSpans(text string) ([]string, []int) {
 	return out, first
 }
 
+var yesNoOptsRe = regexp.MustCompile(`(?i)^\W*yes\b.*\bor\b.*\bno\b`)
+
+// yesNoProposal: "Can I run `kmem find x`? Yes (recommended) or no?": an offer
+// to do work whose options are Yes and no. Its Yes is a go-ahead even though
+// the question names no plan words (user 2026-11-22, tf2db21: a quick-choice
+// Yes to it didn't count as plan approval).
+func yesNoProposal(line string) bool {
+	line = numberedQ.ReplaceAllString(strings.TrimSpace(line), "")
+	i := strings.Index(line, "?")
+	if i < 0 {
+		return false
+	}
+	q := quotedSpans.ReplaceAllString(line[:i], " ")
+	if m := sentenceEnd.FindAllStringIndex(q, -1); len(m) > 0 {
+		q = q[m[len(m)-1][1]:]
+	}
+	q = strings.TrimLeft(q, "*_ ")
+	rest := strings.Trim(line[i+1:], "*_ ")
+	return proposalAsk.MatchString(q) && yesNoOptsRe.MatchString(rest)
+}
+
 // AsksApproval: the turn's last text ends in a question asking to approve,
 // or in a proposal of work (see approvalAsk).
 func (c *Conversation) AsksApproval() bool {
@@ -250,7 +271,7 @@ func (c *Conversation) AsksApproval() bool {
 		}
 		// Rule 28 (user 2026-11-21): a plan ends with its questions numbered,
 		// one per line; the approval can be any of them, not just the last.
-		if ClosingApproval(t) != "" {
+		if ClosingApproval(t) != "" || yesNoProposal(last) {
 			return true
 		}
 		return proposes(last)
@@ -287,7 +308,7 @@ func ClosingApproval(text string) string {
 			return ""
 		}
 		q := strings.TrimSpace(strings.Trim(numberedQ.ReplaceAllString(l, ""), "*_ "))
-		if lq := lastQuestionOf(q); lq != "" && asksToApprove(lq) {
+		if lq := lastQuestionOf(q); lq != "" && asksToApprove(lq) || yesNoProposal(q) {
 			return q
 		}
 	}

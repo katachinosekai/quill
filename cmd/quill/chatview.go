@@ -84,6 +84,8 @@ type chatView struct {
 	stepOpen      map[*chat.Item]bool
 	planAns       map[*chat.Item]map[int]planAnswer // plan card answers, kept across redraws
 	planPlain     map[*chat.Item]bool               // plans shown as written plus the card, not overlaid
+	btnKinds      map[int]string                    // buttons each item shows now (click guard)
+	btnChanged    time.Time                         // when any item's buttons last changed
 	frame         *fyne.Container
 	inner         *fyne.Container
 	steps         bool
@@ -1715,13 +1717,13 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	border := colAccent
 	owner := v.s
 	if it.PermState == chat.PermPending {
-		no := glowButton("Don't run", theme.CancelIcon(), colError, true, func() { v.d.answerPlan(owner, it, false) })
+		no := glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() { v.d.answerPlan(owner, it, false) }))
 		approve := func(opt string) fyne.CanvasObject {
 			label := "Approve plan & run all"
 			if opt != "" {
 				label = "Approve: " + shortLabel(opt, 50)
 			}
-			return glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), func() { v.d.answerPlanWith(owner, it, true, opt) })
+			return glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() { v.d.answerPlanWith(owner, it, true, opt) }))
 		}
 		var opts []string
 		rec := -1
@@ -1736,7 +1738,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 			// a control for each, all answers go with Approve.
 			ans := v.planAnswers(it, qs)
 			parts = append(parts, v.planQuestionForm(qs, ans))
-			run := glowButton("Approve plan & send answers", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), func() { v.d.answerPlanAnswers(owner, it, qs, ans) })
+			run := glowButton("Approve plan & send answers", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() { v.d.answerPlanAnswers(owner, it, qs, ans) }))
 			parts = append(parts, v.buttonRow(run, no))
 		case len(opts) > 0 && rec >= 0:
 			// The recommended answer goes with Approve; the others wait behind a link.
@@ -1768,10 +1770,15 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		default:
 			parts = append(parts, v.buttonRow(approve(""), no))
 		}
-	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !replied(owner, it) {
-		resend := glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, func() { v.d.answerPlan(owner, it, true) })
+		v.noteButtons(it.Seq, "pending")
+	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !owner.inTurn && !replied(owner, it) {
+		// Not while a turn is under way: Busy drops between a turn's steps,
+		// and this button flipped in and out under the pointer (tb704f5).
+		resend := glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, v.guarded(func() { v.d.answerPlan(owner, it, true) }))
 		parts = append(parts, v.buttonRow(resend))
+		v.noteButtons(it.Seq, "resend")
 	} else {
+		v.noteButtons(it.Seq, "none")
 		text := "Not run"
 		switch it.PermState {
 		case chat.PermAllowed:
@@ -2099,6 +2106,80 @@ func parseChoices(line string) (string, []string, bool) {
 	return strings.TrimRight(clean, "*_ "), opts, true
 }
 
+// clickGuard: after a card's buttons change (appear, swap, go), clicks are
+// ignored this long, so a click aimed at the old buttons can't hit the new
+// ones (user 2026-11-22, tb704f5: "Yes" became "Resend approval" under the
+// pointer).
+var clickGuard = 600 * time.Millisecond
+
+// noteButtons records which buttons an item shows now; a change starts the
+// click guard.
+func (v *chatView) noteButtons(seq int, kind string) {
+	if v.btnKinds == nil {
+		v.btnKinds = map[int]string{}
+	}
+	if v.btnKinds[seq] != kind {
+		v.btnKinds[seq] = kind
+		v.btnChanged = time.Now()
+	}
+}
+
+// guarded wraps a button's action in the click guard.
+func (v *chatView) guarded(fn func()) func() {
+	return func() {
+		if time.Since(v.btnChanged) < clickGuard {
+			return
+		}
+		fn()
+	}
+}
+
+// numChoiceQ: one numbered question of a reply, with its option buttons (none
+// if its line names no options).
+type numChoiceQ struct {
+	num   string
+	title string
+	opts  []string
+}
+
+var numLead = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?(\d+)[.)]\s+`)
+
+// numberedChoiceQs: when a reply ends with two or more numbered question
+// lines, the text before them and each question with its options (user
+// 2026-11-22, t4981e5: only the last of five got buttons).
+func numberedChoiceQs(text string) (string, []numChoiceQ) {
+	lines := strings.Split(strings.TrimRight(chat.JoinOptionLines(text), " \n"), "\n")
+	first := len(lines)
+	for i := len(lines) - 1; i >= 0; i-- {
+		t := strings.TrimSpace(lines[i])
+		if t == "" {
+			continue
+		}
+		if !numLead.MatchString(t) {
+			break
+		}
+		first = i
+	}
+	var qs []numChoiceQ
+	for _, l := range lines[first:] {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		m := numLead.FindStringSubmatch(l)
+		rest := strings.TrimSpace(l[len(m[0]):])
+		q := numChoiceQ{num: m[1], title: m[1] + ". " + strings.Trim(rest, "*_ ")}
+		if title, opts, ok := parseChoices(rest); ok {
+			q.title, q.opts = m[1]+". "+title, opts
+		}
+		qs = append(qs, q)
+	}
+	if len(qs) < 2 {
+		return "", nil
+	}
+	return strings.Join(lines[:first], "\n"), qs
+}
+
 func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 	s := v.s
 	if s == nil || it.Streaming {
@@ -2108,7 +2189,17 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 	cut := strings.LastIndex(text, "\n")
 	line := text[cut+1:]
 	title, opts, ok := parseChoices(line)
-	if !ok {
+	var multi []numChoiceQ
+	multiBody := ""
+	if mb, mq := numberedChoiceQs(text); mq != nil {
+		for _, q := range mq {
+			if len(q.opts) > 0 {
+				multi, multiBody = mq, mb
+				break
+			}
+		}
+	}
+	if !ok && multi == nil {
 		return "", nil
 	}
 	latest := true
@@ -2128,12 +2219,11 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 			latest = false
 		}
 	}
-	head := widget.NewLabel(title)
-	head.TextStyle = fyne.TextStyle{Bold: true}
-	head.Wrapping = fyne.TextWrapWord
-	head.Alignment = v.align()
-	parts := []fyne.CanvasObject{head}
+	kind := "none"
 	if latest {
+		kind = "choice"
+	}
+	buttons := func(prefix string, opts []string) fyne.CanvasObject {
 		var btns []fyne.CanvasObject
 		for _, o := range opts {
 			o := o
@@ -2142,10 +2232,38 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 				label = string(r[:59]) + "…"
 			}
 			n := len(btns)
-			btns = append(btns, glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(s), func() { v.d.pickChoice(s, it, choiceReply(n, o)) }))
+			btns = append(btns, glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(s), v.guarded(func() { v.d.pickChoice(s, it, prefix+choiceReply(n, o)) })))
 		}
-		parts = append(parts, v.buttonRow(btns...))
+		return v.buttonRow(btns...)
 	}
+	label := func(t string) *widget.Label {
+		head := widget.NewLabel(t)
+		head.TextStyle = fyne.TextStyle{Bold: true}
+		head.Wrapping = fyne.TextWrapWord
+		head.Alignment = v.align()
+		return head
+	}
+	if multi != nil {
+		// Each numbered question gets its own card and buttons; a click
+		// answers that question ("Question 2: I pick the first option: X.").
+		var cards []fyne.CanvasObject
+		for _, q := range multi {
+			parts := []fyne.CanvasObject{label(q.title)}
+			if latest && len(q.opts) > 0 {
+				kind += "|" + q.num + ":" + strings.Join(q.opts, "/")
+				parts = append(parts, buttons("Question "+q.num+": ", q.opts))
+			}
+			cards = append(cards, questionCard(parts, latest))
+		}
+		v.noteButtons(it.Seq, kind)
+		return multiBody, container.NewVBox(cards...)
+	}
+	parts := []fyne.CanvasObject{label(title)}
+	if latest {
+		kind += ":" + strings.Join(opts, "/")
+		parts = append(parts, buttons("", opts))
+	}
+	v.noteButtons(it.Seq, kind)
 	body := ""
 	if cut > 0 {
 		body = text[:cut]

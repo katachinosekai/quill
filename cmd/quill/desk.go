@@ -3066,7 +3066,7 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 }
 
 var (
-	choicePickRe = regexp.MustCompile(`^I pick the \w+ option: (.+?)\.?$`)
+	choicePickRe = regexp.MustCompile(`^(?:Question \d+: )?I pick the \w+ option: (.+?)\.?$`)
 	toolUseIDRe  = regexp.MustCompile(`<tool-use-id>([^<\s]+)</tool-use-id>`)
 )
 

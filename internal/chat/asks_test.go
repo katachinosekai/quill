@@ -63,6 +63,25 @@ func TestProposalsGetTheCard(t *testing.T) {
 	}
 }
 
+// tf2db21: "Can I run X? Yes (recommended) or no?" asks for a go-ahead even
+// without "steps N" or "run this" in it.
+func TestYesNoProposalIsApprovalAsk(t *testing.T) {
+	for text, want := range map[string]bool{
+		"Reply.\n\n**1. A or B?**\n**2. Can I run `tool find x`? Yes (recommended) or no?**": true,
+		"Reply.\n\nCan I run the read-only lookup? Yes (recommended) or no?":                  true,
+		"Reply.\n\nCan I run the lookup?\nYes (recommended) or no?":                           true,
+		"Reply.\n\nCan I run the lookup? Blue or red?":                                        false,
+		"Reply.\n\nWhich lookup should I run? Yes or no?":                                     false,
+	} {
+		c := New()
+		c.AddUser("hi")
+		c.Items = append(c.Items, &Item{Kind: Assistant, Text: text})
+		if got := c.AsksApproval(); got != want {
+			t.Errorf("AsksApproval(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
 // Options on the line after their question (user 2026-11-22: no plan card for
 // "1. Can I run steps 1–6?\nYes (recommended) or no?").
 func TestApprovalWithOptionsOnNextLine(t *testing.T) {
