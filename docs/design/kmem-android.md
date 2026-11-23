@@ -246,6 +246,16 @@ Every write answers `{"v": 1, "assistant": {…as in overview}}` (plus `item`
 or `queue` where the session route returns them). A write in a state that
 doesn't offer that button answers `409 stale`.
 
+As built (phase 2): items answers `id: "kmem-assistant"` (the Claude session
+id is not sent; a new assistant session is a new `epoch`) and an empty list
+with `epoch: 0` before the assistant ever ran; items and every write carry
+`assistant` as in the overview plus `actions` (subset of `start`, `stop`,
+`restart`, `save`, `send`, `choose`: what the routes accept now, so Quill
+Android never guesses) and, while the save-timeout question is open,
+`question: {text, choices: [3 labels]}`. `choose` uses `{"choice": n}`;
+`queue/{op}` is `queue/delete` or `queue/send-now`. The answer of whichever
+app is second is `409 stale`.
+
 These routes work whether or not the kmem window is open: the assistant runs
 with the window closed. Items come from the assistant's `deskSession`; the
 item tracker (`track`) must keep a tracker for it (today `scan` drops
@@ -275,6 +285,10 @@ desktop notification (an open kmem screen on the phone counts as seen).
 but `enabled(type)` returns false for types not in `TYPES` first (0.9.29),
 so old phones drop the event. New Quill Android adds `kmem` to `TYPES` and
 `LABELS` ("kmem assistant needs you").
+As built: `body` is `needs approval: …`, `has a question: …`, `has a plan to
+approve: …` or `did not save its kmem handoff in time: choose what
+happens.` (scrubbed like other kmem text, at most 300 bytes); no `kmem`
+event for finished turns or errors.
 
 ### 4.6 Task and bin writes (phase 4)
 
