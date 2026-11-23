@@ -136,7 +136,7 @@ func (c *Conversation) AddPlan() *Item {
 // via Zomboid Networking 2) a closing proposal ("Should I ship 1.3.7 now?",
 // "Do you want me to adapt it next?") also gets the card, unless it names
 // options ("A or B?") or asks which/what: those get option buttons.
-var approvalAsk = regexp.MustCompile(`(?i)\bapprov|\bgo ahead\b|\bproceed\b|\b(?:okay|ok) to\b|\brun (?:this|it|these|them)\b|\bcarry (?:it|this|them) out\b|\bsteps? \d`)
+var approvalAsk = regexp.MustCompile(`(?i)\bapprov(?:e|ed|al|ing)\b|\bgo ahead\b|\bproceed\b|\b(?:okay|ok) to\b|\brun (?:this|it|these|them)\b|\bcarry (?:it|this|them) out\b|\bsteps? \d`)
 
 // quotedSpans are quotes and parentheses: words in them are named, not asked
 // ("…instead of "Approve plan & run all"?" is no approval question).
@@ -250,6 +250,12 @@ func yesNoProposal(line string) bool {
 // information (show, check, tell, explain) and that stop things (stop,
 // cancel, kill) are left out on purpose: a Yes there is not a go-ahead.
 const actionVerbs = `fix|merge|release|ship|run|rerun|re-run|commit|push|delete|remove|apply|add|update|create|start|rename|revert|deploy|publish|install|build|restart|rebase|implement|continue|proceed|tag|cut|bump|land|move|switch|enable|disable|reset|drop|archive|write|rewrite|save|refactor|migrate|port|replace|retry|redo|upload|send|patch|squash|cherry-pick|finish|go ahead|go with|do it|do that|do this|do both|do all|clean up|set up|turn on|turn off`
+
+var namesWork = regexp.MustCompile(`(?i)\b(?:` + actionVerbs + `|execute|launch|perform|approve)\b`)
+
+// NamesWork: s names work to do ("Ship as v0.1.18", "replace the files"), as
+// a pick between things to approve does; a pick between preferences doesn't.
+func NamesWork(s string) bool { return namesWork.MatchString(s) }
 
 var actionStart = regexp.MustCompile(`(?i)^(?:(?:ok|okay|so|and|also|then|now)[,:]?\s+)?(?:` + actionVerbs + `)\b|^(?:ok|okay) to\b`)
 
@@ -388,9 +394,12 @@ var numberedQ = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?\d+[.)]\s+`)
 // dialog look right?"; two-model review 2026-11-22).
 var openAsk = regexp.MustCompile(`(?i)^\W*(?:and |so |also )?(?:which|what|why|how|where|when|who|whose|did|does)\b`)
 
+var approvalNoun = regexp.MustCompile(`(?i)\bapprovals? (?:question|card|dialog|button|message|gate|text|prompt|flow)s?\b`)
+
 // asksToApprove: a question sentence that asks to go ahead with a plan.
 func asksToApprove(q string) bool {
 	q = strings.TrimSpace(quotedSpans.ReplaceAllString(q, " "))
+	q = approvalNoun.ReplaceAllString(q, " ") // "an approval question is waiting" names it, asks nothing
 	if q == "" || openAsk.MatchString(q) {
 		return false
 	}
@@ -448,7 +457,13 @@ func lastQuestionOf(s string) string {
 	if i < 0 {
 		return ""
 	}
-	return quotedSpans.ReplaceAllString(s[:i], " ")
+	q := quotedSpans.ReplaceAllString(s[:i], " ")
+	// The question is its last sentence: "…approves even when… Count it only
+	// while…, or keep it?" is a preference, not a request to approve.
+	if m := sentenceEnd.FindAllStringIndex(q, -1); len(m) > 0 {
+		q = q[m[len(m)-1][1]:]
+	}
+	return q
 }
 
 // AsksQuestion: the turn's last text ends with a question to the user (its

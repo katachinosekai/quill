@@ -57,6 +57,11 @@ func planApprovalOptions(title string) *approvalOpts {
 			opts = []string{"Yes", "No"}
 		}
 		a := &approvalOpts{Options: opts, Stop: make([]bool, len(opts)), Recommended: recommendedOption(sents[i], len(opts))}
+		if a.Recommended < 0 && i > 0 {
+			// "Count it … (recommended), or keep it? Only while waiting, or
+			// keep?": the question before the options sentence marks it.
+			a.Recommended = recommendedOption(sents[i-1], len(opts))
+		}
 		stops := 0
 		for j, o := range opts {
 			if stopOption.MatchString(o) {
@@ -75,7 +80,7 @@ func planApprovalOptions(title string) *approvalOpts {
 	// No way to stop: planChoices' options (it leaves out "Do you approve
 	// …, or should I change something first?", which is no pick).
 	opts, rec := planChoices(title)
-	if len(opts) == 0 {
+	if len(opts) == 0 || !asksToRun(title, opts) {
 		return nil
 	}
 	return &approvalOpts{Options: opts, Stop: make([]bool, len(opts)), Recommended: rec, DontRun: true}
@@ -217,76 +222,82 @@ func (d *desk) answerPlanApproval(s *deskSession, it *chat.Item, a *approvalOpts
 	d.answerPlanMsg(s, it, true, planGoChanges(planGoFull(choice, qs, ans), changes))
 }
 
-// approvalPick: the card's pick on the approval question (-1 = none yet).
-func (v *chatView) approvalPick(plan *chat.Item) int {
-	if p, ok := v.planApprove[plan]; ok {
+// approvalPick: the card's pick on the approval question: an index into its
+// options, dontRunPick for the card's own "Don't run", or -1 for none. Until
+// the user picks, the question's recommended option is the pick (user
+// 2026-11-23: a radio group like the other questions).
+func (v *chatView) approvalPick(plan *chat.Item, a *approvalOpts) int {
+	if p, ok := v.planApprove[plan]; ok && (p >= 0 && p < len(a.Options) || p == dontRunPick && a.DontRun) {
 		return p
+	}
+	if a != nil && a.Recommended >= 0 && a.Recommended < len(a.Options) {
+		return a.Recommended
 	}
 	return -1
 }
 
-// approvalButtons: the approval question's options as buttons. Without other
-// questions a click answers the plan; with them it marks the pick (it can be
-// changed) and "Send answers" sends everything.
-func (v *chatView) approvalButtons(owner *deskSession, plan *chat.Item, a *approvalOpts, qs []planQ, ans map[int]planAnswer) fyne.CanvasObject {
-	return v.approvalButtonsOn(owner, plan, a, qs, ans, true)
-}
-
-// approvalButtonsOn: approvalButtons, all disabled when the card isn't active.
-func (v *chatView) approvalButtonsOn(owner *deskSession, plan *chat.Item, a *approvalOpts, qs []planQ, ans map[int]planAnswer, active bool) fyne.CanvasObject {
-	pick := v.approvalPick(plan)
-	var btns []fyne.CanvasObject
+// approvalLabels: the approval radio group's labels: the options (the
+// recommended one marked), then the card's own "Don't run" if no option stops.
+func approvalLabels(a *approvalOpts) []string {
+	var out []string
 	for i, o := range a.Options {
-		i := i
 		label := shortLabel(o, 60)
 		if i == a.Recommended {
 			label += " (recommended)"
 		}
-		icon, tint := fyne.Resource(nil), colIdle
-		if a.Stop[i] {
-			tint = colError
-		}
-		if len(qs) == 0 {
-			icon = theme.ConfirmIcon()
-			if a.Stop[i] {
-				icon = theme.CancelIcon()
-			}
-		} else if pick == i {
-			icon, tint = theme.ConfirmIcon(), colAccent
-		}
-		enabled := active && (a.Stop[i] || v.d.canAnswer(owner))
-		btns = append(btns, glowButton(label, icon, tint, enabled, v.guarded(func() {
-			if len(qs) == 0 {
-				v.d.answerPlanApproval(owner, plan, a, i, nil, nil, "")
-				return
-			}
-			if v.planApprove == nil {
-				v.planApprove = map[*chat.Item]int{}
-			}
-			v.planApprove[plan] = i
-			v.redrawPlan(plan, planReply(owner.conv, plan))
-		})))
+		out = append(out, label)
 	}
 	if a.DontRun {
-		// No option stops: the card's own way to turn the plan down, at
-		// once (with the other questions' answers, if any).
-		btns = append(btns, glowButton("Don't run", theme.CancelIcon(), colError, active, v.guarded(func() {
-			v.d.answerPlanApproval(owner, plan, a, dontRunPick, qs, ans, "")
-		})))
+		out = append(out, "Don't run")
 	}
-	return v.buttonRow(btns...)
+	return out
+}
+
+// approvalRadio: the approval question's options as a radio group, with the
+// pick marked; it stays a pick (it can be changed) until "Send answers"
+// sends it with the other questions' answers. active false: greyed.
+func (v *chatView) approvalRadio(owner *deskSession, plan *chat.Item, a *approvalOpts, active bool) fyne.CanvasObject {
+	labels := approvalLabels(a)
+	r := widget.NewRadioGroup(labels, nil)
+	if p := v.approvalPick(plan, a); p == dontRunPick {
+		r.Selected = labels[len(labels)-1]
+	} else if p >= 0 {
+		r.Selected = labels[p]
+	}
+	r.OnChanged = func(sel string) {
+		pick := -1
+		for j, l := range labels {
+			if l == sel {
+				pick = j
+				if a.DontRun && j == len(labels)-1 {
+					pick = dontRunPick
+				}
+			}
+		}
+		if v.planApprove == nil {
+			v.planApprove = map[*chat.Item]int{}
+		}
+		v.planApprove[plan] = pick
+		v.redrawPlan(plan, planReply(owner.conv, plan))
+	}
+	if !active {
+		r.Disable()
+	}
+	return r
 }
 
 // approvalSend: "Send answers" for a card whose approval question has its own
-// options, with a note while that question has no pick.
-func (v *chatView) approvalSend(owner *deskSession, plan *chat.Item, a *approvalOpts, qs []planQ, ans map[int]planAnswer) []fyne.CanvasObject {
-	pick := v.approvalPick(plan)
-	enabled := pick >= 0 && (a.Stop[pick] || v.d.canAnswer(owner))
+// options (with the other questions' answers, if any), with a note while that
+// question has no pick. active false: greyed.
+func (v *chatView) approvalSend(owner *deskSession, plan *chat.Item, a *approvalOpts, qs []planQ, ans map[int]planAnswer, active bool) []fyne.CanvasObject {
+	pick := v.approvalPick(plan, a)
+	stop := pick == dontRunPick || pick >= 0 && a.Stop[pick]
+	enabled := active && pick != -1 && (stop || v.d.canAnswer(owner))
 	send := glowButton("Send answers", theme.MailSendIcon(), colIdle, enabled, v.guarded(func() {
-		v.d.answerPlanApproval(owner, plan, a, v.approvalPick(plan), qs, ans, "")
+		v.d.answerPlanApproval(owner, plan, a, v.approvalPick(plan, a), qs, ans, "")
 	}))
 	out := []fyne.CanvasObject{v.buttonRow(send)}
-	if pick < 0 {
+	if pick == -1 && active {
 		note := widget.NewLabel("Answer the approval question, then send.")
 		note.SizeName = theme.SizeNameCaptionText
 		note.Alignment = v.align()
@@ -301,10 +312,7 @@ func approvalKind(a *approvalOpts, qs []planQ) string {
 	if a.DontRun {
 		k += "|dontrun"
 	}
-	if len(qs) > 0 {
-		k += "|send"
-	}
-	return k
+	return k + "|send"
 }
 
 // approvalCaption: the card's note on what the go-ahead does.
@@ -326,6 +334,18 @@ func isApprovalStop(a *approvalOpts, opt string) bool {
 	}
 	for i, o := range a.Options {
 		if a.Stop[i] && o == opt {
+			return true
+		}
+	}
+	return false
+}
+
+// asksToRun: the question (title, options opts) is about doing work. A pick
+// between preferences ("Only while waiting, or keep it as is?") names none
+// and is no approval question.
+func asksToRun(_ string, opts []string) bool {
+	for _, o := range opts {
+		if chat.NamesWork(o) {
 			return true
 		}
 	}

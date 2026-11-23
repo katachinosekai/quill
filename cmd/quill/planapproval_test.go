@@ -60,6 +60,13 @@ func TestPlanApprovalOptions(t *testing.T) {
 // text and ended with a plan card.
 func planCardSession(t *testing.T, h *harness, text string) (*deskSession, *chat.Item) {
 	t.Helper()
+	return planCardSessionWait(t, h, text, false)
+}
+
+// planCardSessionWait: planCardSession; wait = a blocked call asks for the
+// plan card (the reply itself asks no approval).
+func planCardSessionWait(t *testing.T, h *harness, text string, wait bool) (*deskSession, *chat.Item) {
+	t.Helper()
 	var s *deskSession
 	h.ui(func() {
 		s = h.d.createSession(h.proj, "default", "default")
@@ -71,6 +78,7 @@ func planCardSession(t *testing.T, h *harness, text string) (*deskSession, *chat
 		h.d.planFirst = true
 		s.inTurn = false
 		userEvent(h, s, "a request", nil)
+		s.planWait = wait
 		s.conv.Items = append(s.conv.Items, &chat.Item{Seq: 9000 + len(s.conv.Items), Kind: chat.Assistant, Text: text})
 		endTurn(t, h, s)
 		for _, it := range s.conv.Items {

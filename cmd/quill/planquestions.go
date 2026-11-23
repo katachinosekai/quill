@@ -138,6 +138,10 @@ func planQuestions(text string) []planQ {
 		if !strings.Contains(l, "?") {
 			continue
 		}
+		// A table row or a quoted line holds a question, it doesn't ask one.
+		if t := strings.TrimSpace(l); strings.HasPrefix(t, "|") || strings.HasPrefix(t, ">") {
+			continue
+		}
 		num := 0
 		if m := qNumLead.FindStringSubmatch(mdNoise.Replace(l)); m != nil {
 			fmt.Sscan(m[1], &num)

@@ -195,7 +195,7 @@ const reviewShotReply = "Findings.\n\n1. Rule 12 is read twice. Merge the two re
 // (b) one control per question: not a radio group and buttons for the same question.
 func TestReviewShotNoDuplicateControls(t *testing.T) {
 	h := newHarness(t)
-	s, plan := planCardSession(t, h, reviewShotReply)
+	s, plan := planCardSessionWait(t, h, reviewShotReply, true)
 	h.ui(func() {
 		_ = s
 		o := h.d.chat.planUI(plan)
@@ -229,7 +229,7 @@ func TestReviewShotApprovalButtonsRecommended(t *testing.T) {
 // (d) a preference question is no approval: no "Don't run" beside its options.
 func TestReviewShotPreferenceIsNoApproval(t *testing.T) {
 	h := newHarness(t)
-	s, plan := planCardSession(t, h, reviewShotReply)
+	s, plan := planCardSessionWait(t, h, reviewShotReply, true)
 	h.ui(func() {
 		if a := planItemApproval(s, plan); a != nil {
 			t.Fatalf("the preference question is read as the approval: %+v", a)

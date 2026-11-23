@@ -86,7 +86,8 @@ type chatView struct {
 	planPlain     map[*chat.Item]bool               // plans shown as written plus the card, not overlaid
 	planApprove   map[*chat.Item]int                // the approval question's pick on a plan card (planapproval.go)
 	btnKinds      map[int]string                    // buttons each item shows now (click guard)
-	choicePicks   map[*chat.Item]map[string]int     // picks on a multi-question reply, kept until sent
+	choicePicks   map[*chat.Item]map[int]int        // picks on a multi-question reply (by question index), kept until sent
+	choiceTexts   map[*chat.Item]map[int]string     // typed answers on a multi-question reply
 	btnChanged    time.Time                         // when any item's buttons last changed
 	frame         *fyne.Container
 	inner         *fyne.Container
@@ -1770,11 +1771,11 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 			if len(qs) > 0 {
 				ans = v.planAnswers(it, qs)
 			}
-			parts = append(parts, v.approvalButtons(owner, it, appr, qs, ans))
+			parts = append(parts, v.approvalRadio(owner, it, appr, true))
 			if len(qs) > 0 {
 				parts = append(parts, v.planQuestionForm(qs, ans))
-				parts = append(parts, v.approvalSend(owner, it, appr, qs, ans)...)
 			}
+			parts = append(parts, v.approvalSend(owner, it, appr, qs, ans, true)...)
 			kind = approvalKind(appr, qs)
 		case len(qs) > 0:
 			// Several questions, or one that isn't a pick between options:
@@ -1795,27 +1796,17 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		v.noteButtons(it.Seq, "resend")
 	} else {
 		v.noteButtons(it.Seq, "none")
-		text := "Not run"
-		switch it.PermState {
-		case chat.PermAllowed:
-			text = "Approved: running the whole plan"
-		case chat.PermCancelled:
-			text = "No longer needed"
-		}
-		if it.PermState == chat.PermPending {
-			text = "No longer needed"
-		}
 		// Inactive buttons with a small label: a stale card can't be clicked.
 		if owner != nil {
 			if appr := planItemApproval(owner, it); appr != nil {
-				parts = append(parts, v.approvalButtonsOn(owner, it, appr, nil, nil, false))
+				parts = append(parts, v.approvalRadio(owner, it, appr, false))
 			} else {
 				parts = append(parts, v.buttonRow(
 					glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, false, nil),
 					glowButton("Don't run", theme.CancelIcon(), colError, false, nil)))
 			}
 		}
-		parts = append(parts, v.muted(text+" ("+planStateLabel(state)+")", fontBody))
+		parts = append(parts, v.muted(planStatus(it, state), fontBody))
 		border = color.NRGBA{0x44, 0x44, 0x40, 0xff}
 	}
 	r := canvas.NewRectangle(colCard)
@@ -2051,6 +2042,10 @@ func yesNoOptions(a, b string) bool {
 }
 
 func parseChoices(line string) (string, []string, bool) {
+	// A quote or a table row names a question, it doesn't ask it.
+	if t := strings.TrimSpace(line); strings.HasPrefix(t, ">") || strings.HasPrefix(t, "|") {
+		return "", nil, false
+	}
 	clean := strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(line), "#>*-_ "))
 	q := strings.LastIndex(clean, "?")
 	if q < 0 {
@@ -2167,6 +2162,7 @@ func (v *chatView) guarded(fn func()) func() {
 // if its line names no options).
 type numChoiceQ struct {
 	num   string
+	idx   int // unique in the reply (numbers can repeat: markdown's "1." on every item)
 	title string
 	opts  []string
 	// line, end: the original lines of the reply the question is on (end
@@ -2215,7 +2211,7 @@ func numberedChoiceQs(text string) (string, []numChoiceQ) {
 			body = append(body, l)
 			continue
 		}
-		q := numChoiceQ{num: m[1], title: m[1] + ". " + strings.Trim(rest, "*_ ")}
+		q := numChoiceQ{num: m[1], idx: len(qs), title: m[1] + ". " + strings.Trim(rest, "*_ ")}
 		if title, opts, ok := parseChoices(rest); ok {
 			q.title, q.opts = m[1]+". "+title, opts
 		}
@@ -2316,11 +2312,11 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 		// A button each time would drop the other questions' buttons, and
 		// sending on the last pick would give no chance to change one.
 		if v.choicePicks == nil {
-			v.choicePicks = map[*chat.Item]map[string]int{}
+			v.choicePicks = map[*chat.Item]map[int]int{}
 		}
 		picks := v.choicePicks[it]
 		if picks == nil {
-			picks = map[string]int{}
+			picks = map[int]int{}
 			v.choicePicks[it] = picks
 		}
 		var cards []fyne.CanvasObject
@@ -2334,17 +2330,17 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 				for i, o := range q.opts {
 					i := i
 					icon, tint := fyne.Resource(nil), color.Color(colIdle)
-					if p, ok := picks[q.num]; ok && p == i {
+					if p, ok := picks[q.idx]; ok && p == i {
 						icon, tint = theme.ConfirmIcon(), colAccent
 					}
 					btns = append(btns, glowButton(shortLabel(o, 60), icon, tint, v.d.canAnswer(s), v.guarded(func() {
-						picks[q.num] = i
+						picks[q.idx] = i
 						if iv, ok := v.views[it.Seq]; ok {
 							v.refreshItem(it, iv)
 						}
 					})))
 				}
-				if _, ok := picks[q.num]; !ok {
+				if _, ok := picks[q.idx]; !ok {
 					missing++
 				}
 				parts = append(parts, v.buttonRow(btns...))
@@ -2353,7 +2349,7 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 		}
 		if latest {
 			send := glowButton("Send answers", theme.MailSendIcon(), colIdle, v.d.canAnswer(s) && missing == 0, v.guarded(func() {
-				v.d.pickChoice(s, it, multiChoiceReply(multi, picks))
+				v.d.pickChoice(s, it, multiChoiceReply(multi, picks, nil))
 			}))
 			cards = append(cards, v.buttonRow(send))
 			if missing > 0 {
@@ -2426,15 +2422,47 @@ func (d *desk) refreshChoiceCards(s *deskSession, reply *chat.Item) {
 
 // multiChoiceReply: the picks of a multi-question reply as one message, one
 // line per question ("Question 2: I pick the second option: Later."), in
-// question order. choicePicks reads it back.
-func multiChoiceReply(qs []numChoiceQ, picks map[string]int) string {
+// question order, and typed answers ("Question 3: text"). picks and texts are
+// keyed by the question's index (several questions can share a number);
+// choicePicks reads the picks back.
+func multiChoiceReply(qs []numChoiceQ, picks map[int]int, texts map[int]string) string {
 	var lines []string
 	for _, q := range qs {
-		if p, ok := picks[q.num]; ok && p >= 0 && p < len(q.opts) {
+		if p, ok := picks[q.idx]; ok && p >= 0 && p < len(q.opts) {
 			lines = append(lines, "Question "+q.num+": "+choiceReply(p, q.opts[p]))
+		} else if t := strings.TrimSpace(texts[q.idx]); t != "" && len(q.opts) == 0 {
+			lines = append(lines, "Question "+q.num+": "+strings.Join(strings.Fields(t), " "))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// answeredPicks: the picks and typed answers an answered multi-question
+// reply's user message holds (multiChoiceReply's lines), by question index.
+func answeredPicks(qs []numChoiceQ, msg string) (map[int]int, map[int]string) {
+	picks, texts := map[int]int{}, map[int]string{}
+	lines := strings.Split(msg, "\n")
+	at := 0
+	for _, q := range qs {
+		if at >= len(lines) {
+			break
+		}
+		rest, ok := strings.CutPrefix(lines[at], "Question "+q.num+": ")
+		if !ok {
+			continue
+		}
+		at++
+		matched := false
+		for p, o := range q.opts {
+			if rest == choiceReply(p, o) {
+				picks[q.idx], matched = p, true
+			}
+		}
+		if !matched && len(q.opts) == 0 {
+			texts[q.idx] = rest
+		}
+	}
+	return picks, texts
 }
 
 func choiceReply(n int, option string) string {

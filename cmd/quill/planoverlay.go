@@ -62,12 +62,13 @@ func replyPlan(c *chat.Conversation, reply *chat.Item) *chat.Item {
 }
 
 // planOverlayQs: the plan's questions with their lines in reply, when the
-// overlay can show them there: the plan is pending and the reply alone yields
-// the same questions as the card. A plan without questions (just the approval
+// overlay can show them there: the reply alone yields the same questions as
+// the card. An answered, rejected, replaced or moved-on plan keeps them there
+// too, greyed with the pick marked (user 2026-11-23). A plan without questions (just the approval
 // buttons) gives an empty, non-nil list when the reply holds its approval
 // question.
 func planOverlayQs(s *deskSession, plan, reply *chat.Item) []planQ {
-	if s == nil || plan == nil || reply == nil || plan.PermState != chat.PermPending || planState(s.conv, plan) != planActive || reply.Streaming {
+	if s == nil || plan == nil || reply == nil || reply.Streaming {
 		return nil
 	}
 	qs := planItemQuestions(s, plan)
@@ -76,20 +77,19 @@ func planOverlayQs(s *deskSession, plan, reply *chat.Item) []planQ {
 		return nil
 	}
 	if len(qs) == 0 {
-		if start, _ := approvalSpan(reply.Text, planQuestion(s.conv, plan)); start < 0 {
-			return nil
-		}
-		return []planQ{}
+		return []planQ{} // the approval question, or the buttons closing the reply
 	}
-	n, at := len(strings.Split(reply.Text, "\n")), 0
+	n, at, prev := len(strings.Split(reply.Text, "\n")), 0, -1
 	for i, q := range qs {
 		r := rq[i]
 		if r.Num != q.Num || r.Text != q.Text || r.Kind != q.Kind || r.Recommended != q.Recommended || strings.Join(r.Options, "\x00") != strings.Join(q.Options, "\x00") {
 			return nil
 		}
-		if r.line < at || r.end > n || r.line >= r.end {
+		// Two questions on one numbered line share its lines.
+		if r.line == prev && r.end != at || r.line != prev && r.line < at || r.end > n || r.line >= r.end {
 			return nil
 		}
+		prev = r.line
 		at = r.end
 		qs[i].line, qs[i].end = r.line, r.end
 	}
@@ -158,16 +158,71 @@ func (v *chatView) redrawPlan(plan, reply *chat.Item) {
 	}
 }
 
+// keepNumbers: lines as one markdown block. A numbered list that doesn't
+// start at 1 (a step after a question: "3. Then run x.") would restart at 1
+// as a block of its own, so its numbers get a no-break space (no list
+// marker) and a blank line between them.
+func keepNumbers(lines []string) string {
+	first := -1
+	for i, l := range lines {
+		if m := numLeadMD.FindStringSubmatch(l); m != nil {
+			first = i
+			if m[2] == "1" {
+				first = -1
+			}
+			break
+		}
+	}
+	if first < 0 {
+		return strings.Join(lines, "\n")
+	}
+	var out []string
+	for i, l := range lines {
+		if numLeadMD.MatchString(l) {
+			l = numLeadMD.ReplaceAllString(l, "$1$2$3\u00a0")
+			if i > 0 && strings.TrimSpace(lines[i-1]) != "" {
+				out = append(out, "")
+			}
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}
+
 var numLeadMD = regexp.MustCompile(`^(\s*)(\d+)([.)])\s+`)
 
-// renderPlanReply draws a reply with a pending plan: the overlay, or the
-// plain reply under the toggle; nil when the reply isn't a plan's.
+
+// planStatus: the small caption an inactive plan shows under its controls.
+func planStatus(plan *chat.Item, state string) string {
+	text := "Not run"
+	switch plan.PermState {
+	case chat.PermAllowed:
+		text = "Approved: running the whole plan"
+	case chat.PermCancelled, chat.PermPending:
+		text = "No longer needed"
+	}
+	return text + " (" + planStateLabel(state) + ")"
+}
+
+// greyed disables a control (the radio group, check group or text field of
+// an answered plan); the pick stays marked.
+func greyed(o fyne.CanvasObject) fyne.CanvasObject {
+	if d, ok := o.(fyne.Disableable); ok {
+		d.Disable()
+	}
+	return o
+}
+
+// renderPlanReply draws a reply with a plan: the overlay, or the plain reply
+// under the toggle; nil when the reply isn't a plan's. A plan that is
+// answered, rejected, replaced or moved on keeps its controls here, greyed
+// with the pick marked, and has no card below (user 2026-11-23).
 func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	if v.s == nil || reply.Streaming {
 		return nil
 	}
 	plan := replyPlan(v.s.conv, reply)
-	if plan == nil || plan.PermState != chat.PermPending {
+	if plan == nil {
 		return nil
 	}
 	qs := planOverlayQs(v.s, plan, reply)
@@ -178,10 +233,11 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		return container.NewVBox(v.planToggle(plan, reply), msgText(v.markdownBlocks(reply.Text)))
 	}
 	owner := v.s
+	state := planState(owner.conv, plan)
+	active := plan.PermState == chat.PermPending && state == planActive
 	ans := v.planAnswers(plan, qs)
 	lines := strings.Split(reply.Text, "\n")
-	// The approval question is the Approve button; one with its own options
-	// stays, with those options as buttons under it (planapproval.go).
+	// The approval question is shown once, as a radio group (planapproval.go).
 	appr := planItemApproval(owner, plan)
 	skip := map[int]bool{}
 	// apprStart..apprLine: the original lines of the approval question.
@@ -192,11 +248,11 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		}
 	}
 	box := container.NewVBox(v.planToggle(plan, reply))
-	apprButtons := func() { box.Add(v.approvalButtons(owner, plan, appr, qs, ans)) }
+	apprControl := func() { box.Add(v.centered(v.approvalRadio(owner, plan, appr, active))) }
 	prose := func(from, to int) {
 		var keep []string
 		flush := func() {
-			if t := strings.Join(keep, "\n"); strings.TrimSpace(t) != "" {
+			if t := keepNumbers(keep); strings.TrimSpace(t) != "" {
 				box.Add(msgText(v.markdownBlocks(t)))
 			}
 			keep = nil
@@ -204,14 +260,14 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		for i := from; i < to && i < len(lines); i++ {
 			if !skip[i] {
 				l := lines[i]
-				if appr != nil && i == apprStart {
-					l = numLeadMD.ReplaceAllString(l, "$1$2$3\u00a0") // "2." stays 2
+				if numLeadMD.MatchString(l) { // "3." stays 3 between pieces
+					l = numLeadMD.ReplaceAllString(l, "$1$2$3 ")
 				}
 				keep = append(keep, l)
 			}
 			if appr != nil && i == apprLine {
 				flush()
-				apprButtons()
+				apprControl()
 			}
 		}
 		flush()
@@ -226,63 +282,92 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		// The question as written; "2." stays 2, not a list restarting at 1
 		// (a no-break space after the number is no list marker).
 		text := strings.Join(lines[q.line:q.end], "\n")
-		text = numLeadMD.ReplaceAllString(text, "$1$2$3\u00a0")
+		text = numLeadMD.ReplaceAllString(text, "$1$2$3 ")
 		box.Add(msgText(v.markdown(strings.TrimRight(text, "\n "))))
 		// Every question on this line gets its control under it.
 		for ; i < len(qs) && qs[i].line == q.line; i++ {
 			ctl := planControl(qs[i], recommendedLabels(qs[i]), ans)
+			if !active {
+				greyed(ctl)
+			}
 			if _, entry := ctl.(*widget.Entry); !entry {
 				ctl = v.centered(ctl)
 			}
 			box.Add(ctl)
 		}
 		if appr != nil && apprLine >= q.line && apprLine < q.end {
-			apprButtons() // the approval shares this question's lines
+			apprControl() // the approval shares this question's lines
 		}
 		at = q.end
 	}
 	prose(at, len(lines))
-	if appr != nil {
-		if apprLine < 0 {
-			apprButtons() // the question wasn't found in the reply: its buttons close it
-		}
-		caption := approvalCaption(appr)
-		if len(qs) > 0 {
-			caption += " Unanswered questions are sent as \"no answer\"."
-		}
-		msg := widget.NewLabel(caption)
+	caption := func(text string) {
+		msg := widget.NewLabel(text)
 		msg.Wrapping = fyne.TextWrapWord
 		msg.Alignment = v.align()
 		msg.SizeName = theme.SizeNameCaptionText
 		box.Add(msg)
-		if len(qs) > 0 {
-			for _, o := range v.approvalSend(owner, plan, appr, qs, ans) {
-				box.Add(o)
+	}
+	status := func() { box.Add(v.muted(planStatus(plan, state), fontBody)) }
+	resend := func() {
+		if plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
+			box.Add(v.buttonRow(glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, v.guarded(func() { v.d.answerPlan(owner, plan, true) }))))
+			v.noteButtons(plan.Seq, "resend")
+		}
+	}
+	if appr != nil {
+		if apprLine < 0 {
+			apprControl() // the question wasn't found in the reply: its radio group closes it
+		}
+		if active {
+			c := approvalCaption(appr)
+			if len(qs) > 0 {
+				c += " Unanswered questions are sent as \"no answer\"."
+			}
+			caption(c)
+		}
+		for _, o := range v.approvalSend(owner, plan, appr, qs, ans, active) {
+			box.Add(o)
+		}
+		if active {
+			v.noteButtons(plan.Seq, approvalKind(appr, qs))
+		} else {
+			status()
+			if plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
+				resend()
+			} else {
+				v.noteButtons(plan.Seq, "none")
 			}
 		}
-		v.noteButtons(plan.Seq, approvalKind(appr, qs))
 		return box
 	}
 	label := "Approve plan & send answers"
-	caption := "Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done. Unanswered questions are sent as \"no answer\"."
+	text := "Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done. Unanswered questions are sent as \"no answer\"."
 	if len(qs) == 0 {
 		label = "Approve plan & run all"
-		caption = "Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done."
+		text = "Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done."
 	}
-	msg := widget.NewLabel(caption)
-	msg.Wrapping = fyne.TextWrapWord
-	msg.Alignment = v.align()
-	msg.SizeName = theme.SizeNameCaptionText
-	run := glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() {
+	run := glowButton(label, theme.ConfirmIcon(), colIdle, active && v.d.canAnswer(owner), v.guarded(func() {
 		if len(qs) == 0 {
 			v.d.answerPlan(owner, plan, true)
 			return
 		}
 		v.d.answerPlanAnswers(owner, plan, qs, ans)
 	}))
-	no := glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() { v.d.answerPlan(owner, plan, false) }))
-	box.Add(msg)
+	no := glowButton("Don't run", theme.CancelIcon(), colError, active, v.guarded(func() { v.d.answerPlan(owner, plan, false) }))
+	if active {
+		caption(text)
+	}
 	box.Add(v.buttonRow(run, no))
-	v.noteButtons(plan.Seq, "pending")
+	if active {
+		v.noteButtons(plan.Seq, "pending")
+		return box
+	}
+	status()
+	if plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
+		resend()
+	} else {
+		v.noteButtons(plan.Seq, "none")
+	}
 	return box
 }
