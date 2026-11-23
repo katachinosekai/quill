@@ -1003,6 +1003,7 @@ func (d *desk) syncAssistButtons() {
 				dot.Refresh()
 			}
 		}
+		d.syncAssistAlert(bt) // approval waiting: amber over the dot (assistalert.go)
 		if bt.sideBub != nil && bt.bubble != nil {
 			mirrorBubble(bt.bubble, bt.sideBub)
 		}

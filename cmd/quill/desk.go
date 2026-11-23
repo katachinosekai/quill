@@ -1677,10 +1677,12 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		} else if d.kmemWin.session() == s {
 			d.flushWinUI()
 		}
-		if d.kmemAssistIs(s) {
-			d.updateKmemBadge()
-		}
 		d.refreshSidebarSoon()
+	}
+	if urgent || ev.Type == "user" || ev.Type == "control_cancel_request" {
+		// Any assistant's badge and button (not only kmem's): a question or
+		// plan came, or was answered, while its box is closed (t98af12).
+		d.assistEvent(s)
 	}
 	if ev.Type == "result" {
 		d.flushQueue(s)

@@ -102,6 +102,9 @@ func (d *desk) alert(s *deskSession, kind, body string) {
 		if d.seen(s) {
 			return
 		}
+		if kind == "finished" && s.conv.AsksApproval() {
+			kind = "question" // waits for approval without a card (plan-first off): as the button shows it
+		}
 		def := roleDef(role)
 		if def.phone != nil && (kind == "plan" || kind == "question" || kind == "approval") {
 			def.phone(d, strings.TrimSpace(alertTitles[kind])+": "+body)
@@ -222,18 +225,33 @@ func (d *desk) startNotifier() {
 			if !known || v.Name != notifyIface+".ActionInvoked" {
 				continue
 			}
-			d.do(func() {
-				if d.hiddenID(sid, "") {
-					d.openHidden(sid) // raises its role's host, e.g. the kmem window
-					return
-				}
-				d.showWindow()
-				if d.session(sid) != nil {
-					d.open(sid)
-				}
-			})
+			d.do(func() { d.notifyClicked(sid) })
 		}
 	}()
+}
+
+// notifyClicked opens what notification sid is about (UI thread): a tab, or
+// a hidden assistant's box in the main window (shown first: it may be in the
+// tray), switching the box from the other assistant; the popped-out kmem
+// window is raised instead.
+func (d *desk) notifyClicked(sid string) {
+	if d.hiddenID(sid, "") {
+		if role := d.hiddenRoleOf(sid, ""); role != roleKmem || !d.kmemPoppedOut() {
+			d.showWindow()
+		}
+		d.openHidden(sid)
+		return
+	}
+	d.showWindow()
+	if d.session(sid) != nil {
+		d.open(sid)
+	}
+}
+
+// kmemPoppedOut: the kmem box is in its own window.
+func (d *desk) kmemPoppedOut() bool {
+	w := d.kmemWin
+	return w != nil && w.win != nil && !w.closed
 }
 
 func (n *notifier) send(d *desk, sid, title, body string) {
