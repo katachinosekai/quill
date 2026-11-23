@@ -96,7 +96,7 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 		case path == "sessions/new":
 			out, fail = a.newSession(in)
 		case parts[0] == "handoffs":
-			if a.d.kmemOn() { // handoffs are history only now
+			if a.d.topicMode() { // handoffs are history only now
 				fail = updateRequired()
 				return
 			}
@@ -385,7 +385,7 @@ func (a *phoneAPI) newSession(in writeBody) (map[string]any, *apiErr) {
 	if in.OpenTopic != nil {
 		return a.openTopicWrite(in)
 	}
-	if in.Start != nil && d.kmemOn() { // an older Quill Android: handoff start
+	if in.Start != nil && d.topicMode() { // an older Quill Android: handoff start
 		return nil, updateRequired()
 	}
 	ok := false

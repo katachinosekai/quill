@@ -363,7 +363,9 @@ capped (t32b878).
   Android subagent after the desktop API merges.
 
 **As built (sub G, branch feat/topics-g, 2026-11-23):** all of it is in
-`docs/phone-api.md` ("Topics"). Topic mode is `kmemOn()`; hello gets
+`docs/phone-api.md` ("Topics"). Topic mode is `d.topicMode()`: kmem mode, kmem lists `end-check`, and
+the migration marker `topicMigration=1` is set (otherwise the phone API
+behaves exactly as before); hello gets
 `topics: {api: 1, on, endCheck}` (endCheck = kmem lists `end-check`).
 
 - `GET /phone/sessions`: topic mode lists live sessions only (open tab or
@@ -371,7 +373,7 @@ capped (t32b878).
   `legacyName`, `agents[]` (the strip's list), `agentTokens`, `endWait`
   {why, checking, asked, blockers[] with `text`}; body `topics[]` {slug,
   title, scope, live, status, claimed, open} from the topic cache, plus a
-  `topics` stream change. `statusMs` is left out (kmem 1.8.1 gives no age).
+  `topics` stream change. `statusMs` is left out until kmem reports the status fact's age.
 - `GET /phone/topics` (status, claimed tasks with checkpoints, history of
   old handoffs), `GET /phone/topics/slug`, `GET /phone/folders?topic=`
   (coordinator folder + the project's `org.Dirs`).
@@ -381,7 +383,7 @@ capped (t32b878).
 - `start.kmem`, handoff resume/delete: `426 update_required` in topic mode;
   `GET /phone/handoffs` is empty and `readOnly: true`. Outside topic mode
   nothing changed, so older phones keep working.
-- Not done: Quill Android itself (later subagent); `statusMs`.
+- Not done: Quill Android itself (later subagent); `statusMs` (when kmem reports the status fact's age).
 
 ### 3.12 Migration of existing org data (one-time, kmem mode)
 

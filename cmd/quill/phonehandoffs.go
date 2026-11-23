@@ -20,6 +20,17 @@ const topicsPhoneAPI = 1
 // handoff start of the new-session sheet while topics are on.
 const updateAndroid = "Update Quill Android: this Quill Desktop opens topics now. Use New session and pick a topic (openTopic); resuming handoffs and free names are gone."
 
+// topicMigratedKey is the marker the topic migration sets (sub F,
+// topicmigrate.go: topicMigration=1); absent means topic mode is off.
+const topicMigratedKey = "topicMigration"
+
+// topicMode: topic tabs are really on: kmem memory in use, kmem has the
+// end-of-session check (1.10.0+) and the topic migration ran. Until then the
+// phone API behaves as before. UI thread.
+func (d *desk) topicMode() bool {
+	return d.kmemOn() && d.kmemFeatureCached(endCheckFeature) && d.app.Preferences().Int(topicMigratedKey) >= 1
+}
+
 func updateRequired() *apiErr {
 	return &apiErr{http.StatusUpgradeRequired, "update_required", updateAndroid}
 }
@@ -44,7 +55,7 @@ type apiHandoff struct {
 func (a *phoneAPI) handoffs(w http.ResponseWriter) {
 	var hs []kmemHandoff
 	avail, topics := false, false
-	a.ui(func() { avail, topics = a.d.kmemAvailable(), a.d.kmemOn() })
+	a.ui(func() { avail, topics = a.d.kmemAvailable(), a.d.topicMode() })
 	if topics { // read-only and nothing to resume: the Topics view has the history
 		folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "handoffs": []apiHandoff{}, "readOnly": true})
 		return
@@ -185,7 +196,7 @@ func (a *phoneAPI) topicEntry(t topicInfo) apiTopic {
 // thread); nil when topics are off. A stale cache is reloaded in the
 // background.
 func (a *phoneAPI) topicList() []apiTopic {
-	if !a.d.kmemOn() {
+	if !a.d.topicMode() {
 		return nil
 	}
 	a.d.refreshTopics()
@@ -231,7 +242,7 @@ const topicViewTasks = 50
 func (a *phoneAPI) topicsView(w http.ResponseWriter, r *http.Request) {
 	phone := folders.PhoneID(r)
 	on := false
-	a.ui(func() { on = a.d.kmemOn() })
+	a.ui(func() { on = a.d.topicMode() })
 	if !on {
 		folders.WriteError(w, http.StatusServiceUnavailable, "kmem_unavailable", "kmem memory is off or kmem is not installed on Quill Desktop")
 		return
@@ -289,7 +300,7 @@ func (a *phoneAPI) topicSlug(w http.ResponseWriter, r *http.Request) {
 	var fail *apiErr
 	out := map[string]any{"v": 1, "slug": "", "exists": false, "live": ""}
 	a.ui(func() {
-		if !a.d.kmemOn() {
+		if !a.d.topicMode() {
 			fail = &apiErr{http.StatusServiceUnavailable, "kmem_unavailable", "kmem memory is off or kmem is not installed on Quill Desktop"}
 			return
 		}
@@ -347,7 +358,7 @@ func (a *phoneAPI) topicFolders(slug string) []map[string]string {
 func (a *phoneAPI) openTopicWrite(in writeBody) (map[string]any, *apiErr) {
 	d := a.d
 	ot := in.OpenTopic
-	if !d.kmemOn() {
+	if !d.topicMode() {
 		return nil, &apiErr{http.StatusServiceUnavailable, "kmem_unavailable", "kmem memory is off or kmem is not installed on Quill Desktop"}
 	}
 	var t topicInfo

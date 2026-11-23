@@ -62,6 +62,7 @@ func topicPhone(t *testing.T, features bool) (*harness, *apiClient) {
 	h.ui(func() {
 		h.d.app.Preferences().SetString(memoryModeKey, memoryModeKmem)
 		h.d.app.Preferences().SetBool("phoneControl", true)
+		h.d.app.Preferences().SetInt(topicMigratedKey, 1) // the migration ran
 		h.d.app.Preferences().SetInt("phonePort", 0)
 		if err := h.d.startPhoneServer(); err != nil {
 			t.Fatal(err)
@@ -110,7 +111,7 @@ func TestPhoneTopicsHello(t *testing.T) {
 		_, a := topicPhone(t, features)
 		code, m, _ := a.do("POST", "/phone/hello", wkey(), map[string]string{"name": "Tablet", "app": "quill-android"})
 		tp, _ := m["topics"].(map[string]any)
-		if code != 200 || tp["api"] != float64(1) || tp["on"] != true || tp["endCheck"] != features {
+		if code != 200 || tp["api"] != float64(1) || tp["on"] != features || tp["endCheck"] != features {
 			t.Fatalf("hello topics (features %v): %d %v", features, code, m["topics"])
 		}
 	}
@@ -401,5 +402,50 @@ func TestPhoneTopicsListLiveOnly(t *testing.T) {
 	_, m, _ = a.do("GET", "/phone/sessions", "", nil)
 	if sessionByID(m, editsID) == nil {
 		t.Fatal("outside topic mode it is listed")
+	}
+}
+
+// Today's state, kmem memory on but topic tabs not (kmem without end-check, or
+// the topic migration not run): the phone API behaves exactly as before.
+func TestPhoneTopicModeGate(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		features bool
+		marker   int
+	}{{"no end-check feature", false, 1}, {"no migration marker", true, 0}} {
+		t.Run(c.name, func(t *testing.T) {
+			h, a := topicPhone(t, c.features)
+			folder := ""
+			h.ui(func() {
+				h.d.app.Preferences().SetInt(topicMigratedKey, c.marker)
+				folder = h.proj
+				h.d.groups = append(h.d.groups, bookGroup{key: "old", title: "Old", ids: []string{editsID}})
+			})
+			_, m, _ := a.do("POST", "/phone/hello", wkey(), map[string]string{"name": "Tablet", "app": "quill-android"})
+			tp, _ := m["topics"].(map[string]any)
+			if tp["on"] != false || m["kmem"].(map[string]any)["on"] != true {
+				t.Fatalf("hello: topics off, kmem on: %v", m)
+			}
+			_, m, _ = a.do("GET", "/phone/sessions", "", nil)
+			if _, has := m["topics"]; has || sessionByID(m, editsID) == nil {
+				t.Fatalf("sessions as before (not live-only, no topics): %v", m["topics"])
+			}
+			code, m, _ := a.do("GET", "/phone/handoffs", "", nil)
+			if list, _ := m["handoffs"].([]any); code != 200 || len(list) != 1 || m["readOnly"] != nil {
+				t.Fatalf("handoffs as before: %d %v", code, m)
+			}
+			code, m, _ = a.do("POST", "/phone/sessions/new", wkey(), map[string]any{"folder": folder, "start": map[string]string{"kmem": "new", "title": "Tablet Thing"}})
+			if code != 200 {
+				t.Fatalf("start.kmem still works: %d %v", code, m)
+			}
+			for _, p := range []string{"/phone/topics", "/phone/topics/slug?title=x"} {
+				if code, m, _ = a.do("GET", p, "", nil); code != 503 {
+					t.Fatalf("%s: %d %v", p, code, m)
+				}
+			}
+			if code, m, _ = a.do("POST", "/phone/sessions/new", wkey(), map[string]any{"openTopic": map[string]string{"topic": "alpha"}}); code != 503 {
+				t.Fatalf("openTopic: %d %v", code, m)
+			}
+		})
 	}
 }

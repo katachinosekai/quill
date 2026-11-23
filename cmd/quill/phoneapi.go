@@ -184,7 +184,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 	}
 	phone := folders.PhoneID(r)
 	conn, snap := lanConnOf(r), lanSnapshot()
-	var ctl, unlock, lan, kmemOn, files, endCheck bool
+	var ctl, unlock, lan, kmemOn, files, endCheck, topics bool
 	a.ui(func() {
 		list := a.d.phones()
 		changed := false
@@ -216,10 +216,11 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		lan = a.lanHello(phone, conn, snap)
 		kmemOn = a.d.kmemOn()
 		endCheck = kmemOn && a.d.kmemFeatureCached(endCheckFeature)
+		topics = a.d.topicMode()
 	})
 	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan,
 		"kmem": map[string]any{"api": kmemPhoneAPI, "on": kmemOn}, "files": map[string]any{"api": filesPhoneAPI, "on": files},
-		"topics": map[string]any{"api": topicsPhoneAPI, "on": kmemOn, "endCheck": endCheck}})
+		"topics": map[string]any{"api": topicsPhoneAPI, "on": topics, "endCheck": endCheck}})
 }
 
 type apiSession struct {
@@ -285,7 +286,7 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 	group := map[string]string{}
 	var ids []string
 	// Topic mode (kmem memory on): only live sessions, grouped by topic.
-	topicMode := d.kmemOn()
+	topicMode := d.topicMode()
 	live := func(id string) bool {
 		if !topicMode {
 			return true
@@ -470,7 +471,7 @@ func (a *phoneAPI) folders(w http.ResponseWriter, r *http.Request) {
 	slug := r.URL.Query().Get("topic")
 	var fail *apiErr
 	a.ui(func() {
-		if slug != "" && a.d.kmemOn() {
+		if slug != "" && a.d.topicMode() {
 			if _, ok := cachedTopic(slug); !ok {
 				fail = notFound("no topic " + slug)
 				return
