@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -193,23 +195,131 @@ func TestAgentTipSteady(t *testing.T) {
 		h.d.agentStrip.row.Objects = []fyne.CanvasObject{chip}
 		chip.MouseIn(nil)
 	})
-	if chip.pop == nil {
+	if chip.host.pop == nil {
 		t.Skip("no canvas for the chip in this harness")
 	}
-	pop, size := chip.pop, chip.pop.Content.MinSize()
+	pop, size := chip.host.pop, chip.host.pop.Content.MinSize()
 	h.ui(func() {
 		g.Tokens, g.LastTool = 123456, "Edit"
 		cur = &g
 		h.d.agentStrip.sync()
 	})
-	if chip.pop != pop || chip.pop.Content.MinSize() != size {
-		t.Fatalf("tooltip rebuilt or resized: %v -> %v", size, chip.pop.Content.MinSize())
+	if chip.host.pop != pop || chip.host.pop.Content.MinSize() != size {
+		t.Fatalf("tooltip rebuilt or resized: %v -> %v", size, chip.host.pop.Content.MinSize())
 	}
 	found := false
-	for _, l := range chip.tipLines {
+	for _, l := range chip.host.lines {
 		found = found || l.Text == "now: Edit"
 	}
 	if !found {
-		t.Fatalf("text not updated in place: %v", chip.tipLines)
+		t.Fatalf("text not updated in place: %v", chip.host.lines)
 	}
+}
+
+// hoverChips: two chips sharing one tooltip host, placed in the strip row.
+func hoverChips(h *harness) (*agentChip, *agentChip, *agentTipHost) {
+	host := newAgentTipHost()
+	host.do = func(f func()) { f() }
+	host.grace = 40 * time.Millisecond
+	mk := func(name string) *agentChip {
+		c := newAgentChip("● "+name, colIdle, nil, func() string { return name + "\nExplore\nRunning for 1 min" })
+		c.host = host
+		return c
+	}
+	a, b := mk("Fix join stall"), mk("Release build")
+	h.ui(func() {
+		h.d.agentStrip.row.Objects = []fyne.CanvasObject{a, b}
+		h.d.agentStrip.row.Refresh()
+	})
+	return a, b, host
+}
+
+// The tooltip hangs just below the chip, centred on it; hovering any edge of
+// the chip (not only the text) opens it.
+func TestAgentTipAnchoredToChip(t *testing.T) {
+	h := newHarness(t)
+	a, _, host := hoverChips(h)
+	h.ui(func() {
+		a.MouseIn(&desktop.MouseEvent{}) // an edge: MouseIn carries no position dependency
+		if host.pop == nil {
+			t.Skip("no canvas for the chip in this harness")
+		}
+		p := fyne.CurrentApp().Driver().AbsolutePositionForObject(a)
+		pos, sz := host.pop.Position(), host.pop.Size()
+		if pos.Y != p.Y+a.Size().Height {
+			t.Fatalf("tooltip y %v, chip bottom %v", pos.Y, p.Y+a.Size().Height)
+		}
+		cx := p.X + a.Size().Width/2
+		if pos.X > 0 && absf(pos.X+sz.Width/2-cx) > 1 {
+			t.Fatalf("tooltip centre %v, chip centre %v", pos.X+sz.Width/2, cx)
+		}
+	})
+}
+
+func absf(f float32) float32 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
+
+// A short MouseOut then MouseIn inside the grace keeps the same popup; a
+// MouseOut alone hides it after the grace; the tooltip itself keeps it open.
+func TestAgentTipGrace(t *testing.T) {
+	h := newHarness(t)
+	a, _, host := hoverChips(h)
+	h.ui(func() { a.MouseIn(nil) })
+	if host.pop == nil {
+		t.Skip("no canvas for the chip in this harness")
+	}
+	pop := host.pop
+	h.ui(func() { a.MouseOut(); a.MouseIn(nil) })
+	time.Sleep(100 * time.Millisecond)
+	h.ui(func() {
+		if host.pop != pop {
+			t.Fatal("re-entering within the grace rebuilt or hid the tooltip")
+		}
+		a.MouseOut() // the pointer moves onto the tooltip
+		(&tipHover{h: host}).MouseIn(nil)
+	})
+	time.Sleep(100 * time.Millisecond)
+	h.ui(func() {
+		if host.pop != pop {
+			t.Fatal("tooltip hidden while the pointer is on it")
+		}
+		(&tipHover{h: host}).MouseOut()
+	})
+	time.Sleep(150 * time.Millisecond)
+	h.ui(func() {
+		if host.pop != nil {
+			t.Fatal("tooltip still up after the grace")
+		}
+	})
+}
+
+// Moving straight to another chip reuses the popup with the new text.
+func TestAgentTipSwitchChips(t *testing.T) {
+	h := newHarness(t)
+	a, b, host := hoverChips(h)
+	h.ui(func() { a.MouseIn(nil) })
+	if host.pop == nil {
+		t.Skip("no canvas for the chip in this harness")
+	}
+	pop := host.pop
+	h.ui(func() {
+		a.MouseOut()
+		b.MouseIn(nil)
+		if host.pop != pop || host.owner != b || host.lines[0].Text != "Release build" {
+			t.Fatalf("switch: same popup %v, owner b %v, text %q", host.pop == pop, host.owner == b, host.lines[0].Text)
+		}
+		if host.lines[0].Color == color.Transparent {
+			t.Fatal("a swapped tooltip must not fade in again")
+		}
+	})
+	time.Sleep(100 * time.Millisecond)
+	h.ui(func() {
+		if host.pop != pop {
+			t.Fatal("the old chip's MouseOut hid the swapped tooltip")
+		}
+	})
 }

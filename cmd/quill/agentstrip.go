@@ -47,10 +47,11 @@ type agentStrip struct {
 	col   *fyne.Container // the row inside the chat-width column
 	shown string          // the texts on screen, to skip unchanged refreshes
 	now   func() time.Time
+	tips  *agentTipHost // the one tooltip all chips share
 }
 
 func newAgentStrip(d *desk) *agentStrip {
-	a := &agentStrip{d: d, now: time.Now}
+	a := &agentStrip{d: d, now: time.Now, tips: newAgentTipHost()}
 	a.row = container.NewHBox()
 	// The chat column's width and shift (chatview.go), so the strip sits over
 	// the chat: chips centred with centring on, else on its left edge.
@@ -211,7 +212,7 @@ func (a *agentStrip) sync() {
 	for i, t := range texts {
 		if strings.HasPrefix(t, "+") && i == agentStripMax {
 			rest := list[agentStripMax:]
-			objs = append(objs, newAgentChip(t, colMuted, func(c fyne.CanvasObject) { a.moreMenu(c, s, rest) }, nil))
+			objs = append(objs, a.chip(t, colMuted, func(c fyne.CanvasObject) { a.moreMenu(c, s, rest) }, nil))
 			break
 		}
 		g := list[i]
@@ -219,13 +220,9 @@ func (a *agentStrip) sync() {
 		if !g.Running() {
 			col = colMuted
 		}
-		objs = append(objs, newAgentChip(t, col, func(c fyne.CanvasObject) { menuAbove(c, a.items(s, g)) }, func() string { return agentTip(g, a.now()) }))
+		objs = append(objs, a.chip(t, col, func(c fyne.CanvasObject) { menuAbove(c, a.items(s, g)) }, func() string { return agentTip(g, a.now()) }))
 	}
-	for _, o := range a.row.Objects { // a rebuilt chip must not leave its tooltip up
-		if c, ok := o.(*agentChip); ok {
-			c.MouseOut()
-		}
-	}
+	a.tips.hideNow() // a rebuilt chip must not leave its tooltip up
 	a.row.Objects = objs
 	a.row.Refresh()
 	if len(objs) > 0 {
@@ -239,6 +236,13 @@ func (a *agentStrip) sync() {
 			relayout(a.d.mainPane)
 		}
 	}
+}
+
+// chip: a chip sharing the strip's tooltip.
+func (a *agentStrip) chip(text string, col color.Color, onTap func(fyne.CanvasObject), tip func() string) *agentChip {
+	c := newAgentChip(text, col, onTap, tip)
+	c.host = a.tips
+	return c
 }
 
 // items: one agent's menu.
@@ -294,22 +298,22 @@ func (a *agentStrip) moreMenu(c fyne.CanvasObject, s *deskSession, rest []chat.A
 	menuAbove(c, out)
 }
 
-// agentChip: a small tappable text on a tinted pill.
+// agentChip: a small tappable text on a tinted pill. The whole pill, padding
+// included, is the hover area; the tooltip lives in a agentTipHost shared by
+// the strip's chips.
 type agentChip struct {
 	widget.BaseWidget
 	text  *canvas.Text
 	col   color.Color
 	onTap func(fyne.CanvasObject)
 	tip   func() string // the tooltip text, built on hover (times move)
-	pop   *widget.PopUp
-
-	tipLines []*canvas.Text // the open tooltip's lines, updated in place
+	host  *agentTipHost
 }
 
 func newAgentChip(text string, col color.Color, onTap func(fyne.CanvasObject), tip func() string) *agentChip {
 	t := canvas.NewText(text, col)
 	t.TextSize = fontMeta
-	c := &agentChip{text: t, col: col, onTap: onTap, tip: tip}
+	c := &agentChip{text: t, col: col, onTap: onTap, tip: tip, host: newAgentTipHost()}
 	c.ExtendBaseWidget(c)
 	return c
 }
@@ -319,7 +323,7 @@ func (c *agentChip) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (c *agentChip) Tapped(*fyne.PointEvent) {
-	c.MouseOut()
+	c.host.hideNow()
 	if c.onTap != nil {
 		c.onTap(c)
 	}
@@ -358,52 +362,143 @@ func tipLines(s string) []string {
 	return lines
 }
 
-// MouseIn shows the tooltip under the chip once, with a short fade-in; its
-// size is fixed from the first text (and a floor), later ticks only change
-// the text (updateTip). MouseOut and a tap hide it.
-func (c *agentChip) MouseIn(*desktop.MouseEvent) {
+// agentTipGrace: how long the tooltip stays after the pointer leaves the chip
+// or the tooltip, so small movements and the way from chip to tooltip (or to
+// the next chip) do not flicker it.
+const agentTipGrace = 150 * time.Millisecond
+
+// agentTipHost: the one tooltip popup of a strip. It is anchored to its owner
+// chip (just below it, centred on it), hides after agentTipGrace, stays while
+// the pointer is on it, and moves to another chip without a new fade.
+type agentTipHost struct {
+	pop   *widget.PopUp
+	lines []*canvas.Text // the open tooltip's lines, updated in place
+	owner *agentChip
+	timer *time.Timer
+	grace time.Duration
+	do    func(func()) // runs on the UI thread
+}
+
+func newAgentTipHost() *agentTipHost {
+	return &agentTipHost{grace: agentTipGrace, do: fyne.Do}
+}
+
+// tipHover reports the pointer entering or leaving the tooltip itself.
+type tipHover struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+	h       *agentTipHost
+}
+
+func (t *tipHover) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimpleRenderer(t.content) }
+func (t *tipHover) MouseIn(*desktop.MouseEvent)         { t.h.keep() }
+func (t *tipHover) MouseMoved(*desktop.MouseEvent)      { t.h.keep() }
+func (t *tipHover) MouseOut()                           { t.h.leave() }
+
+// keep cancels a pending hide.
+func (h *agentTipHost) keep() {
+	if h.timer != nil {
+		h.timer.Stop()
+		h.timer = nil
+	}
+}
+
+// leave starts the grace delay before the tooltip hides.
+func (h *agentTipHost) leave() {
+	if h.pop == nil {
+		return
+	}
+	h.keep()
+	var t *time.Timer
+	t = time.AfterFunc(h.grace, func() {
+		h.do(func() {
+			if h.timer == t { // not cancelled or replaced meanwhile
+				h.hideNow()
+			}
+		})
+	})
+	h.timer = t
+}
+
+func (h *agentTipHost) hideNow() {
+	h.keep()
+	if h.pop != nil {
+		h.pop.Hide()
+		h.pop = nil
+		h.lines = nil
+		h.owner = nil
+	}
+}
+
+// show opens the tooltip for c, or, when one is open for another chip, moves
+// and refills the same popup (no new fade).
+func (h *agentTipHost) show(c *agentChip) {
+	h.keep()
 	cv := fyne.CurrentApp().Driver().CanvasForObject(c)
-	if c.tip == nil || cv == nil || c.pop != nil {
+	if c.tip == nil || cv == nil || (h.pop != nil && h.owner == c) {
 		return
 	}
 	lines := tipLines(c.tip())
 	objs := make([]fyne.CanvasObject, len(lines))
-	c.tipLines = c.tipLines[:0]
-	var w, h float32
-	w = canvas.NewText(agentTipMinText, theme.ForegroundColor()).MinSize().Width
+	h.lines = h.lines[:0]
+	w := canvas.NewText(agentTipMinText, theme.ForegroundColor()).MinSize().Width
+	var ht float32
+	swap := h.pop != nil
+	fg := theme.ForegroundColor()
 	for i, l := range lines {
 		t := canvas.NewText(l, color.Transparent)
+		if swap {
+			t.Color = fg
+		}
 		t.TextSize = fontMeta
 		t.Text = l
 		ms := t.MinSize()
 		w = max(w, ms.Width)
-		h += ms.Height
+		ht += ms.Height
 		if i > 0 {
-			h += theme.Padding() / 2
+			ht += theme.Padding() / 2
 		}
-		c.tipLines = append(c.tipLines, t)
+		h.lines = append(h.lines, t)
 		objs[i] = t
 	}
-	size := fyne.NewSize(w, h)
-	c.pop = widget.NewPopUp(container.NewPadded(container.New(&agentTipLayout{size: size}, objs...)), cv)
-	c.pop.ShowAtPosition(fyne.CurrentApp().Driver().AbsolutePositionForObject(c).Add(fyne.NewPos(0, c.Size().Height)))
-	fg := theme.ForegroundColor()
+	body := &tipHover{h: h, content: container.NewPadded(container.New(&agentTipLayout{size: fyne.NewSize(w, ht)}, objs...))}
+	body.ExtendBaseWidget(body)
+	h.owner = c
+	if swap {
+		h.pop.Content = body
+		h.pop.Resize(h.pop.MinSize())
+		h.pop.Move(tipPos(c, h.pop.Size(), cv.Size()))
+		h.pop.Refresh()
+		return
+	}
+	h.pop = widget.NewPopUp(body, cv)
+	h.pop.Resize(h.pop.MinSize())
+	h.pop.ShowAtPosition(tipPos(c, h.pop.Size(), cv.Size()))
+	lns := h.lines
 	fyne.NewAnimation(agentTipFade, func(p float32) {
-		for _, t := range c.tipLines {
+		for _, t := range lns {
 			t.Color = fade(fg, float64(p))
 			t.Refresh()
 		}
 	}).Start()
 }
 
-// updateTip: refreshes the open tooltip's text in place; the popup is not
+// tipPos: just below the chip, centred on it, kept inside the canvas.
+func tipPos(c *agentChip, tip, canvasSize fyne.Size) fyne.Position {
+	p := fyne.CurrentApp().Driver().AbsolutePositionForObject(c)
+	x := p.X + (c.Size().Width-tip.Width)/2
+	x = min(x, canvasSize.Width-tip.Width)
+	return fyne.NewPos(max(x, 0), p.Y+c.Size().Height)
+}
+
+// update refreshes the open tooltip's text in place for c; the popup is not
 // rebuilt or resized (the line count and width were fixed on open).
-func (c *agentChip) updateTip() {
-	if c.pop == nil || c.tip == nil {
+func (h *agentTipHost) update(c *agentChip) {
+	if h.pop == nil || h.owner != c || c.tip == nil {
 		return
 	}
 	lines := tipLines(c.tip())
-	for i, t := range c.tipLines {
+	for i, t := range h.lines {
 		l := ""
 		if i < len(lines) {
 			l = lines[i]
@@ -415,12 +510,20 @@ func (c *agentChip) updateTip() {
 	}
 }
 
-func (c *agentChip) MouseMoved(*desktop.MouseEvent) {}
+// MouseIn (anywhere on the chip, padding included) shows the tooltip; the
+// size is fixed from the first text (and a floor), later ticks only change
+// the text (updateTip).
+func (c *agentChip) MouseIn(*desktop.MouseEvent) { c.host.show(c) }
+
+func (c *agentChip) updateTip() { c.host.update(c) }
+
+func (c *agentChip) MouseMoved(*desktop.MouseEvent) { c.host.keep() }
+
+// MouseOut hides the tooltip after the grace delay, unless the pointer
+// reaches the tooltip or another chip first.
 func (c *agentChip) MouseOut() {
-	if c.pop != nil {
-		c.pop.Hide()
-		c.pop = nil
-		c.tipLines = nil
+	if c.host.owner == c {
+		c.host.leave()
 	}
 }
 
