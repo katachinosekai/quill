@@ -93,7 +93,7 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 			box.Add(msgText(v.markdownBlocks(strings.Join(lines[:len(lines)-1], "\n"))))
 		}
 		box.Add(msgText(v.markdown(line)))
-		box.Add(v.buttonRow(btns...))
+		box.Add(v.fadeIn(it.Seq, v.buttonRow(btns...)))
 		v.noteButtons(it.Seq, kind)
 		return box, false
 	}
@@ -150,7 +150,7 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 			if !active {
 				e.Disable()
 			}
-			box.Add(e)
+			box.Add(v.fadeIn(it.Seq, e))
 			kind += "|" + q.num + ":text"
 		} else {
 			if active {
@@ -173,7 +173,7 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 			if _, ok := picks[q.idx]; !ok {
 				missing++
 			}
-			box.Add(v.buttonRow(btns...))
+			box.Add(v.fadeIn(it.Seq, v.buttonRow(btns...)))
 		}
 		at = q.end
 	}
@@ -181,7 +181,7 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 	send := glowButton("Send answers", theme.MailSendIcon(), colIdle, active && v.d.canAnswer(s) && missing == 0, v.guarded(func() {
 		v.d.pickChoice(s, it, multiChoiceReply(multi, picks, texts))
 	}))
-	box.Add(v.buttonRow(send))
+	box.Add(v.fadeIn(it.Seq, v.buttonRow(send)))
 	if missing > 0 && active {
 		note := widget.NewLabel("Pick an answer for each question, then send.")
 		note.SizeName = theme.SizeNameCaptionText

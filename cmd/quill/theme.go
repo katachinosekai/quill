@@ -95,6 +95,16 @@ func (t smallTheme) Size(n fyne.ThemeSizeName) float32 {
 
 type msgTheme struct{ deskTheme }
 
+// Color: the fade steps of newly revealed text (textfade.go).
+func (t msgTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
+	for k, name := range fadeNames {
+		if n == name {
+			return color.NRGBA{colText.R, colText.G, colText.B, fadeAlpha(k)}
+		}
+	}
+	return t.deskTheme.Color(n, v)
+}
+
 func (t msgTheme) Size(n fyne.ThemeSizeName) float32 {
 	switch n {
 	case theme.SizeNameText:

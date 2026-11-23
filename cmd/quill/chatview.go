@@ -110,6 +110,9 @@ type chatView struct {
 	choicePicks   map[*chat.Item]map[int]int        // picks on a multi-question reply (by question index), kept until sent
 	choiceTexts   map[*chat.Item]map[int]string     // typed answers on a multi-question reply
 	btnChanged    time.Time                         // when any item's buttons last changed
+	fadeStart     map[int]time.Time                 // when each item's controls began to fade in (fade.go)
+	fadePend      []*canvas.Rectangle               // veils of the controls being built, until noteButtons
+	fadesStarted  int                               // control fades started (tests)
 	frame         *fyne.Container
 	inner         *fyne.Container
 	steps         bool
@@ -859,11 +862,7 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 func (v *chatView) markdown(text string) fyne.CanvasObject {
 	rt := widget.NewRichTextFromMarkdown(hardBreaks(autolinks(text)))
 	rt.Wrapping = fyne.TextWrapWord
-	for i, seg := range rt.Segments {
-		if cb, ok := seg.(*widget.CodeBlockSegment); ok {
-			rt.Segments[i] = &wrapCode{text: cb.Text}
-		}
-	}
+	wrapCodeBlocks(rt)
 	if v.d.center {
 		return centeredBlocks(rt.Segments)
 	}
@@ -1834,7 +1833,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	r.CornerRadius = 10
 	r.StrokeColor = border
 	r.StrokeWidth = 1.5
-	return container.NewVBox(padTop(4), container.NewStack(r, container.NewPadded(container.NewVBox(parts...))), padTop(4))
+	return v.fadeIn(it.Seq, container.NewVBox(padTop(4), container.NewStack(r, container.NewPadded(container.NewVBox(parts...))), padTop(4)))
 }
 
 type fitCenter struct{ natural float32 }
@@ -2163,6 +2162,8 @@ func (v *chatView) noteButtons(seq int, kind string) {
 	if v.btnKinds == nil {
 		v.btnKinds = map[int]string{}
 	}
+	_, seen := v.btnKinds[seq]
+	v.startFades(seq, !seen, kind)
 	if v.btnKinds[seq] != kind {
 		v.btnKinds[seq] = kind
 		v.btnChanged = time.Now()
@@ -2380,7 +2381,7 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 			}
 		}
 		v.noteButtons(it.Seq, kind)
-		return multiBody, container.NewVBox(cards...)
+		return multiBody, v.fadeIn(it.Seq, container.NewVBox(cards...))
 	}
 	parts := []fyne.CanvasObject{label(title)}
 	if latest {
@@ -2392,7 +2393,7 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 	if cut > 0 {
 		body = text[:cut]
 	}
-	return body, questionCard(parts, latest)
+	return body, v.fadeIn(it.Seq, questionCard(parts, latest))
 }
 
 func (d *desk) pickChoice(s *deskSession, it *chat.Item, option string) {

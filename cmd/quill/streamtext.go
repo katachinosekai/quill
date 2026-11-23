@@ -8,6 +8,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
 )
@@ -90,6 +91,10 @@ type streamView struct {
 	speed    string  // animateSpeed when the reply started
 	carry    float64 // fraction of a byte not yet revealed
 	renders  int     // live redraws (tests)
+
+	reveals   []reveal         // characters shown in the last textFade (textfade.go)
+	fadeDirty bool             // the last draw had faded characters
+	liveRT    *widget.RichText // the live paragraph's one RichText, redrawn in place
 }
 
 func (d *desk) animateText() bool {
@@ -218,10 +223,15 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 				for n < len(text) && !utf8.RuneStart(text[n]) {
 					n++
 				}
+				if st.animated {
+					st.noteReveal(utf8.RuneCountInString(text[st.pos:n]), streamNow())
+				}
 				st.pos = n
 				v.drawStream(st, iv)
+			} else if st.fadeActive() {
+				v.drawStream(st, iv) // the last characters finish fading in
 			}
-			if st.pos >= len(text) {
+			if st.pos >= len(text) && !st.fadeActive() {
 				// Caught up: stop ticking (no idle timer while Claude
 				// thinks); the next text starts it again.
 				st.ticking = false
@@ -259,17 +269,24 @@ func (v *chatView) drawStream(st *streamView, iv *itemView) {
 		}
 		st.box.Objects = append(objs, st.live)
 		st.done = len(done)
+		st.liveRT = nil // a new live paragraph starts
 		st.box.Refresh()
 	}
-	if live != st.shown {
+	counts, total := st.fadeCounts(streamNow())
+	if live != st.shown || total > 0 || st.fadeDirty {
 		st.shown = live
 		st.renders++
-		if strings.TrimSpace(live) == "" {
+		st.fadeDirty = total > 0
+		switch {
+		case strings.TrimSpace(live) == "":
+			st.liveRT = nil
 			st.live.Objects = nil
-		} else {
+			st.live.Refresh()
+		case st.animated && v.drawLiveFaded(st, closeOpenMarkdown(live), counts):
+		default:
 			st.live.Objects = []fyne.CanvasObject{msgText(v.markdown(closeOpenMarkdown(live)))}
+			st.live.Refresh()
 		}
-		st.live.Refresh()
 	}
 	v.settleHeight(iv)
 }

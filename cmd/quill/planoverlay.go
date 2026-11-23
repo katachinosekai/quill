@@ -250,7 +250,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		}
 	}
 	box := container.NewVBox(v.planToggle(plan, reply))
-	apprControl := func() { box.Add(v.centered(v.approvalRadio(owner, plan, appr, active))) }
+	apprControl := func() { box.Add(v.fadeIn(plan.Seq, v.centered(v.approvalRadio(owner, plan, appr, active)))) }
 	prose := func(from, to int) {
 		var keep []string
 		flush := func() {
@@ -295,7 +295,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			if _, entry := ctl.(*widget.Entry); !entry {
 				ctl = v.centered(ctl)
 			}
-			box.Add(ctl)
+			box.Add(v.fadeIn(plan.Seq, ctl))
 		}
 		if appr != nil && apprLine >= q.line && apprLine < q.end {
 			apprControl() // the approval shares this question's lines
@@ -313,7 +313,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	status := func() { box.Add(v.muted(planStatus(plan, state), fontBody)) }
 	resend := func() {
 		if plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
-			box.Add(v.buttonRow(glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, v.guarded(func() { v.d.answerPlan(owner, plan, true) }))))
+			box.Add(v.fadeIn(plan.Seq, v.buttonRow(glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, v.guarded(func() { v.d.answerPlan(owner, plan, true) })))))
 			v.noteButtons(plan.Seq, "resend")
 		}
 	}
@@ -329,7 +329,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			caption(c)
 		}
 		for _, o := range v.approvalSend(owner, plan, appr, qs, ans, active) {
-			box.Add(o)
+			box.Add(v.fadeIn(plan.Seq, o))
 		}
 		if active {
 			v.noteButtons(plan.Seq, approvalKind(appr, qs))
@@ -360,7 +360,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	if active {
 		caption(text)
 	}
-	box.Add(v.buttonRow(run, no))
+	box.Add(v.fadeIn(plan.Seq, v.buttonRow(run, no)))
 	if active {
 		v.noteButtons(plan.Seq, "pending")
 		return box
