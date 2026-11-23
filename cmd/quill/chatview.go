@@ -762,8 +762,14 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 		if o := v.renderPlanReply(it); o != nil {
 			return o
 		}
-		if body, card := v.choiceCard(it); card != nil {
-			return container.NewVBox(msgText(v.markdownBlocks(body)), card)
+		o, plain := v.renderChoiceReply(it)
+		if o != nil {
+			return o
+		}
+		if !plain {
+			if body, card := v.choiceCard(it); card != nil {
+				return container.NewVBox(msgText(v.markdownBlocks(body)), card)
+			}
 		}
 		md := msgText(v.markdownBlocks(it.Text))
 		if p := v.mediaPreviews(it.Text); p != nil {
@@ -2163,6 +2169,9 @@ type numChoiceQ struct {
 	num   string
 	title string
 	opts  []string
+	// line, end: the original lines of the reply the question is on (end
+	// exclusive), for showing its buttons in place (choiceoverlay.go).
+	line, end int
 }
 
 var numLead = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?(\d+)[.)]\s+`)
@@ -2171,9 +2180,15 @@ var numLead = regexp.MustCompile(`^\s*(?:[-*]\s*)?(?:\*\*)?(\d+)[.)]\s+`)
 // lines, the text before them and each question with its options (user
 // 2026-11-22, t4981e5: only the last of five got buttons).
 func numberedChoiceQs(text string) (string, []numChoiceQ) {
-	lines := strings.Split(strings.TrimRight(chat.JoinOptionLines(text), " \n"), "\n")
-	first := len(lines)
-	for i := len(lines) - 1; i >= 0; i-- {
+	joined, first := chat.JoinOptionLineSpans(text)
+	n := len(joined)
+	for n > 0 && strings.TrimSpace(joined[n-1]) == "" {
+		n--
+	}
+	lines := joined[:n]
+	nOrig := len(strings.Split(text, "\n"))
+	first0 := n
+	for i := n - 1; i >= 0; i-- {
 		t := strings.TrimSpace(lines[i])
 		if t == "" {
 			continue
@@ -2181,12 +2196,12 @@ func numberedChoiceQs(text string) (string, []numChoiceQ) {
 		if !numLead.MatchString(t) {
 			break
 		}
-		first = i
+		first0 = i
 	}
 	var qs []numChoiceQ
-	body := lines[:first:first]
-	for _, l := range lines[first:] {
-		l = strings.TrimSpace(l)
+	body := lines[:first0:first0]
+	for i := first0; i < n; i++ {
+		l := strings.TrimSpace(lines[i])
 		if l == "" {
 			continue
 		}
@@ -2204,12 +2219,44 @@ func numberedChoiceQs(text string) (string, []numChoiceQ) {
 		if title, opts, ok := parseChoices(rest); ok {
 			q.title, q.opts = m[1]+". "+title, opts
 		}
+		q.line, q.end = first[i], nOrig
+		if i+1 < len(first) {
+			q.end = first[i+1]
+		}
 		qs = append(qs, q)
 	}
 	if len(qs) < 2 {
 		return "", nil
 	}
 	return strings.Join(body, "\n"), qs
+}
+
+// choiceGate: whether a reply's choice buttons show at all (ok), and whether
+// they are live (latest). A reply that repeats a pending plan card's
+// questions, or has a plan card after it, shows none.
+func (v *chatView) choiceGate(it *chat.Item) (ok, latest bool) {
+	s := v.s
+	if keptPlan(s.conv, it.Text) != nil {
+		return false, false // repeats the unanswered plan card's questions
+	}
+	latest = true
+	after := false
+	for _, x := range s.conv.Items {
+		if x == it {
+			after = true
+			continue
+		}
+		if !after {
+			continue
+		}
+		if x.Kind == chat.Plan {
+			return false, false
+		}
+		if x.Kind == chat.User || x.Kind == chat.Assistant && strings.TrimSpace(x.Text) != "" {
+			latest = false
+		}
+	}
+	return true, latest
 }
 
 func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
@@ -2234,25 +2281,9 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 	if !ok && multi == nil {
 		return "", nil
 	}
-	if keptPlan(s.conv, it.Text) != nil {
-		return "", nil // repeats the unanswered plan card's questions
-	}
-	latest := true
-	after := false
-	for _, x := range s.conv.Items {
-		if x == it {
-			after = true
-			continue
-		}
-		if !after {
-			continue
-		}
-		if x.Kind == chat.Plan {
-			return "", nil
-		}
-		if x.Kind == chat.User || x.Kind == chat.Assistant && strings.TrimSpace(x.Text) != "" {
-			latest = false
-		}
+	ok2, latest := v.choiceGate(it)
+	if !ok2 {
+		return "", nil
 	}
 	kind := "none"
 	if latest {

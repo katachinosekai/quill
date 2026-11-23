@@ -62,25 +62,62 @@ func replyPlan(c *chat.Conversation, reply *chat.Item) *chat.Item {
 }
 
 // planOverlayQs: the plan's questions with their lines in reply, when the
-// overlay can show them there: the plan is pending, every question is
-// numbered, and the reply alone yields the same questions as the card.
+// overlay can show them there: the plan is pending and the reply alone yields
+// the same questions as the card. A plan without questions (just the approval
+// buttons) gives an empty, non-nil list when the reply holds its approval
+// question.
 func planOverlayQs(s *deskSession, plan, reply *chat.Item) []planQ {
 	if s == nil || plan == nil || reply == nil || plan.PermState != chat.PermPending || planState(s.conv, plan) != planActive || reply.Streaming {
 		return nil
 	}
 	qs := planItemQuestions(s, plan)
 	rq := planQuestionsFor(planQuestion(s.conv, plan), reply.Text)
-	if len(qs) == 0 || len(rq) != len(qs) {
+	if len(rq) != len(qs) {
 		return nil
 	}
-	for i, q := range qs {
-		r := rq[i]
-		if q.Num == 0 || r.Num != q.Num || r.Text != q.Text || r.Kind != q.Kind || r.Recommended != q.Recommended || strings.Join(r.Options, "\x00") != strings.Join(q.Options, "\x00") {
+	if len(qs) == 0 {
+		if start, _ := approvalSpan(reply.Text, planQuestion(s.conv, plan)); start < 0 {
 			return nil
 		}
+		return []planQ{}
+	}
+	n, at := len(strings.Split(reply.Text, "\n")), 0
+	for i, q := range qs {
+		r := rq[i]
+		if r.Num != q.Num || r.Text != q.Text || r.Kind != q.Kind || r.Recommended != q.Recommended || strings.Join(r.Options, "\x00") != strings.Join(q.Options, "\x00") {
+			return nil
+		}
+		if r.line < at || r.end > n || r.line >= r.end {
+			return nil
+		}
+		at = r.end
 		qs[i].line, qs[i].end = r.line, r.end
 	}
 	return qs
+}
+
+// approvalSpan: the original lines of text (first, last) that hold the
+// approval question title (its options may be on the next line;
+// chat.JoinOptionLineSpans); -1 if none does.
+func approvalSpan(text, title string) (int, int) {
+	lines := strings.Split(text, "\n")
+	if title = normQ(title); title == "" {
+		return -1, -1
+	}
+	joined, first := chat.JoinOptionLineSpans(text)
+	for i := len(joined) - 1; i >= 0; i-- {
+		if n := normQ(joined[i]); n != "" && (n == title || strings.Contains(n, title)) {
+			end := len(lines) - 1
+			if i+1 < len(first) {
+				end = first[i+1] - 1
+			}
+			for end > first[i] && strings.TrimSpace(lines[end]) == "" {
+				end--
+			}
+			return first[i], end
+		}
+	}
+	return -1, -1
 }
 
 // planOverlaid: the plan's controls are in its reply (its card draws nothing).
@@ -147,25 +184,9 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	// stays, with those options as buttons under it (planapproval.go).
 	appr := planItemApproval(owner, plan)
 	skip := map[int]bool{}
-	// apprStart..apprLine: the original lines of the approval question (its
-	// options may be on the next line; chat.JoinOptionLineSpans).
-	apprStart, apprLine := -1, -1
-	if title := normQ(planQuestion(owner.conv, plan)); title != "" {
-		joined, first := chat.JoinOptionLineSpans(reply.Text)
-		for i := len(joined) - 1; i >= 0; i-- {
-			if n := normQ(joined[i]); n != "" && (n == title || strings.Contains(n, title)) {
-				apprStart, apprLine = first[i], len(lines)-1
-				if i+1 < len(first) {
-					apprLine = first[i+1] - 1
-				}
-				for apprLine > apprStart && strings.TrimSpace(lines[apprLine]) == "" {
-					apprLine--
-				}
-				break
-			}
-		}
-	}
-	if appr == nil {
+	// apprStart..apprLine: the original lines of the approval question.
+	apprStart, apprLine := approvalSpan(reply.Text, planQuestion(owner.conv, plan))
+	if appr == nil && len(qs) > 0 { // without questions the approval question stays as the card's title was
 		for i := apprStart; i >= 0 && i <= apprLine; i++ {
 			skip[i] = true
 		}
@@ -230,21 +251,34 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		msg.Alignment = v.align()
 		msg.SizeName = theme.SizeNameCaptionText
 		box.Add(msg)
-		for _, o := range v.approvalSend(owner, plan, appr, qs, ans) {
-			box.Add(o)
+		if len(qs) > 0 {
+			for _, o := range v.approvalSend(owner, plan, appr, qs, ans) {
+				box.Add(o)
+			}
 		}
 		v.noteButtons(plan.Seq, approvalKind(appr, qs))
 		return box
 	}
-	msg := widget.NewLabel("Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done. Unanswered questions are sent as \"no answer\".")
+	label := "Approve plan & send answers"
+	caption := "Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done. Unanswered questions are sent as \"no answer\"."
+	if len(qs) == 0 {
+		label = "Approve plan & run all"
+		caption = "Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done."
+	}
+	msg := widget.NewLabel(caption)
 	msg.Wrapping = fyne.TextWrapWord
 	msg.Alignment = v.align()
 	msg.SizeName = theme.SizeNameCaptionText
-	run := glowButton("Approve plan & send answers", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), func() {
+	run := glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() {
+		if len(qs) == 0 {
+			v.d.answerPlan(owner, plan, true)
+			return
+		}
 		v.d.answerPlanAnswers(owner, plan, qs, ans)
-	})
-	no := glowButton("Don't run", theme.CancelIcon(), colError, true, func() { v.d.answerPlan(owner, plan, false) })
+	}))
+	no := glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() { v.d.answerPlan(owner, plan, false) }))
 	box.Add(msg)
 	box.Add(v.buttonRow(run, no))
+	v.noteButtons(plan.Seq, "pending")
 	return box
 }
