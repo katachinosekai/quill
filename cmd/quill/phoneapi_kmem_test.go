@@ -210,8 +210,11 @@ func TestPhoneKmemAPI(t *testing.T) {
 	if _, ok := byID["t1"]["owner"]; ok || byID["t1"]["title"] != "Read ~/Projects/demo/notes.txt" {
 		t.Fatalf("t1: %v", byID["t1"])
 	}
-	if acts, _ := byID["t2"]["actions"].([]any); acts == nil || len(acts) != 0 {
-		t.Fatalf("no task actions in phase 1: %v", byID["t2"]["actions"])
+	// phase 4: actions follow the claim rules (gone: done+release; live: none; open: done)
+	for id, want := range map[string]string{"t1": `["done"]`, "t2": `["done","release"]`, "t4": `[]`} {
+		if acts, _ := json.Marshal(byID[id]["actions"]); string(acts) != want {
+			t.Fatalf("%s actions: %s, want %s", id, acts, want)
+		}
 	}
 	if tops, _ := json.Marshal(ts["topics"]); string(tops) != `["demo","kmem","other"]` {
 		t.Fatalf("topics: %s", tops)

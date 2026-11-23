@@ -362,7 +362,7 @@ func (a *phoneAPI) kmemWrite(w http.ResponseWriter, r *http.Request, path string
 			lines = append(lines, sc(kmemCmdLine(args)))
 		}
 		folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "confirm": cid, "action": action, "id": id,
-			"summary": sc(summary), "commands": lines, "expiresS": int(kmemConfirmTTL / time.Second)})
+			"summary": sc(summary), "commands": lines, "expiresS": int((kmemConfirmTTL + time.Second - 1) / time.Second)})
 		return
 	}
 	if conf.state != state {
