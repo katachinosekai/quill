@@ -99,6 +99,11 @@ func fadeSegs(segs []widget.RichTextSegment, b *fadeBudget) []widget.RichTextSeg
 	for ; i > 0 && !b.empty(); i-- {
 		switch s := segs[i-1].(type) {
 		case *widget.TextSegment:
+			if !s.Style.Inline { // a block of its own: not cut
+				b.take(utf8.RuneCountInString(s.Text))
+				rev = append(rev, s)
+				continue
+			}
 			runes := []rune(s.Text)
 			var pieces []widget.RichTextSegment // last first
 			for len(runes) > 0 && !b.empty() {
@@ -173,4 +178,13 @@ func wrapCodeBlocks(rt *widget.RichText) {
 			rt.Segments[i] = &wrapCode{text: cb.Text}
 		}
 	}
+}
+
+func isFadeName(n fyne.ThemeColorName) bool {
+	for _, f := range fadeNames {
+		if n == f {
+			return true
+		}
+	}
+	return false
 }

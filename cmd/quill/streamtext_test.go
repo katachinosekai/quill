@@ -33,8 +33,14 @@ func visibleText(o fyne.CanvasObject) string {
 	var b strings.Builder
 	deepWalk(o, func(x fyne.CanvasObject) {
 		if rt, ok := x.(*widget.RichText); ok && x.Visible() {
-			for _, s := range rt.Segments {
+			for i, s := range rt.Segments {
 				b.WriteString(s.Textual())
+				// The pieces of a faded tail (textfade.go) are one text.
+				if i+1 < len(rt.Segments) {
+					if n, ok := rt.Segments[i+1].(*widget.TextSegment); ok && isFadeName(n.Style.ColorName) {
+						continue
+					}
+				}
 				b.WriteString("\n")
 			}
 		}
