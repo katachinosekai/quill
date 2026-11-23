@@ -881,8 +881,8 @@ func TestOnlineLocalSwitch(t *testing.T) {
 		if _, meta, _ := h.d.rowText(s.id); !strings.Contains(meta, "local qwen3:8b") || !strings.Contains(h.d.subtitle.Text, "Local: qwen3:8b") {
 			t.Fatalf("a local session is marked in the sidebar and header: %q / %q", meta, h.d.subtitle.Text)
 		}
-		if h.d.app.Preferences().String("newModel") != localFallback[0] {
-			t.Fatal("new sessions remember the choice")
+		if h.d.app.Preferences().String("newModel") != "" {
+			t.Fatal("one session's backend leaves the New sessions setting alone")
 		}
 		pick(backendOnline)
 		if h.d.backendBtn.Text != backendOnline {

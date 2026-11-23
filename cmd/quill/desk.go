@@ -264,6 +264,7 @@ type desk struct {
 	rateAt        time.Time
 	input         *sendEntry
 	modelSel      *widget.Select
+	newSessSel    *widget.Select // Settings → New sessions
 	modeSel       *widget.Select
 	folder        *canvas.Text
 	stats         *canvas.Text
@@ -1036,7 +1037,6 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		if d.suppress || d.current == nil {
 			return
 		}
-		d.app.Preferences().SetString("newModel", v)
 		d.setModel(d.current, v)
 	})
 	d.modeSel = widget.NewSelect(modeChoices, func(v string) {

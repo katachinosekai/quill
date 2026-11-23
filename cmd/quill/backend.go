@@ -259,9 +259,6 @@ func (d *desk) setBackend(s *deskSession, backend string) {
 		}
 	}
 	d.setModel(s, model)
-	if s.model == model {
-		prefs.SetString("newModel", model)
-	}
 }
 
 func (d *desk) localModeGuard(s *deskSession) {

@@ -373,22 +373,11 @@ func remoteID(name string) string {
 // newSessionModelSetting: Settings → New sessions: online or one of the
 // local models (the same setting the Welcome's first question sets).
 func (d *desk) newSessionModelSetting() fyne.CanvasObject {
-	const online = "Online: Claude"
-	opts := []string{online}
-	for _, m := range d.localModelList() {
-		opts = append(opts, "Local: "+strings.TrimPrefix(m, "ollama:"))
-	}
-	sel := widget.NewSelect(opts, nil)
-	cur := d.app.Preferences().StringWithFallback("newModel", "default")
-	sel.Selected = online
-	if isLocal(cur) {
-		sel.Selected = "Local: " + strings.TrimPrefix(cur, "ollama:")
-		if !contains(opts, sel.Selected) {
-			sel.Options = append(sel.Options, sel.Selected)
-		}
-	}
+	sel := widget.NewSelect(nil, nil)
+	d.newSessSel = sel
+	d.syncNewSessionSetting()
 	sel.OnChanged = func(v string) {
-		if v == online {
+		if v == optNewOnline {
 			if isLocal(d.app.Preferences().String("newModel")) {
 				d.app.Preferences().SetString("newModel", "default")
 			}
@@ -405,6 +394,31 @@ func (d *desk) newSessionModelSetting() fyne.CanvasObject {
 	}
 	return container.NewVBox(container.NewBorder(nil, nil, widget.NewLabel("New sessions use"), nil, sel),
 		caption("Each session can still switch with the Online/Local button under the message box."))
+}
+
+const optNewOnline = "Online: Claude"
+
+// syncNewSessionSetting shows the live newModel in Settings → New sessions
+// (called when Settings opens; the box itself is built once at startup).
+func (d *desk) syncNewSessionSetting() {
+	sel := d.newSessSel
+	if sel == nil {
+		return
+	}
+	opts := []string{optNewOnline}
+	for _, m := range d.localModelList() {
+		opts = append(opts, "Local: "+strings.TrimPrefix(m, "ollama:"))
+	}
+	cur := d.app.Preferences().StringWithFallback("newModel", "default")
+	want := optNewOnline
+	if isLocal(cur) {
+		want = "Local: " + strings.TrimPrefix(cur, "ollama:")
+		if !contains(opts, want) {
+			opts = append(opts, want)
+		}
+	}
+	sel.Options, sel.Selected = opts, want // no OnChanged: only showing the setting
+	sel.Refresh()
 }
 
 func featureAnswers(radios map[string]*widget.RadioGroup) map[string]int {

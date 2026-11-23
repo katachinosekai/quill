@@ -139,7 +139,6 @@ func (d *desk) newPane() *pane {
 	p.mic.Importance = widget.LowImportance
 	p.model = widget.NewSelect(modelChoices, func(v string) {
 		if !p.quiet && p.view.s != nil {
-			d.app.Preferences().SetString("newModel", v)
 			d.setModel(p.view.s, v)
 		}
 	})

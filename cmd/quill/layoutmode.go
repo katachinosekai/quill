@@ -113,6 +113,7 @@ func (d *desk) toolsPane() fyne.CanvasObject {
 
 func (d *desk) showSettings() {
 	d.loadPolicyRow()
+	d.syncNewSessionSetting()
 	tabs := container.NewAppTabs(
 		container.NewTabItem("General", container.NewVScroll(d.setGeneral)),
 		container.NewTabItem("Setup", d.setupPane()),

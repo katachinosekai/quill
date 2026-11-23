@@ -190,11 +190,15 @@ func TestKmemAssistModelSetting(t *testing.T) {
 	h.ui(func() {
 		p := h.d.app.Preferences()
 		if h.d.kmemAssistModel() != "default" {
-			t.Fatalf("follows New sessions: %q", h.d.kmemAssistModel())
+			t.Fatalf("Online Claude by default: %q", h.d.kmemAssistModel())
+		}
+		p.SetString("newModel", "ollama:qwen3:8b")
+		if h.d.kmemAssistModel() != "default" {
+			t.Fatalf("a local New sessions model never runs the assistant: %q", h.d.kmemAssistModel())
 		}
 		p.SetString("newModel", "opus")
 		if h.d.kmemAssistModel() != "opus" {
-			t.Fatal("follows a changed New sessions model")
+			t.Fatal("follows a Claude New sessions model")
 		}
 		var sel *widget.Select
 		walk(h.d.kmemAssistSetting(), func(o fyne.CanvasObject) {
@@ -203,11 +207,15 @@ func TestKmemAssistModelSetting(t *testing.T) {
 			}
 		})
 		if sel == nil || sel.Selected != optAssistSame || sel.Options[1] != optAssistOff || !slices.Contains(sel.Options, "sonnet") {
-			t.Fatalf("Same as New sessions (default), Off, then the models: %+v", sel)
+			t.Fatalf("Online Claude (default), Off, then the models: %+v", sel)
 		}
 		sel.SetSelected(optAssistOff)
 		if h.d.kmemAssistModel() != kmemAssistOff {
 			t.Fatal("Off")
+		}
+		p.SetString(prefKmemAssistModel, "ollama:qwen3:8b")
+		if h.d.kmemAssistModel() != "ollama:qwen3:8b" {
+			t.Fatal("a local model chosen explicitly for the assistant")
 		}
 		sel.SetSelected("sonnet")
 		if h.d.kmemAssistModel() != "sonnet" || p.String(prefKmemAssistModel) != "sonnet" {

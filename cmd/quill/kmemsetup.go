@@ -371,11 +371,12 @@ func (d *desk) kmemSetupDialog(after func()) {
 }
 
 // The model of the kmem window's assistant (docs/design/kmem-window.md §9):
-// "" follows the New sessions model, "off" leaves the window panels-only.
+// "" is Online Claude (the New sessions model if that is a Claude model, never
+// a local one), "off" leaves the window panels-only.
 const (
 	prefKmemAssistModel = "kmemAssistModel"
 	kmemAssistOff       = "off"
-	optAssistSame       = "Same as New sessions (default)"
+	optAssistSame       = "Online Claude (default)"
 	optAssistOff        = "Off"
 )
 
@@ -385,10 +386,15 @@ func (d *desk) kmemAssistModel() string {
 	if v := p.String(prefKmemAssistModel); v != "" {
 		return v
 	}
-	return p.StringWithFallback("newModel", "default")
+	// A local model only when chosen here explicitly: a local New sessions
+	// model may not be running (ECONNREFUSED) or able to use tools.
+	if m := p.StringWithFallback("newModel", "default"); !isLocal(m) {
+		return m
+	}
+	return "default"
 }
 
-// kmemAssistOptions: Same as New sessions, Off, the Claude models and the
+// kmemAssistOptions: Online Claude (default), Off, the Claude models and the
 // local models that are listed (plus the saved choice if no longer listed).
 func (d *desk) kmemAssistOptions() []string {
 	opts := append([]string{optAssistSame, optAssistOff}, claudeModels...)
@@ -426,5 +432,5 @@ func (d *desk) kmemAssistSetting() fyne.CanvasObject {
 		sel.Disable()
 	}
 	return container.NewVBox(boldLabel("kmem assistant"), sel,
-		caption("The model of kmem-lock-audit, Quill Desktop's kmem assistant (always running in the background). A local model must be able to use tools. Off: it doesn't run and the kmem window shows its panels only. A change applies the next time it starts."))
+		caption("The model of kmem-lock-audit, Quill Desktop's kmem assistant (always running in the background). By default it runs on Online Claude, even when new sessions start on a local model; a local model runs it only when picked here and must be able to use tools. Off: it doesn't run and the kmem window shows its panels only. A change applies the next time it starts."))
 }

@@ -112,3 +112,34 @@ func TestSettingsCoverWelcome(t *testing.T) {
 		}
 	})
 }
+
+// Settings → New sessions shows the live newModel each time Settings opens,
+// and picking a model or backend for one session doesn't change it.
+func TestNewSessionsSettingLive(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		p := h.d.app.Preferences()
+		sel := h.d.newSessSel
+		if sel == nil || sel.Selected != optNewOnline {
+			t.Fatalf("starts Online: %+v", sel)
+		}
+		p.SetString("newModel", "ollama:qwen3:8b")
+		h.d.showSettings()
+		if sel.Selected != "Local: qwen3:8b" {
+			t.Fatalf("Settings shows the live newModel on open: %q", sel.Selected)
+		}
+		h.d.closeSettings()
+		p.SetString("newModel", "default")
+		h.d.showSettings()
+		h.d.closeSettings()
+		if sel.Selected != optNewOnline || p.String("newModel") != "default" {
+			t.Fatalf("back to Online, and showing it changes nothing: %q %q", sel.Selected, p.String("newModel"))
+		}
+		s := h.d.createSession(h.proj, "opus", "auto")
+		h.d.open(s.id)
+		h.d.modelSel.SetSelected("sonnet")
+		if s.model != "sonnet" || p.String("newModel") != "default" {
+			t.Fatalf("the session switches, New sessions stays: %q %q", s.model, p.String("newModel"))
+		}
+	})
+}
