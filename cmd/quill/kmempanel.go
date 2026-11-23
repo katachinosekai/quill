@@ -134,7 +134,7 @@ type kmemHandoffRow struct {
 }
 
 // showKmemPanel: the kmem window replaced the kmem dialog (user 2026-11-22).
-func (d *desk) showKmemPanel() { d.openKmemWindow() }
+func (d *desk) showKmemPanel() { d.showKmem() }
 
 func (d *desk) newKmemPanel(w *kmemWindow) *kmemPanel {
 	p := &kmemPanel{d: d, w: w}
@@ -444,7 +444,7 @@ func (p *kmemPanel) resumeHandoff(name string) {
 func (d *desk) resumeHandoffNamed(name string) *deskSession {
 	d.setDormant(name, false)
 	if name == kmemWinOperator {
-		d.openKmemWindow()
+		d.showKmem()
 		if s := d.kmemWin.session(); s != nil {
 			return s
 		}

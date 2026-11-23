@@ -207,7 +207,7 @@ func (d *desk) reconcileKmemNames(all bool, done func(kmemRenameScan)) {
 // from its handoff (following a rename), and say which in the window.
 func (d *desk) resumeNamedFromCLI(name string) {
 	if name == kmemWinOperator && d.kmemAvailable() {
-		d.openKmemWindow()
+		d.showKmem()
 		return
 	}
 	d.showWindow()

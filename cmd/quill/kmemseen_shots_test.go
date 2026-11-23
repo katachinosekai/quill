@@ -39,7 +39,7 @@ func TestKmemBadgeShots(t *testing.T) {
 		h.d.setKmemNeeds(kmemNeeds{RolloutWait: "stage demo: waiting for review", Bin: 2,
 			Issues: []kmemTask{{ID: "t0000c1", Status: "open", Title: "kmem issue: maint warns about a moved folder", Topic: "kmem"}}})
 		shot(t, h.w, dir, "badge-on-button.png")
-		h.d.openKmemWindow()
+		h.d.showKmem()
 	})
 	h.eventually("loaded", func() bool {
 		return h.d.kmemWin != nil && h.d.kmemWin.panel.data != nil

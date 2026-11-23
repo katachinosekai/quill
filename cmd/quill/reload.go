@@ -455,7 +455,7 @@ func (d *desk) applyRestore(st *restoreState) {
 		d.refreshSidebar()
 	}
 	if st.KmemWin {
-		d.openKmemWindow()
+		d.showKmem()
 	}
 	defer d.restoreSplit(st.Split)
 	if st.Session == "" {

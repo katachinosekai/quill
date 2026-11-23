@@ -126,7 +126,7 @@ func TestKmemWindow(t *testing.T) {
 		if !strings.Contains(labelsIn([]fyne.CanvasObject{w.right}), "assistant is off") {
 			t.Fatal("without an assistant the right side says why in one line")
 		}
-		h.d.openKmemWindow()
+		h.d.showKmem()
 		h.d.resumeHandoffNamed(kmemWinOperator)
 		if h.d.kmemWin != w || opened != 1 {
 			t.Fatalf("opening again raises the same window (opened %d)", opened)
@@ -217,7 +217,7 @@ func TestKmemWindow(t *testing.T) {
 		if prefs.Float("kmemWinSplit") != 0.6 || prefs.Float("win.kmem.w") != 1000 || prefs.Float("win.kmem.h") != 700 {
 			t.Fatalf("size and split saved: %v %v %v", prefs.Float("kmemWinSplit"), prefs.Float("win.kmem.w"), prefs.Float("win.kmem.h"))
 		}
-		h.d.openKmemWindow()
+		h.d.showKmem()
 		if h.d.kmemWin == nil || h.d.kmemWin == w || h.d.kmemWin.split.Offset != 0.6 || opened != 2 {
 			t.Fatal("reopening builds a new window with the saved split")
 		}
@@ -238,7 +238,7 @@ func TestKmemWindow(t *testing.T) {
 func TestKmemWindowNeedsKmem(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
-		h.d.openKmemWindow()
+		h.d.showKmem()
 		if h.d.kmemWin != nil {
 			t.Fatal("no kmem, no window")
 		}

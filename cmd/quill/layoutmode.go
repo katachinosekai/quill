@@ -35,7 +35,7 @@ func (d *desk) layoutButtons() fyne.CanvasObject {
 	d.layoutBtn.Importance = widget.MediumImportance
 	d.settingsBtn = widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	d.settingsBtn.Importance = widget.MediumImportance
-	d.kmemBtn = widget.NewButtonWithIcon("kmem", theme.StorageIcon(), d.openKmemWindow)
+	d.kmemBtn = widget.NewButtonWithIcon("kmem", theme.StorageIcon(), d.showKmem)
 	d.pcsBtn = d.pcsButton()
 	d.refreshPCsButton()
 	d.kmemBtn.Importance = widget.MediumImportance

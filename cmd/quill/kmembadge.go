@@ -304,7 +304,7 @@ const (
 
 // showKmemPanelTab opens (or raises) the kmem window on one of its tabs.
 func (d *desk) showKmemPanelTab(tab int) {
-	d.openKmemWindow()
+	d.showKmem()
 	if w := d.kmemWin; w != nil && w.panel != nil && w.panel.tabs != nil && tab >= 0 && tab < len(w.panel.tabs.Items) {
 		w.panel.tabs.SelectIndex(tab)
 	}

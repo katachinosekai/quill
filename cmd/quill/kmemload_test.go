@@ -90,7 +90,7 @@ func TestKmemWindowEventsLoadOnce(t *testing.T) {
 	ck.reset()
 	time.Sleep(kmemCoalesceFor)
 	h.ui(func() {
-		h.d.openKmemWindow()
+		h.d.showKmem()
 		h.d.showKmemPanelTab(kmemTabTasks)
 		h.d.refreshKmemNeeds()
 	})

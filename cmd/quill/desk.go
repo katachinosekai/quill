@@ -612,7 +612,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
 	openSettings.Alignment = widget.ButtonAlignLeading
-	openKmem := widget.NewButtonWithIcon("kmem", theme.StorageIcon(), d.showKmemPanel)
+	openKmem := widget.NewButtonWithIcon("kmem", theme.StorageIcon(), d.showKmem)
 	openKmem.Importance = widget.LowImportance
 	openKmem.Alignment = widget.ButtonAlignLeading
 	d.pcBox = container.NewVBox()
@@ -1365,7 +1365,7 @@ func (d *desk) open(id string) {
 	}
 	if d.hiddenID(id, s.cwd) {
 		// The kmem window's assistant never gets a tab (docs/design/kmem-window.md §4).
-		d.openKmemWindow()
+		d.showKmem()
 		return
 	}
 	if r := s.remote; r != nil && r.fetched != r.rev {

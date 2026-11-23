@@ -178,7 +178,7 @@ func (d *desk) listenInstance(path string) {
 					d.do(d.showWindow)
 				case "kmem-window":
 					// `quill --kmem-window` (the Monday check-in timer, docs/design/kmem-window.md §10).
-					d.do(d.openKmemWindow)
+					d.do(d.showKmem)
 				case "profile":
 					go writeProfile()
 				case "heap":

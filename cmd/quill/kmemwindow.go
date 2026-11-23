@@ -34,8 +34,37 @@ var kmemWindowOpenHook, kmemWindowCloseHook func(d *desk, w *kmemWindow)
 // kmemChatOffReason is the right side until the assistant puts its chat there.
 const kmemChatOffReason = "The kmem assistant is off; the panels on the left work without it."
 
-// openKmemWindow opens the kmem window, or raises it when it is open.
-func (d *desk) openKmemWindow() {
+// showKmem is the one entry for the kmem button, the menu and
+// `quill --kmem-window`. The kmem box will route here; until then it opens
+// the pop-out window (the old kmem window).
+func (d *desk) showKmem() { d.popOutKmem() }
+
+// kmemBoxContent is the kmem box: the kmem panels as tabs on the left rail
+// and the assistant's chat (own message box and status line, put there by
+// setChat) on the right. It is built once; asking again returns the same
+// object, so a Pop out keeps the selected tab and the scroll positions.
+func (d *desk) kmemBoxContent() fyne.CanvasObject {
+	w := d.kmemWin
+	if w == nil || w.split == nil || w.closed {
+		w = &kmemWindow{d: d}
+		w.panel = d.newKmemPanel(w)
+		w.panel.tabs.SetTabLocation(container.TabLocationLeading)
+		w.right = container.NewStack()
+		w.split = container.NewHSplit(w.panel.tabs, w.right)
+		off := d.app.Preferences().FloatWithFallback("kmemWinSplit", kmemWinDefaultSplit)
+		if off < 0.1 || off > 0.9 {
+			off = kmemWinDefaultSplit
+		}
+		w.split.Offset = off
+		d.kmemWin = w
+		w.setChatReason(kmemChatOffReason)
+		w.panel.reload()
+	}
+	return w.split
+}
+
+// popOutKmem shows the box content in its own window (raises it when open).
+func (d *desk) popOutKmem() {
 	if w := d.kmemWin; w != nil && w.win != nil && !w.closed {
 		w.win.Show()
 		w.win.RequestFocus()
@@ -46,16 +75,10 @@ func (d *desk) openKmemWindow() {
 		return
 	}
 	prefs := d.app.Preferences()
-	w := &kmemWindow{d: d, win: d.app.NewWindow(kmemWinTitle)}
-	w.panel = d.newKmemPanel(w)
-	w.right = container.NewStack()
-	w.split = container.NewHSplit(w.panel.tabs, w.right)
-	off := prefs.FloatWithFallback("kmemWinSplit", kmemWinDefaultSplit)
-	if off < 0.1 || off > 0.9 {
-		off = kmemWinDefaultSplit
-	}
-	w.split.Offset = off
-	w.win.SetContent(w.split)
+	content := d.kmemBoxContent()
+	w := d.kmemWin
+	w.win = d.app.NewWindow(kmemWinTitle)
+	w.win.SetContent(content)
 	setAppID(w.win, appIDKmem)
 	saved := loadGeom(prefs, geomKmem)
 	if !saved.valid() { // sizes saved before the geometry keys existed
@@ -67,11 +90,8 @@ func (d *desk) openKmemWindow() {
 	w.saveGeom = trackGeom(w.win, prefs, geomKmem, g, func() bool { return w.closed })
 	w.setupKeys()
 	w.win.SetCloseIntercept(w.close)
-	d.kmemWin = w
-	w.setChatReason(kmemChatOffReason)
 	w.win.Show()
 	w.win.RequestFocus()
-	w.panel.reload()
 	if kmemWindowOpenHook != nil {
 		kmemWindowOpenHook(d, w)
 	}

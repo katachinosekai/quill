@@ -28,7 +28,7 @@ func (d *desk) refuseSecondSession(name, via string, owner *deskSession) {
 	fmt.Fprintln(os.Stderr, msg)
 	d.flashHint(d.folder, msg)
 	if isHiddenSession(owner) {
-		d.openKmemWindow()
+		d.showKmem()
 		return
 	}
 	d.open(owner.id)

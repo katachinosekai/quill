@@ -165,7 +165,7 @@ func (d *desk) hostFor(role string) hiddenHost {
 				return nil
 			},
 			shown: func() bool { return d.kmemWin.session() != nil },
-			open:  d.openKmemWindow,
+			open:  d.showKmem,
 		}
 	}
 	return hiddenHost{}
