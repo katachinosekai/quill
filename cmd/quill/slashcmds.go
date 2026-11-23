@@ -220,12 +220,16 @@ func (d *desk) cmdExport(s *deskSession, arg string) {
 	btns := container.NewHBox(copyBtn, saveBtn)
 	objs := []fyne.CanvasObject{caption("The conversation as Markdown: your messages, Claude's replies and one line per tool call, with its kmem name, project and folder on top.")}
 	if name := d.org.Kmem[s.id]; name != "" && d.kmemAvailable() {
-		ho := widget.NewButtonWithIcon("Save as kmem handoff “"+name+"”", theme.HistoryIcon(), func() { choose.Hide(); d.saveHandoffNow(s) })
-		if !s.running() || s.kmemSave != nil {
+		label, note := "Save as kmem handoff “"+name+"”", "A kmem handoff lets a new session continue this work (New session → resume from kmem); the session saves it itself and goes on."
+		if d.endCheckFor(s) {
+			label, note = "Checkpoint now", "Asks the session to checkpoint its claimed tasks and update its status fact, then shows what the end-of-session check still lists; the session goes on."
+		}
+		ho := widget.NewButtonWithIcon(label, theme.HistoryIcon(), func() { choose.Hide(); d.saveHandoffNow(s) })
+		if !s.running() || s.kmemSave != nil || s.endWait != nil {
 			ho.Disable()
 		}
 		btns.Add(ho)
-		objs = append(objs, caption("A kmem handoff lets a new session continue this work (New session → resume from kmem); the session saves it itself and goes on."))
+		objs = append(objs, caption(note))
 	}
 	choose = dialog.NewCustom("Export conversation", "Cancel", container.NewVBox(append(objs[:1], append([]fyne.CanvasObject{btns}, objs[1:]...)...)...), d.win)
 	choose.Show()
