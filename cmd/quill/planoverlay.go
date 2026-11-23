@@ -250,7 +250,30 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		}
 	}
 	box := container.NewVBox(v.planToggle(plan, reply))
-	apprControl := func() { box.Add(v.fadeIn(plan.Seq, v.centered(v.approvalRadio(owner, plan, appr, active)))) }
+	caption := func(text string) fyne.CanvasObject {
+		msg := widget.NewLabel(text)
+		msg.Wrapping = fyne.TextWrapWord
+		msg.Alignment = v.align()
+		msg.SizeName = theme.SizeNameCaptionText
+		return msg
+	}
+	// The approval block is one box (accent border while the card waits):
+	// the warning, the approval question as written, the radio group.
+	apprControl := func(question string) {
+		var parts []fyne.CanvasObject
+		if active {
+			c := approvalCaption(appr)
+			if len(qs) > 0 {
+				c += " Unanswered questions are sent as \"no answer\"."
+			}
+			parts = append(parts, caption(c))
+		}
+		if strings.TrimSpace(question) != "" {
+			parts = append(parts, msgText(v.markdownBlocks(keepNumbers(strings.Split(strings.TrimRight(question, "\n "), "\n")))))
+		}
+		parts = append(parts, v.fadeIn(plan.Seq, v.centered(v.approvalRadio(owner, plan, appr, active))))
+		box.Add(questionCard(parts, active))
+	}
 	prose := func(from, to int) {
 		var keep []string
 		flush := func() {
@@ -260,7 +283,8 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			keep = nil
 		}
 		for i := from; i < to && i < len(lines); i++ {
-			if !skip[i] {
+			inAppr := appr != nil && apprLine >= from && apprLine < to && i >= apprStart && i <= apprLine
+			if !skip[i] && !inAppr {
 				l := lines[i]
 				if numLeadMD.MatchString(l) { // "3." stays 3 between pieces
 					l = numLeadMD.ReplaceAllString(l, "$1$2$3 ")
@@ -269,7 +293,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			}
 			if appr != nil && i == apprLine {
 				flush()
-				apprControl()
+				apprControl(strings.Join(lines[max(apprStart, 0):apprLine+1], "\n"))
 			}
 		}
 		flush()
@@ -298,18 +322,11 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			box.Add(v.fadeIn(plan.Seq, ctl))
 		}
 		if appr != nil && apprLine >= q.line && apprLine < q.end {
-			apprControl() // the approval shares this question's lines
+			apprControl("") // the approval shares this question's lines (shown above)
 		}
 		at = q.end
 	}
 	prose(at, len(lines))
-	caption := func(text string) {
-		msg := widget.NewLabel(text)
-		msg.Wrapping = fyne.TextWrapWord
-		msg.Alignment = v.align()
-		msg.SizeName = theme.SizeNameCaptionText
-		box.Add(msg)
-	}
 	status := func() { box.Add(v.muted(planStatus(plan, state), fontBody)) }
 	resend := func() {
 		if plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
@@ -319,14 +336,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	}
 	if appr != nil {
 		if apprLine < 0 {
-			apprControl() // the question wasn't found in the reply: its radio group closes it
-		}
-		if active {
-			c := approvalCaption(appr)
-			if len(qs) > 0 {
-				c += " Unanswered questions are sent as \"no answer\"."
-			}
-			caption(c)
+			apprControl("") // the question wasn't found in the reply: its box closes it
 		}
 		for _, o := range v.approvalSend(owner, plan, appr, qs, ans, active) {
 			box.Add(v.fadeIn(plan.Seq, o))
@@ -358,9 +368,10 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	}))
 	no := glowButton("Don't run", theme.CancelIcon(), colError, active, v.guarded(func() { v.d.answerPlan(owner, plan, false) }))
 	if active {
-		caption(text)
+		box.Add(questionCard([]fyne.CanvasObject{caption(text), v.fadeIn(plan.Seq, v.buttonRow(run, no))}, true))
+	} else {
+		box.Add(questionCard([]fyne.CanvasObject{v.fadeIn(plan.Seq, v.buttonRow(run, no))}, false))
 	}
-	box.Add(v.fadeIn(plan.Seq, v.buttonRow(run, no)))
 	if active {
 		v.noteButtons(plan.Seq, "pending")
 		return box

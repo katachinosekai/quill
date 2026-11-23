@@ -1785,7 +1785,7 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	msg.Wrapping = fyne.TextWrapWord
 	msg.Alignment = v.align()
 	msg.SizeName = theme.SizeNameCaptionText
-	parts := []fyne.CanvasObject{title, msg}
+	parts := []fyne.CanvasObject{msg, title} // the warning comes before the question
 	border := colAccent
 	owner := v.s
 	state := planActive
