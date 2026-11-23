@@ -936,6 +936,7 @@ func (c *Conversation) applyStream(ev *protocol.Event) []*Item {
 		}
 		if it != nil && it.Kind == Tool && len(it.Input) == 0 && it.inputBuf.Len() > 0 {
 			c.setToolInput(it, json.RawMessage(it.inputBuf.String()))
+			it.inputBuf = strings.Builder{} // parsed: drop the copy of the streamed JSON
 			return []*Item{it}
 		}
 	}

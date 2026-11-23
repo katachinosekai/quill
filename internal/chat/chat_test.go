@@ -343,3 +343,31 @@ func TestPeerMessagesDontAnswerTheQuestion(t *testing.T) {
 		t.Fatal("the user's own reply does")
 	}
 }
+
+// The streamed tool-input buffer is dropped once the input is parsed.
+func TestToolInputBufClearedAfterParse(t *testing.T) {
+	c := New()
+	ev := func(s string) {
+		e, err := protocol.ParseLine([]byte(s))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Apply(e)
+	}
+	ev(`{"type":"stream_event","api_message_id":"m1","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"Bash","input":{}}}}`)
+	ev(`{"type":"stream_event","api_message_id":"m1","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}}`)
+	ev(`{"type":"stream_event","api_message_id":"m1","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"ls\"}"}}}`)
+	var tool *Item
+	for _, it := range c.Items {
+		if it.Kind == Tool {
+			tool = it
+		}
+	}
+	if tool == nil || tool.inputBuf.Len() == 0 {
+		t.Fatalf("tool item should be buffering its input: %+v", c.Items)
+	}
+	ev(`{"type":"stream_event","api_message_id":"m1","event":{"type":"content_block_stop","index":0}}`)
+	if len(tool.Input) == 0 || tool.inputBuf.Len() != 0 {
+		t.Fatalf("input %q, buffer %d bytes left", tool.Input, tool.inputBuf.Len())
+	}
+}

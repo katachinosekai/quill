@@ -2,6 +2,7 @@ package painter
 
 import (
 	"bytes"
+	"fyne.io/fyne/v2"
 	"testing"
 
 	"github.com/go-text/typesetting/font"
@@ -46,5 +47,22 @@ func BenchmarkParseTTFEmojiUncached(b *testing.B) {
 		if _, err := font.ParseTTF(bytes.NewReader(emoji.Content())); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// Quill patch: the locale font is looked up on the first glyph the bundled
+// fonts lack, not when the font map is built.
+func TestLangFontLookedUpLazily(t *testing.T) {
+	ClearFontCache()
+	faces := lookupFaces(theme.DefaultTextFont(), theme.DefaultTextFont(), nil, "sans-serif", fyne.TextStyle{})
+	if !faces.lazyLang || len(faces.faces) != 1 {
+		t.Fatalf("lazyLang %v, %d faces", faces.lazyLang, len(faces.faces))
+	}
+	if f := faces.ResolveFace('a'); f != faces.faces[0] || !faces.lazyLang {
+		t.Fatal("a bundled glyph must not trigger the lookup")
+	}
+	faces.ResolveFace(0x6F22) // a missing glyph
+	if faces.lazyLang {
+		t.Fatal("a missing glyph triggers the lookup")
 	}
 }

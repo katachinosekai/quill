@@ -56,6 +56,27 @@ func itemSig(it *chat.Item) string {
 	return fmt.Sprintf("%d|%d|%x|%t|%t|%t|%d|%d|%d|%d", it.Kind, len(it.Text), h.Sum64(), it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, len(it.Diff))
 }
 
+// itemTag is what the phone tracker keeps per item instead of the signature
+// text: a 64-bit hash of every field itemSig covers, plus the text length.
+type itemTag struct {
+	n int
+	h uint64
+}
+
+func itemSigTag(it *chat.Item) itemTag {
+	h := fnv.New64a()
+	h.Write([]byte(it.Text))
+	fmt.Fprintf(h, "|%d|%t|%t|%t|%d|%d|%d|%d", it.Kind, it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, len(it.Diff))
+	return itemTag{len(it.Text), h.Sum64()}
+}
+
+// itemCheapTag is itemSigCheap as a hash.
+func itemCheapTag(it *chat.Item) uint64 {
+	h := fnv.New64a()
+	fmt.Fprintf(h, "%d|%d|%t|%t|%t|%d|%d|%d|%d", it.Kind, len(it.Text), it.Streaming, it.HasResult, it.ResultError, len(it.Result), len(it.Input), it.PermState, len(it.Diff))
+	return h.Sum64()
+}
+
 type chatView struct {
 	d             *desk
 	s             *deskSession

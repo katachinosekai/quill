@@ -110,10 +110,11 @@ func lookupFaces(theme, fallback fyne.Resource, additional []fyne.Resource, fami
 		faces.addFace(loadMeasureFont(added))
 	}
 
-	local := lookupLangFont(family, aspect)
-	if local != nil {
-		faces.addFace(local)
-	}
+	// The system-locale font is looked up on the first glyph none of the
+	// bundled fonts has (Quill patch): the lookup scans every installed
+	// font and loads the locale's whole font file.
+	faces.aspect = aspect
+	faces.lazyLang = true
 
 	return faces
 }
@@ -602,14 +603,26 @@ type noopLogger struct{}
 func (n noopLogger) Printf(string, ...any) {}
 
 type dynamicFontMap struct {
-	faces  []*font.Face
-	family string
+	faces    []*font.Face
+	family   string
+	aspect   font.Aspect
+	lazyLang bool // the system-locale font is still to be looked up
 }
 
 func (d *dynamicFontMap) ResolveFace(r rune) *font.Face {
 	for _, f := range d.faces {
 		if _, ok := f.NominalGlyph(r); ok {
 			return f
+		}
+	}
+
+	if d.lazyLang {
+		d.lazyLang = false
+		if local := lookupLangFont(d.family, d.aspect); local != nil {
+			d.addFace(local)
+			if _, ok := local.NominalGlyph(r); ok {
+				return local
+			}
 		}
 	}
 
