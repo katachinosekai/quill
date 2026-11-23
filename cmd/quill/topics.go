@@ -50,14 +50,6 @@ func resetTopicCache() {
 	topicCache.mu.Unlock()
 }
 
-// topLevel: "chunkstream/decisions" -> "chunkstream".
-func topLevel(topic string) string {
-	if i := strings.Index(topic, "/"); i >= 0 {
-		return topic[:i]
-	}
-	return topic
-}
-
 // topicTitle: a topic without a label is shown as its slug with a capital.
 func topicTitle(slug string) string {
 	r := []rune(slug)
