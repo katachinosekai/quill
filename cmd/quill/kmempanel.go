@@ -122,6 +122,8 @@ type kmemPanelData struct {
 	handoffs []kmemHandoffRow
 	tasks    []kmemTask
 	needs    kmemNeeds
+	rows     []topicTask       // tasks with their checkpoints
+	status   map[string]string // top-level topic -> status fact text
 }
 
 type kmemHandoffRow struct {
@@ -139,7 +141,7 @@ func (d *desk) newKmemPanel(w *kmemWindow) *kmemPanel {
 	p.over, p.hand, p.tasks = loading(), loading(), loading()
 	p.tabs = container.NewAppTabs(
 		container.NewTabItem("Overview", container.NewVScroll(p.over)),
-		container.NewTabItem("Handoffs", container.NewVScroll(p.hand)),
+		container.NewTabItem("Topics", container.NewVScroll(p.hand)),
 		container.NewTabItem("Tasks", container.NewVScroll(p.tasks)),
 		container.NewTabItem("Memory", p.memoryTab()),
 	)
@@ -205,9 +207,21 @@ func (p *kmemPanel) reload() {
 			Tasks []kmemTask `json:"tasks"`
 		}
 		d.kmemJSON(&ts, "task", "list")
+		var tr struct {
+			Tasks []topicTask `json:"tasks"`
+		}
+		d.kmemJSON(&tr, "task", "list")
 		needs := parseKmemNeeds(brief.Brief, ts.Tasks)
 		needs.RolloutWait = d.readRolloutWait()
-		data := &kmemPanelData{brief: brief.Brief, topics: parseTopics(topicsOut), handoffs: hs.Handoffs, tasks: ts.Tasks, needs: needs}
+		data := &kmemPanelData{brief: brief.Brief, topics: parseTopics(topicsOut), handoffs: hs.Handoffs, tasks: ts.Tasks, needs: needs, rows: tr.Tasks, status: map[string]string{}}
+		// Assumption (kmem 1.8.1 has no status facts yet): a topic's status
+		// is the current fact under "TOPIC/status", read when that topic exists.
+		for _, t := range data.topics {
+			if top := topLevel(t.Name); t.Name == top+"/status" {
+				out, _ := d.runKmem("kmem", "get", t.Name)
+				data.status[top] = statusText(out)
+			}
+		}
 		d.do(func() {
 			d.setKmemNeeds(needs)
 			p.data = data
@@ -226,7 +240,6 @@ func (p *kmemPanel) render() {
 	if data == nil {
 		return
 	}
-	d := p.d
 	needs := data.needs
 	fill := p.prefill()
 	// Overview
@@ -252,48 +265,7 @@ func (p *kmemPanel) render() {
 	}
 	ov = append(ov, widget.NewSeparator(), caption(fmt.Sprintf("%d topics, %d handoffs, %d open tasks, %d item(s) in the recycle bin (Settings → General → Memory (kmem)).", len(data.topics), len(data.handoffs), len(data.tasks), needs.Bin)))
 	setBox(p.over, ov...)
-	// Handoffs
-	var hrows []fyne.CanvasObject
-	hrows = append(hrows, caption("Ended sessions live on as kmem handoffs. Resume starts a live session from one; Delete moves its facts to the recycle bin."))
-	for _, h := range data.handoffs {
-		h := h
-		saved := h.Saved
-		if t, err := time.Parse(time.RFC3339, h.Saved); err == nil {
-			saved = ago(t)
-		}
-		state := "ended"
-		owner := d.handoffOwner(h.Name, &deskSession{})
-		inWindow := isHiddenSession(owner) || owner != nil && owner == p.w.session()
-		if inWindow {
-			state = "live in the kmem window"
-		} else if owner != nil {
-			title, _, _ := d.rowText(owner.id)
-			state = "live in “" + title + "”"
-		}
-		show := widget.NewButtonWithIcon("Show", theme.VisibilityIcon(), func() { p.showHandoff(h.Name) })
-		resume := widget.NewButtonWithIcon("Resume", theme.MediaPlayIcon(), func() { p.resumeHandoff(h.Name) })
-		del := widget.NewButtonWithIcon("Delete...", theme.DeleteIcon(), func() { p.deleteHandoff(h.Name, h.Items) })
-		if owner != nil {
-			resume.SetText("Open")
-			id := owner.id
-			resume.OnTapped = func() {
-				if inWindow {
-					d.openKmemWindow()
-					return
-				}
-				d.showWindow()
-				d.open(id)
-			}
-			del.Disable()
-		}
-		for _, b := range []*widget.Button{show, resume, del} {
-			b.Importance = widget.LowImportance
-		}
-		hrows = append(hrows, container.NewBorder(nil, nil,
-			container.NewVBox(boldLabel(h.Name), caption(fmt.Sprintf("saved %s · %d items · %s", saved, h.Items, state))), nil,
-			container.NewHBox(layout.NewSpacer(), show, resume, del)), widget.NewSeparator())
-	}
-	setBox(p.hand, hrows...)
+	setBox(p.hand, p.topicsRows(data)...)
 	// Tasks, grouped by topic
 	by := map[string][]string{}
 	var order []string
@@ -660,4 +632,114 @@ func autoMemoryText(cwd string) string {
 		b.WriteString("── " + f + " ──\n" + strings.TrimSpace(string(data)) + "\n\n")
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// topicTask is a task row with its last checkpoint (empty until kmem's task
+// list reports one).
+type topicTask struct {
+	kmemTask
+	Checkpoint string `json:"checkpoint"`
+}
+
+func topLevel(name string) string {
+	if i := strings.Index(name, "/"); i > 0 {
+		return name[:i]
+	}
+	return name
+}
+
+// statusText: the first line of `kmem get T/status`, without the id prefix.
+func statusText(out string) string {
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			l = strings.TrimSpace(factID.ReplaceAllString(l, ""))
+			if i := strings.Index(l, ": "); i > 0 && i < 16 && !strings.Contains(l[:i], " ") {
+				l = l[i+2:] // the kind prefix ("decision: ")
+			}
+			return oneLine(l, 240)
+		}
+	}
+	return ""
+}
+
+// topicsRows builds the read-only Topics tab: per top-level kmem topic the
+// status fact, claimed tasks (checkpoint, owner), open tasks and a live
+// marker; old handoffs go under "History (read-only)" with Show only.
+func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
+	d := p.d
+	names := map[string]bool{}
+	for _, t := range data.topics {
+		if top := topLevel(t.Name); top != "handoff" {
+			names[top] = true
+		}
+	}
+	for _, t := range data.rows {
+		if t.Topic != "" {
+			names[topLevel(t.Topic)] = true
+		}
+	}
+	var order []string
+	for n := range names {
+		order = append(order, n)
+	}
+	sort.Strings(order)
+	rows := []fyne.CanvasObject{caption("Read-only view of kmem's topics: status, claimed and open tasks. Sessions claim and finish tasks; nothing is changed here.")}
+	if len(order) == 0 {
+		rows = append(rows, wrapLabel("No topics yet: kmem has no topics or tasks to show."))
+	}
+	for _, name := range order {
+		live := "not live"
+		if owner := d.handoffOwner(name, &deskSession{}); owner != nil {
+			live = "live in a tab"
+			if isHiddenSession(owner) {
+				live = "live in the kmem window"
+			}
+		}
+		var claimed, open []topicTask
+		for _, t := range data.rows {
+			if topLevel(t.Topic) != name {
+				continue
+			}
+			if t.Owner != nil && *t.Owner != "" {
+				claimed = append(claimed, t)
+			} else {
+				open = append(open, t)
+			}
+		}
+		status := firstNonEmpty(data.status[name], "no status fact yet")
+		rows = append(rows, boldLabel(name+"  ·  "+live), wrapLabel("Status: "+status))
+		for _, t := range claimed {
+			line := fmt.Sprintf("Claimed [%s] %s (owner %s)", t.ID, t.Title, *t.Owner)
+			if t.Checkpoint != "" {
+				line += "; checkpoint: " + t.Checkpoint
+			}
+			rows = append(rows, wrapLabel(line))
+		}
+		for _, t := range open {
+			rows = append(rows, wrapLabel(fmt.Sprintf("Open [%s] p%d %s", t.ID, t.Prio, t.Title)))
+		}
+		if len(claimed)+len(open) == 0 {
+			rows = append(rows, caption("No claimed or open tasks."))
+		}
+		rows = append(rows, widget.NewSeparator())
+	}
+	var hist []fyne.CanvasObject
+	for _, h := range data.handoffs {
+		h := h
+		saved := h.Saved
+		if t, err := time.Parse(time.RFC3339, h.Saved); err == nil {
+			saved = ago(t)
+		}
+		show := widget.NewButtonWithIcon("Show", theme.VisibilityIcon(), func() { p.showHandoff(h.Name) })
+		show.Importance = widget.LowImportance
+		hist = append(hist, container.NewBorder(nil, nil,
+			container.NewVBox(boldLabel(h.Name), caption(fmt.Sprintf("saved %s · %d items", saved, h.Items))), nil,
+			container.NewHBox(layout.NewSpacer(), show)))
+	}
+	if len(hist) == 0 {
+		hist = append(hist, caption("No old handoffs."))
+	}
+	acc := widget.NewAccordion(widget.NewAccordionItem("History (read-only)", container.NewVBox(hist...)))
+	return append(rows, acc)
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 
 	"fyne.io/fyne/v2"
 	"strings"
@@ -46,13 +48,15 @@ func TestKmemPanel(t *testing.T) {
 		case a == "brief --json":
 			return `{"brief": "rules: read, unchanged\nbin: 1 item(s) waiting for the user\n", "api": 1}`, nil
 		case a == "topics":
-			return "handoff/old-work  3 facts, 1 KB\nquill/decisions  40 facts, 13 KB\n", nil
+			return "handoff/old-work  3 facts, 1 KB\nquill/decisions  40 facts, 13 KB\nquill/status  1 fact, 1 KB\nload-opt/notes  2 facts, 1 KB\n", nil
+		case a == "get quill/status":
+			return "[f00000a9] decision: Phase 3 in progress\n", nil
 		case a == "handoff list --json":
 			return `{"handoffs": [{"name": "old-work", "items": 3, "saved": "2026-11-21T06:00:00-08:00"}], "api": 1}`, nil
 		case a == "handoff get old-work --json":
 			return `{"items": [{"id": "f0000a1"}, {"id": "f0000a2"}], "api": 1}`, nil
 		case a == "task list --json":
-			return `{"tasks": [{"id": "t1", "prio": 4, "status": "open", "title": "Do it", "topic": "load-opt", "owner": null}], "api": 1}`, nil
+			return `{"tasks": [{"id": "t1", "prio": 4, "status": "open", "title": "Do it", "topic": "load-opt", "owner": null}, {"id": "t2", "prio": 3, "status": "claimed", "title": "Mine", "topic": "quill", "owner": "quill", "checkpoint": "strip done"}], "api": 1}`, nil
 		case a == "trash list":
 			return binText, nil
 		case a == "show f467b16":
@@ -78,7 +82,9 @@ func TestKmemPanel(t *testing.T) {
 		kw = h.d.kmemWin.win
 	})
 	defer h.ui(func() { h.d.kmemWin.close() })
-	h.eventually("panel loaded", func() bool { return len(p.hand.Objects) > 1 && strings.Contains(labelsIn(p.over.Objects), "rules: read") })
+	h.eventually("panel loaded", func() bool {
+		return len(p.hand.Objects) > 1 && strings.Contains(labelsIn(p.over.Objects), "rules: read")
+	})
 	var b *binView
 	h.ui(func() {
 		over := labelsIn(p.over.Objects)
@@ -94,7 +100,16 @@ func TestKmemPanel(t *testing.T) {
 			}
 		}
 		if !strings.Contains(labelsIn(p.hand.Objects), "old-work") || !strings.Contains(labelsIn(p.tasks.Objects), "Do it") {
-			t.Fatal("handoffs and tasks are listed")
+			t.Fatal("handoffs (as history) and tasks are listed")
+		}
+		tt := labelsIn(p.hand.Objects)
+		for _, want := range []string{"quill", "load-opt", "Status: Phase 3 in progress", "Claimed [t2] Mine (owner quill); checkpoint: strip done", "Open [t1]", "History (read-only)", "Show"} {
+			if !strings.Contains(tt, want) {
+				t.Fatalf("topics tab misses %q: %s", want, tt)
+			}
+		}
+		if buttonIn(p.hand.Objects, "Resume") != nil || buttonContaining(p.hand.Objects, "Delete") != nil || p.tabs.Items[1].Text != "Topics" {
+			t.Fatal("the Topics tab has no Resume or Delete")
 		}
 		review := buttonIn(p.over.Objects, "Review bin")
 		if review == nil {
@@ -151,6 +166,14 @@ func TestKmemPanel(t *testing.T) {
 	h.eventually("terminal opened", func() bool { return len(started) == 1 })
 	if !strings.HasSuffix(strings.TrimSpace(started[0]), "kmem") && strings.Contains(started[0], "f467b16") {
 		t.Fatalf("Empty bin purges everything, not one item: %q", started[0])
+	}
+	if os.Getenv("DESK_SHOTS") != "" {
+		dir, _ := filepath.Abs(filepath.Join("..", "..", ".shots"))
+		os.MkdirAll(dir, 0o755)
+		h.ui(func() {
+			p.tabs.SelectIndex(1)
+			shot(t, kw, dir, "kmem-topics-tab.png")
+		})
 	}
 	h.ui(func() {
 		p.deleteHandoff("old-work", 3)
