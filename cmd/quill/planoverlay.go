@@ -285,11 +285,9 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		for i := from; i < to && i < len(lines); i++ {
 			inAppr := appr != nil && apprLine >= from && apprLine < to && i >= apprStart && i <= apprLine
 			if !skip[i] && !inAppr {
-				l := lines[i]
-				if numLeadMD.MatchString(l) { // "3." stays 3 between pieces
-					l = numLeadMD.ReplaceAllString(l, "$1$2$3 ")
-				}
-				keep = append(keep, l)
+				// Numbers stay as written: keepNumbers keeps a list from 1 a
+				// real list and puts a later piece ("3.") on lines of its own.
+				keep = append(keep, lines[i])
 			}
 			if appr != nil && i == apprLine {
 				flush()
