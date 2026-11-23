@@ -338,3 +338,47 @@ func TestQuillOperatorRotationStaysHidden(t *testing.T) {
 		}
 	})
 }
+
+func TestQuillMoveNoticeOnceMoveAndLater(t *testing.T) {
+	h, _ := quillSetup(t)
+	o := topicSession(h, "quill")
+	h.ui(func() {
+		d := h.d
+		d.open(o.id)
+		a := d.quillAssist()
+		d.assistBoot(a)
+		n := d.quillMove
+		if !n.box.Visible() || !d.app.Preferences().Bool(prefQuillMoveSeen) {
+			t.Fatal("shown on the running quill tab, remembered in prefs")
+		}
+		if a.state != asElsewhere || hiddenRole(o) == roleQuill || !contains(d.tabs, o.id) {
+			t.Fatal("never moves by itself")
+		}
+		n.box.Hide() // a later start: no second notice
+		n.owner = nil
+		d.assistProbe(a)
+		if n.box.Visible() || n.owner != nil {
+			t.Fatal("shown once only")
+		}
+		if a.state != asElsewhere || a.button != "Move it here" {
+			t.Fatal("the box keeps offering")
+		}
+		d.app.Preferences().SetBool(prefQuillMoveSeen, false)
+		n.shown = false
+		d.assistProbe(a)
+		if !n.box.Visible() {
+			t.Fatal("armed again for the test")
+		}
+		d.quillMoveNoticeLater()
+		if n.box.Visible() || hiddenRole(o) == roleQuill || a.state != asElsewhere || a.button != "Move it here" {
+			t.Fatal("Later dismisses; nothing moved; the box keeps offering")
+		}
+		d.app.Preferences().SetBool(prefQuillMoveSeen, false)
+		d.assistProbe(a)
+		d.setAutoApprove(o, true)
+		d.quillMoveNoticeMove()
+		if a.s != o || a.state != asLive || hiddenRole(o) != roleQuill || o.autoApprove || n.box.Visible() {
+			t.Fatal("Move it here calls the move-in: same session, auto-approve ended")
+		}
+	})
+}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/storage"
@@ -30,6 +31,7 @@ const (
 	quillOpName      = "quill"             // the topic and kmem name
 	prefQuillSource  = "quillSourceFolder" // the Quill source folder ("" = unset)
 	prefQuillOpModel = "quillOpModel"      // the operator's model; kmemAssistOff turns it off
+	prefQuillMoveSeen = "quillMoveNoticeSeen" // the one-time move-in notice was shown
 	prefQuillOpSeen  = "quillOpBadgeSeen"  // the Quill badge's seen records
 	quillModule      = "module github.com/katachinosekai/quill"
 )
@@ -283,6 +285,89 @@ func quillOpElsewhere(d *desk, a *assistant, o *deskSession) {
 	}
 	d.assistReasonWith(a, fmt.Sprintf("The Quill operator is open in the tab “%s”.", title),
 		button, func() { d.quillMoveIn(a, o) })
+	d.offerQuillMoveNotice(a, o)
+}
+
+const quillMoveNoticeText = "The Quill operator now lives behind the Quill button. Move this session there?"
+
+// quillMoveNotice is the one-time notice on the running quill tab (§5.1).
+type quillMoveNotice struct {
+	box   *fyne.Container
+	owner *deskSession // the tab it is offered on; nil: none pending
+	shown bool         // displayed once: remembered in prefs
+}
+
+func (d *desk) buildQuillMoveBanner() fyne.CanvasObject {
+	n := &quillMoveNotice{}
+	d.quillMove = n
+	lbl := widget.NewLabel(quillMoveNoticeText)
+	lbl.Wrapping = fyne.TextWrapWord
+	move := widget.NewButton("Move it here", func() { d.quillMoveNoticeMove() })
+	move.Importance = widget.HighImportance
+	later := widget.NewButton("Later", func() { d.quillMoveNoticeLater() })
+	bgr := canvas.NewRectangle(colCard)
+	bgr.CornerRadius = 8
+	n.box = container.NewStack(bgr, container.NewPadded(container.NewBorder(nil, nil, nil, container.NewHBox(move, later), lbl)))
+	n.box.Hide()
+	return n.box
+}
+
+// offerQuillMoveNotice arms the notice for the running tab o, once ever. It
+// shows when that tab is the current one. Never moves anything by itself.
+func (d *desk) offerQuillMoveNotice(a *assistant, o *deskSession) {
+	n := d.quillMove
+	if n == nil || !o.running() || o.stopping || d.app.Preferences().Bool(prefQuillMoveSeen) {
+		return
+	}
+	n.owner = o
+	d.syncQuillMoveBanner()
+}
+
+// syncQuillMoveBanner shows the notice only on its tab; the first display is
+// remembered in prefs so it never comes back.
+func (d *desk) syncQuillMoveBanner() {
+	n := d.quillMove
+	if n == nil || n.box == nil {
+		return
+	}
+	o := n.owner
+	if o != nil && (!o.running() || o.stopping || isHiddenSession(o) || !contains(d.tabs, o.id)) {
+		n.owner, o = nil, nil
+	}
+	show := o != nil && d.current == o
+	if show && !n.shown {
+		n.shown = true
+		d.app.Preferences().SetBool(prefQuillMoveSeen, true)
+	}
+	if show != n.box.Visible() {
+		if show {
+			n.box.Show()
+		} else {
+			n.box.Hide()
+		}
+		if d.headerBox != nil {
+			d.headerBox.Refresh()
+		}
+	}
+}
+
+// quillMoveNoticeMove: [Move it here]: the box's move-in (same process).
+func (d *desk) quillMoveNoticeMove() {
+	n := d.quillMove
+	o := n.owner
+	n.owner = nil
+	if o != nil {
+		if a := d.quillAssist(); a.state == asElsewhere {
+			d.quillMoveIn(a, o)
+		}
+	}
+	d.syncQuillMoveBanner()
+}
+
+// quillMoveNoticeLater: [Later] dismisses the notice; the box keeps offering.
+func (d *desk) quillMoveNoticeLater() {
+	d.quillMove.owner = nil
+	d.syncQuillMoveBanner()
 }
 
 // quillMoveIn turns the tab session o into the hidden operator without

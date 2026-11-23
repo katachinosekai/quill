@@ -252,6 +252,7 @@ type desk struct {
 	pausedIDs      []string
 	pauseBanner    *fyne.Container
 	pauseText      *widget.Label
+	quillMove      *quillMoveNotice // one-time move-in notice (quilloperator.go)
 	// kmem button bubble: what kmem asks the user for (bin, audit, maint,
 	// user tasks); kmembadge.go. The bin dialog: kmembin.go.
 	kmemBubble    *bubble
@@ -1081,7 +1082,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.usage = newUsagePanel(d)
 	d.usageRow = d.usage.buildStrip()
 	d.agentStrip = newAgentStrip(d) // subagent strip under the tabs, both layouts (agentstrip.go)
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.agentStrip.root, d.usageRow, widget.NewSeparator())
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildQuillMoveBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.agentStrip.root, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(d.send)
@@ -1177,6 +1178,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 
 func (d *desk) updateChrome() {
 	d.keepView()
+	defer d.syncQuillMoveBanner()
 	if d.note != nil {
 		noteWas := d.note.Visible()
 		defer func() {
