@@ -377,15 +377,15 @@ func TestPhoneApprovalChoice(t *testing.T) {
 	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]any{"requestId": pid, "action": "approvePlan", "approvalChoice": 7}); code != 422 {
 		t.Fatalf("out of range: %d %v", code, m)
 	}
-	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]any{"requestId": pid, "action": "approvePlan", "approvalChoice": 0, "planAnswers": map[string]any{"1": 0, "3": "v2"}}); code != 200 {
+	if code, m, _ := a.do("POST", base+"/answer", key(), map[string]any{"requestId": pid, "action": "approvePlan", "approvalChoice": 0, "planAnswers": map[string]any{"1": 0, "3": "v2"}, "text": "keep it small"}); code != 200 {
 		t.Fatalf("approvalChoice Yes: %d %v", code, m)
 	}
 	h.ui(func() {
 		if plan.PermState != chat.PermAllowed || !s.runAll {
 			t.Fatalf("the phone's Yes approves: %v %v", plan.PermState, s.runAll)
 		}
-		if got := lastUserText(s); !strings.HasPrefix(got, planGoMessage) || !strings.Contains(got, "→ Use blue.") || !strings.Contains(got, "→ \"v2\".") {
-			t.Fatalf("with the answers: %q", got)
+		if got := lastUserText(s); !strings.HasPrefix(got, planGoMessage) || !strings.Contains(got, "→ Use blue.") || !strings.Contains(got, "→ \"v2\".") || !strings.HasSuffix(got, " Also: keep it small") {
+			t.Fatalf("with the answers and the changes: %q", got)
 		}
 	})
 	h.eventually("the approval's turn ends", func() bool { return !s.inTurn && !s.conv.Busy })
@@ -530,6 +530,98 @@ func TestApprovalPicksWithoutStopMixed(t *testing.T) {
 		got := lastUserText(s2)
 		if plan2.PermState != chat.PermDenied || s2.runAll || !strings.HasPrefix(got, planStopText+" Answers to your questions:") || !strings.Contains(got, "→ \"v2\".") {
 			t.Fatalf("Don't run sends the answers: %v %v %q", plan2.PermState, s2.runAll, got)
+		}
+	})
+}
+
+func TestPlanGoChanges(t *testing.T) {
+	if got := planGoChanges(planGoWith(""), "  "); got != planGoWith("") {
+		t.Fatalf("no text, no change: %q", got)
+	}
+	got := planGoChanges(planGoWith("Yes"), " use blue ")
+	if !strings.HasSuffix(got, " Also: use blue") || !isPlanGo(got) {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestPhonePlanApproveWithChanges(t *testing.T) {
+	h := newHarness(t)
+	s, plan := planCardSession(t, h, yesNoPlan)
+	h.ui(func() {
+		h.d.answerPlanApproval(s, plan, planItemApproval(s, plan), 0, nil, nil, "also add a test")
+		if plan.PermState != chat.PermAllowed || !s.runAll {
+			t.Fatalf("still approves: %v %v", plan.PermState, s.runAll)
+		}
+		if got := lastUserText(s); !isPlanGo(got) || !strings.HasSuffix(got, " Also: also add a test") {
+			t.Fatalf("%q", got)
+		}
+	})
+	h2 := newHarness(t)
+	s2, plan2 := planCardSession(t, h2, yesNoPlan)
+	h2.ui(func() {
+		h2.d.answerPlanWith(s2, plan2, true, "", "rename it")
+		if got := lastUserText(s2); plan2.PermState != chat.PermAllowed || !strings.HasSuffix(got, " Also: rename it") {
+			t.Fatalf("%v %q", plan2.PermState, got)
+		}
+	})
+}
+
+func TestNearApproval(t *testing.T) {
+	for _, y := range []string{"Appeoved", "yes", "ok go", "Aproved", "appeoved", "approvd please", "go ahead", "Yeah, do it"} {
+		if !nearApproval(y) {
+			t.Errorf("%q should look like an approval attempt", y)
+		}
+	}
+	for _, n := range []string{"improve the plan", "what about step 2", "go check the tests", "No", "add a test", "", "above all keep it small"} {
+		if nearApproval(n) {
+			t.Errorf("%q should not", n)
+		}
+	}
+}
+
+func TestTypedNearMissGetsNotice(t *testing.T) {
+	count := func(s *deskSession) int {
+		n := 0
+		for _, it := range s.conv.Items {
+			if it.Kind == chat.Notice && it.Text == notCountedNotice {
+				n++
+			}
+		}
+		return n
+	}
+	h := newHarness(t)
+	s, plan := planCardSession(t, h, yesNoPlan)
+	h.ui(func() {
+		h.d.sendTo(s, "Appeoved")
+		if count(s) != 1 {
+			for _, it := range s.conv.Items {
+				t.Logf("%v %q %v", it.Kind, it.Text, it.PermState)
+			}
+			t.Fatalf("notice expected, plan %v pending %v", plan.PermState, hasPendingPlan(s))
+		}
+		if s.runAll || plan.PermState == chat.PermAllowed {
+			t.Fatal("a typo never approves")
+		}
+		if got := lastUserText(s); got != "Appeoved" {
+			t.Fatalf("the message is still sent: %q", got)
+		}
+	})
+	h2 := newHarness(t)
+	s2, _ := planCardSession(t, h2, yesNoPlan)
+	h2.ui(func() {
+		h2.d.sendTo(s2, "yes")
+		if count(s2) != 0 {
+			t.Fatal("a counted yes gets no notice")
+		}
+	})
+	h3 := newHarness(t)
+	var s3 *deskSession
+	h3.ui(func() {
+		s3 = h3.d.createSession(h3.proj, "default", "default")
+		h3.d.planFirst = true
+		h3.d.sendTo(s3, "Appeoved")
+		if count(s3) != 0 {
+			t.Fatal("no notice without a pending plan")
 		}
 	})
 }

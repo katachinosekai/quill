@@ -102,7 +102,7 @@ Every POST must send `Idempotency-Key: <16-64 chars of [A-Za-z0-9_-]>`, a new ra
 | `allow` | `permission` | |
 | `allowAlways` | `permission` with `request.canAllowAlways` | |
 | `deny` | `permission`, `question` | `text`: optional reason sent to Claude |
-| `approvePlan` | `plan` | optional `choice` (index into `request.choices`), `planAnswers` (by `request.questions` id), `approvalChoice` (index into `request.approval.options`, see below) |
+| `approvePlan` | `plan` | optional `choice` (index into `request.choices`), `planAnswers` (by `request.questions` id), `approvalChoice` (index into `request.approval.options`, see below), `text` (the card's "Changes (optional)": sent to Claude with the go-ahead, appended as "Also: <text>"; the approval counts as without it; with a stop `approvalChoice` it goes after the refusal as for `rejectPlan`) |
 | `rejectPlan` | `plan` | `text`: optional feedback sent to Claude |
 | `answer` | `question` | `answers` (see below) |
 | `choice` | `assistant` item with open `choices` | `index` |

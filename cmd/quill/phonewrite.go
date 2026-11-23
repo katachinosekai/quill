@@ -240,7 +240,11 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 					return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", err.Error()}
 				}
 			}
-			d.answerPlanApproval(s, it, appr, *in.ApprovalChoice, qs, ans)
+			changes := ""
+			if !appr.Stop[*in.ApprovalChoice] {
+				changes = in.Text // a stop option's text goes after the refusal, below
+			}
+			d.answerPlanApproval(s, it, appr, *in.ApprovalChoice, qs, ans, changes)
 			if appr.Stop[*in.ApprovalChoice] && strings.TrimSpace(in.Text) != "" {
 				a.send(s, in.Text)
 			}
@@ -255,7 +259,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 			}
 		}
 		if stopChoice {
-			d.answerPlanWith(s, it, false, "")
+			d.answerPlanWith(s, it, false, "", "")
 			break
 		}
 		if in.PlanAnswers != nil {
@@ -271,7 +275,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 			if opts, _ := planChoices(planQuestion(s.conv, it)); in.Choice != nil && *in.Choice >= 0 && *in.Choice < len(opts) {
 				choice = opts[*in.Choice] // another PC's approval option with answers (answerPlanApproval)
 			}
-			d.answerPlanMsg(s, it, true, planGoFull(choice, qs, ans))
+			d.answerPlanMsg(s, it, true, planGoChanges(planGoFull(choice, qs, ans), in.Text))
 			break
 		}
 		choice := ""
@@ -282,7 +286,11 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 			}
 			choice = opts[*in.Choice]
 		}
-		d.answerPlanWith(s, it, in.Action == "approvePlan", choice)
+		changes := ""
+		if in.Action == "approvePlan" {
+			changes = in.Text
+		}
+		d.answerPlanWith(s, it, in.Action == "approvePlan", choice, changes)
 		if in.Action == "rejectPlan" && strings.TrimSpace(in.Text) != "" {
 			a.send(s, in.Text)
 		}

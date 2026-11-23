@@ -1809,6 +1809,7 @@ func (d *desk) takeOver(s *deskSession, t live.Process, text string) {
 }
 
 func (d *desk) sendTo(s *deskSession, text string) {
+	typed := text
 	if s.remote != nil {
 		d.remoteWrite(s, "send", map[string]string{"text": text})
 		return
@@ -1830,11 +1831,16 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		s.forkOf = ""
 	}
 	if d.planFirst {
+		nearMiss := !approvesPlan(s, text) && !isPlanGo(typed) && !isRetry(typed) && nearApproval(typed) &&
+			(hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait)
 		if approvesPlan(s, text) && !isPlanGo(text) {
 			d.approveByText(s)
 		} else if !isPlanGo(text) && !isRetry(text) && !s.inTurn {
 			endPlan(s)
 			d.chatFor(s, s.conv.CancelPlans())
+		}
+		if nearMiss {
+			d.notify(s, notCountedNotice)
 		}
 		if !isRetry(text) {
 			s.planRevoked = false // the user's newest message decides from here
@@ -3061,19 +3067,19 @@ func (d *desk) approveByText(s *deskSession) {
 }
 
 func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
-	d.answerPlanWith(s, it, ok, "")
+	d.answerPlanWith(s, it, ok, "", "")
 }
 
 // answerPlanWith approves (or not) and, with choice, answers the choice the
 // approval question offered (user 2026-11-21).
-func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice string) {
+func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice, changes string) {
 	if s != nil && s.remote != nil {
 		if s = d.cardOwner(s, it); s != nil {
-			d.remotePlan(s, it, ok, choice, nil)
+			d.remotePlan(s, it, ok, choice, nil, changes)
 		}
 		return
 	}
-	d.answerPlanMsg(s, it, ok, planGoWith(choice))
+	d.answerPlanMsg(s, it, ok, planGoChanges(planGoWith(choice), changes))
 }
 
 // answerPlanAnswers approves with every plan question's answer (plan card
@@ -3081,7 +3087,7 @@ func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice str
 func (d *desk) answerPlanAnswers(s *deskSession, it *chat.Item, qs []planQ, ans map[int]planAnswer) {
 	if s != nil && s.remote != nil {
 		if s = d.cardOwner(s, it); s != nil {
-			d.remotePlan(s, it, true, "", planAnswersJSON(qs, ans))
+			d.remotePlan(s, it, true, "", planAnswersJSON(qs, ans), "")
 		}
 		return
 	}

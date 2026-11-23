@@ -3,6 +3,7 @@ package main
 import (
 	"regexp"
 	"strings"
+	"unicode"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
@@ -107,6 +108,61 @@ func planGoFull(choice string, qs []planQ, ans map[int]planAnswer) string {
 	return msg
 }
 
+// planGoChanges: the approval with the user's "Changes (optional)" text
+// appended ("Approved. Also: <text>"); the approval counts as before.
+func planGoChanges(msg, changes string) string {
+	if changes = strings.TrimSpace(changes); changes == "" {
+		return msg
+	}
+	return msg + " Also: " + changes
+}
+
+// notCountedNotice: shown when a typed message looks like an approval the
+// gate doesn't count (nearApproval).
+const notCountedNotice = "Not counted as approval: press Approve on the plan card or type yes."
+
+// nearApproval: a typed message that looks like an attempt to approve
+// ("Yes appeoved"): it starts with an approval word or is within two edits of
+// "approve(d)". Only a notice follows; it never counts as approval.
+func nearApproval(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	words := strings.FieldsFunc(t, func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' })
+	if len(words) == 0 {
+		return false
+	}
+	switch w := words[0]; w {
+	case "yes", "yeah", "yep", "yup", "ok", "okay", "approve", "approved", "proceed", "lgtm":
+		return true
+	case "go":
+		return len(words) > 1 && (words[1] == "ahead" || words[1] == "for")
+	case "do":
+		return len(words) > 1 && words[1] == "it"
+	default:
+		return len(w) >= 5 && w[0] == 'a' && (levenshtein(w, "approve") <= 2 || levenshtein(w, "approved") <= 2)
+	}
+}
+
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(rb)]
+}
+
 // planStopMessage: what a stop on a card with other questions sends: the
 // plan isn't run, and the answers go along (planGoAnswers' numbering).
 func planStopMessage(choice string, qs []planQ, ans map[int]planAnswer) string {
@@ -124,7 +180,7 @@ const planStopText = "Not running the plan: the user turned it down."
 // questions' answers: a go-ahead approves as "Approve plan & run all" does;
 // a stop is "Don't run", and with other questions their answers are sent
 // after it (user 2026-11-22, f4684ce).
-func (d *desk) answerPlanApproval(s *deskSession, it *chat.Item, a *approvalOpts, i int, qs []planQ, ans map[int]planAnswer) {
+func (d *desk) answerPlanApproval(s *deskSession, it *chat.Item, a *approvalOpts, i int, qs []planQ, ans map[int]planAnswer, changes string) {
 	if a == nil || (i < 0 || i >= len(a.Options)) && !(i == dontRunPick && a.DontRun) {
 		return
 	}
@@ -148,7 +204,7 @@ func (d *desk) answerPlanApproval(s *deskSession, it *chat.Item, a *approvalOpts
 		if !stop && len(qs) > 0 {
 			answers = planAnswersJSON(qs, ans)
 		}
-		d.remotePlan(s, it, !stop, choice, answers)
+		d.remotePlan(s, it, !stop, choice, answers, changes)
 		return
 	}
 	if stop {
@@ -159,7 +215,7 @@ func (d *desk) answerPlanApproval(s *deskSession, it *chat.Item, a *approvalOpts
 		}
 		return
 	}
-	d.answerPlanMsg(s, it, true, planGoFull(choice, qs, ans))
+	d.answerPlanMsg(s, it, true, planGoChanges(planGoFull(choice, qs, ans), changes))
 }
 
 // approvalPick: the card's pick on the approval question (-1 = none yet).
@@ -197,7 +253,7 @@ func (v *chatView) approvalButtons(owner *deskSession, plan *chat.Item, a *appro
 		enabled := a.Stop[i] || v.d.canAnswer(owner)
 		btns = append(btns, glowButton(label, icon, tint, enabled, v.guarded(func() {
 			if len(qs) == 0 {
-				v.d.answerPlanApproval(owner, plan, a, i, nil, nil)
+				v.d.answerPlanApproval(owner, plan, a, i, nil, nil, "")
 				return
 			}
 			if v.planApprove == nil {
@@ -211,7 +267,7 @@ func (v *chatView) approvalButtons(owner *deskSession, plan *chat.Item, a *appro
 		// No option stops: the card's own way to turn the plan down, at
 		// once (with the other questions' answers, if any).
 		btns = append(btns, glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() {
-			v.d.answerPlanApproval(owner, plan, a, dontRunPick, qs, ans)
+			v.d.answerPlanApproval(owner, plan, a, dontRunPick, qs, ans, "")
 		})))
 	}
 	return v.buttonRow(btns...)
@@ -223,7 +279,7 @@ func (v *chatView) approvalSend(owner *deskSession, plan *chat.Item, a *approval
 	pick := v.approvalPick(plan)
 	enabled := pick >= 0 && (a.Stop[pick] || v.d.canAnswer(owner))
 	send := glowButton("Send answers", theme.MailSendIcon(), colIdle, enabled, v.guarded(func() {
-		v.d.answerPlanApproval(owner, plan, a, v.approvalPick(plan), qs, ans)
+		v.d.answerPlanApproval(owner, plan, a, v.approvalPick(plan), qs, ans, "")
 	}))
 	out := []fyne.CanvasObject{v.buttonRow(send)}
 	if pick < 0 {

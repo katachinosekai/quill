@@ -781,7 +781,7 @@ func (d *desk) remoteAnswers(s *deskSession, it *chat.Item, answers map[string]s
 	d.remoteWrite(s, "answer", map[string]any{"requestId": it.RequestID, "action": "answer", "answers": out})
 }
 
-func (d *desk) remotePlan(s *deskSession, it *chat.Item, ok bool, choice string, answers map[string]any) {
+func (d *desk) remotePlan(s *deskSession, it *chat.Item, ok bool, choice string, answers map[string]any, changes string) {
 	action := "rejectPlan"
 	if ok {
 		action = "approvePlan"
@@ -789,6 +789,9 @@ func (d *desk) remotePlan(s *deskSession, it *chat.Item, ok bool, choice string,
 	body := map[string]any{"requestId": it.RequestID, "action": action}
 	if ok && answers != nil {
 		body["planAnswers"] = answers
+	}
+	if ok && strings.TrimSpace(changes) != "" {
+		body["text"] = changes
 	}
 	// The other PC parses the same question the same way; send the index.
 	if opts, _ := planChoices(planQuestion(s.conv, it)); ok && choice != "" {
