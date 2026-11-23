@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.25
+Version:        0.1.26
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -74,6 +74,16 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Mon Nov 23 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.26-1
+- Languages: topic titles in any language; autocorrect follows the system language (with a picker); dates, sorting and search follow your language; voice input auto-detects the language with larger models
+- Whole-letter text streaming
+- Plan cards: recommended option highlighted, warning above the approval in a highlighted box, numbered steps on separate lines, buttons also when sources follow the question
+- "Keep approving in this tab" auto-approve (root commands and other sessions' requests still need a plan)
+- Stricter and more capable read-only gate
+- Always-visible status line (also in the kmem window); the kmem window loads once per refresh and badges only what needs you; one kmem assistant at a time
+- Windows keep their size; optional KDE rules remember window positions; device lock survives live reloads
+- Crash reports recognise graphics driver resets
+- Bundles kmem 1.9.3 and Quill Android 0.9.38
 * Sun Nov 22 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.25-1
 - Claude can coordinate with subagents: asked at startup (Welcome, or once after updating); Settings keeps the choice
 - Updates keep your settings; only new, changed or removed features that need your input ask, once each, in one dialog (also answerable from Quill Android)
