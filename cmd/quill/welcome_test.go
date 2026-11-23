@@ -26,13 +26,13 @@ func TestWelcomeChoices(t *testing.T) {
 		if b, err := os.ReadFile(rules); err != nil || string(b) != defaultKmemRules || !strings.Contains(strings.Join(done, " "), "Installed Quill's default kmem rules") {
 			t.Fatalf("beginner rules installed: %v %v", err, done)
 		}
-		if !h.d.stt.btn.Visible() || !h.d.stt.langBtn.Visible() {
+		if !h.d.stt.btn.Visible() {
 			t.Fatal("the mic shows while speech to text is on")
 		}
 		os.WriteFile(rules, []byte("1. mine\n"), 0o644)
 		h.d.applyWelcome(welcomeChoices{Lang: "", Rules: true})
-		if p.String("newModel") != "default" || !p.Bool(prefSTTOff) || h.d.stt.btn.Visible() || h.d.stt.langBtn.Visible() {
-			t.Fatal("online and speech to text off hides the mic and Voice buttons")
+		if p.String("newModel") != "default" || !p.Bool(prefSTTOff) || h.d.stt.btn.Visible() {
+			t.Fatal("online and speech to text off hides the mic")
 		}
 		if b, _ := os.ReadFile(rules); string(b) != "1. mine\n" {
 			t.Fatal("an existing rules file stays as it is")

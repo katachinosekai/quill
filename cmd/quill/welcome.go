@@ -207,7 +207,7 @@ func (d *desk) showWelcome(after func()) {
 	}
 	names = append(names, welcomeVoiceOff)
 	voice := widget.NewSelect(names, nil)
-	want := d.app.Preferences().StringWithFallback("sttLang", systemLang())
+	want := d.app.Preferences().StringWithFallback("sttLang", autoLang)
 	if d.app.Preferences().Bool(prefSTTOff) {
 		voice.SetSelected(welcomeVoiceOff)
 	} else {

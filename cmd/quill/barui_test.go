@@ -144,9 +144,6 @@ func TestBarButtonsAreMenus(t *testing.T) {
 		}
 		check("model", h.d.modelItems(s), h.d.modelOptions(s), s.model)
 		check("mode", h.d.modeItems(s), modeOptions(s), s.mode)
-		if l := menuLabels(h.d.voiceItems()); len(l) != 2 || !strings.HasPrefix(l[0], "Language: ") {
-			t.Fatalf("voice menu %v", l)
-		}
 		if l := menuLabels(h.d.taskItems(s)); len(l) != 1 || l[0] != "Show background tasks..." {
 			t.Fatalf("tasks menu %v", l)
 		}

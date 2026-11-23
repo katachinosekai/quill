@@ -21,3 +21,16 @@ func Clean(s string) string {
 	}
 	return strings.Join(out, " ")
 }
+
+// AutoLanguage asks whisper to detect the spoken language (multilingual
+// models only).
+const AutoLanguage = "auto"
+
+// Language is the code handed to whisper: an unset language means
+// auto-detect, never a silent English.
+func Language(lang string) string {
+	if lang == "" {
+		return AutoLanguage
+	}
+	return lang
+}

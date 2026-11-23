@@ -558,13 +558,6 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	coordNote := caption(coordinatorExplain + "\n" + coordinatorOnline)
 	d.buildChk, d.coordChk = buildChk, coordChk
 	newSessions := container.NewVBox(d.newSessionModelSetting(), d.newSessionModeSetting())
-	sttChk := widget.NewCheck("Speech to text (the mic and Voice buttons under the message box)", func(on bool) {
-		d.app.Preferences().SetBool(prefSTTOff, !on)
-		if d.stt != nil {
-			d.stt.syncOff()
-		}
-	})
-	sttChk.Checked = !d.app.Preferences().Bool(prefSTTOff)
 	animChk := widget.NewCheck("Animate new text (replies appear character by character while they stream)", func(on bool) { d.app.Preferences().SetBool(prefAnimateText, on) })
 	animChk.Checked = d.animateText()
 	speedSel := widget.NewSelect(animSpeedNames, func(v string) { d.app.Preferences().SetString(prefAnimateSpeed, speedKey(v)) })
@@ -594,7 +587,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	_ = roBtn
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
-	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, coordNote, animChk, speedRow, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Typing"), sttChk, d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
+	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, coordNote, animChk, speedRow, chipChk, updChk, notifyChk, widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Voice input"), d.voiceSettings(), widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
@@ -1123,7 +1116,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		}
 		return d.modeItems(d.current)
 	})
-	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.stt.langBtn), d.chipsBtn)
+	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn), d.chipsBtn)
 	inputCard := bg(colInput, 12, container.NewBorder(nil, controls, nil, container.NewVBox(d.stopBtn, layout.NewSpacer(), d.stt.btn, d.sendBtn), d.input))
 	d.verLine = d.newVerLine()
 	d.statsRow = container.New(hintsLayout{}, d.verLine.slot, d.folder)

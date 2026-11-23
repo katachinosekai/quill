@@ -156,3 +156,12 @@ func TestRealMicOpens(t *testing.T) {
 	}
 	t.Logf("captured %d samples in 1s, peak level %.4f", n, peak)
 }
+
+func TestLanguageAutoByDefault(t *testing.T) {
+	if Language("") != "auto" || Language(AutoLanguage) != "auto" {
+		t.Fatal("unset and auto must both reach whisper as \"auto\"")
+	}
+	if Language("de") != "de" || Language("en") != "en" {
+		t.Fatal("an explicit language must pass through")
+	}
+}

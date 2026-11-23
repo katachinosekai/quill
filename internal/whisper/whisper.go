@@ -74,10 +74,7 @@ func (m *Model) Transcribe(samples []float32, lang string) (string, error) {
 	if secs < 28 {
 		p.audio_ctx = C.int(min(1500, int(secs*50)+128))
 	}
-	if lang == "" {
-		lang = "en"
-	}
-	clang := C.CString(lang)
+	clang := C.CString(Language(lang))
 	defer C.free(unsafe.Pointer(clang))
 	p.language = clang
 	if C.whisper_full(m.ctx, p, (*C.float)(unsafe.Pointer(&samples[0])), C.int(len(samples))) != 0 {

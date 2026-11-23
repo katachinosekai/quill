@@ -1045,7 +1045,7 @@ func TestSpeechToText(t *testing.T) {
 		h.d.input.SetText("note:")
 		sp.click()
 	})
-	h.eventually("live partial shown", func() bool { return getStarted() == "en" && h.d.input.Text == "note: hello from" && sp.live != nil })
+	h.eventually("live partial shown", func() bool { return getStarted() == "auto" && h.d.input.Text == "note: hello from" && sp.live != nil })
 	h.ui(func() {
 		if sp.state != sttRecording {
 			t.Fatal("should be listening")
@@ -1055,7 +1055,7 @@ func TestSpeechToText(t *testing.T) {
 	h.eventually("final text", func() bool { return sp.state == sttIdle && h.d.input.Text == "note: hello from my voice" })
 	h.ui(func() {
 		sp.setLang("de")
-		if sp.lang() != "de" || modelFile("de") != "ggml-base-q5_1.bin" || modelFile("en") != "ggml-base.en-q5_1.bin" {
+		if sp.lang() != "de" || modelFile("de", "base") != "ggml-base-q5_1.bin" || modelFile("en", "base") != "ggml-base.en-q5_1.bin" {
 			t.Fatal("language choice and model mapping")
 		}
 		sp.setLang("en")
@@ -1068,8 +1068,8 @@ func TestSpeechToText(t *testing.T) {
 			h.w.Canvas().Overlays().Remove(o)
 		}
 		h.d.pickLanguage("en", func(string) {})
-		if languages[0].code != "en" {
-			t.Fatal("English should be first")
+		if languages[0].code != "auto" || languages[1].code != "en" {
+			t.Fatal("Auto-detect then English should come first")
 		}
 	})
 }

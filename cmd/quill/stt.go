@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -43,14 +42,13 @@ const (
 type liveSession interface{ Stop() }
 
 type speech struct {
-	d       *desk
-	btn     *widget.Button
-	langBtn *widget.Button
-	state   sttState
-	live    liveSession
-	base    string
-	ready   func(lang string) error
-	start   func(lang string, update func(whisper.Update)) (liveSession, error)
+	d     *desk
+	btn   *widget.Button
+	state sttState
+	live  liveSession
+	base  string
+	ready func(lang string) error
+	start func(lang string, update func(whisper.Update)) (liveSession, error)
 
 	entry *sendEntry
 
@@ -60,43 +58,6 @@ type speech struct {
 	idle      *time.Timer
 }
 
-type language struct{ code, name string }
-
-var languages = []language{
-	{"en", "English"}, {"zh", "Chinese"}, {"de", "German"}, {"es", "Spanish"}, {"ru", "Russian"}, {"ko", "Korean"},
-	{"fr", "French"}, {"ja", "Japanese"}, {"pt", "Portuguese"}, {"tr", "Turkish"}, {"pl", "Polish"}, {"ca", "Catalan"},
-	{"nl", "Dutch"}, {"ar", "Arabic"}, {"sv", "Swedish"}, {"it", "Italian"}, {"id", "Indonesian"}, {"hi", "Hindi"},
-	{"fi", "Finnish"}, {"vi", "Vietnamese"}, {"he", "Hebrew"}, {"uk", "Ukrainian"}, {"el", "Greek"}, {"ms", "Malay"},
-	{"cs", "Czech"}, {"ro", "Romanian"}, {"da", "Danish"}, {"hu", "Hungarian"}, {"ta", "Tamil"}, {"no", "Norwegian"},
-	{"th", "Thai"}, {"ur", "Urdu"}, {"hr", "Croatian"}, {"bg", "Bulgarian"}, {"lt", "Lithuanian"}, {"la", "Latin"},
-	{"mi", "Maori"}, {"ml", "Malayalam"}, {"cy", "Welsh"}, {"sk", "Slovak"}, {"te", "Telugu"}, {"fa", "Persian"},
-	{"lv", "Latvian"}, {"bn", "Bengali"}, {"sr", "Serbian"}, {"az", "Azerbaijani"}, {"sl", "Slovenian"}, {"kn", "Kannada"},
-	{"et", "Estonian"}, {"mk", "Macedonian"}, {"br", "Breton"}, {"eu", "Basque"}, {"is", "Icelandic"}, {"hy", "Armenian"},
-	{"ne", "Nepali"}, {"mn", "Mongolian"}, {"bs", "Bosnian"}, {"kk", "Kazakh"}, {"sq", "Albanian"}, {"sw", "Swahili"},
-	{"gl", "Galician"}, {"mr", "Marathi"}, {"pa", "Punjabi"}, {"si", "Sinhala"}, {"km", "Khmer"}, {"sn", "Shona"},
-	{"yo", "Yoruba"}, {"so", "Somali"}, {"af", "Afrikaans"}, {"oc", "Occitan"}, {"ka", "Georgian"}, {"be", "Belarusian"},
-	{"tg", "Tajik"}, {"sd", "Sindhi"}, {"gu", "Gujarati"}, {"am", "Amharic"}, {"yi", "Yiddish"}, {"lo", "Lao"},
-	{"uz", "Uzbek"}, {"fo", "Faroese"}, {"ht", "Haitian Creole"}, {"ps", "Pashto"}, {"tk", "Turkmen"}, {"nn", "Nynorsk"},
-	{"mt", "Maltese"}, {"sa", "Sanskrit"}, {"lb", "Luxembourgish"}, {"my", "Myanmar"}, {"bo", "Tibetan"}, {"tl", "Tagalog"},
-	{"mg", "Malagasy"}, {"as", "Assamese"}, {"tt", "Tatar"}, {"haw", "Hawaiian"}, {"ln", "Lingala"}, {"ha", "Hausa"},
-	{"ba", "Bashkir"}, {"jw", "Javanese"}, {"su", "Sundanese"}, {"yue", "Cantonese"},
-}
-
-func init() {
-	rest := languages[1:]
-	less := sortLess()
-	sort.Slice(rest, func(i, j int) bool { return less(rest[i].name, rest[j].name) })
-}
-
-func languageName(code string) string {
-	for _, l := range languages {
-		if l.code == code {
-			return l.name
-		}
-	}
-	return code
-}
-
 func sttHome() string {
 	if d, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(d, ".local", "share", "quill")
@@ -104,34 +65,61 @@ func sttHome() string {
 	return ""
 }
 
-func modelFile(lang string) string {
-	if lang == "en" {
-		return "ggml-base.en-q5_1.bin"
-	}
-	return "ggml-base-q5_1.bin"
+// Multilingual model sizes offered for voice input; base is the default.
+type modelSize struct{ id, label, mb string }
+
+const prefSTTModel = "sttModelSize"
+
+var modelSizes = []modelSize{
+	{"base", "Base", "57 MB"},
+	{"small", "Small", "181 MB"},
+	{"medium", "Medium", "514 MB"},
 }
 
-func modelPath(lang string) string {
+func sizeInfo(id string) modelSize {
+	for _, m := range modelSizes {
+		if m.id == id {
+			return m
+		}
+	}
+	return modelSizes[0]
+}
+
+// modelFile picks the model file: English uses the English-only model of the
+// chosen size, every other language and Auto-detect the multilingual one.
+func modelFile(lang, size string) string {
+	size = sizeInfo(size).id
+	q := "q5_1"
+	if size == "medium" {
+		q = "q5_0"
+	}
+	if lang == "en" {
+		return "ggml-" + size + ".en-" + q + ".bin"
+	}
+	return "ggml-" + size + "-" + q + ".bin"
+}
+
+func modelPath(lang, size string) string {
 	if p := os.Getenv("QUILL_WHISPER_MODEL"); p != "" {
 		return p
 	}
-	return filepath.Join(sttHome(), "models", modelFile(lang))
+	return filepath.Join(sttHome(), "models", modelFile(lang, size))
 }
 
-func modelReady(lang string) error {
-	st, err := os.Stat(modelPath(lang))
+func modelReady(lang, size string) error {
+	st, err := os.Stat(modelPath(lang, size))
 	if err != nil || st.Size() < minModelSize {
 		return fmt.Errorf("the %s speech model is not downloaded", languageName(lang))
 	}
 	return nil
 }
 
-func downloadModel(ctx context.Context, lang string, progress func(float64)) error {
-	dst := modelPath(lang)
+func downloadModel(ctx context.Context, lang, size string, progress func(float64)) error {
+	dst := modelPath(lang, size)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelBaseURL+modelFile(lang), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelBaseURL+modelFile(lang, size), nil)
 	if err != nil {
 		return err
 	}
@@ -185,28 +173,23 @@ func downloadModel(ctx context.Context, lang string, progress func(float64)) err
 }
 
 func newSpeech(d *desk) *speech {
-	sp := &speech{d: d, ready: modelReady}
+	sp := &speech{d: d}
+	sp.ready = func(lang string) error { return modelReady(lang, sp.modelSize()) }
 	sp.start = sp.startLive
 	sp.btn = widget.NewButtonWithIcon("", theme.MediaRecordIcon(), sp.click)
 	sp.btn.Importance = widget.LowImportance
-	sp.langBtn = widget.NewButton("Voice: "+strings.ToUpper(sp.lang()), func() {
-		menuAbove(sp.langBtn, d.voiceItems())
-	})
-	sp.langBtn.Importance = widget.MediumImportance
 	sp.syncOff()
 	return sp
 }
 
-// syncOff hides the mic and language buttons while speech to text is off
-// (Welcome's "Off"); picking a language turns it on again.
+// syncOff hides the mic while speech to text is off (Welcome's "Off" or the
+// Settings switch); the language and model size live in Settings.
 func (sp *speech) syncOff() {
 	off := sp.d.app.Preferences().Bool(prefSTTOff)
-	for _, b := range []*widget.Button{sp.btn, sp.langBtn} {
-		if off {
-			b.Hide()
-		} else {
-			b.Show()
-		}
+	if off {
+		sp.btn.Hide()
+	} else {
+		sp.btn.Show()
 	}
 }
 
@@ -218,14 +201,66 @@ func (sp *speech) target() *sendEntry {
 }
 
 func (sp *speech) lang() string {
-	return sp.d.app.Preferences().StringWithFallback("sttLang", "en")
+	return sp.d.app.Preferences().StringWithFallback("sttLang", autoLang)
 }
 
-func (sp *speech) setLang(code string) {
+func (sp *speech) modelSize() string {
+	return sizeInfo(sp.d.app.Preferences().StringWithFallback(prefSTTModel, "base")).id
+}
+
+func (sp *speech) setModelSize(id string) {
+	sp.d.app.Preferences().SetString(prefSTTModel, sizeInfo(id).id)
+}
+
+func (sp *speech) setLangPref(code string) {
 	sp.d.app.Preferences().SetString("sttLang", code)
+}
+
+// setLang also turns voice input on (used once a model is downloaded).
+func (sp *speech) setLang(code string) {
+	sp.setLangPref(code)
 	sp.d.app.Preferences().SetBool(prefSTTOff, false)
-	sp.langBtn.SetText("Voice: " + strings.ToUpper(code))
 	sp.syncOff()
+}
+
+// voiceSettings is the Settings section for voice input: on/off switch,
+// language (Auto-detect by default) and model size.
+func (d *desk) voiceSettings() fyne.CanvasObject {
+	p := d.app.Preferences()
+	// Settings is built before the speech object exists, so only read prefs here.
+	lang := func() string { return p.StringWithFallback("sttLang", autoLang) }
+	on := widget.NewCheck("Voice input (the mic button under the message box)", func(v bool) {
+		p.SetBool(prefSTTOff, !v)
+		if d.stt != nil {
+			d.stt.syncOff()
+		}
+	})
+	on.Checked = !p.Bool(prefSTTOff)
+	langBtn := widget.NewButton(languageLabel(languageFor(lang())), nil)
+	langBtn.OnTapped = func() {
+		d.pickLanguage(lang(), func(code string) {
+			p.SetString("sttLang", code)
+			langBtn.SetText(languageLabel(languageFor(code)))
+		})
+	}
+	var labels []string
+	for _, m := range modelSizes {
+		labels = append(labels, m.label+" ("+m.mb+")")
+	}
+	size := widget.NewSelect(labels, func(v string) {
+		for _, m := range modelSizes {
+			if v == m.label+" ("+m.mb+")" {
+				p.SetString(prefSTTModel, m.id)
+			}
+		}
+	})
+	cur := sizeInfo(p.StringWithFallback(prefSTTModel, "base"))
+	size.SetSelected(cur.label + " (" + cur.mb + ")")
+	note := widget.NewLabel("Auto-detect uses the multilingual model and finds the spoken language itself. A larger size understands more languages better but is slower; it downloads the first time you use the mic. Voice input runs entirely on this computer.")
+	note.Wrapping = fyne.TextWrapWord
+	return container.NewVBox(on,
+		container.NewBorder(nil, nil, widget.NewLabel("Language"), nil, langBtn),
+		container.NewBorder(nil, nil, widget.NewLabel("Model size"), nil, size), note)
 }
 
 func (sp *speech) loadModel(lang string) (*whisper.Model, error) {
@@ -234,7 +269,7 @@ func (sp *speech) loadModel(lang string) (*whisper.Model, error) {
 	if sp.idle != nil {
 		sp.idle.Stop()
 	}
-	path := modelPath(lang)
+	path := modelPath(lang, sp.modelSize())
 	if sp.model != nil && sp.modelPath == path {
 		return sp.model, nil
 	}
@@ -372,11 +407,12 @@ func (sp *speech) finish() {
 func (sp *speech) setup(lang string) {
 	d := sp.d
 	chosen := lang
+	chosenSize := sp.modelSize()
 	pick := widget.NewButton(languageName(lang), nil)
 	size := widget.NewLabel("")
 	info := func() {
 		pick.SetText(languageName(chosen))
-		size.SetText(fmt.Sprintf("Downloads the %s speech model once (about 57 MB) into ~/.local/share/quill. After that it works offline and nothing leaves this computer.", languageName(chosen)))
+		size.SetText(fmt.Sprintf("Downloads the %s speech model once (about %s) into ~/.local/share/quill. After that it works offline and nothing leaves this computer. Larger sizes understand more languages better but are slower.", languageName(chosen), sizeInfo(chosenSize).mb))
 	}
 	size.Wrapping = fyne.TextWrapWord
 	pick.OnTapped = func() {
@@ -385,6 +421,19 @@ func (sp *speech) setup(lang string) {
 			info()
 		})
 	}
+	var sizeLabels []string
+	for _, m := range modelSizes {
+		sizeLabels = append(sizeLabels, m.label+" ("+m.mb+")")
+	}
+	sizePick := widget.NewSelect(sizeLabels, func(v string) {
+		for _, m := range modelSizes {
+			if v == m.label+" ("+m.mb+")" {
+				chosenSize = m.id
+			}
+		}
+		info()
+	})
+	sizePick.SetSelected(sizeInfo(chosenSize).label + " (" + sizeInfo(chosenSize).mb + ")")
 	info()
 	bar := widget.NewProgressBar()
 	bar.Hide()
@@ -395,14 +444,16 @@ func (sp *speech) setup(lang string) {
 	get.OnTapped = func() {
 		get.Disable()
 		pick.Disable()
+		sizePick.Disable()
 		bar.Show()
-		code := chosen
+		code, sz := chosen, chosenSize
 		go func() {
-			err := downloadModel(ctx, code, func(f float64) { d.do(func() { bar.SetValue(f) }) })
+			err := downloadModel(ctx, code, sz, func(f float64) { d.do(func() { bar.SetValue(f) }) })
 			d.do(func() {
 				if err != nil {
 					get.Enable()
 					pick.Enable()
+					sizePick.Enable()
 					bar.Hide()
 					if ctx.Err() == nil {
 						dialog.ShowError(err, d.win)
@@ -411,14 +462,15 @@ func (sp *speech) setup(lang string) {
 				}
 				dlg.Hide()
 				sp.setLang(code)
+				sp.setModelSize(sz)
 				sp.begin()
 			})
 		}()
 	}
-	body := container.NewVBox(container.NewHBox(widget.NewLabel("Language"), pick), size, bar, get)
+	body := container.NewVBox(container.NewHBox(widget.NewLabel("Language"), pick), container.NewHBox(widget.NewLabel("Model size"), sizePick), size, bar, get)
 	dlg = dialog.NewCustom("Set up speech to text", "Cancel", body, d.win)
 	dlg.SetOnClosed(cancel)
-	dlg.Resize(fyne.NewSize(520, 260))
+	dlg.Resize(fyne.NewSize(520, 300))
 	dlg.Show()
 }
 
@@ -432,7 +484,7 @@ func (d *desk) pickLanguage(current string, onPick func(code string)) {
 		func() fyne.CanvasObject { return widget.NewLabel("") },
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			l := shown[i]
-			o.(*widget.Label).SetText(l.name + "  (" + l.code + ")")
+			o.(*widget.Label).SetText(languageLabel(l))
 		},
 	)
 	var pop *widget.PopUp
@@ -453,13 +505,7 @@ func (d *desk) pickLanguage(current string, onPick func(code string)) {
 		list.UnselectAll()
 	}
 	search.OnChanged = func(q string) {
-		q = foldKey(strings.TrimSpace(q))
-		shown = nil
-		for _, l := range languages {
-			if q == "" || foldContains(l.name, q) || strings.HasPrefix(l.code, q) {
-				shown = append(shown, l)
-			}
-		}
+		shown = filterLanguages(q)
 		list.Refresh()
 		sel := list.OnSelected
 		list.OnSelected = nil

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strings"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -72,25 +70,6 @@ func (d *desk) setShowChips(show bool) {
 	d.hideChips = !show
 	d.app.Preferences().SetBool("hideChips", d.hideChips)
 	d.redrawChats()
-}
-
-func (d *desk) voiceItems() []*fyne.MenuItem {
-	sp := d.stt
-	name := strings.ToUpper(sp.lang())
-	for _, l := range languages {
-		if l.code == sp.lang() {
-			name = l.name + " (" + l.code + ")"
-		}
-	}
-	lang := fyne.NewMenuItem("Language: "+name+"...", func() {
-		d.pickLanguage(sp.lang(), func(code string) { sp.setLang(code) })
-	})
-	on := fyne.NewMenuItem("Voice input", func() {
-		d.app.Preferences().SetBool(prefSTTOff, true)
-		sp.syncOff()
-	})
-	on.Checked = true // the button only shows while voice input is on
-	return []*fyne.MenuItem{lang, fyne.NewMenuItemSeparator(), on}
 }
 
 const stopEverythingLabel = "Stop everything (reply and background tasks)"
