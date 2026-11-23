@@ -37,11 +37,13 @@ Any non-2xx response has this body:
 | 409 | `not_running` | the session has no running Claude process and the action needs one (interrupt) |
 | 409 | `file_busy` | another file read of this phone is still running |
 | 409 | `blocked` | Quill refused the send the same way the desktop box would (session loading, taking over, held by a terminal), or the /command only works on the desktop (dialogs, browser, files, settings: /login, /mcp, /export, /add-dir, ...) |
+| 426 | `update_required` | topic mode (hello `topics.on`): the older handoff start (`start.kmem`, handoff `resume` / `delete`); the message says to update Quill Android |
 | 413 | `too_large` | body over 64 KiB, or `text` over 32 KiB |
 | 422 | `idempotency_mismatch` | Idempotency-Key reused with a different method, path or body |
 | 429 | `rate_limited` | too many writes or file reads; see `Retry-After` |
 | 500 | `internal` | the request failed inside Quill Desktop; nothing is remembered for its Idempotency-Key, so it may be retried |
 | 503 | `not_ready` | Quill is still starting |
+| 503 | `kmem_unavailable` | a topics endpoint or `openTopic` while topic mode is off (kmem memory off or kmem not installed) |
 
 The `message` is for logs; the phone keys off `code`.
 
@@ -154,6 +156,7 @@ A plan whose approval question offers its own options, a go-ahead and a way to s
 - `focused`: the session shown in the desktop's current view.
 - `tokens`: the session's total tokens from its transcript (refreshed about every 5 s; a growth arrives as a `session` change).
 - `project` (since 2026-11-21): the kmem project the session is grouped under. `group` holds the same value, so older phones group by project too. Quill Desktop has no folders any more (no Active, Inactive, Archive, Created by Claude or custom folders).
+- Topic fields (since topics level 1, only in topic mode; see "Topics"): `topic` (the kmem topic the session coordinates), `topicTitle`, `legacyName` (the old kmem name of a session that predates topic tabs; it is to be merged into a topic), `agents` (subagents), `agentTokens` (their summed tokens) and `endWait` (the end-of-session check). All are left out when empty. `kmem` stays as before for older phones.
 - `renamed: true` (optional) when the title was set by hand: offer "Restore original name".
 
 ### Item
@@ -238,7 +241,7 @@ Assistant items with a choice card add:
 
 First call after pairing and after each app start. Body: `{"name": "Pixel 8", "app": "0.9.4"}`. Sets the phone's display name in Quill's phone list and its last-seen time.
 
-Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15", "unlock": true, "lanUnlock": false}`. `control` says whether writes are allowed for this phone right now. `unlock`: this device must unlock before anything else works (see "Device lock and unlock"). `lanUnlock`: right now this device may unlock with its hardware key instead of the password (home-network unlock); older Quill Desktop builds leave it out (treat as `false`). `quill` is the Quill Desktop version (`"dev"` in local builds). `files`: `{"api": 1, "on": false}`: the file endpoint's version and whether this device may open files right now (a phone whose "Let this device open files" switch is on; always `false` for other PCs); older Quill Desktop builds leave it out (no file links). Needs an Idempotency-Key like every POST, but is allowed while control is off.
+Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "quill": "0.1.15", "unlock": true, "lanUnlock": false}`. `control` says whether writes are allowed for this phone right now. `unlock`: this device must unlock before anything else works (see "Device lock and unlock"). `lanUnlock`: right now this device may unlock with its hardware key instead of the password (home-network unlock); older Quill Desktop builds leave it out (treat as `false`). `quill` is the Quill Desktop version (`"dev"` in local builds). `topics`: `{"api": 1, "on": true, "endCheck": true}`: topic mode is on (kmem memory in use) and, with `endCheck`, kmem has the end-of-session check (1.10.0+) so `endWait` can appear; older Quill Desktop builds leave it out (no topics: use the handoff flow). `files`: `{"api": 1, "on": false}`: the file endpoint's version and whether this device may open files right now (a phone whose "Let this device open files" switch is on; always `false` for other PCs); older Quill Desktop builds leave it out (no file links). Needs an Idempotency-Key like every POST, but is allowed while control is off.
 
 ### GET /phone/sessions
 
@@ -266,7 +269,8 @@ Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "qu
 }
 ```
 
-- `sessions`: Session objects for the LIVE sessions only (open tabs and running Quill sessions), in sidebar order: grouped by project, projects A-Z. Ended sessions are kmem handoffs (`/phone/handoffs`).
+- `sessions`: Session objects for the LIVE sessions only (open tabs and running Quill sessions), in sidebar order: grouped by project, projects A-Z. In topic mode `group` is the topic's title for a topic session; a live session that is not a topic yet (`legacyName`) stays listed until merged. Outside topic mode, ended sessions are kmem handoffs (`/phone/handoffs`).
+- `topics` (topic mode only; left out otherwise): the topics the "New session" sheet offers, see "Topics".
 - `boot` changes when Quill restarts; the phone then drops all cached state.
 - `cursor` is the stream position to pass to `/phone/stream` next.
 - `projects`: the project names in the sidebar, for the "Project" picker (the user may also type a new one). `actions`: the session-menu endpoints this Quill Desktop supports; older builds leave it out, so the phone shows only the options listed.
@@ -276,6 +280,8 @@ Response: `{"v": 1, "phoneId": "a1b2c3d4", "control": true, "boot": "9f...", "qu
 ### GET /phone/folders
 
 `{"v": 1, "folders": [{"path": "/home/user/Projects/demo", "name": "demo"}]}`: the folders Quill knows (sidebar groups and recent folders). New sessions can only be started in one of these.
+
+With `?topic=SLUG` in topic mode (`topic` is echoed): the topic's working folders only: its live coordinator's folder first, then the extra folders of its project (Quill Desktop's project folders). `404 not_found` for an unknown topic. `openTopic` accepts these in `folder`.
 
 ### GET /phone/session/{id}/items
 
@@ -329,12 +335,14 @@ Returns at once when something changed after `cursor`, otherwise after `wait` se
     {"type": "usage", "usage": {}},
     {"type": "control", "control": false},
     {"type": "files", "files": {"api": 1, "on": true}},
-    {"type": "settings", "settings": {"buildGate": false, "coordinator": true}}
+    {"type": "settings", "settings": {"buildGate": false, "coordinator": true}},
+    {"type": "topics", "topics": []}
   ]
 }
 ```
 
 - A `session` change carries the whole Session object; its `epoch`/`rev` tell the phone whether to fetch items (only for the session on screen; others just update their row). `usage` is shaped as in `/phone/sessions`.
+- A `topics` change (topic mode) carries the whole `topics` list of `/phone/sessions` when a topic's title, status, counts or live session changed.
 - Every reply carries the current `settings` (as in `/phone/sessions`); a `settings` change comes when either switch changed, on the PC or from a device.
 - `reset: true` (cursor too old, or a different `boot`): the phone refetches `/phone/sessions`.
 - `control` and `files` changes are per phone: each phone gets only its own (`files` follows its "Let this device open files" switch, shaped like hello's `files`).
@@ -412,6 +420,8 @@ The desktop's right-click session menu (revised 2026-11-21). A tab, its Claude s
 
 ### POST /phone/handoffs/{name}/resume and /delete
 
+In topic mode both answer `426 update_required` (handoffs are read-only history; see "Topics"). The rest of this section is the behaviour outside topic mode.
+
 - `resume` `{}`: as Resume in Quill Desktop's kmem panel: opens the live session that holds the name, else starts a fresh session from the handoff (through its ended session when Quill still knows it, keeping folder, model and mode; else in the home folder). Response `{"v": 1, "session": {...}}`.
 - `delete` `{}`: moves every fact of the handoff to the kmem recycle bin (the phone confirms first). `409 blocked` while a live session holds the name (end or delete that session instead). Response `{"v": 1, "removed": "<name>"}`.
 - `404` for an unknown handoff, `409 blocked` when kmem isn't available.
@@ -450,7 +460,9 @@ Body `{"id": "coordinator", "choice": 0}` (`choice` is an index into `choices`; 
 
 Body: `{"folder": "/home/user/Projects/demo", "backend": "online", "model": "opus", "mode": "default"}`. `folder` must be one of `/phone/folders`. Response: `{"v": 1, "session": {...}}`.
 
-Optional `start` (since 2026-11-21) does what the desktop's new-tab card does; without it the session starts as before and gets a kmem name from its title later (a tab, its session and its kmem name are one identity, so there is no "no kmem" choice):
+In topic mode a new session is a topic session: send `openTopic` instead of `folder` + `start` (see "Topics"). `start` is then refused with `426 update_required`.
+
+Optional `start` (since 2026-11-21; refused in topic mode) does what the desktop's new-tab card does; without it the session starts as before and gets a kmem name from its title later (a tab, its session and its kmem name are one identity, so there is no "no kmem" choice):
 
 - `{"kmem": "resume", "name": "quill-android"}`: link the handoff and send its resume prompt; the title becomes the name. `409 blocked` when the handoff is open in another session (`openIn` in `/phone/handoffs`; offer "Open that session" instead).
 - `{"kmem": "new", "title": "Some name"}`: new kmem name from the title (empty title = the folder's default title).
@@ -458,11 +470,60 @@ Optional `start` (since 2026-11-21) does what the desktop's new-tab card does; w
 
 ### GET /phone/handoffs
 
-`{"v": 1, "handoffs": [{"name": "quill-android", "savedMs": 1795250000000, "openIn": {"id": "<session id>", "title": "Quill Android 2"}}]}`: saved kmem handoffs, newest first (same list as the desktop card); `openIn` is the open tab or running session that holds the name, else `null`. Empty list when kmem isn't available. Older Quill Desktop builds answer `404`; hide the Resume part then.
+In topic mode the list is always empty with `"readOnly": true` (nothing to resume; the old handoffs are the `history` of `GET /phone/topics`). Otherwise: `{"v": 1, "handoffs": [{"name": "quill-android", "savedMs": 1795250000000, "openIn": {"id": "<session id>", "title": "Quill Android 2"}}]}`: saved kmem handoffs, newest first (same list as the desktop card); `openIn` is the open tab or running session that holds the name, else `null`. Empty list when kmem isn't available. Older Quill Desktop builds answer `404`; hide the Resume part then.
 
 ### GET /phone/handoffs/slug?title=...
 
 `{"v": 1, "slug": "some-name"}`: the kmem name a new session with that title would get (empty for an empty title).
+
+## Topics
+
+Topic mode (topic tabs, docs/design/topic-tabs.md) is on while hello's `topics.on` is `true` (kmem memory in use). Each tab is the coordinator of one kmem topic, there is at most one live session per topic, and sessions are never resumed from old transcripts. Older Quill Desktop builds have none of this; the existing fields stay as they were, so older phones keep working apart from the handoff start (refused with `426 update_required`: "Update Quill Android ...").
+
+### topics[] (in GET /phone/sessions, and the `topics` stream change)
+
+```json
+{"slug": "alpha", "title": "Alpha", "scope": ["alpha"], "live": "3f2a...", "status": "alpha is half done", "claimed": 1, "open": 4}
+```
+
+`live` is the id of the topic's live session, `""` when none. `status` is the first line of the `<topic>/status` fact (may be empty). `claimed` / `open`: task counts over the topic's scope. The kmem window's own topic (`kmem`) is not listed. Left out: `statusMs` (the age of the status fact; kmem 1.8.1 does not report it).
+
+### Session: agents, endWait
+
+```json
+"agents": [{"id": "agentA", "name": "Fix join stall", "type": "Explore", "tokens": 41000, "startedMs": 1795000000000, "done": false, "status": "running"}],
+"agentTokens": 50000,
+"endWait": {"why": "end", "checking": false, "asked": true,
+  "blockers": [{"kind": "claim", "id": "t1", "title": "Ship it", "need": "checkpoint or release", "text": "claim t1 ..."}]}
+```
+
+- `agents` are the subagents Quill Desktop's strip shows (running ones, then recently finished, `doneMs` when done); `agentTokens` sums their tokens ("3 subagents · 120k tok").
+- `endWait` exists only while the end-of-session check runs (kmem 1.10.0+, hello `topics.endCheck`). `why`: `end`, `rotate`, `quit` or `checkpoint`. `checking`: kmem is being asked now. `asked`: the session was sent the blockers and must resolve them. `blockers`: end-check's entries (`kind` claim, lock, job, files or status; `id`, `title`, `name`, `pid`, `what`, `repo`, `paths`, `need` as kmem gives them) plus `text`, the sentence Quill Desktop shows. Quill never resolves blockers itself; the phone only shows them. It changes like any session field (a `session` change arrives when it appears, changes or goes away).
+
+### POST /phone/sessions/new with openTopic
+
+Body: `{"openTopic": {"topic": "alpha"}}` (an existing topic) or `{"openTopic": {"new": "Garden Planner"}}` (a title; a title that is an existing topic opens that topic; `kmem` is refused). Optional `folder`: one of `GET /phone/folders?topic=` (or a known folder); default the home folder. Model and mode are the defaults. Exactly one of `topic` and `new`.
+
+Response `{"v": 1, "session": {...}, "switched": false, "topic": {"slug": "alpha", "title": "Alpha"}}`. If the topic is live (a tab, the kmem window or a running session with that name) nothing new starts: `switched: true` and `session` is the live one (the desktop switches to it). Otherwise a fresh coordinator starts and gets the topic's first prompt.
+
+Errors: `422 bad_request` (both or neither field, `kmem`), `404 not_found` (unknown `topic`), `400 bad_request` (folder), `503 kmem_unavailable` (not in topic mode).
+
+### GET /phone/topics
+
+Read-only Topics view: `{"v": 1, "topics": [...], "history": [...], "readMs": ...}`. Each topic is a `topics[]` entry plus `tasks`: its claimed tasks `{id, prio, title, owner, claim, checkpoint}` (`claim` as in `/phone/kmem/tasks`; `checkpoint` may be empty). `history`: the old kmem handoffs `{name, items, savedMs}`, newest first (read only; no Delete). `503 kmem_unavailable` outside topic mode. Cached up to 10 s like `/phone/kmem/*`.
+
+### GET /phone/topics/slug?title=...
+
+`{"v": 1, "slug": "garden-planner", "exists": false, "live": ""}` for the "New topic" preview: the slug a title gets, whether that topic exists (then `title` is its title) and its live session id. `422` for `kmem`.
+
+### What Quill Android has to do
+
+- Read hello's `topics`; with `on`, use the topic flow below and stop using `start`, `/phone/handoffs` and the handoff Resume/Delete.
+- Session list: one row per live topic session (`topic`, `topicTitle`), subagents collapsed ("3 subagents · 120k tok" from `agents` / `agentTokens`); `legacyName` marks an old session to merge.
+- New session sheet: a topic picker from `topics[]` (live ones read "open in ..." and switch) and "New topic..." (preview with `/phone/topics/slug`); send `openTopic`.
+- Topics screen from `GET /phone/topics`.
+- Show `endWait.blockers` while ending.
+- Handle `426 update_required` (an older flow) by telling the user to update.
 
 ## Control setting
 

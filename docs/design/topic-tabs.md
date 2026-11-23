@@ -362,6 +362,27 @@ capped (t32b878).
   `legacyName` during merges and `endWait` blockers while ending. Done by an
   Android subagent after the desktop API merges.
 
+**As built (sub G, branch feat/topics-g, 2026-11-23):** all of it is in
+`docs/phone-api.md` ("Topics"). Topic mode is `kmemOn()`; hello gets
+`topics: {api: 1, on, endCheck}` (endCheck = kmem lists `end-check`).
+
+- `GET /phone/sessions`: topic mode lists live sessions only (open tab or
+  running), `group` = topic title; session fields `topic`, `topicTitle`,
+  `legacyName`, `agents[]` (the strip's list), `agentTokens`, `endWait`
+  {why, checking, asked, blockers[] with `text`}; body `topics[]` {slug,
+  title, scope, live, status, claimed, open} from the topic cache, plus a
+  `topics` stream change. `statusMs` is left out (kmem 1.8.1 gives no age).
+- `GET /phone/topics` (status, claimed tasks with checkpoints, history of
+  old handoffs), `GET /phone/topics/slug`, `GET /phone/folders?topic=`
+  (coordinator folder + the project's `org.Dirs`).
+- `POST /phone/sessions/new` `openTopic {topic | new, folder?}`: one live
+  session per topic (`switched: true` returns the live one), else
+  `openTopicInfo` (topics.go) starts a fresh coordinator.
+- `start.kmem`, handoff resume/delete: `426 update_required` in topic mode;
+  `GET /phone/handoffs` is empty and `readOnly: true`. Outside topic mode
+  nothing changed, so older phones keep working.
+- Not done: Quill Android itself (later subagent); `statusMs`.
+
 ### 3.12 Migration of existing org data (one-time, kmem mode)
 
 Preference `topicMigration=1`, idempotent; first copy `sidebarOrg` and `tabs`
