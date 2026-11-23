@@ -270,6 +270,7 @@ type desk struct {
 	input         *sendEntry
 	modelSel      *widget.Select
 	newSessSel    *widget.Select // Settings → New sessions
+	newModeSel    *widget.Select // Settings → New sessions mode
 	modeSel       *widget.Select
 	folder        *canvas.Text
 	stats         *canvas.Text
@@ -542,7 +543,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	coordChk.Checked = prefBool(d.app.Preferences(), prefCoordinator)
 	coordNote := caption(coordinatorExplain + "\n" + coordinatorOnline)
 	d.buildChk, d.coordChk = buildChk, coordChk
-	newSessions := d.newSessionModelSetting()
+	newSessions := container.NewVBox(d.newSessionModelSetting(), d.newSessionModeSetting())
 	sttChk := widget.NewCheck("Speech to text (the mic and Voice buttons under the message box)", func(on bool) {
 		d.app.Preferences().SetBool(prefSTTOff, !on)
 		if d.stt != nil {
@@ -1053,7 +1054,6 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		if d.suppress || d.current == nil {
 			return
 		}
-		d.app.Preferences().SetString("newMode", v)
 		d.setMode(d.current, v)
 	})
 	d.backendBtn = widget.NewButton(backendOnline, func() {
@@ -1398,7 +1398,7 @@ func (d *desk) newSessionDialog() {
 		cwd = d.current.cwd
 	}
 	prefs := d.app.Preferences()
-	s := d.createSession(cwd, prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback("newMode", "auto"))
+	s := d.createSession(cwd, prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback(prefNewMode, "auto"))
 	name := d.nextSessionName()
 	d.org.Titles[s.id] = name
 	d.saveOrg()

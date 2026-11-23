@@ -396,11 +396,29 @@ func (d *desk) newSessionModelSetting() fyne.CanvasObject {
 		caption("Each session can still switch with the Online/Local button under the message box."))
 }
 
-const optNewOnline = "Online: Claude"
+const (
+	optNewOnline = "Online: Claude"
+	prefNewMode  = "newMode"
+)
+
+// newSessionModeSetting: Settings → New sessions: the permission mode new
+// sessions start in. Only this control changes it; picking a mode for one
+// session leaves it alone.
+func (d *desk) newSessionModeSetting() fyne.CanvasObject {
+	sel := widget.NewSelect(modeChoices, nil)
+	d.newModeSel = sel
+	d.syncNewSessionSetting()
+	sel.OnChanged = func(v string) { d.app.Preferences().SetString(prefNewMode, v) }
+	return container.NewBorder(nil, nil, widget.NewLabel("New sessions start in mode"), nil, sel)
+}
 
 // syncNewSessionSetting shows the live newModel in Settings → New sessions
 // (called when Settings opens; the box itself is built once at startup).
 func (d *desk) syncNewSessionSetting() {
+	if m := d.newModeSel; m != nil {
+		m.Selected = d.app.Preferences().StringWithFallback(prefNewMode, "auto") // no OnChanged
+		m.Refresh()
+	}
 	sel := d.newSessSel
 	if sel == nil {
 		return

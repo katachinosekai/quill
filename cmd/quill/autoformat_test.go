@@ -143,3 +143,38 @@ func TestNewSessionsSettingLive(t *testing.T) {
 		}
 	})
 }
+
+// The New sessions mode is a Settings-only choice: picking a mode for one
+// session (main view or split pane) leaves it alone; Settings shows it live.
+func TestNewSessionModeSettingsOnly(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		p := h.d.app.Preferences()
+		sel := h.d.newModeSel
+		if sel == nil || sel.Selected != "auto" {
+			t.Fatalf("starts at auto: %+v", sel)
+		}
+		s := h.d.createSession(h.proj, "opus", "auto")
+		h.d.open(s.id)
+		h.d.modeSel.SetSelected("plan")
+		if s.mode != "plan" || p.String(prefNewMode) != "" {
+			t.Fatalf("the session switches, New sessions stays: %q %q", s.mode, p.String(prefNewMode))
+		}
+		pn := h.d.newPane()
+		pn.view.s = s
+		pn.mode.SetSelected("acceptEdits")
+		if s.mode != "acceptEdits" || p.String(prefNewMode) != "" {
+			t.Fatalf("a split pane too: %q %q", s.mode, p.String(prefNewMode))
+		}
+		sel.SetSelected("default")
+		if p.String(prefNewMode) != "default" {
+			t.Fatalf("the Settings control sets it: %q", p.String(prefNewMode))
+		}
+		p.SetString(prefNewMode, "plan")
+		h.d.showSettings()
+		h.d.closeSettings()
+		if sel.Selected != "plan" || p.String(prefNewMode) != "plan" {
+			t.Fatalf("Settings shows the live default on open: %q", sel.Selected)
+		}
+	})
+}

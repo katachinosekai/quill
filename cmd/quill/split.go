@@ -144,7 +144,6 @@ func (d *desk) newPane() *pane {
 	})
 	p.mode = widget.NewSelect(modeChoices, func(v string) {
 		if !p.quiet && p.view.s != nil {
-			d.app.Preferences().SetString("newMode", v)
 			d.setMode(p.view.s, v)
 		}
 	})
