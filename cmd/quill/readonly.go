@@ -1094,8 +1094,13 @@ func parseReadOnlyExtra(text string) [][]string {
 
 const builtinReadOnly = "kmem brief\nkmem get\nkmem find\nkmem show\nkmem context\nkmem recall\nkmem rules\nkmem task list\nkmem task check\nkmem handoff get\nkmem handoff list\nkmem handoff policy"
 
+// quillReadOnly: Quill Desktop's own read-only commands. `quill settings
+// list/get` only read (settingsreg.go); `set` and `undo` change settings and
+// stay plan-gated (docs/design/quill-operator.md §3.8).
+const quillReadOnly = "quill settings list\nquill settings get"
+
 func (d *desk) readOnlyExtra() [][]string {
-	return parseReadOnlyExtra(builtinReadOnly + "\n" + d.app.Preferences().String("extraReadOnly"))
+	return parseReadOnlyExtra(builtinReadOnly + "\n" + quillReadOnly + "\n" + d.app.Preferences().String("extraReadOnly"))
 }
 
 // readOnlyExtraFor: readOnlyExtra plus `kmem --as <own name> brief|rules` for

@@ -79,6 +79,19 @@ import (
 // planCovers: the session's own call in the current turn is approved.
 func planCovers(s *deskSession) bool { return s.runAll && s.turnCovered }
 
+// userTurn: s is in a turn the user started (a message typed or sent from
+// Quill Android, a plan card answer) that no peer, channel or scheduled
+// message arrived in, or a turn the approved plan covers (its own background
+// work's notification). A turn a task notification, peer message or trigger
+// started otherwise is not the user's, auto-approve or not. The settings
+// command writes only in such a turn (docs/design/quill-operator.md §3.8).
+func userTurn(s *deskSession) bool {
+	if s == nil {
+		return false
+	}
+	return planCovers(s) || (s.inTurn && !s.autoTurn && !s.autoPeer)
+}
+
 // startPlan: the user approved a plan; the current (or next) turn is covered.
 func startPlan(s *deskSession) {
 	s.runAll, s.runAllNext, s.turnCovered, s.planRevoked = true, false, true, false

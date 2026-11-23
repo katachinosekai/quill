@@ -53,6 +53,9 @@ func main() {
 		return
 	}
 	sock := instanceSocket()
+	if flag.Arg(0) == "settings" {
+		os.Exit(settingsCLI(sock, flag.Args()[1:], os.Getenv, os.Stdout, os.Stderr))
+	}
 	if *heapFlag {
 		if !sendCommand(sock, "heap") {
 			fmt.Fprintln(os.Stderr, "no running Quill answered")
@@ -141,6 +144,9 @@ const memorySoftLimit = 512 << 20
 
 func runWindowWith(claudeBin, sock string) int {
 	debug.SetMemoryLimit(memorySoftLimit)
+	// Session tokens for the settings command (settingsreg.go); a handover
+	// keeps the key its running sessions' tokens were made with.
+	initSessionKey(os.Getenv(restoreEnv) != "")
 	app.SetMetadata(fyne.AppMetadata{ID: appID, Name: "Quill", Version: version, Icon: appIcon})
 	a := app.NewWithID(appID)
 	a.Settings().SetTheme(deskTheme{})

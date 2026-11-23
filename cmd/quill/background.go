@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -152,6 +153,11 @@ func (d *desk) listenInstance(path string) {
 					_, _ = c.Write([]byte("ok\n"))
 					return
 				}
+				if req, ok := strings.CutPrefix(cmdLine, "settings "); ok {
+					// `quill settings` (settingsreg.go): one JSON request, one JSON reply line after "ok".
+					_, _ = c.Write([]byte("ok\n" + d.settingsSocket(req, c) + "\n"))
+					return
+				}
 				if text, ok := strings.CutPrefix(cmdLine, "kmem-message "); ok {
 					d.do(func() { fmt.Fprintln(os.Stderr, "Quill Desktop: kmem message:", d.kmemAssistDeliver(text)) })
 					_, _ = c.Write([]byte("ok\n"))
@@ -212,6 +218,32 @@ func (d *desk) listenInstance(path string) {
 			}()
 		}
 	}()
+}
+
+// settingsSocket answers one settings request line from conn c: the peer is
+// read here, the request runs on the UI thread.
+func (d *desk) settingsSocket(line string, c net.Conn) string {
+	var r settingsReq
+	if err := json.Unmarshal([]byte(line), &r); err != nil {
+		return replyJSON(settingsReply{Error: "bad settings request"})
+	}
+	var chain []int
+	if r.Op == "set" || r.Op == "undo" {
+		chain = peerChain(c)
+	}
+	out := make(chan settingsReply, 1)
+	d.do(func() { out <- d.settingsRequest(r, chain) })
+	select {
+	case rep := <-out:
+		return replyJSON(rep)
+	case <-time.After(1500 * time.Millisecond):
+		return replyJSON(settingsReply{Error: "Quill Desktop is busy; try again"})
+	}
+}
+
+func replyJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 func (d *desk) setupBackground() bool {
