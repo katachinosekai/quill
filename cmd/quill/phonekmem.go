@@ -294,7 +294,11 @@ func kmemNeedsBody(n kmemNeeds, sc func(string) string) map[string]any {
 }
 
 func kmemOverviewBody(boot string, data *kmemPanelData, assistant map[string]any, sc func(string) string) map[string]any {
-	brief, _ := capText(sc(strings.TrimSpace(data.brief)), kmemPhoneBriefMax)
+	text := strings.TrimSpace(data.brief)
+	if r := data.needs.MaintReport; r != "" {
+		text = strings.ReplaceAll(text, r, filepath.Base(r)) // the report as a file name only
+	}
+	brief, _ := capText(sc(text), kmemPhoneBriefMax)
 	big := []map[string]any{}
 	for _, t := range data.topics {
 		if t.KB > 8 {
