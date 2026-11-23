@@ -36,11 +36,22 @@ func TestKmemFirstTurnGate(t *testing.T) {
 			`rm -rf /home/user/Projects/demo`,
 		}
 		h.d.sendTo(s, `You are the demo session; use kmem name "demo" (kmem --as "demo" ...). Start by running kmem brief.`)
-		for _, c := range startup {
+		for _, c := range startup[1:] {
 			if !h.d.kmemResumeAllowed(s, bashReq(c)) {
 				t.Fatalf("first turn lets %q through", c)
 			}
 		}
+		// brief and rules only for the session's own kmem name
+		if h.d.kmemResumeAllowed(s, bashReq(`kmem --as demo brief`)) || h.d.kmemResumeAllowed(s, bashReq(`kmem --as demo rules`)) {
+			t.Fatal("first turn: brief/rules under a name that is not the session's own stay gated")
+		}
+		h.d.org.Kmem[s.id] = "demo"
+		for _, c := range startup {
+			if !h.d.kmemResumeAllowed(s, bashReq(c)) {
+				t.Fatalf("own name: first turn lets %q through", c)
+			}
+		}
+		delete(h.d.org.Kmem, s.id)
 		for _, c := range gated {
 			if h.d.kmemResumeAllowed(s, bashReq(c)) {
 				t.Fatalf("first turn: %q must stay gated", c)

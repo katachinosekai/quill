@@ -109,6 +109,7 @@ func TestRefusedBatchOrderAndApproval(t *testing.T) {
 		}
 		feed(t, h, s, `{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s1"}`)
 		s.inTurn = false
+		s.planWait = true // a plan waits for the approval
 		userEvent(h, s, planGoMessage, nil)
 		if !s.runAll {
 			t.Fatal("the card's approval approves")
@@ -425,8 +426,9 @@ func TestReadOnlyAdditions(t *testing.T) {
 		"git remote get-url origin upstream":      false,
 		"git remote set-url origin x":             false,
 		"git remote add x y":                      false,
-		"kmem --as quill rules":                   true,
-		"kmem --as quill brief":                   true,
+		"kmem --as quill rules":                   false,
+		"kmem --as quill brief":                   false,
+		"kmem --as quill find x":                  true,
 		"sudo findmnt":                            false,
 		"pkexec systemctl status sshd":            false,
 		"sudo git remote get-url origin":          false,

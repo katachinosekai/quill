@@ -33,7 +33,7 @@ func TestPlanChoices(t *testing.T) {
 	if got := planGoWith("A new Quill Desktop release v0.1.18"); !strings.HasPrefix(got, planGoMessage) || !strings.HasSuffix(got, "Choice: A new Quill Desktop release v0.1.18.") {
 		t.Fatalf("the approval carries the choice: %q", got)
 	}
-	s := &deskSession{conv: chat.New()}
+	s := &deskSession{conv: chat.New(), planWait: true}
 	if !approvesPlan(s, planGoWith("but not that")) || !isPlanGo(planGoWith("x")) {
 		t.Fatal("an approval with a choice still approves, whatever the choice says")
 	}

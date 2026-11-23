@@ -34,6 +34,7 @@ func TestApprovedPlanCoversItsSubagents(t *testing.T) {
 	h.ui(func() {
 		h.d.planFirst = true
 		s.inTurn = false
+		s.planWait = true // a plan waits for the approval
 		userEvent(h, s, planGoMessage, nil)
 		if !s.runAll {
 			t.Fatal("approved")
@@ -105,6 +106,7 @@ func TestGrantsTrackedBySubagent(t *testing.T) {
 	h.ui(func() {
 		h.d.planFirst = true
 		s.inTurn = false
+		s.planWait = true // a plan waits for the approval
 		userEvent(h, s, planGoMessage, nil)
 		bg := gateCall(h, s, "a1", "Agent", `{"prompt":"do the feature","run_in_background":true}`, "toolu_agentBG")
 		fg := gateCall(h, s, "a2", "Agent", `{"prompt":"review it"}`, "toolu_agentFG")
@@ -174,6 +176,7 @@ func TestPeerMessagesDontEndApproval(t *testing.T) {
 	h.ui(func() {
 		h.d.planFirst = true
 		s := h.d.createSession(h.proj, "haiku", "auto")
+		s.planWait = true // a plan waits for the approval
 		userEvent(h, s, planGoMessage, nil)
 		s.inTurn = false // between turns of the approved plan
 		userEvent(h, s, `<cross-session-message from="peer">status</cross-session-message>`, nil)
@@ -266,6 +269,7 @@ func TestBackgroundSubagentKnownByAgentID(t *testing.T) {
 	h.ui(func() {
 		h.d.planFirst = true
 		s.inTurn = false
+		s.planWait = true // a plan waits for the approval
 		userEvent(h, s, planGoMessage, nil)
 		// The approved turn launches A in the background (the CLI need not
 		// ask for an Agent call), then gets the immediate launch result.

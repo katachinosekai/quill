@@ -23,6 +23,7 @@ func approvedSession(t *testing.T, h *harness) *deskSession {
 	h.ui(func() {
 		h.d.planFirst = true
 		s.inTurn = false
+		s.planWait = true // a plan waits for the approval
 		userEvent(h, s, planGoMessage, nil)
 	})
 	return s
@@ -112,6 +113,7 @@ func TestPeerAndTriggerDontExtendApproval(t *testing.T) {
 				}
 				endTurn(t, h, s)
 				// Inside a covered turn, it ends the coverage for the rest of it.
+				s.planWait = true // a plan waits for the approval
 				userEvent(h, s, planGoMessage, nil)
 				if st := ownCall(h, s, "p3", "make"); st != chat.PermAutoAllowed {
 					t.Fatalf("approved turn: %v", st)

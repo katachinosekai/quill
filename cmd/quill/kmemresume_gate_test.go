@@ -26,6 +26,7 @@ func TestKmemResumeGateOnlyForResumeTurn(t *testing.T) {
 			}
 		}
 		// Quill's own resume prompt opens the exception for that turn.
+		h.d.org.Kmem[s.id] = "demo" // a resumed session carries the handoff name
 		h.d.sendResume(s, "demo", "You are the session for kmem handoff \"demo\"; ...")
 		for _, c := range startup {
 			if !h.d.kmemResumeAllowed(s, bashReq(c)) {

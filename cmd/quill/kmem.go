@@ -336,7 +336,7 @@ func (d *desk) kmemSaveAllowed(s *deskSession, r *protocol.ControlRequest) bool 
 	if s.kmemSave == nil {
 		return false
 	}
-	return readOnlyRequest(r, append(d.readOnlyExtra(), kmemSaveExtra...))
+	return readOnlyRequest(r, append(d.readOnlyExtraFor(s), kmemSaveExtra...))
 }
 
 // sendResume sends Quill's own resume-from-handoff prompt. Until the next
@@ -388,8 +388,12 @@ func (d *desk) kmemResumeAllowed(s *deskSession, r *protocol.ControlRequest) boo
 		return false
 	}
 	extra := d.readOnlyExtra()
+	own := d.org.Kmem[s.id] == s.resumeAs
 	for _, e := range extra {
 		if len(e) > 1 && e[0] == "kmem" {
+			if (e[1] == "brief" || e[1] == "rules") && !own {
+				continue // under another name they mark that name's brief/rules read
+			}
 			extra = append(extra,
 				append([]string{"kmem", "--as", s.resumeAs}, e[1:]...),
 				append([]string{"kmem", "--as=" + s.resumeAs}, e[1:]...))

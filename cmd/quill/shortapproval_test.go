@@ -47,7 +47,7 @@ func TestShortApprovalGate(t *testing.T) {
 		if !isPlanGo(text) || !approves(text) {
 			t.Errorf("not recognised: %q", text)
 		}
-		s := &deskSession{conv: chat.New()}
+		s := &deskSession{conv: chat.New(), planWait: true}
 		if !approvesPlan(s, text) {
 			t.Errorf("approvesPlan(%q) false", text)
 		}

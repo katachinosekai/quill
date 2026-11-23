@@ -441,7 +441,7 @@ func (d *desk) endCheckAllowed(s *deskSession, r *protocol.ControlRequest) bool 
 	if ew == nil {
 		return false
 	}
-	extra := append(d.readOnlyExtra(), kmemSaveExtra...)
+	extra := append(d.readOnlyExtraFor(s), kmemSaveExtra...)
 	for _, b := range ew.blockers {
 		if b.Kind == "lock" && b.Name != "" {
 			extra = append(extra, []string{"pzlock", "release", b.Name})

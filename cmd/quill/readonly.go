@@ -558,6 +558,22 @@ func (d *desk) readOnlyExtra() [][]string {
 	return parseReadOnlyExtra(builtinReadOnly + "\n" + d.app.Preferences().String("extraReadOnly"))
 }
 
+// readOnlyExtraFor: readOnlyExtra plus `kmem --as <own name> brief|rules` for
+// session s. Under another name those two mark that name's brief/rules as
+// read and stay gated.
+func (d *desk) readOnlyExtraFor(s *deskSession) [][]string {
+	extra := d.readOnlyExtra()
+	if s == nil {
+		return extra
+	}
+	if k := d.org.Kmem[s.id]; k != "" {
+		for _, sub := range []string{"brief", "rules"} {
+			extra = append(extra, []string{"kmem", "--as", k, sub}, []string{"kmem", "--as=" + k, sub})
+		}
+	}
+	return extra
+}
+
 func (d *desk) readOnlyDialog() {
 	e := widget.NewMultiLineEntry()
 	e.SetText(d.app.Preferences().String("extraReadOnly"))
@@ -582,12 +598,14 @@ func (d *desk) readOnlyDialog() {
 // a mark (kmem 1.7.0), so only the bare "kmem fixed" list counts; "kmem
 // rules" only marks the rules read. "--as NAME" in front counts the same
 // (user 2026-11-23: `kmem --as zomboid find …` needed a plan; brief and rules
-// only mark them read for that name).
+// only mark them read for that name, so under --as they count only for the
+// session's own name: desk.readOnlyExtraFor adds those two; user 2026-11-23).
 func readOnlyKmem(args []string) bool {
+	asName := false
 	if len(args) >= 2 && args[0] == "--as" {
-		args = args[2:]
+		args, asName = args[2:], true
 	} else if len(args) >= 1 && strings.HasPrefix(args[0], "--as=") {
-		args = args[1:]
+		args, asName = args[1:], true
 	}
 	if len(args) == 0 {
 		return false
@@ -602,7 +620,9 @@ func readOnlyKmem(args []string) bool {
 		return false
 	}
 	switch words[0] {
-	case "brief", "get", "find", "show", "context", "recall", "topics", "version", "help", "rules":
+	case "brief", "rules":
+		return !asName
+	case "get", "find", "show", "context", "recall", "topics", "version", "help":
 		return true
 	case "fixed":
 		return len(words) == 1

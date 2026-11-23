@@ -86,6 +86,7 @@ type deskSession struct {
 	clearAfterTurn bool
 	terminal       *live.Process
 	planWait       bool
+	cardGo         bool     // answerPlanMsg is sending the card's own approval
 	approvalHint   bool     // the session's prompt has planApprovalHint (else planAsk adds a reminder)
 	releaseTasks   []string // kmem task releases Quill asked for after a rewind (allowed for that turn)
 	runAll         bool
@@ -1881,6 +1882,8 @@ func (d *desk) takeOverThen(s *deskSession, t live.Process, text string, after f
 
 func (d *desk) sendTo(s *deskSession, text string) {
 	typed := text
+	cardGo := s.cardGo // the plan card's own Approve (answerPlanMsg)
+	s.cardGo = false
 	if s.remote != nil {
 		d.remoteWrite(s, "send", map[string]string{"text": text})
 		return
@@ -1902,11 +1905,15 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		s.forkOf = ""
 	}
 	if d.planFirst {
+		// "Approved." is the card's own text: it keeps the plan going when the
+		// card sent it, or when a plan or approval question waits for it; typed
+		// with nothing pending it is an ordinary message (user 2026-11-23).
+		planGo := isPlanGo(text) && (cardGo || approvesPlan(s, text))
 		nearMiss := !approvesPlan(s, text) && !isPlanGo(typed) && !isRetry(typed) && nearApproval(typed) &&
 			(hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait)
 		if approvesPlan(s, text) && !isPlanGo(text) {
 			d.approveByText(s)
-		} else if !isPlanGo(text) && !isRetry(text) && !s.inTurn {
+		} else if !planGo && !isRetry(text) && !s.inTurn {
 			endPlan(s)
 			d.chatFor(s, s.conv.CancelPlans())
 		}
@@ -2833,7 +2840,7 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 		// A batch is decided as a whole: once plan-first refused one of its
 		// calls, its other gated calls are refused too (ta43580), a
 		// subagent's batch too.
-		if d.planFirst && d.inRefusedBatch(s, it.Request) && !readOnlyRequest(it.Request, d.readOnlyExtra()) {
+		if d.planFirst && d.inRefusedBatch(s, it.Request) && !readOnlyRequest(it.Request, d.readOnlyExtraFor(s)) {
 			if s.proc.DenyWith(it.RequestID, it.Request, planAsk(s)) == nil {
 				it.PermState = chat.PermPlanAsked
 				s.planWait = true
@@ -2885,7 +2892,7 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 		if !d.planFirst {
 			return nil
 		}
-		if readOnlyRequest(it.Request, d.readOnlyExtra()) {
+		if readOnlyRequest(it.Request, d.readOnlyExtraFor(s)) {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}
@@ -3131,7 +3138,9 @@ func approvesPlan(s *deskSession, text string) bool {
 		return false // peer, channel and scheduled messages never approve
 	}
 	if isPlanGo(text) {
-		return true
+		// Only while a plan or approval question waits; the card's own
+		// Approve path does not come through here (sendTo's cardGo).
+		return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
 	}
 	// A quick-choice pick of the approval question's Yes ("I pick the first
 	// option: Yes."; user 2026-11-22: picking Yes didn't count).
@@ -3281,6 +3290,7 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 	}
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {
 		startPlan(s)
+		s.cardGo = true
 		d.sendTo(s, msg)
 		return
 	}
@@ -3300,6 +3310,7 @@ func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string)
 	it.PermState = chat.PermAllowed
 	startPlan(s)
 	d.chatFor(s, []*chat.Item{it})
+	s.cardGo = true
 	d.sendTo(s, msg)
 	if !s.running() {
 		endPlan(s)
