@@ -98,6 +98,7 @@ type assistBox struct {
 	body    *fyne.Container
 	veil    *canvas.Rectangle
 	outline *canvas.Rectangle
+	headRow *fyne.Container
 	title   *widget.Label
 	status  *widget.Label
 	note    *widget.Label
@@ -158,9 +159,8 @@ func (d *desk) box() *assistBox {
 	b.dockBtn.Importance = widget.LowImportance
 	b.closeX = widget.NewButtonWithIcon("", theme.CancelIcon(), d.closeAssistBox)
 	b.closeX.Importance = widget.LowImportance
-	head := container.NewVBox(
-		container.NewBorder(nil, nil, b.title, container.NewHBox(b.dockBtn, b.closeX), b.status),
-		b.note, widget.NewSeparator())
+	b.headRow = container.NewBorder(nil, nil, b.title, container.NewHBox(b.dockBtn, b.closeX), b.status)
+	head := container.NewVBox(b.headRow, b.note, widget.NewSeparator())
 	b.body = container.NewStack()
 	bgRect := canvas.NewRectangle(colInput)
 	bgRect.CornerRadius = 12
@@ -349,6 +349,7 @@ func (d *desk) showBoxContent(role string) {
 	b := d.box()
 	v := d.viewOf(role)
 	setLabel(b.title, v.title)
+	b.headRow.Refresh() // the title's new width
 	if v.content != nil {
 		b.body.Objects = []fyne.CanvasObject{v.content}
 	} else {
