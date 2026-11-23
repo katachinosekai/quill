@@ -73,12 +73,14 @@ var (
 // assistBoxView is what a role shows in the box. content is built once and
 // kept across open and close (unsent text stays). Every func may be nil.
 type assistBoxView struct {
-	title   string            // "Quill operator", "kmem assistant"
-	content fyne.CanvasObject // below the box's header (title, status, Dock, ×)
-	input   fyne.Focusable    // its own message box: focused on open
-	escape  func() bool       // Escape inside the box, before it closes (a popup, a selection); true = handled
-	status  func() string     // the header's status line (refreshed every second while open)
-	shown   func(on bool)     // the box opened (true) or closed / switched away (false)
+	title   string                // "Quill operator", "kmem assistant"
+	content fyne.CanvasObject     // below the box's header (title, status, Dock, ×)
+	input   fyne.Focusable        // its own message box: focused on open
+	inputFn func() fyne.Focusable // instead of input when it is built later (kmem: after the chat attaches)
+	popOut  func()                // a Pop out button in the header (kmem: the box as its own window)
+	escape  func() bool           // Escape inside the box, before it closes (a popup, a selection); true = handled
+	status  func() string         // the header's status line (refreshed every second while open)
+	shown   func(on bool)         // the box opened (true) or closed / switched away (false)
 }
 
 type assistBox struct {
@@ -103,14 +105,14 @@ type assistBox struct {
 	status  *widget.Label
 	note    *widget.Label
 	dockBtn *widget.Button
+	popBtn  *widget.Button
 	closeX  *widget.Button
 
-	anim     *fyne.Animation
-	lastDur  time.Duration // the last animation's length (tests)
-	rootW    float32       // the main area's width at the last layout
-	tickOn   bool
-	pulse    bool
-	fallback bool // the kmem fallback (old window) is opening
+	anim    *fyne.Animation
+	lastDur time.Duration // the last animation's length (tests)
+	rootW   float32       // the main area's width at the last layout
+	tickOn  bool
+	pulse   bool
 }
 
 // assistButton: a role's toolbar button and its portrait twin, each with a
@@ -159,8 +161,26 @@ func (d *desk) box() *assistBox {
 	b.dockBtn.Importance = widget.LowImportance
 	b.closeX = widget.NewButtonWithIcon("", theme.CancelIcon(), d.closeAssistBox)
 	b.closeX.Importance = widget.LowImportance
-	b.headRow = container.NewBorder(nil, nil, b.title, container.NewHBox(b.dockBtn, b.closeX), b.status)
-	head := container.NewVBox(b.headRow, b.note, widget.NewSeparator())
+	b.popBtn = widget.NewButtonWithIcon("Pop out", theme.ViewFullScreenIcon(), func() {
+		if b.role == "" {
+			return
+		}
+		if f := d.viewOf(b.role).popOut; f != nil {
+			d.closeAssistBox()
+			if b.anim != nil {
+				b.anim.Stop()
+				b.anim = nil
+				d.endBoxAnim()
+			}
+			b.body.Objects = nil // the content moves to the window
+			b.body.Refresh()
+			f()
+		}
+	})
+	b.popBtn.Importance = widget.LowImportance
+	b.popBtn.Hide()
+	b.headRow = container.NewBorder(nil, nil, nil, container.NewHBox(b.popBtn, b.dockBtn, b.closeX), b.title)
+	head := container.NewVBox(b.headRow, b.status, b.note, widget.NewSeparator())
 	b.body = container.NewStack()
 	bgRect := canvas.NewRectangle(colInput)
 	bgRect.CornerRadius = 12
@@ -253,14 +273,18 @@ func (d *desk) toggleAssistBox(role string) {
 // docked). Another role open switches the content (cross-fade).
 func (d *desk) openAssistBox(role string) {
 	b := d.box()
-	if b.views[role] == nil && role == boxKmem {
-		// Until the kmem box lands (sub D) the kmem button opens the window.
-		if !b.fallback {
-			b.fallback = true
-			d.popOutKmem()
-			b.fallback = false
+	if role == boxKmem {
+		if w := d.kmemWin; w != nil && w.win != nil && !w.closed {
+			d.popOutKmem() // popped out: raise the window (the content is there)
+			return
 		}
-		return
+		if b.views[role] == nil {
+			if !d.kmemAvailable() {
+				d.popOutKmem() // says kmem is not available
+				return
+			}
+			d.registerKmemBox()
+		}
 	}
 	if b.role == role {
 		d.focusBox()
@@ -349,6 +373,11 @@ func (d *desk) showBoxContent(role string) {
 	b := d.box()
 	v := d.viewOf(role)
 	setLabel(b.title, v.title)
+	if v.popOut != nil {
+		b.popBtn.Show()
+	} else {
+		b.popBtn.Hide()
+	}
 	b.headRow.Refresh() // the title's new width
 	if v.content != nil {
 		b.body.Objects = []fyne.CanvasObject{v.content}
@@ -365,8 +394,8 @@ func (d *desk) focusBox() {
 	if b.role == "" || d.win == nil {
 		return
 	}
-	if v := d.viewOf(b.role); v.input != nil {
-		d.win.Canvas().Focus(v.input)
+	if in := d.viewOf(b.role).focusable(); in != nil {
+		d.win.Canvas().Focus(in)
 	}
 	d.syncBoxOutline()
 }
@@ -390,9 +419,9 @@ func (d *desk) boxFocused() bool {
 	if b == nil || b.role == "" || d.win == nil {
 		return false
 	}
-	v := d.viewOf(b.role)
+	in := d.viewOf(b.role).focusable()
 	f := d.win.Canvas().Focused()
-	return v.input != nil && f != nil && f == v.input
+	return in != nil && f != nil && f == in
 }
 
 // syncBoxOutline: an accent outline while the box has the focus.
@@ -538,14 +567,12 @@ func (d *desk) refreshBoxHeader() {
 	} else {
 		b.dockBtn.SetText("Dock")
 	}
+	fits := d.dockFits()
 	note := ""
-	switch {
-	case !d.dockFits() && d.assistDockWanted(b.role):
+	if !fits && d.assistDockWanted(b.role) {
 		note = "window too narrow to dock; shown over the chat until it is wider"
-	case !d.dockFits():
-		note = ""
 	}
-	if !d.dockFits() && !b.docked {
+	if !fits && !b.docked {
 		b.dockBtn.Disable()
 	} else {
 		b.dockBtn.Enable()
@@ -1227,4 +1254,82 @@ func (d *desk) assistStatusText(a *assistant) string {
 		st += " · " + s.model
 	}
 	return st
+}
+
+// focusable: the view's own message box, nil if none (yet).
+func (v *assistBoxView) focusable() fyne.Focusable {
+	if v.inputFn != nil {
+		if f := v.inputFn(); f != nil {
+			return f
+		}
+	}
+	return v.input
+}
+
+// registerKmemBox: the kmem box (kmemBoxContent: panels left, the
+// assistant's chat right) as the kmem role's box content. Opening attaches
+// the assistant's chat (kmemWindowOpenHook: kmemAssistOpen), closing hides it
+// (the assistant keeps running); Pop out moves the content to its window.
+func (d *desk) registerKmemBox() {
+	content := d.kmemBoxContent()
+	v := &assistBoxView{
+		title:   "kmem assistant",
+		content: content,
+		inputFn: func() fyne.Focusable {
+			if a := d.assist(); a.input != nil && d.kmemAssistChatOn() {
+				return a.input
+			}
+			return nil
+		},
+		escape: func() bool {
+			if w := d.kmemWin; w != nil && w.view != nil && w.view.sel != nil && w.view.sel.has {
+				w.view.sel.clear()
+				return true
+			}
+			return false
+		},
+		status: func() string { return d.assistStatusText(d.assist()) },
+		popOut: d.popOutKmem,
+	}
+	v.shown = func(on bool) {
+		w := d.kmemWin
+		if w == nil || w.closed || w.split != content {
+			// The pop-out window closed meanwhile: a fresh content.
+			if !on {
+				return
+			}
+			content = d.kmemBoxContent()
+			v.content = content
+			d.showBoxContent(boxKmem)
+			w = d.kmemWin
+		}
+		if on {
+			if kmemWindowOpenHook != nil {
+				kmemWindowOpenHook(d, w)
+			}
+			if a := d.assist(); a.input != nil && a.input.onEscape == nil {
+				a.input.onEscape = d.assistBoxEscape
+			}
+			d.markAssistSeen(d.assist(), false)
+			return
+		}
+		if kmemWindowCloseHook != nil {
+			kmemWindowCloseHook(d, w)
+		}
+	}
+	d.setAssistBoxView(boxKmem, v)
+	d.setHiddenHost(roleKmem, &hiddenHost{
+		session: func() *deskSession { return d.kmemWin.session() },
+		view: func() *chatView {
+			if w := d.kmemWin; w != nil {
+				return w.view
+			}
+			return nil
+		},
+		shown: func() bool {
+			w := d.kmemWin
+			return d.assistBoxShowing(boxKmem) || w != nil && w.win != nil && !w.closed && w.s != nil
+		},
+		open: d.showKmem,
+	})
 }

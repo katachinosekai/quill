@@ -92,16 +92,34 @@ func TestKmemPopOutKeepsState(t *testing.T) {
 func TestShowKmemFromButtonAndCommand(t *testing.T) {
 	h := kmemBoxHarness(t)
 	h.ui(func() {
-		test.Tap(h.d.kmemBtn)
-		w := h.d.kmemWin
-		if w == nil || w.win == nil {
-			t.Fatal("the kmem button calls showKmem, which pops the window out")
+		d := h.d
+		test.Tap(d.kmemBtn)
+		w := d.kmemWin
+		if d.assistBoxRole() != boxKmem || w == nil || w.win != nil || d.box().body.Objects[0] != fyne.CanvasObject(w.split) {
+			t.Fatal("the kmem button calls showKmem, which opens the kmem box with kmemBoxContent")
 		}
-		w.close()
-		h.d.showKmem()
-		if h.d.kmemWin == nil || h.d.kmemWin.win == nil {
-			t.Fatal("showKmem opens again")
+		if !d.box().popBtn.Visible() || d.box().title.Text != "kmem assistant" {
+			t.Fatal("the kmem box has Pop out")
 		}
-		h.d.kmemWin.close()
+		test.Tap(d.kmemBtn)
+		if d.assistBoxRole() != "" {
+			t.Fatal("the button again closes the box")
+		}
+		d.showKmem()
+		test.Tap(d.box().popBtn)
+		if d.assistBoxRole() != "" || d.kmemWin == nil || d.kmemWin.win == nil || len(d.box().body.Objects) != 0 {
+			t.Fatal("Pop out closes the box and shows the content in its window")
+		}
+		pop := d.kmemWin
+		d.showKmem()
+		if d.assistBoxRole() != "" || d.kmemWin != pop {
+			t.Fatal("while popped out, showKmem raises the window")
+		}
+		pop.close()
+		d.showKmem()
+		if d.assistBoxRole() != boxKmem || d.kmemWin == nil || d.kmemWin == pop || d.box().body.Objects[0] != fyne.CanvasObject(d.kmemWin.split) {
+			t.Fatal("after the window closes, the box shows a fresh content")
+		}
+		d.closeAssistBox()
 	})
 }

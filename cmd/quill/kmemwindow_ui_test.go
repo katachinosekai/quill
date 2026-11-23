@@ -109,10 +109,10 @@ func TestKmemWindow(t *testing.T) {
 	tabsBefore := 0
 	h.ui(func() {
 		tabsBefore = len(h.d.tabs)
-		test.Tap(h.d.kmemBtn)
+		h.d.popOutKmem() // the kmem button opens the box (assistbox_test.go); this is its Pop out window
 		w = h.d.kmemWin
 		if w == nil || w.win == nil || w.panel == nil || h.d.kmemPanelNow != w.panel {
-			t.Fatal("the kmem button opens the kmem window")
+			t.Fatal("Pop out opens the kmem window")
 		}
 		if w.win.Title() != "kmem — Quill Desktop" {
 			t.Fatalf("title: %q", w.win.Title())
@@ -217,7 +217,7 @@ func TestKmemWindow(t *testing.T) {
 		if prefs.Float("kmemWinSplit") != 0.6 || prefs.Float("win.kmem.w") != 1000 || prefs.Float("win.kmem.h") != 700 {
 			t.Fatalf("size and split saved: %v %v %v", prefs.Float("kmemWinSplit"), prefs.Float("win.kmem.w"), prefs.Float("win.kmem.h"))
 		}
-		h.d.showKmem()
+		h.d.popOutKmem()
 		if h.d.kmemWin == nil || h.d.kmemWin == w || h.d.kmemWin.split.Offset != 0.6 || opened != 2 {
 			t.Fatal("reopening builds a new window with the saved split")
 		}

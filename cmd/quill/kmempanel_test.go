@@ -74,7 +74,7 @@ func TestKmemPanel(t *testing.T) {
 	var p *kmemPanel
 	var kw fyne.Window
 	h.ui(func() {
-		h.d.showKmemPanel()
+		h.d.popOutKmem() // the window: dialogs open over it
 		p = h.d.kmemPanelNow
 		if h.d.kmemWin == nil || p == nil || p.w != h.d.kmemWin {
 			t.Fatal("the kmem button opens the kmem window with the panel on its left")

@@ -35,9 +35,9 @@ var kmemWindowOpenHook, kmemWindowCloseHook func(d *desk, w *kmemWindow)
 const kmemChatOffReason = "The kmem assistant is off; the panels on the left work without it."
 
 // showKmem is the one entry for the kmem button, the menu and
-// `quill --kmem-window`. The kmem box will route here; until then it opens
-// the pop-out window (the old kmem window).
-func (d *desk) showKmem() { d.popOutKmem() }
+// `quill --kmem-window`: the kmem box (assistbox.go; its Pop out button
+// opens the window, and a popped-out window is raised instead).
+func (d *desk) showKmem() { d.openAssistBox(boxKmem) }
 
 // kmemBoxContent is the kmem box: the kmem panels as tabs on the left rail
 // and the assistant's chat (own message box and status line, put there by
@@ -121,7 +121,9 @@ func (w *kmemWindow) close() {
 	if kmemWindowCloseHook != nil {
 		kmemWindowCloseHook(d, w)
 	}
-	w.win.Close()
+	if w.win != nil { // nil while the content shows in the kmem box
+		w.win.Close()
+	}
 }
 
 // parent: the window dialogs opened from the kmem window belong to.
