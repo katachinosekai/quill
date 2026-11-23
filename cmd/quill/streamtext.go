@@ -30,6 +30,45 @@ const (
 	revealMaxStep   = 24                    // characters per frame at most
 )
 
+// Text animation speed (user 2026-11-23): Normal is the pace above, exactly;
+// Slow is half of it, Fast double; Instant shows text at once (no reveal).
+// It only matters while "Animate new text" is on.
+const prefAnimateSpeed = "animateSpeed"
+
+var animSpeedNames = []string{"Slow", "Normal", "Fast", "Instant"}
+
+// speedKey is the stored value of a speed name ("Normal" -> "normal").
+func speedKey(name string) string { return strings.ToLower(name) }
+
+// speedName is the display name of a stored value; unknown means Normal.
+func speedName(key string) string {
+	for _, n := range animSpeedNames {
+		if speedKey(n) == key {
+			return n
+		}
+	}
+	return "Normal"
+}
+
+// revealStep is how many bytes the reveal advances in one frame when gap
+// bytes are still hidden, at a speed (stored value; unknown means normal).
+func revealStep(speed string, gap int) int {
+	minRate, catchUp, maxStep := revealMinRate, revealCatchUp, revealMaxStep
+	switch speed {
+	case "slow":
+		minRate, catchUp, maxStep = 1, revealCatchUp*2, revealMaxStep/2
+	case "fast":
+		minRate, catchUp, maxStep = revealMinRate*2, revealCatchUp/2, revealMaxStep*2
+	case "instant":
+		return gap
+	}
+	return min(max(minRate, gap/catchUp), maxStep)
+}
+
+func (d *desk) animateSpeed() string {
+	return speedKey(speedName(d.app.Preferences().StringWithFallback(prefAnimateSpeed, "normal")))
+}
+
 type streamView struct {
 	it       *chat.Item
 	box      *fyne.Container // finished paragraphs, then live
@@ -39,7 +78,8 @@ type streamView struct {
 	shown    string          // the live paragraph as drawn
 	ticking  bool
 	animated bool
-	renders  int // live redraws (tests)
+	speed    string // animateSpeed when the reply started
+	renders  int    // live redraws (tests)
 }
 
 func (d *desk) animateText() bool {
@@ -127,7 +167,7 @@ func streaming(it *chat.Item, iv *itemView) bool {
 func (v *chatView) refreshStream(it *chat.Item, iv *itemView) {
 	st := iv.st
 	if st == nil || st.it != it {
-		st = &streamView{it: it, live: container.NewStack(), animated: v.d.animateText()}
+		st = &streamView{it: it, live: container.NewStack(), animated: v.d.animateText() && v.d.animateSpeed() != "instant", speed: v.d.animateSpeed()}
 		st.box = container.NewVBox(st.live)
 		iv.st = st
 		iv.holder.Objects = []fyne.CanvasObject{spaced(it.Kind, msgText(st.box))}
@@ -159,7 +199,7 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 			text := st.it.Text
 			if st.pos < len(text) {
 				gap := len(text) - st.pos
-				step := min(max(revealMinRate, gap/revealCatchUp), revealMaxStep)
+				step := revealStep(st.speed, gap)
 				n := min(st.pos+step, len(text))
 				// Character by character (user 2026-11-22: not whole words),
 				// never in the middle of a multi-byte character.
