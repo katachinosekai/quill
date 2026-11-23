@@ -188,6 +188,19 @@ func CachedFontFace(style fyne.TextStyle, source fyne.Resource, o fyne.CanvasObj
 	return val
 }
 
+func init() {
+	// Font faces are cached per theme scope (one per ThemeOverride apply);
+	// drop those of scopes no object uses any more (Quill patch, 2026-11-23).
+	cache.OnScopesSwept(func(live func(string) bool) {
+		fontCache.Range(func(k cacheID, _ *FontCacheItem) bool {
+			if k.scope != "" && !live(k.scope) {
+				fontCache.Delete(k)
+			}
+			return true
+		})
+	})
+}
+
 // ClearFontCache is used to remove cached fonts in the case that we wish to re-load Font faces
 func ClearFontCache() {
 	fontCache.Clear()

@@ -61,6 +61,7 @@ func Clean(canvasRefreshed bool) {
 	destroyExpiredSvgs(now)
 	destroyExpiredFontMetrics(now)
 	destroyExpiredBlurKernels(now)
+	sweepOverrides()
 	if canvasRefreshed {
 		// Destroy renderers on canvas refresh to avoid flickering screen.
 		destroyExpiredRenderers(now)
@@ -136,4 +137,27 @@ func (c *expiringCache) isExpired(now time.Time) bool {
 // setAlive updates expiration time.
 func (c *expiringCache) setAlive() {
 	c.expires = cachedNow.Load() + ValidDuration.Nanoseconds()
+}
+
+// OverrideEntries returns the number of objects with a theme override scope
+// (Quill patch, for leak tests).
+func OverrideEntries() int {
+	return overrides.Len()
+}
+
+// CleanAt runs the paint loop's clean task (with a canvas refresh) as if the
+// clock read now. touch runs first with that clock, so renderers it looks up
+// stay alive (Quill patch, for leak tests).
+func CleanAt(now time.Time, touch func()) {
+	cachedNow.Store(now.UnixNano())
+	if touch != nil {
+		touch()
+	}
+	destroyExpiredSvgs(now)
+	destroyExpiredFontMetrics(now)
+	destroyExpiredBlurKernels(now)
+	destroyExpiredRenderers(now)
+	destroyExpiredCanvases(now)
+	sweepOverrides()
+	refreshNow()
 }

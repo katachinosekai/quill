@@ -1,101 +1,51 @@
-Only in a: .gitattributes
-Only in a: .github
-Only in a: .gitignore
-
---- a/internal/driver/glfw/window_desktop.go	2026-11-19 04:15:14.046525466 -0800
-+++ b/internal/driver/glfw/window_desktop.go	2026-11-19 18:03:26.997886885 -0800
-@@ -924,3 +924,23 @@
- func wrapInnerWindow(*container.InnerWindow, fyne.Window, *gLDriver) fyne.Window {
+diff -urN -x .github -x .gitattributes -x .gitignore a/container/theme.go b/container/theme.go
+--- a/container/theme.go
++++ b/container/theme.go
+@@ -1,6 +1,10 @@
++//go:build go1.24
++
+ package container
+ 
+ import (
++	"weak"
++
+ 	"fyne.io/fyne/v2"
+ 	"fyne.io/fyne/v2/internal/cache"
+ 	intTheme "fyne.io/fyne/v2/internal/theme"
+@@ -67,19 +71,26 @@
+ 	t.Refresh()
+ }
+ 
++// featureTheme is the theme stored in the theme cache for the content's
++// objects. It holds the override weakly (Quill patch, 2026-11-23): a strong
++// pointer kept the override, and with it all its content, alive from the
++// cache, so the cache's weak keys could never be collected.
+ type featureTheme struct {
+ 	fyne.Theme
+ 
+-	over *ThemeOverride
++	over weak.Pointer[ThemeOverride]
+ }
+ 
+ func addFeatures(th fyne.Theme, o *ThemeOverride) fyne.Theme {
+-	return &featureTheme{Theme: th, over: o}
++	return &featureTheme{Theme: th, over: weak.Make(o)}
+ }
+ 
+ func (f *featureTheme) Feature(n intTheme.FeatureName) any {
+ 	if n == intTheme.FeatureNameDeviceIsMobile {
+-		return f.over.mobile
++		if o := f.over.Value(); o != nil {
++			return o.mobile
++		}
++		return false
+ 	}
+ 
  	return nil
- }
-+
-+func (w *window) Maximized() bool {
-+	if v := w.view(); v != nil {
-+		return v.GetAttrib(glfw.Maximized) == glfw.True
-+	}
-+	return false
-+}
-+
-+func (w *window) Maximize() {
-+	w.runOnMainWhenCreated(func() {
-+		w.viewport.Maximize()
-+	})
-+}
-+
-+func (w *window) Position() (int, int) {
-+	if v := w.view(); v != nil {
-+		return v.GetPos()
-+	}
-+	return 0, 0
-+}
-
---- a/widget/entry.go	2026-11-19 04:15:14.084158856 -0800
-+++ b/widget/entry.go	2026-11-19 13:31:09.114095645 -0800
-@@ -44,6 +44,7 @@
- 	Text     string
- 	// Since: 2.0
- 	TextStyle   fyne.TextStyle
-+	Alignment   fyne.TextAlign
- 	PlaceHolder string
- 	OnChanged   func(string) `json:"-"`
- 
-@@ -232,7 +233,7 @@
- 	textSize := th.Size(theme.SizeNameText)
- 
- 	size := provider.lineSizeToColumn(e.CursorColumn, e.CursorRow, textSize, innerPad)
--	xPos := size.Width
-+	xPos := size.Width + provider.rowAlignOffset(e.CursorRow, textSize, innerPad)
- 	yPos := size.Height * float32(e.CursorRow)
- 
- 	return fyne.NewPos(xPos-(inputBorder/2), yPos+innerPad-inputBorder)
-@@ -1279,6 +1280,7 @@
- 	textSegment.Style.ColorName = colName
- 	textSegment.Style.concealed = e.Password
- 	textSegment.Style.TextStyle = e.TextStyle
-+	textSegment.Style.Alignment = e.Alignment
- 
- 	colName = theme.ColorNamePlaceHolder
- 	if disabled {
-@@ -1291,6 +1293,7 @@
- 	textSegment = placeholder.Segments[0].(*TextSegment)
- 	textSegment.Style.ColorName = colName
- 	textSegment.Style.TextStyle = e.TextStyle
-+	textSegment.Style.Alignment = e.Alignment
- 	textSegment.Text = e.PlaceHolder
- }
- 
-diff -urN a/driver/walk.go b/driver/walk.go
---- /dev/null
-+++ b/driver/walk.go
-@@ -0,0 +1,11 @@
-+package driver
-+
-+import (
-+	"fyne.io/fyne/v2"
-+	intdriver "fyne.io/fyne/v2/internal/driver"
-+)
-+
-+// WalkVisibleObjectTree exposes the internal walker so apps can find the drawn objects of a widget tree.
-+func WalkVisibleObjectTree(obj fyne.CanvasObject, beforeChildren func(fyne.CanvasObject, fyne.Position, fyne.Position, fyne.Size) bool, afterChildren func(fyne.CanvasObject, fyne.Position, fyne.CanvasObject)) bool {
-+	return intdriver.WalkVisibleObjectTree(obj, beforeChildren, afterChildren)
-+}
-
-diff -urN a/widget/entry_offset.go b/widget/entry_offset.go
---- a/widget/entry_offset.go	1970-01-01 00:00:00.000000000 +0000
-+++ b/widget/entry_offset.go	2026-11-21 12:00:00.000000000 -0800
-@@ -0,0 +1,7 @@
-+package widget
-+
-+func (e *Entry) SetCursorTextOffset(pos int) {
-+	e.CursorRow, e.CursorColumn = e.rowColFromTextPos(pos)
-+	e.syncSelectable()
-+	e.Refresh()
-+}
-diff --git a/dialog/base.go b/dialog/base.go
-index a12de0f..e234ebd 100644
+diff -urN -x .github -x .gitattributes -x .gitignore a/dialog/base.go b/dialog/base.go
 --- a/dialog/base.go
 +++ b/dialog/base.go
-@@ -83,6 +83,27 @@ func (d *dialog) Show() {
+@@ -83,6 +83,27 @@
  		d.win.Resize(d.desiredSize)
  	}
  	d.win.Show()
@@ -123,7 +73,7 @@ index a12de0f..e234ebd 100644
  }
  
  func (d *dialog) Refresh() {
-@@ -123,6 +144,7 @@ func (d *dialog) SetOnClosed(closed func()) {
+@@ -123,6 +144,7 @@
  }
  
  func (d *dialog) hideWithResponse(resp bool) {
@@ -131,11 +81,10 @@ index a12de0f..e234ebd 100644
  	d.win.Hide()
  	if d.callback != nil {
  		d.callback(resp)
-diff --git a/dialog/entry.go b/dialog/entry.go
-index 3f5c542..f6c7cd5 100644
+diff -urN -x .github -x .gitattributes -x .gitignore a/dialog/entry.go b/dialog/entry.go
 --- a/dialog/entry.go
 +++ b/dialog/entry.go
-@@ -61,6 +61,7 @@ func NewEntryDialog(title, message string, onConfirm func(string), parent fyne.W
+@@ -61,6 +61,7 @@
  		}
  
  		i.entry.Text = ""
@@ -143,26 +92,239 @@ index 3f5c542..f6c7cd5 100644
  		i.win.Hide() // Close directly without executing the callback. This is the callback.
  	}, parent)
  
-diff --git a/widget/popup.go b/widget/popup.go
-index 45623e3..4cd6e3f 100644
---- a/widget/popup.go
-+++ b/widget/popup.go
-@@ -234,3 +234,12 @@ func withRelativePosition(rel fyne.Position, to fyne.CanvasObject, f func(positi
- 	pos := d.AbsolutePositionForObject(to).Add(rel)
- 	f(pos)
+diff -urN -x .github -x .gitattributes -x .gitignore a/driver/walk.go b/driver/walk.go
+--- a/driver/walk.go
++++ b/driver/walk.go
+@@ -0,0 +1,11 @@
++package driver
++
++import (
++	"fyne.io/fyne/v2"
++	intdriver "fyne.io/fyne/v2/internal/driver"
++)
++
++// WalkVisibleObjectTree exposes the internal walker so apps can find the drawn objects of a widget tree.
++func WalkVisibleObjectTree(obj fyne.CanvasObject, beforeChildren func(fyne.CanvasObject, fyne.Position, fyne.Position, fyne.Size) bool, afterChildren func(fyne.CanvasObject, fyne.Position, fyne.CanvasObject)) bool {
++	return intdriver.WalkVisibleObjectTree(obj, beforeChildren, afterChildren)
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/internal/cache/base.go b/internal/cache/base.go
+--- a/internal/cache/base.go
++++ b/internal/cache/base.go
+@@ -61,6 +61,7 @@
+ 	destroyExpiredSvgs(now)
+ 	destroyExpiredFontMetrics(now)
+ 	destroyExpiredBlurKernels(now)
++	sweepOverrides()
+ 	if canvasRefreshed {
+ 		// Destroy renderers on canvas refresh to avoid flickering screen.
+ 		destroyExpiredRenderers(now)
+@@ -137,3 +138,26 @@
+ func (c *expiringCache) setAlive() {
+ 	c.expires = cachedNow.Load() + ValidDuration.Nanoseconds()
  }
 +
-+// OverlayContent returns what an overlay from Canvas.Overlays() shows: the
-+// PopUp or PopUpMenu inside a pop-up overlay, otherwise o itself.
-+func OverlayContent(o fyne.CanvasObject) fyne.CanvasObject {
-+	if oc, ok := o.(*widget.OverlayContainer); ok && oc.Content != nil {
-+		return oc.Content
-+	}
-+	return o
++// OverrideEntries returns the number of objects with a theme override scope
++// (Quill patch, for leak tests).
++func OverrideEntries() int {
++	return overrides.Len()
 +}
-
---- a/internal/painter/font.go	2026-11-23 02:50:30.164618444 -0800
-+++ b/internal/painter/font.go	2026-11-23 02:50:30.167654225 -0800
++
++// CleanAt runs the paint loop's clean task (with a canvas refresh) as if the
++// clock read now. touch runs first with that clock, so renderers it looks up
++// stay alive (Quill patch, for leak tests).
++func CleanAt(now time.Time, touch func()) {
++	cachedNow.Store(now.UnixNano())
++	if touch != nil {
++		touch()
++	}
++	destroyExpiredSvgs(now)
++	destroyExpiredFontMetrics(now)
++	destroyExpiredBlurKernels(now)
++	destroyExpiredRenderers(now)
++	destroyExpiredCanvases(now)
++	sweepOverrides()
++	refreshNow()
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/internal/cache/theme.go b/internal/cache/theme.go
+--- a/internal/cache/theme.go
++++ b/internal/cache/theme.go
+@@ -5,11 +5,10 @@
+ 	"sync/atomic"
+ 
+ 	"fyne.io/fyne/v2"
+-	"fyne.io/fyne/v2/internal/async"
+ )
+ 
+ var (
+-	overrides     async.Map[fyne.CanvasObject, *overrideScope]
++	overrides     overrideMap // weak keys, see theme_map.go (Quill patch)
+ 	overrideCount atomic.Uint32
+ )
+ 
+diff -urN -x .github -x .gitattributes -x .gitignore a/internal/cache/theme_map.go b/internal/cache/theme_map.go
+--- a/internal/cache/theme_map.go
++++ b/internal/cache/theme_map.go
+@@ -0,0 +1,130 @@
++//go:build go1.24
++
++package cache
++
++import (
++	"reflect"
++	"sync"
++	"unsafe"
++	"weak"
++
++	"fyne.io/fyne/v2"
++)
++
++// overrideMap maps canvas objects to their theme override scope without
++// keeping the objects alive (Quill patch, 2026-11-23).
++//
++// It used to be a plain map keyed by the objects: every text, rectangle and
++// widget inside every ThemeOverride stayed in it for good (only widgets were
++// removed, when their renderer was destroyed), and through the scope's theme
++// the whole override with its content. Quill wraps each chat message in a
++// ThemeOverride: 243,000 entries and ~140 MB after a few hours, ~0.9 MB per
++// streaming redraw. Now an object is keyed by its address and held by a weak
++// pointer, so it is collected once nothing else uses it; the clean task
++// drops the entries of collected objects (sweep).
++type overrideMap struct {
++	m sync.Map // uintptr (object address) or fyne.CanvasObject (non-pointer objects) -> *overrideEntry
++}
++
++type overrideEntry struct {
++	obj   weak.Pointer[byte] // pointer objects
++	value fyne.CanvasObject  // non-pointer objects, held strongly as before
++	scope *overrideScope
++}
++
++// objectKey returns the map key for o and its address (nil for objects that
++// are not a non-empty pointer: those are keyed, and kept, by value).
++func objectKey(o fyne.CanvasObject) (any, unsafe.Pointer) {
++	t := reflect.TypeOf(o)
++	if t == nil || t.Kind() != reflect.Pointer || t.Elem().Size() == 0 {
++		return o, nil
++	}
++	p := reflect.ValueOf(o).UnsafePointer()
++	if p == nil {
++		return o, nil
++	}
++	return uintptr(p), p
++}
++
++func (e *overrideEntry) live(p unsafe.Pointer) bool {
++	return p == nil || e.obj.Value() == (*byte)(p)
++}
++
++func (m *overrideMap) Load(o fyne.CanvasObject) (*overrideScope, bool) {
++	k, p := objectKey(o)
++	v, ok := m.m.Load(k)
++	if !ok {
++		return nil, false
++	}
++	e := v.(*overrideEntry)
++	if !e.live(p) { // a collected object that lived at the same address
++		return nil, false
++	}
++	return e.scope, true
++}
++
++func (m *overrideMap) Store(o fyne.CanvasObject, s *overrideScope) {
++	k, p := objectKey(o)
++	e := &overrideEntry{scope: s}
++	if p != nil {
++		e.obj = weak.Make((*byte)(p))
++	} else {
++		e.value = o
++	}
++	m.m.Store(k, e)
++}
++
++func (m *overrideMap) Delete(o fyne.CanvasObject) {
++	k, _ := objectKey(o)
++	m.m.Delete(k)
++}
++
++// Len returns the number of entries (collected objects not swept yet included).
++func (m *overrideMap) Len() (n int) {
++	m.m.Range(func(_, _ any) bool {
++		n++
++		return true
++	})
++	return n
++}
++
++// sweep deletes the entries of collected objects and returns the cache IDs
++// of the scopes still in use.
++func (m *overrideMap) sweep() map[string]bool {
++	live := map[string]bool{}
++	m.m.Range(func(k, v any) bool {
++		e := v.(*overrideEntry)
++		if e.value == nil && e.obj.Value() == nil {
++			m.m.CompareAndDelete(k, v)
++			return true
++		}
++		live[e.scope.cacheID] = true
++		return true
++	})
++	return live
++}
++
++var (
++	scopeHooksMu sync.Mutex
++	scopeHooks   []func(live func(cacheID string) bool)
++)
++
++// OnScopesSwept registers a hook the clean task runs after dropping the
++// entries of collected objects: live reports whether a scope cache ID is
++// still used, so caches keyed by scope can drop the others (Quill patch).
++func OnScopesSwept(f func(live func(cacheID string) bool)) {
++	scopeHooksMu.Lock()
++	scopeHooks = append(scopeHooks, f)
++	scopeHooksMu.Unlock()
++}
++
++// sweepOverrides drops the override entries of collected objects.
++func sweepOverrides() {
++	live := overrides.sweep()
++	scopeHooksMu.Lock()
++	hooks := scopeHooks
++	scopeHooksMu.Unlock()
++	for _, f := range hooks {
++		f(func(id string) bool { return live[id] })
++	}
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/internal/driver/glfw/window_desktop.go b/internal/driver/glfw/window_desktop.go
+--- a/internal/driver/glfw/window_desktop.go
++++ b/internal/driver/glfw/window_desktop.go
+@@ -924,3 +924,23 @@
+ func wrapInnerWindow(*container.InnerWindow, fyne.Window, *gLDriver) fyne.Window {
+ 	return nil
+ }
++
++func (w *window) Maximized() bool {
++	if v := w.view(); v != nil {
++		return v.GetAttrib(glfw.Maximized) == glfw.True
++	}
++	return false
++}
++
++func (w *window) Maximize() {
++	w.runOnMainWhenCreated(func() {
++		w.viewport.Maximize()
++	})
++}
++
++func (w *window) Position() (int, int) {
++	if v := w.view(); v != nil {
++		return v.GetPos()
++	}
++	return 0, 0
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/internal/painter/font.go b/internal/painter/font.go
+--- a/internal/painter/font.go
++++ b/internal/painter/font.go
 @@ -110,10 +110,11 @@
  		faces.addFace(loadMeasureFont(added))
  	}
@@ -179,7 +341,24 @@ index 45623e3..4cd6e3f 100644
  
  	return faces
  }
-@@ -191,6 +192,7 @@
+@@ -187,10 +188,24 @@
+ 	return val
+ }
+ 
++func init() {
++	// Font faces are cached per theme scope (one per ThemeOverride apply);
++	// drop those of scopes no object uses any more (Quill patch, 2026-11-23).
++	cache.OnScopesSwept(func(live func(string) bool) {
++		fontCache.Range(func(k cacheID, _ *FontCacheItem) bool {
++			if k.scope != "" && !live(k.scope) {
++				fontCache.Delete(k)
++			}
++			return true
++		})
++	})
++}
++
+ // ClearFontCache is used to remove cached fonts in the case that we wish to re-load Font faces
  func ClearFontCache() {
  	fontCache.Clear()
  	fontCustomCache.Clear()
@@ -187,7 +366,7 @@ index 45623e3..4cd6e3f 100644
  
  	runBufferMut.Lock()
  	clear(shapeCache)
-@@ -224,13 +226,32 @@
+@@ -224,13 +239,32 @@
  	})
  }
  
@@ -222,7 +401,7 @@ index 45623e3..4cd6e3f 100644
  	return loaded
  }
  
-@@ -582,8 +603,10 @@
+@@ -582,8 +616,10 @@
  func (n noopLogger) Printf(string, ...any) {}
  
  type dynamicFontMap struct {
@@ -235,7 +414,7 @@ index 45623e3..4cd6e3f 100644
  }
  
  func (d *dynamicFontMap) ResolveFace(r rune) *font.Face {
-@@ -593,6 +616,16 @@
+@@ -593,6 +629,16 @@
  		}
  	}
  
@@ -252,3 +431,319 @@ index 45623e3..4cd6e3f 100644
  	toAdd := lookupRuneFont(r, d.family, font.Aspect{})
  	if toAdd != nil {
  		d.addFace(toAdd)
+diff -urN -x .github -x .gitattributes -x .gitignore a/internal/painter/font_parse_test.go b/internal/painter/font_parse_test.go
+--- a/internal/painter/font_parse_test.go
++++ b/internal/painter/font_parse_test.go
+@@ -0,0 +1,68 @@
++package painter
++
++import (
++	"bytes"
++	"fyne.io/fyne/v2"
++	"testing"
++
++	"github.com/go-text/typesetting/font"
++
++	"fyne.io/fyne/v2/theme"
++)
++
++// Quill patch: a font resource is parsed once, however many theme scopes
++// (ThemeOverrides) ask for it.
++func TestLoadMeasureFontParsesOnce(t *testing.T) {
++	ClearFontCache()
++	a := loadMeasureFont(theme.DefaultTextFont())
++	b := loadMeasureFont(theme.DefaultTextFont())
++	if a == nil || a != b {
++		t.Fatal("the same font resource gives the same parsed face")
++	}
++	if c := loadMeasureFont(theme.DefaultTextBoldFont()); c == a {
++		t.Fatal("a different font is parsed on its own")
++	}
++}
++
++func BenchmarkLoadMeasureFontEmoji(b *testing.B) {
++	emoji := theme.DefaultEmojiFont()
++	if emoji == nil {
++		b.Skip("built without the emoji font")
++	}
++	ClearFontCache()
++	b.ReportAllocs()
++	for i := 0; i < b.N; i++ {
++		loadMeasureFont(emoji)
++	}
++}
++
++// The cost per scope before the patch: a full parse every time.
++func BenchmarkParseTTFEmojiUncached(b *testing.B) {
++	emoji := theme.DefaultEmojiFont()
++	if emoji == nil {
++		b.Skip("built without the emoji font")
++	}
++	b.ReportAllocs()
++	for i := 0; i < b.N; i++ {
++		if _, err := font.ParseTTF(bytes.NewReader(emoji.Content())); err != nil {
++			b.Fatal(err)
++		}
++	}
++}
++
++// Quill patch: the locale font is looked up on the first glyph the bundled
++// fonts lack, not when the font map is built.
++func TestLangFontLookedUpLazily(t *testing.T) {
++	ClearFontCache()
++	faces := lookupFaces(theme.DefaultTextFont(), theme.DefaultTextFont(), nil, "sans-serif", fyne.TextStyle{})
++	if !faces.lazyLang || len(faces.faces) != 1 {
++		t.Fatalf("lazyLang %v, %d faces", faces.lazyLang, len(faces.faces))
++	}
++	if f := faces.ResolveFace('a'); f != faces.faces[0] || !faces.lazyLang {
++		t.Fatal("a bundled glyph must not trigger the lookup")
++	}
++	faces.ResolveFace(0x6F22) // a missing glyph
++	if faces.lazyLang {
++		t.Fatal("a missing glyph triggers the lookup")
++	}
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/internal/painter/font_system_test.go b/internal/painter/font_system_test.go
+--- a/internal/painter/font_system_test.go
++++ b/internal/painter/font_system_test.go
+@@ -0,0 +1,23 @@
++//go:build !ci && !test
++
++package painter
++
++import (
++	"testing"
++
++	"fyne.io/fyne/v2"
++	"fyne.io/fyne/v2/theme"
++)
++
++// With real system fonts: CJK and emoji glyphs still resolve through the
++// lazy fallback (skipped where no installed font has them).
++func TestSystemFallbackFindsCJKAndEmoji(t *testing.T) {
++	ClearFontCache()
++	faces := lookupFaces(theme.DefaultTextFont(), theme.DefaultTextFont(), nil, "sans-serif", fyne.TextStyle{})
++	for _, r := range []rune{0x6F22, 0x3042, 0x1F600} {
++		f := faces.ResolveFace(r)
++		if _, ok := f.NominalGlyph(r); !ok {
++			t.Skipf("no installed font has U+%X", r)
++		}
++	}
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/test/cache.go b/test/cache.go
+--- a/test/cache.go
++++ b/test/cache.go
+@@ -0,0 +1,36 @@
++package test
++
++import (
++	"time"
++
++	"fyne.io/fyne/v2"
++	"fyne.io/fyne/v2/internal/cache"
++	intdriver "fyne.io/fyne/v2/internal/driver"
++)
++
++// ThemeOverrideEntries returns the number of objects the theme cache holds
++// an override scope for (Quill patch, for leak tests).
++func ThemeOverrideEntries() int {
++	return cache.OverrideEntries()
++}
++
++// CleanCaches runs the cache clean of a desktop paint loop as if `after` had
++// passed since the last frame, with the visible objects of c drawn in that
++// frame: renderers (and their theme scopes) of everything else expire, as
++// they would in a running app (Quill patch, for leak tests).
++func CleanCaches(c fyne.Canvas, after time.Duration) {
++	cache.CleanAt(time.Now().Add(after), func() {
++		touch := func(o fyne.CanvasObject, _, _ fyne.Position, _ fyne.Size) bool {
++			if w, ok := o.(fyne.Widget); ok {
++				cache.Renderer(w)
++			}
++			return false
++		}
++		if c.Content() != nil {
++			intdriver.WalkVisibleObjectTree(c.Content(), touch, nil)
++		}
++		for _, o := range c.Overlays().List() {
++			intdriver.WalkVisibleObjectTree(o, touch, nil)
++		}
++	})
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/widget/entry.go b/widget/entry.go
+--- a/widget/entry.go
++++ b/widget/entry.go
+@@ -44,6 +44,7 @@
+ 	Text     string
+ 	// Since: 2.0
+ 	TextStyle   fyne.TextStyle
++	Alignment   fyne.TextAlign
+ 	PlaceHolder string
+ 	OnChanged   func(string) `json:"-"`
+ 
+@@ -232,7 +233,7 @@
+ 	textSize := th.Size(theme.SizeNameText)
+ 
+ 	size := provider.lineSizeToColumn(e.CursorColumn, e.CursorRow, textSize, innerPad)
+-	xPos := size.Width
++	xPos := size.Width + provider.rowAlignOffset(e.CursorRow, textSize, innerPad)
+ 	yPos := size.Height * float32(e.CursorRow)
+ 
+ 	return fyne.NewPos(xPos-(inputBorder/2), yPos+innerPad-inputBorder)
+@@ -1279,6 +1280,7 @@
+ 	textSegment.Style.ColorName = colName
+ 	textSegment.Style.concealed = e.Password
+ 	textSegment.Style.TextStyle = e.TextStyle
++	textSegment.Style.Alignment = e.Alignment
+ 
+ 	colName = theme.ColorNamePlaceHolder
+ 	if disabled {
+@@ -1291,6 +1293,7 @@
+ 	textSegment = placeholder.Segments[0].(*TextSegment)
+ 	textSegment.Style.ColorName = colName
+ 	textSegment.Style.TextStyle = e.TextStyle
++	textSegment.Style.Alignment = e.Alignment
+ 	textSegment.Text = e.PlaceHolder
+ }
+ 
+diff -urN -x .github -x .gitattributes -x .gitignore a/widget/entry_offset.go b/widget/entry_offset.go
+--- a/widget/entry_offset.go
++++ b/widget/entry_offset.go
+@@ -0,0 +1,7 @@
++package widget
++
++func (e *Entry) SetCursorTextOffset(pos int) {
++	e.CursorRow, e.CursorColumn = e.rowColFromTextPos(pos)
++	e.syncSelectable()
++	e.Refresh()
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/widget/popup.go b/widget/popup.go
+--- a/widget/popup.go
++++ b/widget/popup.go
+@@ -234,3 +234,12 @@
+ 	pos := d.AbsolutePositionForObject(to).Add(rel)
+ 	f(pos)
+ }
++
++// OverlayContent returns what an overlay from Canvas.Overlays() shows: the
++// PopUp or PopUpMenu inside a pop-up overlay, otherwise o itself.
++func OverlayContent(o fyne.CanvasObject) fyne.CanvasObject {
++	if oc, ok := o.(*widget.OverlayContainer); ok && oc.Content != nil {
++		return oc.Content
++	}
++	return o
++}
+diff -urN -x .github -x .gitattributes -x .gitignore a/widget/richtext.go b/widget/richtext.go
+--- a/widget/richtext.go
++++ b/widget/richtext.go
+@@ -112,13 +112,6 @@
+ func (t *RichText) Refresh() {
+ 	t.minCache = fyne.Size{}
+ 	t.updateRowBounds()
+-
+-	for _, s := range t.Segments {
+-		if txt, ok := s.(*TextSegment); ok {
+-			txt.parent = t
+-		}
+-	}
+-
+ 	t.BaseWidget.Refresh()
+ }
+ 
+@@ -438,6 +431,15 @@
+ 	var iterateSegments func(segList []RichTextSegment, depth int)
+ 	iterateSegments = func(segList []RichTextSegment, depth int) {
+ 		for _, seg := range segList {
++			// Quill: every text segment drawn gets t as its parent, nested
++			// ones (list items, the bullets ListSegment makes on the fly)
++			// included. Only top-level ones used to, so list text took its
++			// size from whatever theme was being rendered at that moment
++			// (a ThemeOverride's own layout pass, or the app's anywhere
++			// else) and streaming replies snapped between the two.
++			if txt, ok := seg.(*TextSegment); ok {
++				txt.parent = t
++			}
+ 			if parent, ok := seg.(RichTextBlock); ok {
+ 				segs := parent.Segments()
+ 				iterateSegments(segs, depth+1)
+@@ -578,6 +580,16 @@
+ // codeInlineText returns the text inside an inline-code container, identified by
+ // its codeInlineLayout, or a bare *canvas.Text as-is. It returns false for any
+ // other object.
++// isCodeBox: obj is an inline-code container (background + text).
++func isCodeBox(obj fyne.CanvasObject) bool {
++	c, ok := obj.(*fyne.Container)
++	if !ok {
++		return false
++	}
++	_, ok = c.Layout.(*codeInlineLayout)
++	return ok
++}
++
+ func codeInlineText(obj fyne.CanvasObject) (*canvas.Text, bool) {
+ 	switch o := obj.(type) {
+ 	case *canvas.Text:
+@@ -936,8 +948,14 @@
+ 	case fyne.TextAlignTrailing:
+ 		spare += innerPadding
+ 		first := texts[0]
+-		first.Resize(fyne.NewSize(first.Size().Width+spare, height))
+-		setAlign(first, fyne.TextAlignTrailing)
++		if isCodeBox(first) {
++			// Quill: an inline-code box draws its text at its left edge,
++			// so widening it would leave the code at the row's start.
++			first.Move(first.Position().Add(fyne.NewPos(spare, 0)))
++		} else {
++			first.Resize(fyne.NewSize(first.Size().Width+spare, height))
++			setAlign(first, fyne.TextAlignTrailing)
++		}
+ 
+ 		for _, text := range texts[1:] {
+ 			text.Move(text.Position().Add(fyne.NewPos(spare, 0)))
+@@ -946,11 +964,18 @@
+ 		spare += innerPadding
+ 		pad := spare / 2
+ 		first := texts[0]
+-		first.Resize(fyne.NewSize(first.Size().Width+pad, height))
+-		setAlign(first, fyne.TextAlignTrailing)
++		if isCodeBox(first) {
++			// Quill: move the code box (see the trailing case) instead.
++			first.Move(first.Position().Add(fyne.NewPos(pad, 0)))
++		} else {
++			first.Resize(fyne.NewSize(first.Size().Width+pad, height))
++			setAlign(first, fyne.TextAlignTrailing)
++		}
+ 		last := texts[len(texts)-1]
+-		last.Resize(fyne.NewSize(last.Size().Width+pad, height))
+-		setAlign(last, fyne.TextAlignLeading)
++		if !isCodeBox(last) {
++			last.Resize(fyne.NewSize(last.Size().Width+pad, height))
++			setAlign(last, fyne.TextAlignLeading)
++		}
+ 
+ 		for _, text := range texts[1:] {
+ 			text.Move(text.Position().Add(fyne.NewPos(pad, 0)))
+diff -urN -x .github -x .gitattributes -x .gitignore a/widget/richtext_objects.go b/widget/richtext_objects.go
+--- a/widget/richtext_objects.go
++++ b/widget/richtext_objects.go
+@@ -233,6 +233,10 @@
+ type ListSegment struct {
+ 	Items   []RichTextSegment
+ 	Ordered bool
++	// Markers, when set, are the items' markers as written ("a.", "b)");
++	// Quill uses them for lettered lists. Empty entries fall back to the
++	// bullet or number.
++	Markers []string
+ 
+ 	// startIndex is the starting number - 1 (If it is ordered). Unordered lists
+ 	// ignore startIndex.
+@@ -277,6 +281,9 @@
+ 				txt = strconv.Itoa(j) + "."
+ 				j++
+ 			}
++			if i < len(l.Markers) && l.Markers[i] != "" {
++				txt = l.Markers[i]
++			}
+ 			indentation := strings.Repeat(" ", l.indentationLevel*4)
+ 			style := RichTextStyleStrong
+ 			style.QuotingDepth = l.quotingLevel

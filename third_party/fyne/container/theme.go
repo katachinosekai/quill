@@ -1,6 +1,10 @@
+//go:build go1.24
+
 package container
 
 import (
+	"weak"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/internal/cache"
 	intTheme "fyne.io/fyne/v2/internal/theme"
@@ -67,19 +71,26 @@ func (t *ThemeOverride) SetDeviceIsMobile(on bool) {
 	t.Refresh()
 }
 
+// featureTheme is the theme stored in the theme cache for the content's
+// objects. It holds the override weakly (Quill patch, 2026-11-23): a strong
+// pointer kept the override, and with it all its content, alive from the
+// cache, so the cache's weak keys could never be collected.
 type featureTheme struct {
 	fyne.Theme
 
-	over *ThemeOverride
+	over weak.Pointer[ThemeOverride]
 }
 
 func addFeatures(th fyne.Theme, o *ThemeOverride) fyne.Theme {
-	return &featureTheme{Theme: th, over: o}
+	return &featureTheme{Theme: th, over: weak.Make(o)}
 }
 
 func (f *featureTheme) Feature(n intTheme.FeatureName) any {
 	if n == intTheme.FeatureNameDeviceIsMobile {
-		return f.over.mobile
+		if o := f.over.Value(); o != nil {
+			return o.mobile
+		}
+		return false
 	}
 
 	return nil
