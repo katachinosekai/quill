@@ -16,6 +16,10 @@ and the plan card read plans in this format.
    turns each into buttons, checkboxes or a text field; the recommended
    option shows "(recommended)" and is highlighted, and no button shows a
    check until the user picks.
+5. Any closing question (plan or not) comes last in the reply, after sources
+   and links, and each question has its own line. (The cards also find a
+   question followed only by a sources/links block, but the hint keeps
+   replies in the shape the cards read best.)
 
 ## What an approval covers
 
