@@ -239,16 +239,13 @@ func (d *desk) followDraft() {
 	if prev := d.sessions[d.strip.lastCur]; prev != nil && prev.qedit != nil {
 		d.cancelQueueEdit(prev)
 	}
-	d.strip.keepDraft(d.strip.lastCur, d.input.Text)
+	d.strip.keepBox(d.strip.lastCur, d.input)
 	d.strip.lastCur = cur
-	text := d.strip.draft(cur)
-	if first && text == "" {
-		d.strip.keepDraft(cur, d.input.Text)
+	if first && d.strip.draft(cur) == "" {
+		d.strip.keepBox(cur, d.input)
 		return
 	}
-	if text != d.input.Text {
-		d.input.SetText(text)
-	}
+	d.strip.fillBox(cur, d.input)
 }
 
 func (d *desk) syncTabs() {

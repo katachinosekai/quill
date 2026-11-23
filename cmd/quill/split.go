@@ -340,7 +340,7 @@ func (d *desk) setSplit(n int) {
 		cur := d.current
 		for _, p := range d.panes {
 			if p.view.s != nil {
-				d.strip.keepDraft(p.view.s.id, p.input.Text)
+				d.strip.keepBox(p.view.s.id, p.input)
 			}
 		}
 		d.panes = nil
@@ -350,7 +350,7 @@ func (d *desk) setSplit(n int) {
 		d.focused = nil
 		if cur != nil {
 			d.chat.show(cur)
-			d.input.SetText(d.strip.draft(cur.id))
+			d.strip.fillBox(cur.id, d.input)
 			d.strip.lastCur = cur.id
 		} else {
 			d.chat.show(nil)
@@ -360,7 +360,7 @@ func (d *desk) setSplit(n int) {
 	}
 	if !d.split() {
 		if d.current != nil {
-			d.strip.keepDraft(d.current.id, d.input.Text)
+			d.strip.keepBox(d.current.id, d.input)
 		}
 		d.input.SetText("")
 		first := d.newPane()
@@ -491,8 +491,8 @@ func (d *desk) syncPanes() {
 			id = p.view.s.id
 		}
 		if id != p.lastID {
-			d.strip.keepDraft(p.lastID, p.input.Text)
-			p.input.SetText(d.strip.draft(id))
+			d.strip.keepBox(p.lastID, p.input)
+			d.strip.fillBox(id, p.input)
 			p.lastID = id
 		}
 		d.syncPaneControls(p)
@@ -797,6 +797,7 @@ func (d *desk) restoreSplit(st *splitState) {
 		}
 		if i < len(st.Drafts) && st.Drafts[i] != "" {
 			p.input.SetText(st.Drafts[i])
+			d.strip.placeCaret(id, p.input)
 		}
 	}
 	if st.Focus >= 0 && st.Focus < len(d.panes) {

@@ -2621,3 +2621,54 @@ func chipText(c *tabChip) string {
 	}
 	return walk(c.content)
 }
+
+func TestCaretSurvivesTabSwitch(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		a := h.d.createSession(h.proj, "default", "default")
+		b := h.d.createSession(h.proj, "default", "default")
+		h.d.open(a.id)
+		h.d.input.SetText("hello world\nsecond line")
+		h.d.input.CursorRow, h.d.input.CursorColumn = 0, 5
+		h.d.open(b.id)
+		h.d.input.SetText("other")
+		h.d.input.CursorRow, h.d.input.CursorColumn = 0, 2
+		h.d.open(a.id)
+		if h.d.input.Text != "hello world\nsecond line" || h.d.input.CursorRow != 0 || h.d.input.CursorColumn != 5 {
+			t.Fatalf("caret mid-text: %q %d,%d", h.d.input.Text, h.d.input.CursorRow, h.d.input.CursorColumn)
+		}
+		h.d.input.CursorRow, h.d.input.CursorColumn = 1, 3
+		h.d.open(b.id)
+		if h.d.input.CursorRow != 0 || h.d.input.CursorColumn != 2 {
+			t.Fatalf("other tab caret: %d,%d", h.d.input.CursorRow, h.d.input.CursorColumn)
+		}
+		h.d.open(a.id)
+		if h.d.input.CursorRow != 1 || h.d.input.CursorColumn != 3 {
+			t.Fatalf("multiline caret: %d,%d", h.d.input.CursorRow, h.d.input.CursorColumn)
+		}
+		// a caret survives the handover to a reloaded Quill Desktop
+		var st restoreState
+		h.d.strip.keepBox(a.id, h.d.input)
+		h.d.saveSessions(&st)
+		raw, _ := json.Marshal(st)
+		var back restoreState
+		json.Unmarshal(raw, &back)
+		if back.Carets[a.id] != (caretPos{1, 3}) {
+			t.Fatalf("caret saved for reload: %+v", back.Carets)
+		}
+		// split panes keep their own carets when a pane changes tab
+		h.d.setSplit(2)
+		p := h.d.panes[0]
+		h.d.showInPane(p, a.id)
+		h.d.syncPanes()
+		p.input.SetText("pane text here")
+		p.input.CursorRow, p.input.CursorColumn = 0, 4
+		h.d.showInPane(p, b.id)
+		h.d.syncPanes()
+		h.d.showInPane(p, a.id)
+		h.d.syncPanes()
+		if p.input.Text != "pane text here" || p.input.CursorColumn != 4 {
+			t.Fatalf("pane caret: %q %d,%d", p.input.Text, p.input.CursorRow, p.input.CursorColumn)
+		}
+	})
+}

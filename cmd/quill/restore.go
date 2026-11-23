@@ -65,6 +65,12 @@ func (d *desk) saveSessions(st *restoreState) {
 			st.Drafts = map[string]string{}
 		}
 		st.Drafts[id] = text
+		if c, ok := d.strip.carets[id]; ok {
+			if st.Carets == nil {
+				st.Carets = map[string]caretPos{}
+			}
+			st.Carets[id] = c
+		}
 	}
 }
 
@@ -99,6 +105,12 @@ func (d *desk) restoreSessions(st *restoreState) {
 	}
 	for id, text := range st.Drafts {
 		d.strip.keepDraft(id, text)
+	}
+	for id, c := range st.Carets {
+		if d.strip.carets == nil {
+			d.strip.carets = map[string]caretPos{}
+		}
+		d.strip.carets[id] = c
 	}
 }
 

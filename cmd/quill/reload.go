@@ -42,6 +42,7 @@ type restoreState struct {
 	Queues   map[string][]string `json:"queues,omitempty"`
 	Meta     map[string]sessMeta `json:"meta,omitempty"`
 	Drafts   map[string]string   `json:"drafts,omitempty"`
+	Carets   map[string]caretPos `json:"carets,omitempty"`
 	Paused   *pauseState         `json:"paused,omitempty"`
 	KmemWin  bool                `json:"kmemWin,omitempty"` // the kmem window was open: reopen it
 }
@@ -203,10 +204,12 @@ func (d *desk) trySwap() {
 	d.stopRemotes()
 	st := d.restoreHead()
 	if d.current != nil && !d.split() {
+		d.strip.keepBox(d.current.id, d.input)
 		d.strip.keepDraft(d.current.id, st.Draft)
 	}
 	for _, p := range d.panes {
 		if p.view.s != nil {
+			d.strip.keepBox(p.view.s.id, p.input)
 			d.strip.keepDraft(p.view.s.id, d.boxDraft(p.view.s, p.input))
 		}
 	}
@@ -443,6 +446,7 @@ func (d *desk) applyRestore(st *restoreState) {
 	draftFor := firstNonEmpty(st.DraftFor, st.Session)
 	if st.Draft != "" && d.current != nil && d.current.id == draftFor && d.input.Text == "" {
 		d.input.SetText(st.Draft)
+		d.strip.placeCaret(d.current.id, d.input)
 	}
 	if st.ScrollY > 0 {
 		go func() {

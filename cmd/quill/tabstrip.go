@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -20,6 +21,7 @@ type tabStrip struct {
 	cur     map[*tabChip]float32
 	plus    fyne.CanvasObject
 	drafts  map[string]string
+	carets  map[string]caretPos // caret per tab's draft
 	lastCur string
 	held    *tabChip
 	heldID  string
@@ -253,4 +255,52 @@ func (t *tabStrip) keepDraft(id, text string) {
 
 func (t *tabStrip) draft(id string) string {
 	return t.drafts[id]
+}
+
+// caretPos is where the box's text caret sits (row and column in runes).
+// Fyne cannot set a selection from code, so only the caret is kept.
+type caretPos struct {
+	Row int `json:"row"`
+	Col int `json:"col"`
+}
+
+// keepBox saves the box's text and caret as the draft of tab id.
+func (t *tabStrip) keepBox(id string, in *sendEntry) {
+	t.keepDraft(id, in.Text)
+	if id == "" {
+		return
+	}
+	if in.Text == "" {
+		delete(t.carets, id)
+		return
+	}
+	if t.carets == nil {
+		t.carets = map[string]caretPos{}
+	}
+	t.carets[id] = caretPos{in.CursorRow, in.CursorColumn}
+}
+
+// fillBox puts tab id's draft in the box and the caret back where it was
+// (the end of the text when no caret was saved: a fresh draft).
+func (t *tabStrip) fillBox(id string, in *sendEntry) {
+	text := t.draft(id)
+	if text != in.Text {
+		in.SetText(text)
+	}
+	t.placeCaret(id, in)
+}
+
+// placeCaret moves the box's caret to tab id's saved one, if any.
+func (t *tabStrip) placeCaret(id string, in *sendEntry) {
+	c, ok := t.carets[id]
+	if !ok {
+		return
+	}
+	lines := strings.Split(in.Text, "\n")
+	c.Row = max(0, min(c.Row, len(lines)-1))
+	c.Col = max(0, min(c.Col, len([]rune(lines[c.Row]))))
+	if in.CursorRow != c.Row || in.CursorColumn != c.Col {
+		in.CursorRow, in.CursorColumn = c.Row, c.Col
+		in.Refresh()
+	}
 }
