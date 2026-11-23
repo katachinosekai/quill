@@ -33,11 +33,12 @@ const assistOff = kmemAssistOff
 
 // assistRole is the configuration of one assistant.
 type assistRole struct {
-	id    string // "kmem", "quill": the key of its state
-	name  string // its kmem name (kmem --as NAME, handoff, peer name)
-	label string // "kmem assistant": in notes and hints
-	hint  string // the session prompt hint (memorymode.go)
-	dir   func() string
+	id     string // "kmem", "quill": the key of its state
+	name   string // its kmem name (kmem --as NAME, handoff, peer name)
+	label  string // "kmem assistant": in notes and hints
+	hidden string // its hidden-session role (hidden.go: roleKmem, roleQuill); its host is set with setHiddenHost
+	hint   string // the session prompt hint (memorymode.go)
+	dir    func() string
 
 	startedPref string // preference: when the last session started (the "ended without saving" note)
 	startNote   string // follows the resume prompt on every start
@@ -531,13 +532,9 @@ func (d *desk) assistStart(a *assistant, model, prompt string, saved time.Time) 
 	note := assistCrashNote(a.role.name, prefs.String(a.role.startedPref), saved)
 	prefs.SetString(a.role.startedPref, time.Now().Format(time.RFC3339))
 	s := d.addSession(dir, model, "default", false)
-	s.hidden = true
+	d.markHiddenAs(s, a.role.hidden)
 	s.title = a.role.name
 	d.org.Kmem[s.id] = a.role.name
-	if d.org.Hidden == nil {
-		d.org.Hidden = map[string]bool{}
-	}
-	d.org.Hidden[s.id] = true
 	d.saveOrg()
 	a.s, a.state = s, asStarting
 	a.lastSave = saved

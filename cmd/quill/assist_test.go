@@ -16,6 +16,7 @@ func fakeRole(t *testing.T, items *[]badgeItem) (*assistRole, *[]string) {
 		id:          "fake",
 		name:        "fake-op",
 		label:       "fake assistant",
+		hidden:      roleQuill,
 		dir:         func() string { return dir },
 		startedPref: "fakeStarted",
 		startNote:   "You are the fake assistant.",

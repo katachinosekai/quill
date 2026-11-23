@@ -70,6 +70,7 @@ func newKmemRole() *assistRole {
 		id:          "kmem",
 		name:        kmemAssistName,
 		label:       "kmem assistant",
+		hidden:      roleKmem,
 		hint:        kmemAssistantHint,
 		dir:         kmemWindowDir,
 		startedPref: prefKmemWinStarted,
