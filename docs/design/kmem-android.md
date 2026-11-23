@@ -219,6 +219,39 @@ kmem has no `--json` for these yet: Quill Desktop parses the text lines (as
 `factIDs` and `parseTopics` do) and falls back to `{"text": …}` for lines
 it can't read. `q` is 2-200 characters; at most 200 facts, 64 KiB.
 
+As built (phase 3, `cmd/quill/phonekmemmemory.go`):
+
+- `GET /phone/kmem/find?q=…` (plain words or a regex, as `kmem find`) →
+  `{"v": 1, "facts": [{"id", "kind", "topic", "text", "why"?, "pinned",
+  "expired"?}], "truncated": false}`. `why` is split off the text (kmem's
+  `  WHY: `), `expired` only when true; a fact's text may span lines. A line
+  kmem printed that isn't a fact comes before the first fact as `{"text",
+  "pinned": false}` (no `id`); kmem's own notices are left out. `400
+  bad_request` for `q` outside 2-200 characters or a bad regex (message from
+  kmem); no matches = empty `facts`. At most once a second per phone: `429
+  rate_limited` with `Retry-After` (seconds).
+- `GET /phone/kmem/get?topic=…` → `{"v": 1, "topic", "facts": [as find],
+  "sections": [{"name", "facts", "kb"}], "truncated": false}`. `sections`
+  lists the topic's sections when it has any (`kb` has one decimal, as kmem
+  prints it here: `13.2`); `facts` holds the topic's own facts. `400
+  bad_request` for a name outside `[A-Za-z0-9._/-]` (or starting with `-`,
+  with `..` or `//`), `404 not_found` when kmem has no current facts under it.
+- `GET /phone/kmem/fact?id=f…` (`kmem show`) → `{"v": 1, "fact": {"id",
+  "kind", "topic", "text", "why"?, "state"?, "pinned", "expired"?, "binned",
+  "recorded", "by", "source"?, "validFrom"?, "validTo"?, "task"?,
+  "supersededBy"?, "history": [{"at", "what", "by"}]}}`. `state` is
+  `superseded` or `retired` (absent while current), `recorded` is kmem's
+  RFC 3339 time, `by` the kmem name that wrote it, `history` kmem's change
+  lines (`superseded by f…`, `retired: …`, `binned: …`, `restored from the
+  bin`). Fact ids only (`f` + 6-16 hex): `400 bad_request` otherwise, `404
+  not_found` for an unknown or purged id. Cited paths are not sent.
+- The topic list is phase 1's `/phone/kmem/topics`. All three run one kmem
+  process each (no cache), count toward the one-at-a-time limit per phone
+  (`409 kmem_busy`, shared with the phase 1 reads), answer `503
+  kmem_unavailable` when kmem is off or doesn't answer, and are GET only: no
+  add, retire, pin or trash from the phone. Text, why, topic, `by` and
+  history are scrubbed (§5.5); a fact text is capped at 32 KiB.
+
 `GET /phone/kmem/bin` (phase 4) → `{"v": 1, "items": [{"id", "kind",
 "days", "by", "reason", "title"}]}` (from `parseBin`).
 
