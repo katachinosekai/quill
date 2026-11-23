@@ -281,11 +281,12 @@ rotation, Quit and /clear:
 4. Quill never resolves blockers itself (rule 2: only the session releases
    its pzlock turn; claims are the session's).
 
-### 3.8a Topic snapshot: a hybrid of handoffs and topics (proposal, user 2026-11-24; not decided)
+### 3.8a Topic snapshot: a hybrid of handoffs and topics (approved by the user 2026-11-24)
 
 Amends §1.6 ("no handoffs for topic state"), §3.8 and K2/K4/K5. Status:
-**proposal for review** by kmem-lock-audit and the user; nothing is built
-until the user approves the final version.
+**approved** with kmem-lock-audit's review changes (see "Final design" at
+the end of this section, which wins where it differs from the proposal).
+Ships in kmem 1.11.0 behind the feature `topic-snapshot`.
 
 Why: tasks, the status fact and topic facts carry the *work*, but a
 handoff also carried what the next session needs *right away* and that
@@ -338,10 +339,32 @@ hypothesis, job) and owned by the topic, not by a session name.
 7. **Rule 24** would read: "Before a session ends or is cleared, run the
    end-of-session check (it saves the topic snapshot)."
 
-Open points for kmem-lock-audit: field names and JSON for the question line
-kind; whether the snapshot lives under `handoff/<topic>` (reuses `handoff
-get`, rename and policy code) or a new `snapshot/<topic>`; how K2 bounds
-its size inside the 3000-char briefing.
+**Final design (kmem-lock-audit review + user answers, 2026-11-24):**
+
+- kmem 1.11.0 (after 1.10.0), feature flag `topic-snapshot` in
+  `version --json`. Quill Desktop shows unknown end-check blocker kinds
+  generically (their `need` text), so 1.10.0-era Quill keeps working.
+- Storage: `handoff/<topic>` (the topic name is the handoff name); no
+  separate snapshot store.
+- Questions: `kmem handoff save T --question "…" --option "…" --option "…"
+  --recommend "…"` (several groups allowed); one fact per question, kind
+  `question`, JSON `{"qid","text","options","recommended","asked","answered"}`.
+  Answering is explicit: `kmem handoff answer T <qid> "<answer>"` (not
+  inferred from decision facts). Answered questions stay visible as history
+  in `handoff get` under "answered:" (user).
+- Jobs: `--job "what | pid N | log path"` → `{"what","pid","log"}`; with a
+  pid, ended processes drop out; without, the job stays until the next
+  snapshot.
+- K2 share: 35% of the briefing (user), first after the KMEM-BRIEF line and
+  the snapshot's age: questions first and never cut (≤300 chars each; if
+  they exceed the share, the rest becomes "+N more: kmem handoff get T"),
+  then jobs/worktrees one line each, ≤2 hypotheses, ≤4 pointers as one-line
+  clips. Past the TTL: one summary line.
+- `kmem handoff save T --same` re-stamps an unchanged snapshot (no nagging).
+- Subagent briefs: no snapshot by default; only pointers/hypotheses when the
+  task matches.
+- K5 merge: newest wins per line kind, all open questions kept, plus one
+  history fact per old handoff name for traceability.
 
 ### 3.9 What changes in Quill Desktop's kmem code
 
