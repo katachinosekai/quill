@@ -96,24 +96,11 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 				fail = notFound("no session " + parts[1])
 				return
 			}
-			switch parts[2] {
-			case "send":
-				out, fail = a.send(s, in.Text)
-			case "answer":
-				out, fail = a.answer(s, in)
-			case "interrupt":
-				if !s.running() {
-					fail = &apiErr{http.StatusConflict, "not_running", "no Claude process"}
-					return
-				}
-				busy := s.conv.Busy || s.proc.Busy()
-				a.d.interrupt(s)
-				out = map[string]any{"wasBusy": busy}
-			case "queue":
-				out, fail = a.queueAction(s, parts[3], in)
-			default:
-				out, fail = a.menuAction(s, parts[2], in)
+			op := ""
+			if len(parts) == 4 {
+				op = parts[3]
 			}
+			out, fail = a.sessionWrite(s, parts[2], op, in)
 		}
 	})
 	if fail != nil {
@@ -123,6 +110,28 @@ func (a *phoneAPI) write(w http.ResponseWriter, r *http.Request, path string, pa
 	a.d.do(a.scan)
 	out["v"] = 1
 	folders.WriteJSON(w, http.StatusOK, out)
+}
+
+// sessionWrite runs one session write (UI thread): send, answer, interrupt,
+// queue/{op} or a menu action. The /phone/session/{id}/... routes and the
+// kmem assistant's /phone/kmem/assistant/... routes share it.
+func (a *phoneAPI) sessionWrite(s *deskSession, action, op string, in writeBody) (map[string]any, *apiErr) {
+	switch action {
+	case "send":
+		return a.send(s, in.Text)
+	case "answer":
+		return a.answer(s, in)
+	case "interrupt":
+		if !s.running() {
+			return nil, &apiErr{http.StatusConflict, "not_running", "no Claude process"}
+		}
+		busy := s.conv.Busy || s.proc.Busy()
+		a.d.interrupt(s)
+		return map[string]any{"wasBusy": busy}, nil
+	case "queue":
+		return a.queueAction(s, op, in)
+	}
+	return a.menuAction(s, action, in)
 }
 
 func (a *phoneAPI) queueJSON(s *deskSession) []map[string]any {

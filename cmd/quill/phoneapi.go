@@ -113,6 +113,10 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handoffs(w)
 	case r.Method == http.MethodGet && path == "handoffs/slug":
 		a.handoffSlug(w, r)
+	case r.Method == http.MethodGet && path == "kmem/assistant/items":
+		a.kmemAssistItems(w, r)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "kmem/assistant/"):
+		a.kmemAssistWrite(w, r, strings.TrimPrefix(path, "kmem/assistant/"))
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "kmem/"):
 		a.kmemRoute(w, r, path)
 	case r.Method == http.MethodGet && path == "stream":
@@ -536,7 +540,10 @@ func (a *phoneAPI) scan() {
 		a.track(s)
 	}
 	for id := range a.tracks {
-		if d.sessions[id] == nil || d.hiddenID(id, "") && id != assistID {
+		if id == assistID {
+			continue // kept while stopped too: its chat stays readable on the phone
+		}
+		if d.sessions[id] == nil || d.hiddenID(id, "") {
 			delete(a.tracks, id)
 		}
 	}
@@ -828,16 +835,26 @@ func (a *phoneAPI) preload(id string) bool {
 	return true
 }
 
-func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
+// itemsQuery: the query of an items read (session/{id}/items and
+// kmem/assistant/items).
+type itemsQuery struct {
+	limit, epoch, since, before int
+	hasEpoch, hasBefore         bool
+	have                        map[int]haveText
+}
+
+// parseItemsQuery reads limit, epoch+since, before and delta+have; on a bad
+// query it wrote the error and returns false.
+func parseItemsQuery(w http.ResponseWriter, r *http.Request) (itemsQuery, bool) {
 	q := r.URL.Query()
-	limit := apiWindow
+	iq := itemsQuery{limit: apiWindow}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			folders.WriteError(w, http.StatusBadRequest, "bad_request", "limit must be a positive number")
-			return
+			return iq, false
 		}
-		limit = min(n, apiWindowMax)
+		iq.limit = min(n, apiWindowMax)
 	}
 	num := func(k string) (int, bool, bool) {
 		v := q.Get(k)
@@ -847,20 +864,28 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 		n, err := strconv.Atoi(v)
 		return n, true, err == nil && n >= 0
 	}
-	epoch, hasEpoch, ok1 := num("epoch")
-	since, hasSince, ok2 := num("since")
-	before, hasBefore, ok3 := num("before")
-	if !ok1 || !ok2 || !ok3 || hasEpoch != hasSince {
+	var hasSince, ok1, ok2, ok3 bool
+	iq.epoch, iq.hasEpoch, ok1 = num("epoch")
+	iq.since, hasSince, ok2 = num("since")
+	iq.before, iq.hasBefore, ok3 = num("before")
+	if !ok1 || !ok2 || !ok3 || iq.hasEpoch != hasSince {
 		folders.WriteError(w, http.StatusBadRequest, "bad_request", "epoch and since go together; numbers only")
-		return
+		return iq, false
 	}
-	var have map[int]haveText
 	if q.Get("delta") == "1" {
 		var err error
-		if have, err = parseHave(q.Get("have")); err != nil {
+		if iq.have, err = parseHave(q.Get("have")); err != nil {
 			folders.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
+			return iq, false
 		}
+	}
+	return iq, true
+}
+
+func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
+	iq, ok := parseItemsQuery(w, r)
+	if !ok {
+		return
 	}
 	var body map[string]any
 	found := a.preload(id)
@@ -869,57 +894,62 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	a.ui(func() {
-		d := a.d
-		s := d.session(id)
+		s := a.d.session(id)
 		if s == nil {
 			found = false
 			return
 		}
-		t := a.track(s)
-		items := s.conv.Items
-		open := openChoiceItem(s.conv)
-		reset := false
-		incremental := false
-		var pick []*chat.Item
-		switch {
-		case hasEpoch && epoch == t.epoch && since <= t.rev:
-			incremental = true
-			for _, it := range items {
-				if t.irev[it.Seq] > since {
-					pick = append(pick, it)
-				}
-			}
-		case hasBefore:
-			end := len(items)
-			for i, it := range items {
-				if it.Seq >= before {
-					end = i
-					break
-				}
-			}
-			pick = items[max(0, end-limit):end]
-		default:
-			reset = hasEpoch
-			pick = items[max(0, len(items)-limit):]
-		}
-		out := []map[string]any{}
-		for _, it := range pick {
-			m := a.item(s, it, t.irev[it.Seq], open)
-			if h, ok := have[it.Seq]; ok && incremental {
-				textDelta(m, it, h)
-			}
-			out = append(out, m)
-		}
-		hasMore := len(pick) > 0 && len(items) > 0 && pick[0] != items[0]
-		queue := []map[string]any{}
-		for i, txt := range s.queue {
-			queue = append(queue, map[string]any{"index": i, "text": txt})
-		}
-		body = map[string]any{"v": 1, "id": id, "epoch": t.epoch, "rev": t.rev, "reset": reset, "hasMore": hasMore, "items": out, "queue": queue}
+		body = a.itemsBody(s, id, iq)
 	})
 	if !found {
 		folders.WriteError(w, http.StatusNotFound, "not_found", "no session "+id)
 		return
 	}
 	folders.WriteJSON(w, http.StatusOK, body)
+}
+
+// itemsBody: the items answer for s (UI thread); id is the id the phone
+// knows it by.
+func (a *phoneAPI) itemsBody(s *deskSession, id string, iq itemsQuery) map[string]any {
+	t := a.track(s)
+	items := s.conv.Items
+	open := openChoiceItem(s.conv)
+	reset := false
+	incremental := false
+	var pick []*chat.Item
+	switch {
+	case iq.hasEpoch && iq.epoch == t.epoch && iq.since <= t.rev:
+		incremental = true
+		for _, it := range items {
+			if t.irev[it.Seq] > iq.since {
+				pick = append(pick, it)
+			}
+		}
+	case iq.hasBefore:
+		end := len(items)
+		for i, it := range items {
+			if it.Seq >= iq.before {
+				end = i
+				break
+			}
+		}
+		pick = items[max(0, end-iq.limit):end]
+	default:
+		reset = iq.hasEpoch
+		pick = items[max(0, len(items)-iq.limit):]
+	}
+	out := []map[string]any{}
+	for _, it := range pick {
+		m := a.item(s, it, t.irev[it.Seq], open)
+		if h, ok := iq.have[it.Seq]; ok && incremental {
+			textDelta(m, it, h)
+		}
+		out = append(out, m)
+	}
+	hasMore := len(pick) > 0 && len(items) > 0 && pick[0] != items[0]
+	queue := []map[string]any{}
+	for i, txt := range s.queue {
+		queue = append(queue, map[string]any{"index": i, "text": txt})
+	}
+	return map[string]any{"v": 1, "id": id, "epoch": t.epoch, "rev": t.rev, "reset": reset, "hasMore": hasMore, "items": out, "queue": queue}
 }

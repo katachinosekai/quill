@@ -567,14 +567,25 @@ func (d *desk) kmemAssistExited(s *deskSession) {
 
 // kmemAssistRestart (FAILED → Restart) starts a fresh session.
 func (d *desk) kmemAssistRestart(a *kmemAssist) {
-	if a.w == nil || a.s != nil && a.s.running() || a.state == asSaving || a.state == asStopping || a.state == asProbing {
+	if a.w == nil {
 		return
+	}
+	d.kmemAssistRestartNow(a)
+}
+
+// kmemAssistRestartNow: Restart without the window (Quill Android's
+// /phone/kmem/assistant/restart and start); false when the state offers no
+// restart.
+func (d *desk) kmemAssistRestartNow(a *kmemAssist) bool {
+	if a.s != nil && a.s.running() || a.state == asSaving || a.state == asStopping || a.state == asProbing {
+		return false
 	}
 	if a.s != nil && (a.state == asLive || a.state == asStarting) {
 		d.markEnded(a.s.id) // FAILED: nothing to save
 	}
 	a.userStopped = false
 	d.kmemAssistProbe(a)
+	return true
 }
 
 // kmemAssistChatOn: the window's chat takes input (the left side's Explain,
@@ -762,12 +773,13 @@ func (d *desk) kmemAssistLastSave(a *kmemAssist) string {
 }
 
 // kmemAssistAsk: the save missed the deadline; the user picks what happens.
+// Quill Android shows the same question as a card; the first answer on either
+// side wins (kmemAssistChoose hides the other).
 func (d *desk) kmemAssistAsk(a *kmemAssist) {
-	msg := widget.NewLabel(fmt.Sprintf("kmem-lock-audit did not save its kmem handoff within %s. %s\n"+
-		"kmem refuses the save until its claims, jobs and files are recorded, so it may still be working on that.", waitText(), d.kmemAssistLastSave(a)))
+	msg := widget.NewLabel(d.kmemAssistAskText(a))
 	msg.Wrapping = fyne.TextWrapWord
 	var btns []fyne.CanvasObject
-	for i, label := range []string{"Stop without saving", "Keep running until saved", "Keep it running"} {
+	for i, label := range kmemAssistChoices {
 		n := i
 		btns = append(btns, widget.NewButton(label, func() { d.kmemAssistChoose(a, n) }))
 	}
@@ -776,6 +788,17 @@ func (d *desk) kmemAssistAsk(a *kmemAssist) {
 	a.choice = dlg
 	dlg.Show()
 	d.kmemAssistRefresh(a) // the countdown ends
+	if s := a.s; s != nil && !d.seen(s) {
+		d.kmemPhoneEvent("did not save its kmem handoff in time: choose what happens.")
+	}
+}
+
+// kmemAssistChoices: the save-timeout question's answers, by kmemAssistChoose's index.
+var kmemAssistChoices = []string{"Stop without saving", "Keep running until saved", "Keep it running"}
+
+func (d *desk) kmemAssistAskText(a *kmemAssist) string {
+	return fmt.Sprintf("kmem-lock-audit did not save its kmem handoff within %s. %s\n"+
+		"kmem refuses the save until its claims, jobs and files are recorded, so it may still be working on that.", waitText(), d.kmemAssistLastSave(a))
 }
 
 // kmemAssistChoose: 0 stop without saving, 1 keep running until saved, 2 keep

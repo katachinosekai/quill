@@ -376,6 +376,10 @@ func (a *phoneAPI) kmemAssistSummary(full bool) map[string]any {
 		src = "New sessions"
 	}
 	out["model"], out["modelSource"] = model, src
+	out["actions"] = d.kmemAssistActions(as) // phase 2: what /phone/kmem/assistant/* accepts now
+	if q := d.kmemAssistQuestion(as); q != nil {
+		out["question"] = q
+	}
 	if as.state == asSaving && !as.untilSaved && as.choice == nil {
 		if left := time.Until(as.saveBy); left > 0 {
 			out["saveLeftS"] = int((left + time.Second - 1) / time.Second)

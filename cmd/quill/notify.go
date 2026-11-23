@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/godbus/dbus/v5"
@@ -95,8 +96,16 @@ var alertTitles = map[string]string{
 func (d *desk) alert(s *deskSession, kind, body string) {
 	body = clip(body, 200)
 	if isHiddenSession(s) {
-		// The kmem window's assistant: desktop only, never the phone (§4 #25).
-		if d.notifyOn() && !d.seen(s) {
+		// The kmem window's assistant: never a session event on the phone
+		// (§4 #25); a "kmem" event when it waits for the user, unseen
+		// (docs/design/kmem-android.md §4.5).
+		if d.seen(s) {
+			return
+		}
+		if kind == "plan" || kind == "question" || kind == "approval" {
+			d.kmemPhoneEvent(strings.TrimSpace(alertTitles[kind]) + ": " + body)
+		}
+		if d.notifyOn() {
 			d.desktopNotify(s.id, "kmem assistant"+alertTitles[kind], body)
 		}
 		return
@@ -129,6 +138,17 @@ func (d *desk) phoneEvent(sid, kind, title, body string) {
 		}
 	}
 	p.server.Emit(folders.Event{Type: kind, RC: rc, Quill: sid, Title: title, Folder: folder, Body: body})
+}
+
+// kmemPhoneEvent: the phone event for the kmem assistant waiting for the
+// user (type "kmem", no session id; old Quill Android drops unknown types).
+func (d *desk) kmemPhoneEvent(body string) {
+	p := d.phoneSync
+	if p == nil || p.server == nil {
+		return
+	}
+	body, _ = capText(kmemScrubber()(body), 300)
+	p.server.Emit(folders.Event{Type: "kmem", Title: "kmem assistant", Body: body})
 }
 
 func lastReply(c *chat.Conversation) string {
