@@ -487,6 +487,9 @@ func (d *desk) kmemAssistRefresh(a *kmemAssist) {
 		st = "● starting"
 	}
 	setLabel(a.stateLbl, st)
+	if a.view != nil && a.view.s == s {
+		a.view.setStatus(s)
+	}
 	if failed {
 		a.restart.Show()
 	} else {

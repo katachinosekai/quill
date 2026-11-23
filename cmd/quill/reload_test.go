@@ -138,7 +138,11 @@ func TestLiveIndicatorUnderChat(t *testing.T) {
 	})
 	h.eventually("indicator", func() bool { return strings.TrimSpace(h.d.chat.live.Text) != "" && h.d.chat.live.Visible() })
 	h.ui(func() { h.d.interrupt(s) })
-	h.eventually("indicator clears", func() bool { return strings.TrimSpace(h.d.chat.live.Text) == "" })
+	// The line never goes blank: after the turn it shows the idle state.
+	h.eventually("indicator shows idle", func() bool {
+		x := h.d.chat.live.Text
+		return x == "Ready" || x == "Stopped"
+	})
 }
 
 func TestReloadCommandForcesSwap(t *testing.T) {

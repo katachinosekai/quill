@@ -545,7 +545,7 @@ func (sp *speech) sync() {
 		sp.btn.SetIcon(theme.MediaRecordIcon())
 		sp.btn.Importance = widget.LowImportance
 		sp.btn.Enable()
-		sp.d.chat.setLive(liveText(sp.d.current))
+		sp.d.chat.setStatus(sp.d.current)
 	}
 	sp.btn.Refresh()
 }

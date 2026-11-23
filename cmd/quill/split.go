@@ -544,7 +544,7 @@ func (d *desk) syncPanes() {
 		}
 		p.outline.Refresh()
 		if p.view.s != nil && p != d.focused {
-			p.view.setLive(liveText(p.view.s))
+			p.view.setStatus(p.view.s)
 		}
 	}
 }
@@ -561,7 +561,7 @@ func (p *pane) queue(items []*chat.Item) {
 			p.pending = nil
 			if p.view.s != nil {
 				p.view.update(items)
-				p.view.setLive(liveText(p.view.s))
+				p.view.setStatus(p.view.s)
 				p.d.syncPaneControls(p)
 			}
 		})

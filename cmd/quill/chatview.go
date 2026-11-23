@@ -78,6 +78,9 @@ func itemCheapTag(it *chat.Item) uint64 {
 }
 
 type chatView struct {
+	veil          *canvas.Rectangle // pulse veil over the status line (status.go)
+	pulse         *fyne.Animation
+	pulsing       bool
 	d             *desk
 	s             *deskSession
 	box           *fyne.Container
@@ -155,6 +158,7 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 		v.live.Alignment = fyne.TextAlignCenter
 	}
 	v.live.Importance = widget.MediumImportance
+	v.veil = canvas.NewRectangle(veil(0))
 	v.col = v.inner
 	v.scroll = container.NewVScroll(v.inner)
 	border := canvas.NewRectangle(color.Transparent)
@@ -163,7 +167,7 @@ func newChatViewWith(d *desk, width, shift func() float32) *chatView {
 	border.CornerRadius = 16
 	inside := container.New(layout.NewCustomPaddedLayout(2, 2, 2, 2), v.scroll)
 	v.frame = windowCentered(width, shift, container.NewStack(border, inside))
-	liveRow := windowCentered(width, shift, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), v.live))
+	liveRow := windowCentered(width, shift, container.New(layout.NewCustomPaddedLayout(0, 0, 8, 8), container.NewStack(v.live, v.veil)))
 	v.follow = true
 	v.scroll.OnScrolled = func(fyne.Position) {
 		if v.autoScrolling {

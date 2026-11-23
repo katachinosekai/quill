@@ -150,6 +150,8 @@ type deskSession struct {
 	rcOn           bool
 	rcName         string
 	created        time.Time
+	turnStart      time.Time // when the running turn began (status.go)
+	lastAct        time.Time // last event from the session (status.go)
 	touched        time.Time // last time the session was shown, read by the phone or busy (unload.go)
 }
 
@@ -208,6 +210,7 @@ type sideRow struct {
 }
 
 type desk struct {
+	statusRun      bool // the status ticker runs (status.go)
 	nameClose      func()
 	limitMsg       string
 	notifier       *notifier
@@ -1285,7 +1288,7 @@ func (d *desk) updateChrome() {
 		d.usage.update()
 	}
 	if d.chat != nil && (d.stt == nil || d.stt.state == sttIdle) {
-		d.chat.setLive(liveText(d.current))
+		d.chat.setStatus(d.current)
 	}
 }
 
@@ -1568,6 +1571,7 @@ func (d *desk) adopt(s *deskSession, p *session.Process) {
 
 func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	items := s.conv.Apply(ev)
+	s.noteActivity(statusNow())
 	if ev.Type == "system" && ev.Subtype == "init" && ev.SessionID != "" && ev.SessionID != s.id {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
@@ -1679,6 +1683,7 @@ func (d *desk) flushWinUI() {
 	}
 	if v := d.viewFor(owner); v != nil && v != d.chat && v.s == owner {
 		v.update(dedupItems(items))
+		v.setStatus(owner)
 	}
 }
 
@@ -2617,28 +2622,6 @@ func (d *desk) signIn() {
 		})
 		d.refreshAccount()
 	}()
-}
-
-func liveText(s *deskSession) string {
-	if s == nil || !s.conv.Busy {
-		return ""
-	}
-	if len(s.conv.PendingPermissions()) > 0 {
-		return "Waiting for your answer above"
-	}
-	if s.conv.Thinking {
-		return "✻ Thinking..."
-	}
-	if n := len(s.conv.Items); n > 0 {
-		last := s.conv.Items[n-1]
-		if last.Kind == chat.Assistant && last.Streaming {
-			return ""
-		}
-		if last.Kind == chat.Tool && !last.HasResult {
-			return "● " + oneLine(toolHeader(last), 90)
-		}
-	}
-	return "✻ Working..."
 }
 
 func setLabel(l *widget.Label, text string) {
