@@ -30,9 +30,17 @@ const (
 	revealMaxStep   = 24                    // characters per frame at most
 )
 
-// Text animation speed (user 2026-11-23): Normal is the pace above, exactly;
-// Slow is half of it, Fast double; Instant shows text at once (no reveal).
-// It only matters while "Animate new text" is on.
+// Text animation speed (user 2026-11-23, rescaled the same day: even Slow felt
+// fast): each speed is a fraction of the pace above (the old Normal). Fast is
+// 1/2, Normal 1/4 (the default), Slow 1/8; Instant shows text at once (no
+// reveal). Retune a speed by changing its one constant. It only matters while
+// "Animate new text" is on.
+const (
+	speedScaleFast   = 1.0 / 2
+	speedScaleNormal = 1.0 / 4
+	speedScaleSlow   = 1.0 / 8
+)
+
 const prefAnimateSpeed = "animateSpeed"
 
 var animSpeedNames = []string{"Slow", "Normal", "Fast", "Instant"}
@@ -50,19 +58,20 @@ func speedName(key string) string {
 	return "Normal"
 }
 
-// revealStep is how many bytes the reveal advances in one frame when gap
-// bytes are still hidden, at a speed (stored value; unknown means normal).
-func revealStep(speed string, gap int) int {
-	minRate, catchUp, maxStep := revealMinRate, revealCatchUp, revealMaxStep
+// revealRate is how many bytes the reveal advances per frame (can be below
+// one) when gap bytes are still hidden, at a speed (stored value; unknown
+// means normal).
+func revealRate(speed string, gap int) float64 {
+	scale := speedScaleNormal
 	switch speed {
 	case "slow":
-		minRate, catchUp, maxStep = 1, revealCatchUp*2, revealMaxStep/2
+		scale = speedScaleSlow
 	case "fast":
-		minRate, catchUp, maxStep = revealMinRate*2, revealCatchUp/2, revealMaxStep*2
+		scale = speedScaleFast
 	case "instant":
-		return gap
+		return float64(gap)
 	}
-	return min(max(minRate, gap/catchUp), maxStep)
+	return float64(min(max(revealMinRate, gap/revealCatchUp), revealMaxStep)) * scale
 }
 
 func (d *desk) animateSpeed() string {
@@ -78,8 +87,9 @@ type streamView struct {
 	shown    string          // the live paragraph as drawn
 	ticking  bool
 	animated bool
-	speed    string // animateSpeed when the reply started
-	renders  int    // live redraws (tests)
+	speed    string  // animateSpeed when the reply started
+	carry    float64 // fraction of a byte not yet revealed
+	renders  int     // live redraws (tests)
 }
 
 func (d *desk) animateText() bool {
@@ -199,7 +209,9 @@ func (v *chatView) revealLoop(st *streamView, iv *itemView) {
 			text := st.it.Text
 			if st.pos < len(text) {
 				gap := len(text) - st.pos
-				step := revealStep(st.speed, gap)
+				st.carry += revealRate(st.speed, gap)
+				step := int(st.carry)
+				st.carry -= float64(step)
 				n := min(st.pos+step, len(text))
 				// Character by character (user 2026-11-22: not whole words),
 				// never in the middle of a multi-byte character.

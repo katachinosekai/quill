@@ -2,24 +2,24 @@ package main
 
 import "testing"
 
-func TestRevealStepSpeeds(t *testing.T) {
-	// Normal equals the original formula at every gap.
+func TestRevealRateSpeeds(t *testing.T) {
+	// Every speed is its fraction of the old Normal formula at every gap;
+	// unknown means normal.
 	for gap := 1; gap < 2000; gap++ {
-		want := min(max(revealMinRate, gap/revealCatchUp), revealMaxStep)
-		if got := revealStep("normal", gap); got != want {
-			t.Fatalf("normal gap %d: %d want %d", gap, got, want)
+		old := float64(min(max(revealMinRate, gap/revealCatchUp), revealMaxStep))
+		for speed, scale := range map[string]float64{"fast": 0.5, "normal": 0.25, "slow": 0.125, "bogus": 0.25} {
+			if got := revealRate(speed, gap); got != old*scale {
+				t.Fatalf("%s gap %d: %v want %v", speed, gap, got, old*scale)
+			}
 		}
-		if got := revealStep("bogus", gap); got != want {
-			t.Fatalf("unknown speed must be normal, gap %d: %d", gap, got)
+		if revealRate("instant", gap) != float64(gap) {
+			t.Fatalf("instant must reveal all %d", gap)
 		}
 	}
 	for _, gap := range []int{5, 100, 500, 5000} {
-		s, n, f := revealStep("slow", gap), revealStep("normal", gap), revealStep("fast", gap)
+		s, n, f := revealRate("slow", gap), revealRate("normal", gap), revealRate("fast", gap)
 		if !(s < n && n < f) {
-			t.Fatalf("gap %d: slow %d normal %d fast %d not increasing", gap, s, n, f)
-		}
-		if revealStep("instant", gap) != gap {
-			t.Fatalf("instant must reveal all %d", gap)
+			t.Fatalf("gap %d: slow %v normal %v fast %v not increasing", gap, s, n, f)
 		}
 	}
 }
