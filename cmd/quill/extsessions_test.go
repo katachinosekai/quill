@@ -3,17 +3,16 @@ package main
 import (
 	"errors"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 )
 
 // extKmem stubs kmem for the external-session tests: the version with or
 // without the "sessions" feature, the topics, and `kmem sessions --live`.
-func extKmem(t *testing.T, h *harness, features string, sessions string) *int {
+func extKmem(t *testing.T, h *harness, features string, sessions string) *atomic.Int64 {
 	resetExtSessions()
 	t.Cleanup(resetExtSessions)
-	var mu sync.Mutex
-	n := new(int)
+	n := new(atomic.Int64)
 	h.d.kmemOff = false
 	h.d.kmemVer.reset()
 	h.d.app.Preferences().SetString(memoryModeKey, memoryModeKmem)
@@ -31,9 +30,7 @@ func extKmem(t *testing.T, h *harness, features string, sessions string) *int {
 		case a == "topics":
 			return "alpha/core  2 facts, 1 KB\nbeta/open  1 facts, 1 KB\n", nil
 		case a == "sessions --live --json":
-			mu.Lock()
-			*n++
-			mu.Unlock()
+			n.Add(1)
 			return sessions, nil
 		}
 		return "", errors.New("unexpected " + a)
@@ -49,7 +46,7 @@ const extLive = `{"api":1,"sessions":[
 
 func TestExternalLiveUnderTopic(t *testing.T) {
 	h := newHarness(t)
-	n := extKmem(t, h, `"sessions"`, extLive)
+	extKmem(t, h, `"sessions"`, extLive)
 	h.d.loadTopics()
 	h.d.loadExtSessions()
 	h.ui(func() {
@@ -76,7 +73,6 @@ func TestExternalLiveUnderTopic(t *testing.T) {
 		}
 		delete(h.d.sessions, "ext-1")
 	})
-	_ = n
 }
 
 func TestExternalOldNameNeedsConfigMapping(t *testing.T) {
@@ -95,8 +91,8 @@ func TestExternalFeatureAbsent(t *testing.T) {
 	h := newHarness(t)
 	n := extKmem(t, h, ``, extLive)
 	h.d.loadTopics()
-	if got := h.d.loadExtSessions(); len(got) != 0 || *n != 0 {
-		t.Fatalf("without the sessions feature kmem sessions is never run: %v calls %d", got, *n)
+	if got := h.d.loadExtSessions(); len(got) != 0 || n.Load() != 0 {
+		t.Fatalf("without the sessions feature kmem sessions is never run: %v calls %d", got, n.Load())
 	}
 	h.ui(func() {
 		if len(h.d.externalLive()) != 0 {
@@ -149,20 +145,20 @@ func TestExternalCache(t *testing.T) {
 			h.d.projectGroups(nil)
 		}
 	})
-	h.eventually("first load", func() bool { return *n == 1 })
+	h.eventually("first load", func() bool { return n.Load() == 1 })
 	h.ui(func() {
 		for i := 0; i < 5; i++ {
 			h.d.projectGroups(nil)
 		}
 	})
-	if *n != 1 {
-		t.Fatalf("sidebar refreshes reuse the cache: %d kmem calls", *n)
+	if n.Load() != 1 {
+		t.Fatalf("sidebar refreshes reuse the cache: %d kmem calls", n.Load())
 	}
 	extCache.mu.Lock()
 	extCache.at = extCache.at.Add(-2 * extRefresh)
 	extCache.mu.Unlock()
 	h.ui(func() { h.d.projectGroups(nil) })
-	h.eventually("reload after 30 s", func() bool { return *n == 2 })
+	h.eventually("reload after 30 s", func() bool { return n.Load() == 2 })
 	h.ui(func() { h.d.refreshExtSessions(true) })
-	h.eventually("forced reload", func() bool { return *n == 3 })
+	h.eventually("forced reload", func() bool { return n.Load() == 3 })
 }
