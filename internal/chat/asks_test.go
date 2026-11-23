@@ -171,3 +171,26 @@ func TestProposesWork(t *testing.T) {
 		}
 	}
 }
+
+// t225b3e (2026-11-23): plans that ask for the user's yes without a closing
+// question got no card, so a plain "yes" didn't approve them (paraphrased
+// from the session's replies).
+func TestAsksApprovalRequestsYes(t *testing.T) {
+	for text, want := range map[string]bool{
+		"That works with the desktop's password prompt.\n\n**Plan (needs your yes):**\n1. Write the script to a file.\n2. Run it with `pkexec` in the background.\n3. Check the output.\n4. Record it in kmem.": true,
+		"Same plan, in order:\n1. Write the script.\n2. Then run it.\n\nReply **yes** to run it.":                                                                                                               true,
+		"Plan (awaiting your approval):\n1. Edit a.go.\n   (keeps the API)\n2. Run the tests.":                                                                                                                  true,
+		"Say yes and I'll start.": true,
+		"**Plan (needs your yes):**\n1. Write the script.\n\nI'll check the logs first.": false,
+		"Plan:\n1. Write the script.\n2. Run it.":                                        false,
+		"Reply with the file name to continue.":                                          false,
+		"Steps done:\n1. Wrote the script.\n2. Ran it.":                                  false,
+	} {
+		c := New()
+		c.AddUser("hi")
+		c.Items = append(c.Items, &Item{Kind: Assistant, Text: text})
+		if got := c.AsksApproval(); got != want {
+			t.Errorf("AsksApproval(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

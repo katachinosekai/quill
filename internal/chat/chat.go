@@ -325,7 +325,51 @@ func (c *Conversation) AsksApproval() bool {
 		if ClosingApproval(t) != "" || yesNoProposal(last) {
 			return true
 		}
+		if RequestsYes(t) {
+			return true
+		}
 		return proposes(last)
+	}
+	return false
+}
+
+// yesPlanHead: a plan heading that says it waits for the user's go-ahead
+// ("**Plan (needs your yes):**", "Plan, awaiting your approval:").
+var yesPlanHead = regexp.MustCompile(`(?i)^\W*(?:the |my )?plan\b.{0,40}?\b(?:needs|awaiting|waiting (?:for|on)|for)\s+your\s+(?:yes|approval|ok|okay|go[- ]ahead)\b.{0,20}$`)
+
+// replyYes: a closing line that asks for a typed go-ahead without a question
+// mark ("Reply **yes** to run it.", "Say yes and I'll start.").
+var replyYes = regexp.MustCompile(`(?i)^\W*(?:just\s+|please\s+)?(?:reply|answer|say|type|send)\s+\W*(?:yes|approved?|ok|okay|go)\W*\s+(?:to|and|if)\b`)
+
+// RequestsYes: text ends asking for the user's yes without a closing
+// question (t225b3e, 2026-11-23: a plan under "**Plan (needs your yes):**"
+// with numbered steps and nothing after them, and one ending "Reply **yes**
+// to run it.", got no card, so a typed "yes" didn't approve). Either its last
+// line asks for a typed yes, or a heading asking for the user's yes is
+// followed only by the plan's numbered steps (and their indented or bulleted
+// continuation lines).
+func RequestsYes(text string) bool {
+	lines := strings.Split(strings.TrimRight(strings.TrimSpace(text), "*_ "), "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	if replyYes.MatchString(strings.TrimSpace(lines[len(lines)-1])) {
+		return true
+	}
+	steps := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := lines[i]
+		t := strings.TrimSpace(l)
+		switch {
+		case t == "":
+		case numberedQ.MatchString(t):
+			steps++
+		case steps > 0 && yesPlanHead.MatchString(t):
+			return true
+		case (strings.HasPrefix(l, " ") || strings.HasPrefix(l, "\t") || strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ")):
+		default:
+			return false
+		}
 	}
 	return false
 }

@@ -407,6 +407,11 @@ func readOnlySegment(seg []shWord, extra [][]string) bool {
 	for _, w := range seg[1:] {
 		f = append(f, w.text)
 	}
+	// Root never counts as read-only, whatever the user's list says
+	// (ta43580; gatebatch.go).
+	if privilegedWords(append([]string{seg[0].text}, f[1:]...)) {
+		return false
+	}
 	for _, e := range extra {
 		if hasWordPrefix(f, e) {
 			return true

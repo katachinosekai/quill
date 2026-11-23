@@ -101,6 +101,8 @@ type deskSession struct {
 	grantRev       int                   // bumped whenever a grant is made or ends (gateMark)
 	keptGate       gateMark              // the plan-scope state last sent to the keeper (keepGate)
 	gateUnsure     bool                  // restored after a restart: no call is presumed a subagent's until the turn ends
+	batchOf        map[string]string     // this turn's own tool_use ids -> their assistant message (gatebatch.go)
+	batchRefused   map[string]bool       // assistant messages with a call plan-first refused this turn
 	queue          []string
 	lastSent       string
 	inTurn         bool
@@ -2741,6 +2743,7 @@ func planAsk(s *deskSession) string {
 
 func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
 	trackAgentCalls(s, ev)
+	noteBatch(s, ev)
 	switch {
 	case ev.Type == "control_request" && ev.Request != nil && ev.Request.Subtype == "can_use_tool":
 		var it *chat.Item
@@ -2768,6 +2771,15 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			if s.proc.DenyWith(it.RequestID, it.Request, openerMessage) == nil {
 				it.PermState = chat.PermDenied
 				return []*chat.Item{s.conv.AddNotice("Shown here instead of opening a window: " + strings.Join(targets, " "))}
+			}
+			return nil
+		}
+		// A batch is decided as a whole: once plan-first refused one of its
+		// calls, its other gated calls are refused too (ta43580).
+		if d.planFirst && inRefusedBatch(s, it.Request) && !readOnlyRequest(it.Request, d.readOnlyExtra()) {
+			if s.proc.DenyWith(it.RequestID, it.Request, planAsk(s)) == nil {
+				it.PermState = chat.PermPlanAsked
+				s.planWait = true
 			}
 			return nil
 		}
@@ -2806,7 +2818,8 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		// trigger or a notification started is a turn too (autoTurn).
 		// Not right after a restart either (gateUnsure): events lost in the
 		// crash may have started a turn.
-		if _, known := s.agentCalls[it.Request.ToolUseID]; !known && !s.inTurn && !s.autoTurn && !s.gateUnsure && len(s.agentGrants) > 0 {
+		// Never for a root command (ta43580).
+		if _, known := s.agentCalls[it.Request.ToolUseID]; !known && !s.inTurn && !s.autoTurn && !s.gateUnsure && len(s.agentGrants) > 0 && !privilegedRequest(it.Request) {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}
@@ -2824,8 +2837,11 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		// An approval Quill didn't see go out (the user's last message in
 		// the transcript) counts in a turn the user started, never in one a
 		// peer message, trigger or notification started, nor after a Stop or
-		// refusal.
-		if !s.autoTurn && !s.planRevoked && d.approvedInTranscript(s) {
+		// refusal. Not once a call of this turn was refused either: that
+		// message came before the refusal, so it doesn't answer it (ta43580:
+		// the refused Write's planWait turned an earlier "yes" into approval
+		// of the pkexec call next to it). Never for a root command.
+		if !s.autoTurn && !s.planRevoked && !s.planWait && !privilegedRequest(it.Request) && d.approvedInTranscript(s) {
 			d.approveNow(s)
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
@@ -2838,6 +2854,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		if s.proc.DenyWith(it.RequestID, it.Request, planAsk(s)) == nil {
 			it.PermState = chat.PermPlanAsked
 			s.planWait = true
+			refuseBatch(s, it.Request)
 		}
 	case ev.Type == "user":
 		// A subagent's own messages, peer messages and background-task
@@ -2870,6 +2887,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 	case ev.Type == "result":
 		s.inTurn = false
 		turnEnded(s)
+		endBatches(s)
 		s.releaseTasks = nil
 		if s.restoreMode != "" {
 			mode := s.restoreMode
