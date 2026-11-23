@@ -228,7 +228,8 @@ const (
 	slowWrite   = 60 * time.Second
 )
 
-// slowReply: the replies that can be large (session list, items pages).
+// slowReply: the replies that can be large (session list, items pages,
+// files: an 8 MiB image is ~11 MB of base64).
 func slowReply(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
@@ -237,7 +238,7 @@ func slowReply(r *http.Request) bool {
 		return true
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/phone/"), "/")
-	return len(parts) == 3 && parts[0] == "session" && parts[2] == "items"
+	return len(parts) == 3 && parts[0] == "session" && (parts[2] == "items" || parts[2] == "file")
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -24,6 +24,9 @@ type Phone struct {
 	// Lock overrides whether the device must unlock with the PC password
 	// (default: every device except phones).
 	Lock *bool `json:"lock,omitempty"`
+	// Files: "Let this device open files" (phones only, off by default):
+	// GET /phone/session/{id}/file serves this device.
+	Files bool `json:"files,omitempty"`
 }
 
 // NeedsUnlock: every paired device, phones and devices that never said hello

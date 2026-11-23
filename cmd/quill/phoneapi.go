@@ -54,6 +54,9 @@ type phoneAPI struct {
 
 	kmem     phoneKmem // /phone/kmem/* reads (phonekmem.go)
 	lastKmem string    // the last "kmem" stream change
+
+	files     *fileGuard      // /phone/session/{id}/file (phonefiles.go)
+	lastFiles map[string]bool // per phone: the last "files" capability sent
 }
 
 type apiChange struct {
@@ -65,7 +68,8 @@ func newPhoneAPI(d *desk, s *folders.Server) *phoneAPI {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	a := &phoneAPI{d: d, server: s, boot: hex.EncodeToString(b), next: 1, wake: make(chan struct{}), stop: make(chan struct{}), streams: map[string]chan struct{}{},
-		tracks: map[string]*itemTrack{}, lastSess: map[string]string{}, lastCtl: map[string]bool{}, lan: newLanMem()}
+		tracks: map[string]*itemTrack{}, lastSess: map[string]string{}, lastCtl: map[string]bool{}, lan: newLanMem(),
+		files: newFileGuard(), lastFiles: map[string]bool{}}
 	go a.loop()
 	return a
 }
@@ -125,6 +129,8 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.stream(w, r)
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "items":
 		a.items(w, r, parts[1])
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "file":
+		a.file(w, r, parts[1])
 	case r.Method == http.MethodGet && path == "settings/questions":
 		a.featureQuestionsRoute(w)
 	case r.Method == http.MethodPost && path == "settings/answer":
@@ -173,7 +179,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 	}
 	phone := folders.PhoneID(r)
 	conn, snap := lanConnOf(r), lanSnapshot()
-	var ctl, unlock, lan, kmemOn bool
+	var ctl, unlock, lan, kmemOn, files bool
 	a.ui(func() {
 		list := a.d.phones()
 		changed := false
@@ -195,6 +201,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 				changed = true
 			}
 			unlock = list[i].NeedsUnlock()
+			files = filesOn(list[i])
 		}
 		if changed {
 			a.d.app.Preferences().SetString("phones", folders.PhonesJSON(list))
@@ -205,7 +212,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		kmemOn = a.d.kmemOn()
 	})
 	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan,
-		"kmem": map[string]any{"api": kmemPhoneAPI, "on": kmemOn}})
+		"kmem": map[string]any{"api": kmemPhoneAPI, "on": kmemOn}, "files": map[string]any{"api": filesPhoneAPI, "on": files}})
 }
 
 type apiSession struct {
@@ -583,6 +590,15 @@ func (a *phoneAPI) scan() {
 				changes = append(changes, map[string]any{"type": "control", "control": c, "phone": p.ID})
 			}
 		}
+		// The file switch (Quill Desktop → Devices) updates hello's "files"
+		// capability live.
+		f := filesOn(p)
+		if old, ok := a.lastFiles[p.ID]; !ok || old != f {
+			a.lastFiles[p.ID] = f
+			if ok {
+				changes = append(changes, map[string]any{"type": "files", "files": map[string]any{"api": filesPhoneAPI, "on": f}, "phone": p.ID})
+			}
+		}
 	}
 	if len(changes) == 0 {
 		return
@@ -613,10 +629,16 @@ func (a *phoneAPI) since(cursor int64, phone string) ([]map[string]any, int64, b
 			continue
 		}
 		if p, ok := c.body["phone"]; ok {
+			// A change for one phone only: sent to it, without the id.
 			if p != phone {
 				continue
 			}
-			body := map[string]any{"type": "control", "control": c.body["control"]}
+			body := map[string]any{}
+			for k, v := range c.body {
+				if k != "phone" {
+					body[k] = v
+				}
+			}
 			out = append(out, body)
 			continue
 		}

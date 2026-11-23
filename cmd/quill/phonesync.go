@@ -387,6 +387,9 @@ func (d *desk) updatePhoneList() {
 			right.Objects = append([]fyne.CanvasObject{d.lanUnlockCheck(ph)}, right.Objects...)
 		}
 		rows = append(rows, container.NewBorder(nil, nil, nil, right, widget.NewLabel(ph.Name+" · "+seen)))
+		if ph.Kind == "phone" {
+			rows = append(rows, d.deviceFilesRow(ph))
+		}
 	}
 	if len(rows) == 0 {
 		rows = append(rows, mutedText("No paired devices", fontMeta))
@@ -505,7 +508,7 @@ func (d *desk) buildPhoneRow() fyne.CanvasObject {
 	head := mutedText("Devices", fontMeta)
 	p.list = container.NewVBox()
 	d.updatePhoneList()
-	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), notifyChk, controlChk, d.pcLockSettings(), p.status)
+	return container.NewVBox(head, pairBtn, p.list, container.NewBorder(nil, nil, nil, d.phoneFileOff, d.phoneFileBtn), notifyChk, controlChk, d.phoneFilesDenyRow(), d.pcLockSettings(), p.status)
 }
 
 func (d *desk) updatePhoneRow() {

@@ -116,7 +116,7 @@ func TestSlowLinkTimeouts(t *testing.T) {
 	if s.srv.IdleTimeout != idleTimeout || idleTimeout < 60*time.Second {
 		t.Fatalf("IdleTimeout %v: phones reuse connections between requests", s.srv.IdleTimeout)
 	}
-	for p, slow := range map[string]bool{"/phone/sessions": true, "/phone/session/abc/items": true, "/phone/stream": false, "/folders.json": false, "/phone/session/abc": false} {
+	for p, slow := range map[string]bool{"/phone/sessions": true, "/phone/session/abc/items": true, "/phone/session/abc/file": true, "/phone/stream": false, "/folders.json": false, "/phone/session/abc": false} {
 		r := httptest.NewRequest("GET", p, nil)
 		if slowReply(r) != slow {
 			t.Errorf("slowReply(%q) = %v", p, !slow)
