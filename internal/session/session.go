@@ -236,7 +236,7 @@ func Start(opts Options, onEvent func(*protocol.Event)) (*Process, error) {
 	runBin, runArgs := scoped(bin, opts.Args())
 	cmd := exec.Command(runBin, runArgs...)
 	cmd.Dir = opts.Cwd
-	cmd.Env = append(append(os.Environ(), LocalEnv(opts.Model)...), opts.Env...)
+	cmd.Env = opts.childEnv()
 	cmd.SysProcAttr = childAttr()
 	inR, inW, err := os.Pipe()
 	if err != nil {
