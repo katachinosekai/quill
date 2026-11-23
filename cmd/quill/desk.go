@@ -1096,7 +1096,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.later = d.afterUI
 	d.input.ac = d.newAutocorrector()
 	d.input.autoFormat = d.autoFormatOn
-	d.input.known = func() func(string) bool { return d.knownWords(d.current) }
+	d.input.known = func() func(string) bool { return d.knownFor(d.input, d.current) }
 	d.input.onFix = func(msg string) { d.flashHint(d.folder, msg) }
 	d.cmds = newCmdMenu(d)
 	d.input.onKey = d.cmds.key
@@ -1229,7 +1229,7 @@ func (d *desk) updateChrome() {
 		setText(d.subtitle, "")
 		d.note.Hide()
 		d.rcStatus.Hide()
-		d.input.setSuggestion("")
+		d.suggest(d.input, "")
 		d.input.Disable()
 		d.sendBtn.Disable()
 		d.stopBtn.Disable()
@@ -1302,9 +1302,9 @@ func (d *desk) updateChrome() {
 		d.sendBtn.Disable()
 	}
 	if held || s.takeover {
-		d.input.setSuggestion("")
+		d.suggest(d.input, "")
 	} else {
-		d.input.setSuggestion(d.shownSuggestion(s))
+		d.suggest(d.input, d.shownSuggestion(s))
 	}
 	setOptions(d.modelSel, d.modelOptions(s))
 	setOptions(d.modeSel, modeOptions(s))
@@ -1630,6 +1630,7 @@ func (d *desk) adopt(s *deskSession, p *session.Process) {
 func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	items := s.conv.Apply(ev)
 	s.noteActivity(statusNow())
+	d.syncTargetSuggestion(s) // the main message box messages this assistant (mainbox.go)
 	if ev.Type == "system" && ev.Subtype == "init" && ev.SessionID != "" && ev.SessionID != s.id {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}

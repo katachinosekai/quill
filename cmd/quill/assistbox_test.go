@@ -49,7 +49,7 @@ func TestAssistBoxOpenCloseSwitch(t *testing.T) {
 		if d.assistBoxRole() != boxKmem || b.title.Text != "kmem assistant" || b.body.Objects[0] != kin {
 			t.Fatal("the other button switches the content")
 		}
-		if d.win.Canvas().Focused() != d.input || d.input.PlaceHolder != "Message the kmem assistant" {
+		if d.win.Canvas().Focused() != d.input || d.input.hint != "Message the kmem assistant" {
 			t.Fatal("over the chat, opening focuses the main message box, which messages the assistant")
 		}
 		d.toggleAssistBox(boxKmem)
@@ -122,7 +122,7 @@ func TestAssistBoxOwnMessageBox(t *testing.T) {
 			t.Fatal("the role's chat shows in the box and is its hidden host")
 		}
 		// Over the chat: no message box of its own; the main one messages it.
-		if c.inRow.Visible() || d.input.PlaceHolder != "Message the Quill operator" || d.win.Canvas().Focused() != d.input || d.input.Text != "" {
+		if c.inRow.Visible() || d.input.hint != "Message the Quill operator" || d.win.Canvas().Focused() != d.input || d.input.Text != "" {
 			t.Fatalf("over the chat, the main message box messages the operator: %v %q %v %q", c.inRow.Visible(), d.input.PlaceHolder, d.win.Canvas().Focused() == d.input, d.input.Text)
 		}
 		if !d.targetLbl.Visible() || !strings.Contains(d.targetLbl.Text, "Quill operator") {

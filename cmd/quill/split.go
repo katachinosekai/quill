@@ -139,7 +139,7 @@ func (d *desk) newPane() *pane {
 	p.input.later = d.afterUI
 	p.input.ac = d.newAutocorrector()
 	p.input.autoFormat = d.autoFormatOn
-	p.input.known = func() func(string) bool { return d.knownWords(p.view.s) }
+	p.input.known = func() func(string) bool { return d.knownFor(p.input, p.view.s) }
 	p.input.onFix = func(msg string) { d.flashHint(p.stats, msg) }
 	p.input.onSendNow = func(text string) {
 		if !d.sendTargeted(p.input, text, true) {
@@ -778,7 +778,7 @@ func (d *desk) syncPaneControls(p *pane) {
 		p.stop.Disable()
 		p.mic.Disable()
 		setText(p.stats, "")
-		p.input.setSuggestion("")
+		d.suggest(p.input, "")
 		d.syncAutoChip(p.auto, nil)
 		return
 	}
@@ -815,7 +815,7 @@ func (d *desk) syncPaneControls(p *pane) {
 	}
 	setText(p.stats, stats)
 	if p.input.Text == "" {
-		p.input.setSuggestion(d.shownSuggestion(s))
+		d.suggest(p.input, d.shownSuggestion(s))
 	}
 }
 

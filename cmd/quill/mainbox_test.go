@@ -1,9 +1,13 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
+
+	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/protocol"
 )
 
 // td1e074: over the chat the box has no message box of its own; the main one
@@ -18,7 +22,7 @@ func TestMainBoxMessagesTheOverlayAssistant(t *testing.T) {
 		tab = d.createSession(h.proj, "default", "default")
 		d.input.SetText("tab draft")
 		d.openAssistBox(boxQuill)
-		if d.input.Text != "" || d.input.PlaceHolder != "Message the Quill operator" || d.quillChat.inRow.Visible() {
+		if d.input.Text != "" || d.input.hint != "Message the Quill operator" || d.quillChat.inRow.Visible() {
 			t.Fatalf("the main box messages the operator: %q %q", d.input.Text, d.input.PlaceHolder)
 		}
 		d.input.SetText("op draft")
@@ -68,4 +72,82 @@ func TestTargetLabels(t *testing.T) {
 	if targetLabel(boxQuill) != "Message the Quill operator" || targetLabel(boxKmem) != "Message the kmem assistant" {
 		t.Fatal(targetLabel(boxQuill), targetLabel(boxKmem))
 	}
+}
+
+// te68cb1: while the main box messages the overlay's assistant it shows that
+// assistant's prompt suggestion (none if it has none), never the tab's; the
+// tab's comes back when the box closes or docks. Panes the same.
+func TestMainBoxSuggestionsPerTarget(t *testing.T) {
+	h, _ := quillSetup(t)
+	_, op := bootQuill(h)
+	h.ui(func() {
+		d := h.d
+		tab := d.createSession(h.proj, "default", "default")
+		tab.conv.Suggestion = "tab next"
+		d.updateChrome()
+		if d.input.suggestion != "tab next" {
+			t.Fatalf("the tab's suggestion: %q", d.input.suggestion)
+		}
+		op.conv.Suggestion = ""
+		d.openAssistBox(boxQuill)
+		d.updateChrome() // a tab refresh must not bring the tab's back
+		if d.input.suggestion != "" || d.input.PlaceHolder != "Message the Quill operator" || d.input.AcceptsTab() {
+			t.Fatalf("the operator has none: %q %q", d.input.suggestion, d.input.PlaceHolder)
+		}
+		d.handleEvent(op, &protocol.Event{Type: "prompt_suggestion", Suggestion: "op next"})
+		d.updateChrome()
+		if d.input.suggestion != "op next" || !strings.Contains(d.input.PlaceHolder, "op next") {
+			t.Fatalf("the operator's suggestion: %q", d.input.PlaceHolder)
+		}
+		d.input.TypedKey(&fyne.KeyEvent{Name: fyne.KeyTab})
+		if d.input.Text != "op next" {
+			t.Fatalf("Tab takes the operator's: %q", d.input.Text)
+		}
+		d.input.SetText("")
+		// Autocorrect learns from the target's conversation too.
+		op.conv.Items = append(op.conv.Items, &chat.Item{Kind: chat.Assistant, Text: "zorbleflux"})
+		if k := d.input.known(); k == nil || !k("zorbleflux") {
+			t.Fatal("the operator's words while the box messages it")
+		}
+		d.closeAssistBox()
+		if k := d.input.known(); k != nil && k("zorbleflux") {
+			t.Fatal("the tab's words again")
+		}
+		if d.input.suggestion != "tab next" || !strings.Contains(d.input.PlaceHolder, "tab next") {
+			t.Fatalf("closing brings the tab's back: %q", d.input.PlaceHolder)
+		}
+		d.openAssistBox(boxQuill)
+		if d.input.suggestion != "op next" {
+			t.Fatalf("reopening: the operator's again: %q", d.input.suggestion)
+		}
+		d.setAssistDock(boxQuill, true)
+		if d.input.suggestion != "tab next" {
+			t.Fatalf("docked: the tab's: %q", d.input.suggestion)
+		}
+		d.setAssistDock(boxQuill, false)
+		d.handleEvent(op, &protocol.Event{Type: "prompt_suggestion", Suggestion: "/clear"})
+		if d.input.suggestion != "" {
+			t.Fatalf("no /clear for the operator: %q", d.input.suggestion)
+		}
+		d.closeAssistBox()
+
+		// Split: the focused pane's box, the same way.
+		d.setSplit(2)
+		p := d.focused
+		if p == nil || p.view.s == nil {
+			t.Fatal("a focused pane with a tab")
+		}
+		p.view.s.conv.Suggestion = "pane next"
+		d.syncPaneControls(p)
+		op.conv.Suggestion = "op again"
+		d.openAssistBox(boxQuill)
+		d.syncPaneControls(p)
+		if p.input.suggestion != "op again" {
+			t.Fatalf("the pane's box: the operator's: %q", p.input.suggestion)
+		}
+		d.closeAssistBox()
+		if p.input.suggestion != "pane next" {
+			t.Fatalf("the pane's back: %q", p.input.suggestion)
+		}
+	})
 }

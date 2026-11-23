@@ -78,9 +78,7 @@ func (d *desk) syncMainTarget() {
 	if old := d.main; old.role != "" && old.in != nil && d.strip != nil {
 		d.strip.keepBox(assistDraftKey(old.role), old.in)
 		d.strip.fillBox(tabDraftKey(old.key), old.in)
-		old.in.hint = "Message Claude"
-		old.in.setSuggestion("")
-		old.in.SetPlaceHolder(old.in.hint)
+		setHint(old.in, "Message Claude", d.tabSuggestion(d.entrySession(old.in)))
 		if old.in == d.input && d.strip != nil {
 			d.strip.lastCur = old.key
 		}
@@ -89,10 +87,8 @@ func (d *desk) syncMainTarget() {
 	if want != "" && in != nil && d.strip != nil {
 		d.strip.keepBox(tabDraftKey(key), in)
 		d.strip.fillBox(assistDraftKey(want), in)
-		in.hint = targetLabel(want)
-		in.setSuggestion("")
-		in.SetPlaceHolder(in.hint)
 		d.main = mainTarget{role: want, in: in, key: key}
+		setHint(in, targetLabel(want), d.targetSuggestion(want))
 		if d.cmds != nil {
 			d.cmds.hide()
 		}
@@ -121,6 +117,75 @@ func (d *desk) syncBoxInputs() {
 			d.targetLbl.Hide()
 		}
 	}
+}
+
+// Suggestions are per target too (te68cb1): while the main message box
+// messages an assistant it shows that assistant's prompt suggestion (ghost
+// text, Tab takes it), none if it has none, never the tab's; closing or
+// docking the box brings the tab's back. Autocorrect learns from the
+// target's conversation the same way.
+
+// setHint sets in's placeholder to hint and its suggestion to sug.
+func setHint(in *sendEntry, hint, sug string) {
+	in.hint = hint
+	in.suggestion = ""
+	in.SetPlaceHolder(hint)
+	in.setSuggestion(sug)
+}
+
+// targetSuggestion: the prompt suggestion of role's assistant session, ""
+// when it has none. /clear and /compact are the tab's business: never here.
+func (d *desk) targetSuggestion(role string) string {
+	s := d.targetSession(role)
+	if s == nil || s.conv == nil || isClearSuggestion(s.conv.Suggestion) {
+		return ""
+	}
+	return s.conv.Suggestion
+}
+
+// tabSuggestion: the suggestion a tab's message box shows for s.
+func (d *desk) tabSuggestion(s *deskSession) string {
+	if s == nil || s.conv == nil || s.takeover || s.terminal != nil && !s.running() {
+		return ""
+	}
+	return d.shownSuggestion(s)
+}
+
+// entrySession: the tab session in belongs to (the main one's or a pane's).
+func (d *desk) entrySession(in *sendEntry) *deskSession {
+	if in == d.input {
+		return d.current
+	}
+	for _, p := range d.panes {
+		if p.input == in {
+			return p.view.s
+		}
+	}
+	return nil
+}
+
+// suggest sets in's suggestion: tab's, or its assistant's while in messages one.
+func (d *desk) suggest(in *sendEntry, tab string) {
+	if r := d.targeted(in); r != "" {
+		tab = d.targetSuggestion(r)
+	}
+	in.setSuggestion(tab)
+}
+
+// syncTargetSuggestion follows the targeted assistant's suggestion after s's
+// events (a new suggestion, or the one cleared by a sent message).
+func (d *desk) syncTargetSuggestion(s *deskSession) {
+	if d.main.role != "" && d.main.in != nil && s != nil && d.targetSession(d.main.role) == s {
+		d.main.in.setSuggestion(d.targetSuggestion(d.main.role))
+	}
+}
+
+// knownFor: the words autocorrect keeps for in: its target's conversation.
+func (d *desk) knownFor(in *sendEntry, tab *deskSession) func(string) bool {
+	if r := d.targeted(in); r != "" {
+		return d.knownWords(d.targetSession(r))
+	}
+	return d.knownWords(tab)
 }
 
 func setShown(o fyne.CanvasObject, on bool) {
@@ -171,6 +236,7 @@ func (d *desk) sendTargeted(in *sendEntry, text string, now bool) bool {
 	}
 	d.assistDeliver(a, text)
 	in.SetText("")
+	in.setSuggestion(d.targetSuggestion(role))
 	d.strip.keepDraft(assistDraftKey(role), "")
 	if role == boxQuill {
 		if c := d.quillChat; c != nil && a.s != nil && c.view.s != a.s {

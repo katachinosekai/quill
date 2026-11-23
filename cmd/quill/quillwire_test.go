@@ -29,7 +29,7 @@ func TestQuillButtonOpensOperatorChat(t *testing.T) {
 		if c == nil || d.assistBoxRole() != boxQuill || d.box().body.Objects[0] != c.root {
 			t.Fatal("the Quill button opens the operator's chat")
 		}
-		if d.win.Canvas().Focused() != d.input || c.inRow.Visible() || d.input.PlaceHolder != "Message the Quill operator" {
+		if d.win.Canvas().Focused() != d.input || c.inRow.Visible() || d.input.hint != "Message the Quill operator" {
 			t.Fatal("over the chat: no message box of its own; the main one messages the operator")
 		}
 		if d.hostFor(roleQuill).open == nil {
