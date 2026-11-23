@@ -562,7 +562,7 @@ func fileAuditFor(phone string, n int) []string {
 		}
 		name, _ := strconv.Unquote(f[4])
 		t, _ := time.Parse(time.RFC3339, f[0])
-		out = append(out, fmt.Sprintf("%s  %s  %s", t.Format("Jan 2 15:04"), f[6], tildePath(name)))
+		out = append(out, fmt.Sprintf("%s  %s  %s", localDate(t, dateMD)+" "+t.Format("15:04"), f[6], tildePath(name)))
 	}
 	if len(out) > n {
 		out = out[len(out)-n:]

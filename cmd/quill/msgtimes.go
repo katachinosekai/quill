@@ -117,16 +117,16 @@ func (d *desk) msgTimeLayout(t time.Time) string {
 		return clock
 	}
 	if t.Year() == now.Year() {
-		return "Mon 2 Jan, " + clock
+		return dateLayout(timeLocale(), dateDMDow) + ", " + clock
 	}
-	return "2 Jan 2006, " + clock
+	return dateLayout(timeLocale(), dateDMY) + ", " + clock
 }
 
 func (d *desk) msgTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Format(d.msgTimeLayout(t))
+	return localTime(t, d.msgTimeLayout(t))
 }
 
 // withTime puts the message's time under it when times are shown.

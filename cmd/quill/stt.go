@@ -84,7 +84,8 @@ var languages = []language{
 
 func init() {
 	rest := languages[1:]
-	sort.Slice(rest, func(i, j int) bool { return rest[i].name < rest[j].name })
+	less := sortLess()
+	sort.Slice(rest, func(i, j int) bool { return less(rest[i].name, rest[j].name) })
 }
 
 func languageName(code string) string {
@@ -452,10 +453,10 @@ func (d *desk) pickLanguage(current string, onPick func(code string)) {
 		list.UnselectAll()
 	}
 	search.OnChanged = func(q string) {
-		q = strings.ToLower(strings.TrimSpace(q))
+		q = foldKey(strings.TrimSpace(q))
 		shown = nil
 		for _, l := range languages {
-			if q == "" || strings.Contains(strings.ToLower(l.name), q) || strings.HasPrefix(l.code, q) {
+			if q == "" || foldContains(l.name, q) || strings.HasPrefix(l.code, q) {
 				shown = append(shown, l)
 			}
 		}

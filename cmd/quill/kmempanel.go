@@ -293,7 +293,8 @@ func (p *kmemPanel) render() {
 		}
 		by[t.Topic] = append(by[t.Topic], fmt.Sprintf("[%s] p%d · %s — %s", t.ID, t.Prio, who, t.Title))
 	}
-	sort.Strings(order)
+	less := sortLess()
+	sort.Slice(order, func(i, j int) bool { return less(order[i], order[j]) })
 	trows := []fyne.CanvasObject{caption("Open and claimed tasks by topic (read-only here; sessions claim and finish them).")}
 	for _, topic := range order {
 		trows = append(trows, boldLabel(topic))
@@ -544,10 +545,10 @@ func (p *kmemPanel) memoryTab() fyne.CanvasObject {
 }
 
 func (p *kmemPanel) filterTopics(q string) {
-	q = strings.ToLower(strings.TrimSpace(q))
+	q = foldKey(strings.TrimSpace(q))
 	p.topicShown = p.topicShown[:0]
 	for _, t := range p.topicList {
-		if q == "" || strings.Contains(strings.ToLower(t.Name), q) {
+		if q == "" || foldContains(t.Name, q) {
 			p.topicShown = append(p.topicShown, t)
 		}
 	}
@@ -669,7 +670,8 @@ func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
 	for n := range names {
 		order = append(order, n)
 	}
-	sort.Strings(order)
+	less := sortLess()
+	sort.Slice(order, func(i, j int) bool { return less(order[i], order[j]) })
 	rows := []fyne.CanvasObject{caption("Read-only view of kmem's topics: status, claimed and open tasks. Sessions claim and finish tasks; nothing is changed here.")}
 	if len(order) == 0 {
 		rows = append(rows, wrapLabel("No topics yet: kmem has no topics or tasks to show."))

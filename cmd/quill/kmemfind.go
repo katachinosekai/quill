@@ -32,10 +32,10 @@ const (
 	findFactMax     = 2000
 )
 
-func queryWords(q string) []string { return strings.Fields(strings.ToLower(q)) }
+func queryWords(q string) []string { return strings.Fields(foldKey(q)) }
 
 func hasAllWords(text string, words []string) bool {
-	t := strings.ToLower(text)
+	t := foldKey(text)
 	for _, w := range words {
 		if !strings.Contains(t, w) {
 			return false

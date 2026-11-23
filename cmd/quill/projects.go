@@ -310,6 +310,7 @@ func (d *desk) projectGroups(entries []sideEntry) []projectGroup {
 		})
 		out = append(out, projectGroup{name, es, ext[name]})
 	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].name) < strings.ToLower(out[j].name) })
+	less := sortLess()
+	sort.Slice(out, func(i, j int) bool { return less(out[i].name, out[j].name) })
 	return out
 }

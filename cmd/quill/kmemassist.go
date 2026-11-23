@@ -354,7 +354,7 @@ func kmemAssistCrashNote(started string, saved time.Time) string {
 	if saved.IsZero() {
 		return "The last session ended without saving, and kmem-lock-audit has no saved handoff yet."
 	}
-	return "The last session ended without saving; working from the save of " + saved.Local().Format("Jan 2 15:04") + "."
+	return "The last session ended without saving; working from the save of " + localDate(saved.Local(), dateMD) + " " + saved.Local().Format("15:04") + "."
 }
 
 // kmemAssistElsewhere is ELSEWHERE: kmem-lock-audit is live in a tab. The
@@ -772,7 +772,7 @@ func (d *desk) kmemAssistLastSave(a *kmemAssist) string {
 	if a.lastSave.IsZero() {
 		return "There is no earlier save."
 	}
-	return "The last save is from " + a.lastSave.Local().Format("Jan 2 15:04") + "."
+	return "The last save is from " + localDate(a.lastSave.Local(), dateMD) + " " + a.lastSave.Local().Format("15:04") + "."
 }
 
 // kmemAssistAsk: the save missed the deadline; the user picks what happens.

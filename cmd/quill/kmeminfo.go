@@ -131,7 +131,7 @@ func formatMaintAge(at, now time.Time) string {
 	case now.AddDate(0, 0, -1).Format("2006-01-02") == at.Format("2006-01-02"):
 		return "yesterday " + hm
 	}
-	return at.Format("Jan 2") + " " + hm
+	return localDate(at, dateMD) + " " + hm
 }
 
 // maintLine: "Daily maintenance (today 11:46): 3 warnings".
@@ -186,7 +186,7 @@ func binDate(t, now time.Time) string {
 	case now.AddDate(0, 0, 1).Format("2006-01-02"):
 		return "tomorrow"
 	}
-	return t.Format("Jan 2")
+	return localDate(t, dateMD)
 }
 
 // binLine: "6 items in the recycle bin, none can be emptied yet (7-day wait);

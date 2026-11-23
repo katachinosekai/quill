@@ -102,7 +102,8 @@ func buildTopics(topicsOut string, labels map[string]kmemSessionCfg, tasks []kme
 		c := labels[k]
 		out = append(out, topicInfo{Slug: k, Title: firstNonEmpty(c.Title, firstNonEmpty(c.As, topicTitle(k))), Scope: c.Scope, Labeled: true})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return strings.ToLower(out[i].Title) < strings.ToLower(out[j].Title) })
+	less := sortLess()
+	sort.SliceStable(out, func(i, j int) bool { return less(out[i].Title, out[j].Title) })
 	var rest []string
 	for _, t := range parseTopics(topicsOut) {
 		top := topLevel(t.Name)

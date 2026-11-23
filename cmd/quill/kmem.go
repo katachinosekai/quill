@@ -159,7 +159,7 @@ func kmemSaveMessage(name string) string {
 func kmemChoices(hs []kmemHandoff) []string {
 	out := []string{kmemNewChoice}
 	for _, h := range hs {
-		out = append(out, kmemResumeOf+h.Name+" (saved "+h.Saved.Local().Format("Jan 2 15:04")+")")
+		out = append(out, kmemResumeOf+h.Name+" (saved "+localDate(h.Saved.Local(), dateMD)+" "+h.Saved.Local().Format("15:04")+")")
 	}
 	return out
 }

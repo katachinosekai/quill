@@ -150,7 +150,7 @@ func resetText(unix int64) string {
 	if time.Until(t) < 24*time.Hour {
 		return "resets " + t.Format("3:04 PM")
 	}
-	return "resets " + t.Format("Mon Jan 2, 3:04 PM")
+	return "resets " + localDate(t, dateDowMD) + ", " + t.Format("3:04 PM")
 }
 
 func (u *usagePanel) update() {

@@ -882,7 +882,7 @@ func ago(t time.Time) string {
 	case d < 7*24*time.Hour:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
-	return t.Format("Jan 2")
+	return localDate(t, dateMD)
 }
 
 func tildePath(p string) string {
@@ -894,7 +894,7 @@ func tildePath(p string) string {
 }
 
 func (d *desk) rebuildRows() {
-	q := strings.ToLower(strings.TrimSpace(d.search.Text))
+	q := foldKey(strings.TrimSpace(d.search.Text))
 	seen := map[string]bool{}
 	var entries []sideEntry
 	add := func(id, cwd string, last time.Time) {
@@ -920,7 +920,7 @@ func (d *desk) rebuildRows() {
 		if q != "" { // search narrows external rows by name
 			var keep []extSession
 			for _, e := range groups[i].ext {
-				if strings.Contains(strings.ToLower(e.Name+" "+groups[i].name), q) {
+				if foldContains(e.Name+" "+groups[i].name, q) {
 					keep = append(keep, e)
 				}
 			}
@@ -1015,7 +1015,7 @@ func (d *desk) rowShown(id string) bool {
 
 func (d *desk) matches(id, cwd, q string) bool {
 	t, _, _ := d.rowText(id)
-	return strings.Contains(strings.ToLower(t), q) || strings.Contains(strings.ToLower(cwd), q)
+	return foldContains(t, q) || foldContains(cwd, q)
 }
 
 func (d *desk) refreshSidebar() {
