@@ -219,6 +219,10 @@ type apiSession struct {
 	Tokens     int64      `json:"tokens"`
 	Project    string     `json:"project"`
 	Renamed    bool       `json:"renamed,omitempty"`
+	// Tab: 0-based position among the open tabs the phone can see (Quill
+	// Desktop's tab bar, left to right), -1 when the session is not an open
+	// tab. Quill Android's portrait list follows it.
+	Tab int `json:"tab"`
 	// Suggestion: the prompt suggestion Quill Desktop shows as ghost text in
 	// the session's empty message box (shownSuggestion, incl. the /clear
 	// rule); left out when there is none.
@@ -268,11 +272,28 @@ func (a *phoneAPI) sessionIDs() ([]string, map[string]string) {
 	return ids, group
 }
 
+// tabIndex is id's position in d.tabs counted over the tabs sessionIDs lists,
+// or -1 when id is not one of them.
+func (a *phoneAPI) tabIndex(id string) int {
+	d := a.d
+	n := 0
+	for _, t := range d.tabs {
+		if d.staleTab(t) || strings.HasPrefix(t, remotePrefix) || d.hiddenID(t, "") {
+			continue
+		}
+		if t == id {
+			return n
+		}
+		n++
+	}
+	return -1
+}
+
 func (a *phoneAPI) session(id, group string) apiSession {
 	d := a.d
 	title, _, st := d.rowText(id)
 	info := d.infos[id]
-	out := apiSession{ID: id, Title: title, Group: group, Status: apiStatus[st], Folder: info.Cwd, Model: "", Mode: "default", Backend: "online", Kmem: d.org.Kmem[id], Tokens: int64(info.Usage.Total())}
+	out := apiSession{ID: id, Tab: a.tabIndex(id), Title: title, Group: group, Status: apiStatus[st], Folder: info.Cwd, Model: "", Mode: "default", Backend: "online", Kmem: d.org.Kmem[id], Tokens: int64(info.Usage.Total())}
 	if !info.Last.IsZero() {
 		out.UpdatedMs = info.Last.UnixMilli()
 	}
