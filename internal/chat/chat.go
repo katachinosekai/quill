@@ -353,7 +353,14 @@ func RequestsYes(text string) bool {
 	if len(lines) == 0 {
 		return false
 	}
-	if replyYes.MatchString(strings.TrimSpace(lines[len(lines)-1])) {
+	// The ask can follow another sentence on its line ("The author reports
+	// stay for later. Reply **yes** to run it."; Zomboid 2026-11-23: the
+	// whole-line match missed it, so the user's "Yes" didn't approve).
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if m := sentenceEnd.FindAllStringIndex(last, -1); len(m) > 0 {
+		last = last[m[len(m)-1][1]:]
+	}
+	if replyYes.MatchString(last) {
 		return true
 	}
 	steps := 0

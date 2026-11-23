@@ -181,10 +181,13 @@ func TestAsksApprovalRequestsYes(t *testing.T) {
 		"Same plan, in order:\n1. Write the script.\n2. Then run it.\n\nReply **yes** to run it.":                                                                                                               true,
 		"Plan (awaiting your approval):\n1. Edit a.go.\n   (keeps the API)\n2. Run the tests.":                                                                                                                  true,
 		"Say yes and I'll start.": true,
-		"**Plan (needs your yes):**\n1. Write the script.\n\nI'll check the logs first.": false,
-		"Plan:\n1. Write the script.\n2. Run it.":                                        false,
-		"Reply with the file name to continue.":                                          false,
-		"Steps done:\n1. Wrote the script.\n2. Ran it.":                                  false,
+		// Zomboid 2026-11-23: the ask after another sentence on its line.
+		"Plan:\n1. Build it locally.\n2. Check memory.\n\nThe author reports (t1) stay for later. Reply **yes** to run it.": true,
+		"I ran it. Reply with the file name to continue.":                                                                   false,
+		"**Plan (needs your yes):**\n1. Write the script.\n\nI'll check the logs first.":                                    false,
+		"Plan:\n1. Write the script.\n2. Run it.":                                                                           false,
+		"Reply with the file name to continue.":                                                                             false,
+		"Steps done:\n1. Wrote the script.\n2. Ran it.":                                                                     false,
 	} {
 		c := New()
 		c.AddUser("hi")
