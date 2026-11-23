@@ -33,6 +33,8 @@ const (
 	prefQuillOpModel  = "quillOpModel"        // the operator's model; kmemAssistOff turns it off
 	prefQuillMoveSeen = "quillMoveNoticeSeen" // the one-time move-in notice was shown
 	prefQuillOpSeen   = "quillOpBadgeSeen"    // the Quill badge's seen records
+	prefQuillClone    = "quillCloneOffered"   // the one-time offer to clone the source was shown
+	quillRepoURL      = "https://github.com/katachinosekai/quill"
 	quillModule       = "module github.com/katachinosekai/quill"
 )
 
@@ -129,8 +131,18 @@ func (d *desk) quillOperatorPrompt(s *deskSession) string {
 	return p
 }
 
-// quillSource: the Quill source folder, "" when unset or gone.
+// quillSource: the Quill source folder: the one set in Settings → General →
+// Quill operator, else the default (quillSourceDefault); "" when there is
+// none. A set folder that is gone counts as unset.
 func (d *desk) quillSource() string {
+	if p := d.quillSourceSet(); p != "" {
+		return p
+	}
+	return quillSourceDefault()
+}
+
+// quillSourceSet: the folder set in Settings, "" when unset or gone.
+func (d *desk) quillSourceSet() string {
 	p := strings.TrimSpace(d.app.Preferences().String(prefQuillSource))
 	if p == "" {
 		return ""
@@ -140,6 +152,64 @@ func (d *desk) quillSource() string {
 		return ""
 	}
 	return filepath.Clean(p)
+}
+
+// quillExe: the running binary (a test hook).
+var quillExe = os.Executable
+
+// quillCloneDir: where the Quill source is cloned when no checkout runs
+// Quill Desktop (te2211d).
+func quillCloneDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "quill", "source")
+}
+
+// quillSourceDefault: the source folder when none is set (te2211d): the git
+// checkout of Quill holding the running binary (a build from source), else
+// quillCloneDir when it holds the Quill source; "" when neither does.
+func quillSourceDefault() string {
+	if exe, err := quillExe(); err == nil {
+		if r, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = r
+		}
+		if r := quillRepoAbove(filepath.Dir(exe)); r != "" && isGitCheckout(r) {
+			return r
+		}
+	}
+	if c := quillCloneDir(); isQuillRepo(c) {
+		return c
+	}
+	return ""
+}
+
+// isGitCheckout: dir is a git checkout (.git is a folder, or a file in a worktree).
+func isGitCheckout(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+// quillCloneOffer: the one-time offer when the operator runs without the
+// Quill source (only an offer: nothing is cloned by itself).
+func quillCloneOffer() string {
+	dir := quillCloneDir()
+	if home, err := os.UserHomeDir(); err == nil {
+		if rel, err := filepath.Rel(home, dir); err == nil {
+			dir = filepath.Join("~", rel)
+		}
+	}
+	return "No Quill source folder, so the Quill operator only changes settings. For developer work on Quill Desktop and Quill Android, clone the source: `git clone " +
+		quillRepoURL + " " + dir + "` (found there by itself), or set a folder in Settings → General → Quill operator. Ask the operator to clone it if you like; it won't on its own."
+}
+
+// offerQuillClone shows quillCloneOffer once ever, on the operator's chat,
+// when it runs without a source folder.
+func (d *desk) offerQuillClone(s *deskSession) {
+	prefs := d.app.Preferences()
+	if s == nil || d.quillSource() != "" || prefs.Bool(prefQuillClone) {
+		return
+	}
+	prefs.SetBool(prefQuillClone, true)
+	d.notify(s, quillCloneOffer())
 }
 
 // quillOpHomeDir: the operator's folder without a source folder.
@@ -514,13 +584,42 @@ func (d *desk) suggestQuillSource() string {
 	return ""
 }
 
+// quillSourceText: the effective source folder, for Settings.
+func (d *desk) quillSourceText() string {
+	if p := d.quillSourceSet(); p != "" {
+		return "In use: " + p
+	}
+	if strings.TrimSpace(d.app.Preferences().String(prefQuillSource)) != "" {
+		if def := quillSourceDefault(); def != "" {
+			return "That folder doesn't exist; in use: the default, " + def
+		}
+		return "That folder doesn't exist, and there is no default: settings only."
+	}
+	if def := quillSourceDefault(); def != "" {
+		return "In use (default): " + def
+	}
+	return "None: settings only. The default is the checkout running Quill Desktop, else " + quillCloneDir() + " once the source is cloned there (" + quillRepoURL + ")."
+}
+
 // quillOpSettings: Settings → General → Quill operator.
 func (d *desk) quillOpSettings() fyne.CanvasObject {
 	prefs := d.app.Preferences()
 	e := widget.NewEntry()
-	e.SetPlaceHolder("Not set")
+	def := quillSourceDefault()
+	if def != "" {
+		e.SetPlaceHolder("Default: " + def)
+	} else {
+		e.SetPlaceHolder("Not set")
+	}
 	e.SetText(prefs.String(prefQuillSource))
-	e.OnChanged = func(v string) { prefs.SetString(prefQuillSource, strings.TrimSpace(v)) }
+	eff := caption("")
+	eff.Wrapping = fyne.TextWrapWord
+	showEff := func() { eff.SetText(d.quillSourceText()) }
+	showEff()
+	e.OnChanged = func(v string) {
+		prefs.SetString(prefQuillSource, strings.TrimSpace(v))
+		showEff()
+	}
 	browse := widget.NewButton("Choose...", func() {
 		dlg := dialog.NewFolderOpen(func(u fyne.ListableURI, err error) {
 			if err == nil && u != nil {
@@ -536,8 +635,8 @@ func (d *desk) quillOpSettings() fyne.CanvasObject {
 	})
 	clear := widget.NewButton("Clear", func() { e.SetText("") })
 	box := container.NewVBox(boldLabel("Quill source folder"),
-		container.NewBorder(nil, nil, nil, container.NewHBox(browse, clear), e))
-	if sug := d.suggestQuillSource(); sug != "" {
+		container.NewBorder(nil, nil, nil, container.NewHBox(browse, clear), e), eff)
+	if sug := d.suggestQuillSource(); sug != "" && sug != def && sug != d.quillSourceSet() {
 		use := widget.NewButton("Use", func() { e.SetText(sug) })
 		box.Add(container.NewBorder(nil, nil, nil, use, caption("Suggested: "+sug)))
 	}

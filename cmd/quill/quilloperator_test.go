@@ -472,3 +472,96 @@ func viewShows(v *chatView, sub string) bool {
 	}
 	return false
 }
+
+// te2211d: the source folder's default: the Quill checkout holding the
+// running binary, else ~/.local/share/quill/source once cloned there; a
+// folder set in Settings wins. Temp folders only.
+func TestQuillSourceDefault(t *testing.T) {
+	h, _ := quillSetup(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := filepath.Join(t.TempDir(), "quill")
+	bin := filepath.Join(repo, "dist", "quill")
+	os.MkdirAll(filepath.Dir(bin), 0o755)
+	os.WriteFile(bin, nil, 0o755)
+	os.WriteFile(filepath.Join(repo, "go.mod"), []byte(quillModule+"\n\ngo 1.26\n"), 0o644)
+	exe := bin
+	quillExe = func() (string, error) { return exe, nil }
+	t.Cleanup(func() { quillExe = os.Executable })
+
+	if quillSourceDefault() != "" {
+		t.Fatal("Quill's go.mod but no git checkout: no default")
+	}
+	os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	if quillSourceDefault() != repo {
+		t.Fatalf("the checkout running Quill Desktop: %q", quillSourceDefault())
+	}
+	exe = filepath.Join(t.TempDir(), "quill") // an installed binary
+	if quillSourceDefault() != "" {
+		t.Fatal("an installed binary and nothing cloned: no default")
+	}
+	clone := quillCloneDir()
+	if clone != filepath.Join(home, ".local", "share", "quill", "source") {
+		t.Fatalf("clone folder %q", clone)
+	}
+	os.MkdirAll(clone, 0o755)
+	if quillSourceDefault() != "" {
+		t.Fatal("an empty clone folder is no source")
+	}
+	os.WriteFile(filepath.Join(clone, "go.mod"), []byte(quillModule+"\n"), 0o644)
+	if quillSourceDefault() != clone {
+		t.Fatal("the cloned source")
+	}
+
+	set := t.TempDir()
+	h.ui(func() {
+		d := h.d
+		prefs := d.app.Preferences()
+		prefs.SetString(prefQuillSource, "")
+		if d.quillSource() != quillSourceDefault() || d.quillOpDir() != quillSourceDefault() {
+			t.Fatal("unset: the default is the source and working folder")
+		}
+		if !strings.Contains(d.quillSourceText(), "(default)") || !strings.Contains(d.quillSourceText(), quillSourceDefault()) {
+			t.Fatalf("Settings shows the effective default: %q", d.quillSourceText())
+		}
+		prefs.SetString(prefQuillSource, set)
+		if d.quillSource() != set || !strings.Contains(d.quillSourceText(), set) {
+			t.Fatal("a folder set in Settings wins")
+		}
+		prefs.SetString(prefQuillSource, filepath.Join(set, "gone"))
+		if d.quillSource() != quillSourceDefault() {
+			t.Fatal("a set folder that is gone falls back to the default")
+		}
+	})
+}
+
+// te2211d: no source at all: the operator offers the clone once, and never
+// clones by itself.
+func TestQuillCloneOfferedOnce(t *testing.T) {
+	h, _ := quillSetup(t)
+	a, s := bootQuill(h)
+	h.ui(func() {
+		d := h.d
+		if d.quillSource() != "" {
+			t.Skip("a Quill source is around")
+		}
+		offers := func() (n int) {
+			for _, it := range s.conv.Items {
+				if strings.Contains(it.Text, "git clone "+quillRepoURL) {
+					n++
+				}
+			}
+			return n
+		}
+		if offers() != 1 || !d.app.Preferences().Bool(prefQuillClone) {
+			t.Fatalf("offered once on start: %d", offers())
+		}
+		d.offerQuillClone(a.s)
+		if offers() != 1 {
+			t.Fatal("only once")
+		}
+		if _, err := os.Stat(quillCloneDir()); err == nil {
+			t.Fatal("nothing cloned by itself")
+		}
+	})
+}

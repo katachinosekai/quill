@@ -42,6 +42,7 @@ func quillBoxAttach(d *desk, a *assistant) {
 	if a.s != nil && c.view.s != a.s {
 		c.view.show(a.s)
 	}
+	d.offerQuillClone(a.s)
 	d.syncReasonStrip(c)
 	d.refreshBoxHeader()
 }
