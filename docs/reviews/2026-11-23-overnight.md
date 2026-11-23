@@ -1,4 +1,4 @@
-# Overnight work 2026-11-23 → 24: review list
+# Overnight work 2026-11-23 (night): review list
 
 Everything below is committed locally on `master` of Quill Desktop and Quill Android.
 Nothing is pushed, built or released. The running Quill Desktop is still the old

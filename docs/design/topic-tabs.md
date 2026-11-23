@@ -281,7 +281,7 @@ rotation, Quit and /clear:
 4. Quill never resolves blockers itself (rule 2: only the session releases
    its pzlock turn; claims are the session's).
 
-### 3.8a Topic snapshot: a hybrid of handoffs and topics (approved by the user 2026-11-24)
+### 3.8a Topic snapshot: a hybrid of handoffs and topics (approved by the user 2026-11-23)
 
 Amends §1.6 ("no handoffs for topic state"), §3.8 and K2/K4/K5. Status:
 **approved** with kmem-lock-audit's review changes (see "Final design" at
@@ -293,7 +293,7 @@ handoff also carried what the next session needs *right away* and that
 fits none of them:
 
 - questions waiting on the user, with their options and the recommended
-  one (decision fd10b14: never assume an answer, ask again; 2026-11-24 the
+  one (decision fd10b14: never assume an answer, ask again; 2026-11-23 the
   open questions survived only because the handoff listed them);
 - running jobs, background subagents, worktrees and branches in flight (the
   end-check only notes them for the end; the next session isn't told);
@@ -339,7 +339,7 @@ hypothesis, job) and owned by the topic, not by a session name.
 7. **Rule 24** would read: "Before a session ends or is cleared, run the
    end-of-session check (it saves the topic snapshot)."
 
-**Final design (kmem-lock-audit review + user answers, 2026-11-24):**
+**Final design (kmem-lock-audit review + user answers, 2026-11-23):**
 
 - kmem 1.11.0 (after 1.10.0), feature flag `topic-snapshot` in
   `version --json`. Quill Desktop shows unknown end-check blocker kinds
