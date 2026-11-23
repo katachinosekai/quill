@@ -497,7 +497,10 @@ at merge.
 Phase 4: Quill merge (§5.3) after Zomboid proves out (Q1); then the Quill
 Android changes (§3.11) by an Android subagent.
 
-## 9. Open questions
+## 9. Decisions (user 2026-11-22: the recommended option for all 25)
+
+All 25 questions below were answered with their recommended option. The four rule changes (5, 8e/14, 17, 24) go into the rules file through kmem-lock-audit, which owns its structure.
+
 
 1. Merge order: Zomboid first, Quill after it proves out (recommended) / Quill first / both together.
 2. Zomboid merge timing: convert now on kmem 1.8.1 (handoff save as the check, retire per fact) (recommended) / wait for end-check and handoff convert in kmem.
