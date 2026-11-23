@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"regexp"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -17,37 +20,182 @@ import (
 // I turn it off". Sending a go-ahead with it ticked approves the plan as
 // usual and switches the session into auto-approve:
 //
-//   - The gate lets every tool call of the session (its subagents' too)
-//     through without a plan, except a command that runs as root
-//     (privilegedRequest): those still need an approved plan, as always.
-//     A batch the gate refused a call of stays refused (gatebatch.go).
+//   - The gate lets the tool calls of the turns it covers (below) through
+//     without a plan, except a command that may run as root
+//     (autoRootRequest, a deliberately crude check in gatebatch.go): those
+//     still need an approved plan, as always. A batch the gate refused a
+//     call of stays refused (gatebatch.go).
 //   - New user messages don't end it; Stop, "Don't run" and a denied prompt
 //     don't either (they end the current plan's approval only).
 //   - It ends when the user turns it off (the "Auto-approve on" chip by the
 //     message box, or "Turn off auto-approve" in the session menu, or the
-//     phone API), or when the session's Claude process exits or restarts.
-//     It is not kept across Quill Desktop restarts or reloads.
+//     phone API), which also ends the current plan's approval and grants;
+//     when the user ends the session (End session, Switch topic), at once;
+//     when the message turning it on can't be sent; or when the session's
+//     Claude process exits or restarts. It is not kept across Quill Desktop
+//     restarts or reloads.
 //
 // Claude learns it from the approval message (autoApproveOnText, which the
-// session hint explains) and, once it is off again, from a note appended to
-// the user's next message (autoApproveOffNote).
+// session hint explains) and, once it is off again, from a note sent with
+// the user's next message (autoApproveOffNote; not shown in the bubble, kept
+// until a send succeeds) and from every plan-first refusal while that note
+// is pending (planAsk), so a turn a peer, trigger or notification started
+// learns it too.
 
 const (
 	autoApproveOnText  = " Auto-approve on: no plans needed in this tab until the user turns it off; commands that run as root still need one."
-	autoApproveOffNote = "\n\n(Quill Desktop: auto-approve is off in this tab now; write a plan and wait for approval again before running anything that needs one.)"
+	autoApproveOffNote = chat.AutoApproveOffNote
 	autoApproveCheck   = "Keep approving in this tab until I turn it off"
 	autoApproveLabel   = "Auto-approve on"
 	autoApproveMenu    = "Turn off auto-approve"
-	// autoApproveRootAsk: the refusal of a root command while auto-approve is on.
-	autoApproveRootAsk = "Auto-approve is on in this tab, but commands that run as root still need an approved plan. "
+	// autoApproveRootAsk: a plan-first refusal while auto-approve is on.
+	autoApproveRootAsk = "Auto-approve is on in this tab, but this call still needs an approved plan: it may run something as root, or a peer session's message or a scheduled trigger started this turn. "
 )
+
+// Which turns it covers (f3a1828: peer messages and scheduled jobs never
+// approve anything; review 2026-11-23, pending the user's own choice): only
+// turns the user started (a typed or phone message, a plan card) and turns
+// started by the task notification of work the session started under
+// auto-approve in such a turn. A turn a peer (cross-session) or channel
+// message or a scheduled trigger started, or that such a message arrived in,
+// is plan-gated as without auto-approve (s.autoPeer). A subagent's calls are
+// covered when a covered turn started it (s.autoOwn, by tool_use_id and
+// agent id); others (a peer turn's, one started before auto-approve, an
+// unknown nested one) are gated.
 
 // autoCovers: auto-approve lets r through without a plan.
 func autoCovers(s *deskSession, r *protocol.ControlRequest) bool {
-	return s != nil && s.autoApprove && !privilegedRequest(r)
+	if s == nil || !s.autoApprove || r == nil {
+		return false
+	}
+	if r.AgentID != "" {
+		if !s.autoOwn[r.AgentID] && !(r.ToolUseID != "" && s.autoOwn[r.ToolUseID]) {
+			return false
+		}
+	} else if s.autoPeer {
+		return false
+	}
+	return !autoRootRequest(r, s.cwd)
+}
+
+// autoRootRequest: r runs a command (Bash, or any tool with a "command"
+// input) that needs a plan under auto-approve (autoNeedsPlan, gatebatch.go).
+func autoRootRequest(r *protocol.ControlRequest, cwd string) bool {
+	if privilegedRequest(r) {
+		return true
+	}
+	var in map[string]any
+	if json.Unmarshal(r.Input, &in) != nil {
+		return true // can't tell: the safe side
+	}
+	cmd, ok := in["command"].(string)
+	return ok && autoNeedsPlan(cmd, cwd)
+}
+
+// maxAutoOwn caps the ids remembered as auto-approve's own work.
+const maxAutoOwn = 16384
+
+func addAutoOwn(s *deskSession, id string) {
+	if id == "" || len(s.autoOwn) >= maxAutoOwn {
+		return
+	}
+	if s.autoOwn == nil {
+		s.autoOwn = map[string]bool{}
+	}
+	s.autoOwn[id] = true
+}
+
+// trackAutoWork records the work a covered turn starts (its tool_use ids,
+// the task and agent ids they get, a subagent's own calls) so that its
+// notifications and its subagents' calls count as the session's own.
+func trackAutoWork(s *deskSession, ev *protocol.Event) {
+	if !s.autoApprove {
+		return
+	}
+	if ev.Type == "system" && ev.Subtype == "task_started" {
+		if s.autoOwn[ev.ToolUseID] {
+			addAutoOwn(s, ev.TaskID)
+		}
+		return
+	}
+	if ev.Message == nil {
+		return
+	}
+	switch ev.Type {
+	case "assistant":
+		sub := ev.IsSubagent()
+		if sub {
+			if !s.autoOwn[*ev.ParentToolUseID] {
+				return
+			}
+			addAutoOwn(s, ev.AgentID)
+		}
+		for _, b := range ev.Message.Blocks() {
+			if b.Type != "tool_use" {
+				continue
+			}
+			var in struct {
+				Background bool   `json:"run_in_background"`
+				To         string `json:"to"`
+			}
+			json.Unmarshal(b.Input, &in)
+			switch {
+			case !sub && s.autoPeer:
+				// A peer's turn writing to a subagent could hand it new
+				// work: that subagent (all of them, when it can't tell
+				// which) is no longer auto-approve's.
+				if b.Name == "SendMessage" {
+					if s.autoOwn[in.To] {
+						delete(s.autoOwn, in.To)
+					} else {
+						s.autoOwn = nil
+					}
+				}
+			case sub || b.Name == "Agent" || b.Name == "Task" || b.Name == "Bash" && in.Background:
+				// work whose notification or calls come later; a subagent's
+				// own calls (its can_use_tool requests name them)
+				addAutoOwn(s, b.ID)
+			}
+		}
+	case "user":
+		var results []protocol.Block
+		for _, b := range ev.Message.Blocks() {
+			if b.Type == "tool_result" && s.autoOwn[b.ToolUseID] {
+				results = append(results, b)
+			}
+		}
+		for _, b := range results {
+			for _, re := range []*regexp.Regexp{bgShellIDRe, agentIDRe} {
+				if m := re.FindSubmatch(b.Content); m != nil {
+					addAutoOwn(s, string(m[1]))
+				}
+			}
+			if len(results) == 1 {
+				var r struct {
+					AgentID string `json:"agentId"`
+				}
+				json.Unmarshal(ev.ToolUseResult, &r)
+				addAutoOwn(s, r.AgentID)
+			}
+		}
+	}
+}
+
+// autoOwnNotice: a task notification names auto-approve's own work.
+func autoOwnNotice(s *deskSession, text string) bool {
+	for _, re := range []*regexp.Regexp{toolUseIDRe, taskIDRe} {
+		for _, m := range re.FindAllStringSubmatch(text, -1) {
+			if s.autoOwn[m[1]] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // setAutoApprove turns auto-approve on or off for s and updates the chrome.
+// Off also ends the current plan approval and its grants (revokePlan), so
+// the calls after the click are gated at once, the approval turn's too.
 func (d *desk) setAutoApprove(s *deskSession, on bool) {
 	if s == nil || s.autoApprove == on {
 		return
@@ -55,6 +203,8 @@ func (d *desk) setAutoApprove(s *deskSession, on bool) {
 	endAutoApprove(s)
 	if on {
 		s.autoApprove, s.autoNote = true, ""
+	} else {
+		revokePlan(s)
 	}
 	d.keepGate(s) // a crash restart's copy knows to tell Claude it is off
 	d.syncAutoApprove()
@@ -65,26 +215,51 @@ func endAutoApprove(s *deskSession) {
 	if s.autoApprove {
 		s.autoApprove, s.autoNote = false, autoApproveOffNote
 	}
+	s.autoOwn, s.autoPeer, s.autoStarting = nil, false, false
+}
+
+// autoOffForEnd: ending the session (End session, Switch topic, a kmem
+// save-and-end) turns auto-approve off at once, before any save turn runs.
+func (d *desk) autoOffForEnd(id string) {
+	if s := d.sessions[id]; s != nil && s.autoApprove {
+		d.setAutoApprove(s, false)
+	}
 }
 
 // keepApproving: the approval msg answerPlanMsg sends turns auto-approve on
 // when the card's checkbox (or the phone's keepApproving) asked for it.
+// sendTo turns it off again if the message can't be sent (autoStartFailed).
 func (d *desk) keepApproving(s *deskSession, msg string) string {
 	if !d.keepNext || !d.planFirst || s == nil || s.remote != nil {
 		return msg
 	}
+	starting, prev := !s.autoApprove, s.autoNote
 	d.setAutoApprove(s, true)
+	if starting {
+		s.autoStarting, s.autoPrevNote = true, prev
+	}
 	return msg + autoApproveOnText
 }
 
-// withAutoNote: the user's message with the pending auto-approve-off note.
-func withAutoNote(s *deskSession, text string) string {
-	if s.autoNote == "" || isRetry(text) {
-		return text
+// autoStartFailed: the message that turned auto-approve on never reached
+// Claude (no process, or the send failed): it is off again, as it was.
+func (d *desk) autoStartFailed(s *deskSession) {
+	if !s.autoStarting {
+		return
 	}
-	text += s.autoNote
-	s.autoNote = ""
-	return text
+	s.autoStarting = false
+	s.autoApprove, s.autoNote, s.autoOwn, s.autoPeer = false, s.autoPrevNote, nil, false
+	d.keepGate(s)
+	d.syncAutoApprove()
+}
+
+// autoNoteFor: the pending auto-approve-off note to send with the user's
+// message (not shown in its bubble); sendTo clears it once sent.
+func autoNoteFor(s *deskSession, text string) string {
+	if isRetry(text) {
+		return ""
+	}
+	return s.autoNote
 }
 
 // syncAutoApprove refreshes the chips and session controls.

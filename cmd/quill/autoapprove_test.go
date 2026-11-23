@@ -107,6 +107,9 @@ func TestAutoApproveGateAndUserMessages(t *testing.T) {
 		if st := ownCall(h, s, "a1", "make install"); st != chat.PermAutoAllowed {
 			t.Fatalf("auto-approve lets the call through without a plan: %v", st)
 		}
+		// A subagent this turn started.
+		mainToolUse(t, h, s, "toolu_ag1", "Agent", `{"description":"tidy","prompt":"tidy the readme","run_in_background":true}`)
+		feed(t, h, s, `{"type":"system","subtype":"task_started","task_id":"agent1","tool_use_id":"toolu_ag1","description":"tidy","task_type":"local_agent","is_backgrounded":true}`)
 		in := `{"file_path":"/tmp/x/a.txt","content":"x"}`
 		sub := &chat.Item{Kind: chat.Permission, ToolName: "Write", RequestID: "a2", Input: []byte(in),
 			Request: &protocol.ControlRequest{Subtype: "can_use_tool", ToolName: "Write", Input: []byte(in), ToolUseID: "toolu_sub1", AgentID: "agent1"}}
@@ -117,8 +120,14 @@ func TestAutoApproveGateAndUserMessages(t *testing.T) {
 		}
 		userEvent(h, s, "<cross-session-message from=\"peer\">hi</cross-session-message>", nil)
 		if !s.autoApprove {
-			t.Fatal("peer messages change nothing")
+			t.Fatal("peer messages don't end it")
 		}
+		if st := ownCall(h, s, "a4", "make install"); st != chat.PermPlanAsked {
+			t.Fatalf("but the rest of the turn a peer message joined is gated: %v", st)
+		}
+		endTurn(t, h, s)
+		s.inTurn = false
+		h.d.sendTo(s, "go on")
 		// Stop and a refused card end the plan's approval, not auto-approve.
 		revokePlan(s)
 		if !s.autoApprove {
@@ -191,8 +200,11 @@ func TestAutoApproveOffRestoresPlanFirst(t *testing.T) {
 			t.Fatal("no off switch while off")
 		}
 		h.d.sendTo(s, "next change")
-		if got := lastUserText(s); got != "next change"+autoApproveOffNote {
+		if got := s.lastSent; got != "next change"+autoApproveOffNote {
 			t.Fatalf("Claude is told with the next message: %q", got)
+		}
+		if got := lastUserText(s); got != "next change" {
+			t.Fatalf("the bubble shows the user's words only: %q", got)
 		}
 		if st := ownCall(h, s, "o1", "make install"); st != chat.PermPlanAsked {
 			t.Fatalf("plan-first again: %v", st)

@@ -101,7 +101,7 @@ func revokePlan(s *deskSession) {
 
 // turnEnded: the session's turn is over; the next one starts uncovered.
 func turnEnded(s *deskSession) {
-	s.turnCovered, s.autoTurn, s.gateUnsure = false, false, false
+	s.turnCovered, s.autoTurn, s.gateUnsure, s.autoPeer = false, false, false, false
 }
 
 // notUserMessage classifies a message the user didn't write (notFromUser).
@@ -122,12 +122,15 @@ func notUserMessage(s *deskSession, text string) {
 		if idle {
 			s.autoTurn = true
 			s.turnCovered = ours && s.runAll
+			// Auto-approve covers it only for work it covered (autoapprove.go).
+			s.autoPeer = !autoOwnNotice(s, t)
 		}
 	default:
 		if idle {
 			s.autoTurn = true
 		}
 		s.turnCovered = false
+		s.autoPeer = true // nor auto-approve, for the rest of this turn
 	}
 }
 

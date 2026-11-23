@@ -595,6 +595,7 @@ func (d *desk) endAndSave(id string) {
 }
 
 func (d *desk) endAndSaveTo(id, place string) {
+	d.autoOffForEnd(id) // at once, not at process exit (autoapprove.go)
 	s := d.session(id)
 	name := d.org.Kmem[id]
 	if s == nil {

@@ -128,6 +128,7 @@ func (d *desk) cancelPendingEnd(s *deskSession) {
 // check (endcheck.go) when kmem has it, else through a handoff save. Trivial
 // sessions end at once.
 func (d *desk) endWithSave(id, place string) {
+	d.autoOffForEnd(id) // at once, not at process exit (autoapprove.go)
 	s := d.sessions[id]
 	if s != nil && s.running() && !trivialSession(s) && d.endCheckFor(s) {
 		d.endTopic(id, place)

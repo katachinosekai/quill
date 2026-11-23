@@ -93,6 +93,10 @@ type deskSession struct {
 	runAllNext     bool
 	autoApprove    bool                  // auto-approve: no plan needed until the user turns it off (autoapprove.go)
 	autoNote       string                // tells Claude with the next message that auto-approve is off
+	autoPeer       bool                  // a peer, channel or scheduled message started or joined this turn: auto-approve doesn't cover it
+	autoOwn        map[string]bool       // work started in turns auto-approve covers (tool_use, task and agent ids)
+	autoStarting   bool                  // the message being sent turned auto-approve on (undone if it can't be sent)
+	autoPrevNote   string                // autoNote before that message
 	agentGrants    map[string]agentGrant // subagents an approved plan started, by tool_use_id, until they finish
 	agentCalls     map[string]string     // tool_use_id of a granted subagent's call (nested agents too) -> its grant
 	agentIDs       map[string]string     // agent id of a granted subagent (nested too) -> its grant
@@ -1888,6 +1892,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 	typed := text
 	cardGo := s.cardGo // the plan card's own Approve (answerPlanMsg)
 	s.cardGo = false
+	defer d.autoStartFailed(s) // auto-approve this message turned on, if it never went out
 	if s.remote != nil {
 		d.remoteWrite(s, "send", map[string]string{"text": text})
 		return
@@ -1930,24 +1935,31 @@ func (d *desk) sendTo(s *deskSession, text string) {
 			s.turnCovered = true // the user's retry continues the approved plan
 		}
 	}
-	text = withAutoNote(s, text)
+	// The auto-approve-off note goes to Claude with the message, not into
+	// its bubble, and stays pending until a send succeeds.
+	note := autoNoteFor(s, text)
 	if s.resumeNext == "" {
 		s.resumeNext = d.firstTurnKmemName(s, text)
 	}
 	if s.resumeNext != "" || !isRetry(text) {
 		s.resumeAs, s.resumeNext = s.resumeNext, ""
 	}
-	s.lastSent = text
+	s.lastSent = text + note
 	s.inTurn = true
+	s.autoPeer = false  // the user's message: auto-approve covers the turn again
 	defer d.keepGate(s) // the message may have ended or started the plan's approval
 	it := s.conv.AddUser(text)
 	d.refreshChoiceCards(s, it)
 	if s.title == "" {
 		s.title = oneLine(text, 60)
 	}
-	if err := s.proc.Send(text); err != nil {
+	if err := s.proc.Send(text + note); err != nil {
 		d.chatFor(s, []*chat.Item{it, s.conv.AddError("Send failed: " + err.Error())})
 		return
+	}
+	s.autoStarting = false
+	if note != "" {
+		s.autoNote = ""
 	}
 	s.conv.Busy = true
 	if d.current == s && strings.TrimSpace(d.input.Text) == text {
@@ -2796,14 +2808,18 @@ func planAsk(s *deskSession) string {
 	if s != nil && s.autoApprove {
 		msg = autoApproveRootAsk + msg
 	}
-	if s != nil && s.approvalHint {
-		return msg
+	if s != nil && !s.approvalHint {
+		msg += planGoReminder
 	}
-	return msg + planGoReminder
+	if s != nil && s.autoNote != "" {
+		msg += " " + strings.TrimSpace(s.autoNote) // auto-approve went off: tell any turn, not only the user's next message
+	}
+	return msg
 }
 
 func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
 	trackAgentCalls(s, ev)
+	trackAutoWork(s, ev)
 	out := noteBatch(s, ev)
 	out = append(out, noteAgentTask(s, ev)...)
 	return append(out, d.planGateEvent(s, ev, items)...)

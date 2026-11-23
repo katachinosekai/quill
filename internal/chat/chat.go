@@ -732,8 +732,18 @@ func CleanUserText(s string) (string, bool) {
 			return "", false
 		}
 	}
+	if u, ok := strings.CutSuffix(t, AutoApproveOffNote); ok {
+		t = strings.TrimSpace(u) // Quill Desktop's note to Claude, not the user's words
+		if t == "" {
+			return "", false
+		}
+	}
 	return t, true
 }
+
+// AutoApproveOffNote: Quill Desktop appends it to the user's next message
+// once auto-approve is off (cmd/quill/autoapprove.go); bubbles leave it out.
+const AutoApproveOffNote = "\n\n(Quill Desktop: auto-approve is off in this tab now; write a plan and wait for approval again before running anything that needs one.)"
 
 func (c *Conversation) applyUser(ev *protocol.Event) []*Item {
 	if ev.Message == nil {

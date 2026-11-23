@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -290,7 +291,8 @@ func endBatches(s *deskSession) {
 }
 
 // escalators run a command as another user (root).
-var escalators = map[string]bool{"sudo": true, "sudoedit": true, "su": true, "doas": true, "pkexec": true, "run0": true, "machinectl": true, "systemd-run": true}
+var escalators = map[string]bool{"sudo": true, "sudoedit": true, "su": true, "doas": true, "pkexec": true, "run0": true, "machinectl": true, "systemd-run": true,
+	"kdesu": true, "kdesudo": true, "gksu": true, "gksudo": true, "sudo-rs": true}
 
 // rootTools change the system as root (or ask polkit to).
 var rootTools = map[string]bool{
@@ -300,6 +302,7 @@ var rootTools = map[string]bool{
 	"btrfs": true, "zramctl": true, "sysctl": true, "chown": true, "chattr": true, "setcap": true, "useradd": true,
 	"usermod": true, "userdel": true, "passwd": true, "visudo": true, "dnf": true, "rpm": true, "flatpak": true, "grub2-mkconfig": true,
 	"dracut": true, "efibootmgr": true, "firewall-cmd": true, "nmcli": true, "localectl": true, "timedatectl": true, "hostnamectl": true,
+	"pkcon": true, "rpm-ostree": true, "fwupdmgr": true, "bootctl": true, "nsenter": true, "grubby": true, "kernel-install": true,
 }
 
 // wrappers run the command that follows them (or one in their arguments).
@@ -308,6 +311,9 @@ var wrappers = map[string]bool{
 	"command": true, "exec": true, "xargs": true, "chrt": true, "taskset": true, "flock": true, "watch": true, "unbuffer": true,
 	"script": true, "parallel": true, "ssh": true, "sh": true, "bash": true, "zsh": true, "dash": true, "fish": true, "eval": true,
 	"systemd-inhibit": true, "strace": true, "ltrace": true, "gdb": true, "busybox": true,
+	// shell keywords and runners whose later words are commands too
+	"do": true, "then": true, "else": true, "elif": true, "if": true, "while": true, "until": true, "{": true, "!": true,
+	"find": true, "flatpak-spawn": true, "toolbox": true, "distrobox-host-exec": true, "distrobox-enter": true, "host-spawn": true,
 }
 
 var systemctlReads = map[string]bool{
@@ -318,7 +324,7 @@ var systemctlReads = map[string]bool{
 
 // escalatorWord: an escalator named anywhere in a word (`bash -c "sudo x"`,
 // `$(pkexec y)`, `/usr/bin/doas`).
-var escalatorWord = regexp.MustCompile(`(?:^|[^\w.-])(?:sudo|sudoedit|su|doas|pkexec|run0)(?:[^\w.-]|$)`)
+var escalatorWord = regexp.MustCompile(`(?:^|[^\w.-])(?:sudo|sudoedit|su|doas|pkexec|run0|kdesu|kdesudo|gksu|gksudo|sudo-rs)(?:[^\w.-]|$)`)
 
 func cmdName(w string) string {
 	n := path.Base(w)
@@ -405,4 +411,288 @@ func privilegedRequest(r *protocol.ControlRequest) bool {
 		return true // can't tell: the safe side
 	}
 	return privilegedCommand(in.Command)
+}
+
+// Auto-approve's root check (autoapprove.go, review 2026-11-23) is
+// deliberately cruder than privilegedCommand: it doesn't follow the shell
+// grammar, it looks at every word of the command, inside quotes, -c / -e
+// strings, loop and brace bodies and find -exec alike. A false alarm only
+// costs a plan (read-only commands still run without one); a miss runs
+// something as root with nobody asked. A command needs a plan when:
+//   - any word (after dropping quotes and backslashes, decoding \x / \u /
+//     octal escapes and expanding {a,b} braces) is an escalator or a tool in
+//     rootTools / autoRootWords, or systemctl with a verb that changes
+//     something, or docker / podman with anything but a read verb;
+//   - it logs in as root over ssh, sets a setuid/setgid bit, starts a
+//     command from a variable, substitution or glob, pipes a decoder or
+//     downloader into an interpreter, or has an interpreter's inline code
+//     run other programs (system, subprocess, exec…);
+//   - a script, Makefile, package.json or git hook it runs (an existing
+//     file it names, read now) does any of the above.
+// What it can't see is in docs/plan-format.md (Auto-approve).
+
+// autoRootWords: besides escalators and rootTools, words that need a plan
+// under auto-approve wherever they appear.
+var autoRootWords = map[string]bool{
+	"unshare": true, "setpriv": true, "busctl": true, "eval": true, "sg": true, "newgrp": true,
+	"flatpak-spawn": true, "toolbox": true, "distrobox-host-exec": true, "distrobox-enter": true, "host-spawn": true,
+	"capsh": true, "pkttyagent": true, "loginctl": true, "ostree": true, "semanage": true, "setsebool": true,
+	"authselect": true, "update-alternatives": true, "alternatives": true, "akmods": true, "dkms": true,
+	"systemd-sysext": true, "systemd-nspawn": true, "lxc": true, "incus": true, "virsh": true, "qemu-system-x86_64": true,
+	"yum": true, "apt": true, "apt-get": true, "dpkg": true, "pacman": true, "zypper": true, "snap": true,
+	"dbus-send": true, "gdbus": true, "qdbus": true, "nerdctl": true,
+}
+
+// autoEscalatorPart: an escalator's name inside a longer word (-Ssudo,
+// x_pkexec); "su" alone is too common a part of words to count.
+var autoEscalatorPart = regexp.MustCompile(`sudo|pkexec|doas|run0|kdesu|gksu`)
+
+// autoRunners: words that run code from their arguments, input or files.
+var autoRunners = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true, "busybox": true, "source": true,
+	"xargs": true, "parallel": true, "make": true, "gmake": true, "just": true, "npm": true, "pnpm": true, "yarn": true, "npx": true,
+	"python": true, "python3": true, "perl": true, "ruby": true, "node": true, "php": true, "lua": true, "deno": true, "bun": true,
+	"tclsh": true, "awk": true, "gawk": true, "mawk": true, "env": true, "exec": true, "watch": true,
+}
+
+// autoInterps run inline code (-c / -e) that can start other programs.
+var autoInterps = map[string]bool{
+	"python": true, "python3": true, "perl": true, "ruby": true, "node": true, "php": true, "lua": true, "deno": true,
+	"bun": true, "tclsh": true, "awk": true, "gawk": true, "mawk": true, "vim": true, "vi": true, "nvim": true, "emacs": true,
+}
+
+var (
+	autoWordRe  = regexp.MustCompile(`[A-Za-z0-9_.+/-]+`)
+	autoEscRe   = regexp.MustCompile(`\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[0-7]{1,4})`)
+	autoBraceRe = regexp.MustCompile(`([A-Za-z0-9_./-]*)\{([^{}\s]*,[^{}\s]*)\}([A-Za-z0-9_./-]*)`)
+	// a command word that is a variable, a substitution or a glob
+	autoCmdPos = `(?:^|[;&|(){}` + "`" + `\n]|\b(?:then|do|else|exec|command|xargs|env|nohup|time|nice|timeout|setsid)\s)\s*(?:\w+=\S*\s+)*`
+	autoVarCmd = regexp.MustCompile(autoCmdPos + `(?:\$|[^\s;&|()\[]*[?*])`)
+	// in a Makefile $(GO) is a make variable (its value is in the file, read
+	// too); a shell variable is $$x
+	autoVarCmdMk = regexp.MustCompile(autoCmdPos + `(?:\$\$|[^\s;&|()\[$]*[?*])`)
+	// an interpreter's code starting other programs
+	autoSpawnRe     = regexp.MustCompile(`(?i)\b(?:system|popen|subprocess|spawn\w*|child_process|exec[lv]?p?e?|os\.exec\w*|pty|ctypes|syscall|qx|getattr|__import__|importlib|compile)\b`)
+	autoDockerReads = map[string]bool{"ps": true, "images": true, "inspect": true, "logs": true, "version": true, "info": true,
+		"stats": true, "top": true, "port": true, "history": true, "search": true, "--version": true, "--help": true, "help": true}
+	autoDecoders   = map[string]bool{"base64": true, "base32": true, "basenc": true, "xxd": true, "od": true, "openssl": true, "rev": true, "tr": true, "gzip": true, "gunzip": true, "zcat": true, "uudecode": true, "printf": true, "curl": true, "wget": true}
+	autoShellWords = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true, "source": true, "python": true, "python3": true, "perl": true, "ruby": true, "node": true}
+)
+
+// autoDecode turns \xHH, \uHHHH and octal escapes into the characters
+// they stand for ($'\x73udo', printf '\163udo').
+func autoDecode(s string) string {
+	return autoEscRe.ReplaceAllStringFunc(s, func(m string) string {
+		e := m[1:]
+		var n uint64
+		var err error
+		switch e[0] {
+		case 'x', 'u', 'U':
+			n, err = strconv.ParseUint(e[1:], 16, 32)
+		default:
+			n, err = strconv.ParseUint(e, 8, 32)
+		}
+		if err != nil || n == 0 {
+			return m
+		}
+		return string(rune(n))
+	})
+}
+
+// autoExpandBraces expands {a,b} lists (s{u,x}do → sudo sxdo).
+func autoExpandBraces(s string) string {
+	for range 8 {
+		t := autoBraceRe.ReplaceAllStringFunc(s, func(m string) string {
+			p := autoBraceRe.FindStringSubmatch(m)
+			var alts []string
+			for _, a := range strings.Split(p[2], ",") {
+				alts = append(alts, p[1]+a+p[3])
+			}
+			return strings.Join(alts, " ")
+		})
+		if t == s {
+			break
+		}
+		s = t
+	}
+	return s
+}
+
+// autoForms: the command as written and decoded, quotes and backslashes
+// dropped, braces expanded.
+func autoForms(cmd string) []string {
+	strip := strings.NewReplacer(`\`, "", `"`, "", `'`, "")
+	forms := []string{autoExpandBraces(strip.Replace(cmd))}
+	if d := autoDecode(cmd); d != cmd {
+		forms = append(forms, autoExpandBraces(strip.Replace(d)))
+	}
+	return forms
+}
+
+// autoMaxFiles caps the files one check reads; autoMaxSize their size.
+const (
+	autoMaxFiles = 64
+	autoMaxSize  = 1 << 20
+)
+
+// autoNeedsPlan: under auto-approve, cmd (run in cwd) still needs a plan.
+func autoNeedsPlan(cmd, cwd string) bool {
+	if privilegedCommand(cmd) {
+		return true
+	}
+	budget := autoMaxFiles
+	return autoScan(cmd, cwd, 0, false, false, &budget)
+}
+
+// autoScan checks one text (a command, or a file it runs; interp: the file
+// is a program an interpreter runs; mk: a Makefile).
+func autoScan(text, cwd string, depth int, interp, mk bool, budget *int) bool {
+	for _, form := range autoForms(text) {
+		if autoRiskyForm(form, interp, mk) {
+			return true
+		}
+	}
+	if depth >= 3 {
+		return false
+	}
+	// Files the command runs (or may run): read them now.
+	words := autoWordRe.FindAllString(autoForms(text)[0], -1)
+	runs, interpRun := false, false
+	for _, w := range words {
+		n := cmdName(w)
+		if autoRunners[n] {
+			runs = true
+		}
+		if autoInterps[n] {
+			interpRun = true
+		}
+	}
+	var files []string
+	for i, w := range words {
+		if strings.HasPrefix(w, "./") || strings.HasPrefix(w, "/") || runs {
+			files = append(files, w)
+		}
+		if w == "." && i+1 < len(words) {
+			files = append(files, words[i+1]) // `. file` sources it (find . -name: no such file)
+		}
+		switch cmdName(w) {
+		case "make", "gmake":
+			files = append(files, "Makefile", "makefile", "GNUmakefile")
+		case "npm", "pnpm", "yarn", "npx":
+			files = append(files, "package.json")
+		case "just":
+			files = append(files, "justfile", "Justfile")
+		case "git":
+			if ents, err := os.ReadDir(filepath.Join(cwd, ".git", "hooks")); err == nil {
+				for _, e := range ents {
+					if !strings.HasSuffix(e.Name(), ".sample") {
+						files = append(files, filepath.Join(".git", "hooks", e.Name()))
+					}
+				}
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		p := f
+		if !filepath.IsAbs(p) {
+			if cwd == "" {
+				continue
+			}
+			p = filepath.Join(cwd, p)
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		st, err := os.Stat(p)
+		if err != nil || !st.Mode().IsRegular() || st.Size() > autoMaxSize {
+			continue
+		}
+		if *budget <= 0 {
+			return true // too much to read: the safe side
+		}
+		*budget--
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if bytes.IndexByte(b, 0) >= 0 {
+			continue // a binary, not a script
+		}
+		base := filepath.Base(p)
+		mk := base == "Makefile" || base == "makefile" || base == "GNUmakefile" || strings.HasSuffix(base, ".mk")
+		if autoScan(string(b), filepath.Dir(p), depth+1, interpRun, mk, budget) {
+			return true
+		}
+	}
+	return false
+}
+
+// autoRiskyForm: the rules that read one normalised form of a text.
+func autoRiskyForm(form string, interp, mk bool) bool {
+	varCmd := autoVarCmd
+	if mk {
+		varCmd = autoVarCmdMk
+	}
+	if varCmd.MatchString(form) || autoEscalatorPart.MatchString(form) {
+		return true
+	}
+	words := autoWordRe.FindAllString(form, -1)
+	names := make([]string, len(words))
+	has := map[string]bool{}
+	for i, w := range words {
+		names[i] = cmdName(w)
+		has[names[i]] = true
+	}
+	user := has["--user"]
+	for i, n := range names {
+		next := ""
+		if i+1 < len(names) {
+			next = words[i+1]
+		}
+		switch {
+		case escalators[n] || rootTools[n] || autoRootWords[n]:
+			return true
+		case n == "systemctl" && !user:
+			for _, a := range words[i+1:] {
+				if !strings.HasPrefix(a, "-") {
+					if !systemctlReads[a] {
+						return true
+					}
+					break
+				}
+			}
+		case n == "docker" || n == "podman":
+			if !autoDockerReads[next] {
+				return true
+			}
+		case (n == "chmod" || n == "install") && autoSetuid(words[i+1:]):
+			return true
+		case (n == "ssh" || n == "scp" || n == "sftp" || n == "rsync" || n == "mosh") && has["root"]:
+			return true
+		case autoInterps[n]:
+			interp = true
+		}
+	}
+	if interp && autoSpawnRe.MatchString(form) {
+		return true
+	}
+	decode, shell := false, false
+	for n := range has {
+		decode = decode || autoDecoders[n]
+		shell = shell || autoShellWords[n]
+	}
+	return decode && shell
+}
+
+// autoSetuid: chmod / install arguments that set a setuid or setgid bit.
+func autoSetuid(args []string) bool {
+	for _, a := range args {
+		a = strings.TrimPrefix(a, "-m")
+		if m, _ := regexp.MatchString(`^[ugoa]*[+=][rwxXst]*s[rwxXst]*$|^0?[2-7][0-7]{3}$`, a); m {
+			return true
+		}
+	}
+	return false
 }

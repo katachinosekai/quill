@@ -210,6 +210,7 @@ func checkpointMessage(name string) string {
 // endTopic: End for a topic session: the check, then stop, mark ended, close
 // the tab.
 func (d *desk) endTopic(id, place string) {
+	d.autoOffForEnd(id) // at once, not at process exit (autoapprove.go)
 	s := d.sessions[id]
 	if s == nil || s.endWait != nil {
 		return
