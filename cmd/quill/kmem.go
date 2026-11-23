@@ -285,7 +285,18 @@ func (d *desk) askKmemName(id string) {
 	dlg.Show()
 }
 
+// relaunchViaKmem rotates a session: a topic session through the
+// end-of-session check (endcheck.go) when kmem has it, else through a
+// handoff save.
 func (d *desk) relaunchViaKmem(id, name string) {
+	if d.endCheckFor(d.session(id)) {
+		d.rotateTopic(id)
+		return
+	}
+	d.relaunchViaHandoff(id, name)
+}
+
+func (d *desk) relaunchViaHandoff(id, name string) {
 	old := d.session(id)
 	if old == nil {
 		return
@@ -319,6 +330,9 @@ func kmemReleaseAllowed(s *deskSession, r *protocol.ControlRequest) bool {
 }
 
 func (d *desk) kmemSaveAllowed(s *deskSession, r *protocol.ControlRequest) bool {
+	if s.endWait != nil {
+		return d.endCheckAllowed(s, r)
+	}
 	if s.kmemSave == nil {
 		return false
 	}
@@ -385,6 +399,10 @@ func (d *desk) kmemResumeAllowed(s *deskSession, r *protocol.ControlRequest) boo
 }
 
 func (d *desk) kmemAfterTurn(s *deskSession) {
+	if s.endWait != nil {
+		d.endAfterTurn(s)
+		return
+	}
 	ks := s.kmemSave
 	if ks == nil || ks.prompt != "" {
 		return
@@ -468,11 +486,22 @@ func kmemEndMessage(name string) string {
 		"Don't start other work. Reply with one line once it is saved.", name)
 }
 
-// saveHandoffNow asks the session to save its kmem handoff and go on (/export
-// "Save as kmem handoff").
+// saveHandoffNow: /export "Save as kmem handoff", or "Checkpoint now" for a
+// topic session when kmem has the end-of-session check.
 func (d *desk) saveHandoffNow(s *deskSession) {
+	if d.endCheckFor(s) {
+		if s.kmemSave == nil {
+			d.checkpointNow(s)
+		}
+		return
+	}
+	d.saveHandoffOnly(s)
+}
+
+// saveHandoffOnly asks the session to save its kmem handoff and go on.
+func (d *desk) saveHandoffOnly(s *deskSession) {
 	name := d.org.Kmem[s.id]
-	if name == "" || !d.kmemAvailable() || !s.running() || s.kmemSave != nil {
+	if name == "" || !d.kmemAvailable() || !s.running() || s.kmemSave != nil || s.endWait != nil {
 		return
 	}
 	spare := 0

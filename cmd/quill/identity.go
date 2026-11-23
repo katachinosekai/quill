@@ -92,13 +92,17 @@ func (d *desk) closeAndEnd(id string) {
 	if d.placement(id) != placeArchive {
 		d.setPlacement(id, placeInactive)
 	}
-	if s == nil || !s.running() || s.kmemSave != nil {
+	if s == nil || !s.running() || s.kmemSave != nil || s.endWait != nil {
 		d.refreshSidebar()
 		return
 	}
 	s.pendingEnd++
 	tok := s.pendingEnd
-	d.notify(s, fmt.Sprintf("Closed: this session ends in %d s and saves its kmem handoff first. Open it again before then to keep it running.", int(closeUndo/time.Second)))
+	first := "saves its kmem handoff first"
+	if d.endCheckFor(s) {
+		first = "runs its end-of-session check first"
+	}
+	d.notify(s, fmt.Sprintf("Closed: this session ends in %d s and %s. Open it again before then to keep it running.", int(closeUndo/time.Second), first))
 	d.refreshSidebar()
 	d.afterUI(closeUndo, func() {
 		if s.pendingEnd != tok {
@@ -119,7 +123,19 @@ func (d *desk) cancelPendingEnd(s *deskSession) {
 	d.refreshSidebar()
 }
 
+// endWithSave ends a session: a topic session through the end-of-session
+// check (endcheck.go) when kmem has it, else through a handoff save. Trivial
+// sessions end at once.
 func (d *desk) endWithSave(id, place string) {
+	s := d.sessions[id]
+	if s != nil && s.running() && !trivialSession(s) && d.endCheckFor(s) {
+		d.endTopic(id, place)
+		return
+	}
+	d.endWithHandoff(id, place)
+}
+
+func (d *desk) endWithHandoff(id, place string) {
 	s := d.sessions[id]
 	if s == nil || !s.running() || trivialSession(s) || d.ensureKmem(id) == "" {
 		d.endSession(id)

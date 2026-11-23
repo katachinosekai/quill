@@ -228,13 +228,13 @@ func TestKmemHiddenReplaceAndEnd(t *testing.T) {
 }
 
 func TestQuitMessage(t *testing.T) {
-	if m := quitMessage(2, 0); !strings.HasPrefix(m, "2 session(s)") || strings.Contains(m, "kmem") {
+	if m := quitMessage(2, 0, 0); !strings.HasPrefix(m, "2 session(s)") || strings.Contains(m, "kmem") {
 		t.Fatal(m)
 	}
-	if m := quitMessage(0, 1); !strings.Contains(m, "kmem assistant") || strings.Contains(m, "session(s)") {
+	if m := quitMessage(0, 1, 0); !strings.Contains(m, "kmem assistant") || strings.Contains(m, "session(s)") {
 		t.Fatal(m)
 	}
-	if m := quitMessage(1, 1); !strings.Contains(m, "1 session(s)") || !strings.Contains(m, "kmem assistant") {
+	if m := quitMessage(1, 1, 0); !strings.Contains(m, "1 session(s)") || !strings.Contains(m, "kmem assistant") {
 		t.Fatal(m)
 	}
 }

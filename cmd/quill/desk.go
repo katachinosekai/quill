@@ -109,6 +109,7 @@ type deskSession struct {
 	retryRules     []protocol.Rule
 	retryDest      string
 	kmemSave       *kmemSave
+	endWait        *endWait // end-of-session check running (endcheck.go)
 	kmemNew        bool
 	remote         *remoteSess // a live session on a paired PC; nil = local
 	resumeNext     string
@@ -148,7 +149,7 @@ func (s *deskSession) status() status {
 	if s.terminal != nil && !s.running() {
 		return stTerminal
 	}
-	restarting := s.restarting || s.compacting || s.kmemSave != nil
+	restarting := s.restarting || s.compacting || s.kmemSave != nil || s.endWait != nil
 	if !s.running() {
 		if s.failed != "" {
 			return stError
@@ -811,6 +812,11 @@ func (d *desk) rowText(id string) (string, string, status) {
 		meta += "  ·  ending soon (open to keep)"
 	} else if s != nil && s.kmemSave != nil && s.kmemSave.end {
 		meta += "  ·  saving handoff, then ending"
+	} else if s != nil && s.endWait != nil && s.endWait.why != endForCheckpoint {
+		meta += "  ·  end-of-session check"
+		if n := len(s.endWait.blockers); n > 0 {
+			meta += fmt.Sprintf(": %d blocker(s)", n)
+		}
 	}
 	if s != nil {
 		if m := session.LocalModel(s.model); m != "" {
@@ -2323,37 +2329,67 @@ func (d *desk) confirmQuit() {
 		d.app.Quit()
 		return
 	}
-	msg := quitMessage(len(d.runningVisible()), len(running)-len(d.runningVisible()))
+	checks := d.quitCheckSessions()
+	msg := quitMessage(len(d.runningVisible()), len(running)-len(d.runningVisible()), len(checks))
 	dialog.ShowCustomConfirm("Stop running sessions?", "Stop and quit", "Cancel", widget.NewLabel(msg), func(ok bool) {
 		if !ok {
 			return
 		}
-		prog := dialog.NewCustomWithoutButtons("Stopping sessions...", widget.NewProgressBarInfinite(), d.win)
-		prog.Show()
-		stop := func() {
-			go func() {
-				d.stopAll(d.runningSessions())
-				d.do(func() {
-					prog.Hide()
-					d.app.Quit()
-				})
-			}()
-		}
-		if d.kmemQuitFlow != nil && len(running) > len(d.runningVisible()) {
+		d.quitConfirmed(checks)
+	}, d.win)
+}
+
+// quitConfirmed: the topic sessions in checks run their end-of-session check
+// at once (endcheck.go); a topic that does not pass is listed and needs a
+// second confirm (decision 22). Then the kmem assistant saves its handoff and
+// everything stops.
+func (d *desk) quitConfirmed(checks []*deskSession) {
+	prog := dialog.NewCustomWithoutButtons("Stopping sessions...", widget.NewProgressBarInfinite(), d.win)
+	prog.Show()
+	stop := func() {
+		go func() {
+			d.stopAll(d.runningSessions())
+			d.do(func() {
+				prog.Hide()
+				d.app.Quit()
+			})
+		}()
+	}
+	stopAll := func() {
+		if d.kmemQuitFlow != nil && len(d.runningSessions()) > len(d.runningVisible()) {
 			// The kmem assistant saves its handoff first (§5, bounded by its 60 s cap).
 			d.kmemQuitFlow(func() { d.do(stop) })
 			return
 		}
 		stop()
-	}, d.win)
+	}
+	if len(checks) == 0 {
+		stopAll()
+		return
+	}
+	d.quitEndChecks(checks, func(failed []quitFail) {
+		if len(failed) == 0 {
+			stopAll()
+			return
+		}
+		prog.Hide()
+		d.confirmQuitAnyway(failed, func() {
+			prog.Show()
+			stopAll()
+		})
+	})
 }
 
-// quitMessage: the quit confirmation for visible running sessions and the
-// kmem window's assistant (hidden, 0 or 1).
-func quitMessage(visible, hidden int) string {
+// quitMessage: the quit confirmation for visible running sessions, the
+// kmem window's assistant (hidden, 0 or 1) and the topic sessions among the
+// visible ones that run the end-of-session check (checked).
+func quitMessage(visible, hidden, checked int) string {
 	var msg string
 	if visible > 0 {
 		msg = fmt.Sprintf("%d session(s) are still running in Quill Desktop. Closing stops them (their conversations are saved and can be resumed).", visible)
+	}
+	if checked > 0 {
+		msg += " Each topic runs its end-of-session check first; a topic that does not pass is listed before anything stops."
 	}
 	if hidden > 0 {
 		if msg != "" {

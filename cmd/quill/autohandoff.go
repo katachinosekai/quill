@@ -108,7 +108,9 @@ func contextPct(s *deskSession) int {
 }
 
 func (d *desk) safePoint(s *deskSession) bool {
-	return s.running() && !s.conv.Busy && len(s.queue) == 0 && s.kmemSave == nil && !s.compacting && s.conv.Background() == 0 &&
+	// No subagent running either: rotation waits for them (decision 19).
+	return s.running() && !s.conv.Busy && len(s.queue) == 0 && s.kmemSave == nil && s.endWait == nil && !s.compacting &&
+		s.conv.Background() == 0 && s.conv.RunningAgents() == 0 &&
 		len(s.conv.PendingPermissions()) == 0 && !s.conv.AsksApproval() && !s.stopping
 }
 
@@ -129,7 +131,11 @@ func (d *desk) checkAutoHandoff(s *deskSession) {
 		}
 		s.rotateTried = pct
 		d.closeRotateCards(s)
-		d.notify(s, fmt.Sprintf("Context is at %d%% (auto-handoff at %d%%): rotating to a fresh session from kmem “%s”.", pct, p.Hard, name))
+		if d.endCheckFor(s) {
+			d.notify(s, fmt.Sprintf("Context is at %d%% (rotation at %d%%): rotating to a fresh %s session after the end-of-session check.", pct, p.Hard, name))
+		} else {
+			d.notify(s, fmt.Sprintf("Context is at %d%% (auto-handoff at %d%%): rotating to a fresh session from kmem “%s”.", pct, p.Hard, name))
+		}
 		d.relaunchViaKmem(s.id, name)
 		return
 	}
@@ -185,7 +191,11 @@ func (d *desk) coldRotate(s *deskSession, stamp time.Time, ttl time.Duration) {
 	s.coldStamp = time.Time{}
 	s.rotateTried = pct
 	d.closeRotateCards(s)
-	d.notify(s, fmt.Sprintf("The prompt cache has gone cold (idle for over %s) and context is at %d%%: rotating through kmem “%s” now, since the next turn would pay full price for the whole context anyway.", ttl.Round(time.Minute), pct, name))
+	how := fmt.Sprintf("rotating through kmem “%s” now", name)
+	if d.endCheckFor(s) {
+		how = "rotating to a fresh " + name + " session after the end-of-session check"
+	}
+	d.notify(s, fmt.Sprintf("The prompt cache has gone cold (idle for over %s) and context is at %d%%: %s, since the next turn would pay full price for the whole context anyway.", ttl.Round(time.Minute), pct, how))
 	d.relaunchViaKmem(s.id, name)
 }
 
@@ -240,7 +250,9 @@ func (v *chatView) renderRotate(it *chat.Item) fyne.CanvasObject {
 	title.Alignment = v.align()
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	text := it.Text + " "
-	if name != "" {
+	if name != "" && owner != nil && v.d.endCheckFor(owner) {
+		text += fmt.Sprintf("Rotating runs this session's end-of-session check, starts a fresh %s session that loads its topic briefing from kmem, and deletes this one.", name)
+	} else if name != "" {
 		text += fmt.Sprintf("Rotating saves this session's kmem handoff “%s”, starts a fresh session that resumes from it, and deletes this one.", name)
 	} else {
 		text += "Give this session a kmem name first; then it can rotate through a kmem handoff."

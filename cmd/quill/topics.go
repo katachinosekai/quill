@@ -20,10 +20,10 @@ import (
 // topic itself as its scope, and briefs with today's `kmem context TASK
 // --topic SCOPE` ranking (see topicPrompt).
 
-// topicBriefingSince is the first kmem version assumed to have the topic
-// briefing `kmem context --topic T` (K2); older versions get the ranking
-// fallback. Assumption until kmem-lock-audit ships K2.
-const topicBriefingSince = "1.9.0"
+// topicBriefingFeature: the `kmem version --json` feature of the topic
+// briefing `kmem context --topic T` (K2, kmem 1.10.0). Without it --topic only
+// ranks, so older kmem gets the ranking fallback.
+const topicBriefingFeature = "topic-context"
 
 type topicInfo struct {
 	Slug    string
@@ -230,13 +230,13 @@ func (d *desk) topicOwner(slug string, self *deskSession) *deskSession {
 // topicPrompt: the first prompt of a fresh topic session (replaces the
 // handoff resume prompt). Not on the UI thread (asks kmem's version).
 func (d *desk) topicPrompt(t topicInfo, isNew bool) string {
-	return topicPromptFor(t, d.kmemInstalledVersion(), isNew)
+	return topicPromptFor(t, d.kmemHasFeature(topicBriefingFeature), isNew)
 }
 
-func topicPromptFor(t topicInfo, kmemVersion string, isNew bool) string {
+func topicPromptFor(t topicInfo, briefing bool, isNew bool) string {
 	scope := strings.Join(firstNonEmptyList(t.Scope, []string{t.Slug}), ",")
 	var load, sub string
-	if kmemVersion != "" && !versionLess(kmemVersion, topicBriefingSince) {
+	if briefing {
 		load = fmt.Sprintf("Run `kmem brief` and `kmem context --topic %s`", t.Slug)
 		sub = fmt.Sprintf("`kmem context \"<task>\" --topic %s`", t.Slug)
 	} else {

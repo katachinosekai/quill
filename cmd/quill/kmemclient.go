@@ -14,12 +14,15 @@ type kmemVersion struct {
 	mu  sync.Mutex
 	api int
 	ver string // the installed kmem's version ("" if unknown)
-	at  time.Time
+	// features: `kmem version --json` "features" (1.10.0+: "topic-context",
+	// "end-check", "sessions"); nil before.
+	features []string
+	at       time.Time
 }
 
 func (v *kmemVersion) reset() {
 	v.mu.Lock()
-	v.api, v.ver, v.at = 0, "", time.Time{}
+	v.api, v.ver, v.features, v.at = 0, "", nil, time.Time{}
 	v.mu.Unlock()
 }
 
@@ -39,16 +42,43 @@ func (d *desk) kmemAPILevel() int {
 	if !v.at.IsZero() && time.Since(v.at) < policyRefresh {
 		return v.api
 	}
-	v.api, v.ver, v.at = 0, "", time.Now()
+	v.api, v.ver, v.features, v.at = 0, "", nil, time.Now()
 	out, err := d.runKmem("kmem", "version", "--json")
 	var r struct {
-		API     int    `json:"api"`
-		Version string `json:"version"`
+		API      int      `json:"api"`
+		Version  string   `json:"version"`
+		Features []string `json:"features"`
 	}
 	if err == nil && json.Unmarshal([]byte(strings.TrimSpace(out)), &r) == nil {
-		v.api, v.ver = r.API, r.Version
+		v.api, v.ver, v.features = r.API, r.Version, r.Features
 	}
 	return v.api
+}
+
+// kmemHasFeature: the installed kmem lists feature f in `kmem version
+// --json`. Not on the UI thread.
+func (d *desk) kmemHasFeature(f string) bool {
+	if d.kmemAPILevel() != kmemAPI {
+		return false
+	}
+	d.kmemVer.mu.Lock()
+	defer d.kmemVer.mu.Unlock()
+	return contains(d.kmemVer.features, f)
+}
+
+// kmemFeatureCached: kmemHasFeature from the cache only, for the UI thread;
+// false until the version was read once. A stale cache is refreshed in the
+// background and the old answer is used meanwhile.
+func (d *desk) kmemFeatureCached(f string) bool {
+	v := &d.kmemVer
+	v.mu.Lock()
+	known, stale := !v.at.IsZero(), time.Since(v.at) >= policyRefresh
+	ok := known && v.api == kmemAPI && contains(v.features, f)
+	v.mu.Unlock()
+	if stale && d.kmemAvailable() {
+		go d.kmemAPILevel()
+	}
+	return ok
 }
 
 func (d *desk) kmemJSON(out any, args ...string) bool {

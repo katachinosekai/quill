@@ -63,7 +63,7 @@ func TestTopicParsing(t *testing.T) {
 
 func TestTopicPrompt(t *testing.T) {
 	tp := topicInfo{Slug: "alpha", Title: "Alpha", Scope: []string{"alpha", "side-a"}}
-	old := topicPromptFor(tp, "1.8.1", false)
+	old := topicPromptFor(tp, false, false)
 	for _, want := range []string{"Alpha coordinator", `kmem name "alpha"`, "`kmem --as alpha`", "`kmem brief`", "`kmem task list`", "--topic alpha,side-a", "`alpha/status`", "--replaces"} {
 		if !strings.Contains(old, want) {
 			t.Fatalf("fallback prompt lacks %q: %s", want, old)
@@ -75,12 +75,9 @@ func TestTopicPrompt(t *testing.T) {
 	if kmemNameIn(old) != "alpha" {
 		t.Fatal("the prompt names the kmem name in the form plan-first recognises")
 	}
-	k2 := topicPromptFor(tp, "1.9.0", true)
+	k2 := topicPromptFor(tp, true, true)
 	if !strings.Contains(k2, "`kmem context --topic alpha`") || strings.Contains(k2, "kmem task list") || !strings.Contains(k2, "is new") {
 		t.Fatalf("topic briefing prompt: %s", k2)
-	}
-	if strings.Contains(topicPromptFor(tp, "", false), "kmem context --topic alpha`") {
-		t.Fatal("unknown version uses the fallback")
 	}
 }
 
