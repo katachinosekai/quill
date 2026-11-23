@@ -382,3 +382,93 @@ func TestQuillMoveNoticeOnceMoveAndLater(t *testing.T) {
 		}
 	})
 }
+
+// t653485: Move it here in the overlay box, from the quill tab that is the
+// current one, kept the box open; the tab switch used to close it, so the
+// moved session vanished from sight.
+func TestQuillMoveInKeepsTheBoxOpen(t *testing.T) {
+	h, _ := quillSetup(t)
+	o := topicSession(h, "quill")
+	var other *deskSession
+	h.ui(func() {
+		d := h.d
+		other = d.createSession(h.proj, "default", "default")
+		d.open(o.id)
+		a := d.quillAssist()
+		d.assistBoot(a)
+		d.openAssistBox(boxQuill)
+		d.quillChat.reasonBtn.OnTapped()
+		if a.s != o || a.state != asLive || d.current != other {
+			t.Fatal("moved in; the main area shows another tab")
+		}
+		if d.assistBoxRole() != boxQuill || d.quillChat.view.s != o {
+			t.Fatal("the box stays open and shows the moved session")
+		}
+		d.open(o.id) // a later tab switch still closes the overlay (Q16)
+		d.open(other.id)
+		if d.assistBoxRole() != "" {
+			t.Fatal("tab switches close the overlay again")
+		}
+	})
+	h.eventually("the moved session answers in the box", func() bool {
+		v := h.d.quillChat.view
+		return !o.conv.Busy && viewShows(v, "echo: "+quillOpMovedLine)
+	})
+}
+
+// t653485: a session moved in mid-turn gets the move line after the turn
+// (queued, as the main message box does), not written into the running turn.
+func TestQuillMoveInMidTurnQueuesTheLine(t *testing.T) {
+	h, _ := quillSetup(t)
+	o := topicSession(h, "quill")
+	h.ui(func() {
+		h.d.open(o.id)
+		h.d.send("slow")
+	})
+	h.eventually("mid-turn", func() bool { return o.conv.Busy })
+	h.ui(func() {
+		d := h.d
+		a := d.quillAssist()
+		d.assistBoot(a)
+		d.openAssistBox(boxQuill)
+		d.quillChat.reasonBtn.OnTapped()
+		if a.s != o || len(o.queue) != 1 || o.queue[0] != quillOpMovedLine {
+			t.Fatalf("the move line waits for the turn: %q", o.queue)
+		}
+		d.interrupt(o)
+	})
+	h.eventually("sent after the turn and answered in the box", func() bool {
+		return len(o.queue) == 0 && !o.conv.Busy && viewShows(h.d.quillChat.view, "echo: "+quillOpMovedLine)
+	})
+}
+
+// t653485: Move it here on the tab's notice opens the box with the session.
+func TestQuillMoveNoticeOpensTheBox(t *testing.T) {
+	h, _ := quillSetup(t)
+	o := topicSession(h, "quill")
+	h.ui(func() {
+		d := h.d
+		d.createSession(h.proj, "default", "default")
+		d.open(o.id)
+		d.assistBoot(d.quillAssist())
+		d.quillMoveNoticeMove()
+		if d.quillAssist().s != o || d.assistBoxRole() != boxQuill || d.quillChat.view.s != o {
+			t.Fatal("the box opens on the moved session")
+		}
+	})
+}
+
+// viewShows: v draws an item of its session with text sub, up to date.
+func viewShows(v *chatView, sub string) bool {
+	if v.s == nil {
+		return false
+	}
+	for _, it := range v.s.conv.Items {
+		if strings.Contains(it.Text, sub) {
+			if iv, ok := v.views[it.Seq]; ok && iv.sig == itemSig(it) {
+				return true
+			}
+		}
+	}
+	return false
+}

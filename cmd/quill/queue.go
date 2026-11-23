@@ -34,6 +34,18 @@ func (d *desk) clearInputFor(s *deskSession, text string) {
 	}
 }
 
+// sendOrQueue sends text to s, or queues it (sent when the turn ends, as
+// the main message box does) while s is mid-turn: a message written into a
+// running turn left Quill's turn state behind the process (t653485).
+func (d *desk) sendOrQueue(s *deskSession, text string) {
+	if s.remote == nil && (s.compacting || s.running() && (s.conv.Busy || s.proc.Busy())) {
+		s.queue = append(s.queue, text)
+		d.syncQueue(s)
+		return
+	}
+	d.sendTo(s, text)
+}
+
 func (d *desk) flushQueue(s *deskSession) {
 	if len(s.queue) == 0 || !s.running() || d.usagePaused {
 		return

@@ -364,7 +364,7 @@ func (d *desk) closeAssistBox() {
 // closeAssistOverlay: a tab, sidebar row, Ctrl+T or Ctrl+1-9 closes the
 // overlay before switching (Q16); a docked panel stays.
 func (d *desk) closeAssistOverlay() {
-	if d.assistOverlayOpen() {
+	if d.assistOverlayOpen() && !d.keepBox {
 		d.closeAssistBox()
 	}
 }

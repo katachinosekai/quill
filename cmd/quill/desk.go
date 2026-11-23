@@ -325,6 +325,7 @@ type desk struct {
 	chatHost      *fyne.Container
 	mainRoot      *fyne.Container // the main area with the docked assistant panel (assistbox.go)
 	abox          *assistBox      // the assistant box (assistbox.go)
+	keepBox       bool            // a tab switch keeps the overlay open (the operator's move-in)
 	tipLayer      *fyne.Container // top layer of the window content for tooltips (agentstrip.go)
 	chatDropHL    *canvas.Rectangle
 	viewBtn       *widget.Button

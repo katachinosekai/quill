@@ -28,12 +28,12 @@ import (
 // stopped), its bubble (quillOpBubble) and its host (setHiddenHost(roleQuill)).
 
 const (
-	quillOpName      = "quill"             // the topic and kmem name
-	prefQuillSource  = "quillSourceFolder" // the Quill source folder ("" = unset)
-	prefQuillOpModel = "quillOpModel"      // the operator's model; kmemAssistOff turns it off
+	quillOpName       = "quill"               // the topic and kmem name
+	prefQuillSource   = "quillSourceFolder"   // the Quill source folder ("" = unset)
+	prefQuillOpModel  = "quillOpModel"        // the operator's model; kmemAssistOff turns it off
 	prefQuillMoveSeen = "quillMoveNoticeSeen" // the one-time move-in notice was shown
-	prefQuillOpSeen  = "quillOpBadgeSeen"  // the Quill badge's seen records
-	quillModule      = "module github.com/katachinosekai/quill"
+	prefQuillOpSeen   = "quillOpBadgeSeen"    // the Quill badge's seen records
+	quillModule       = "module github.com/katachinosekai/quill"
 )
 
 // quillOpBubble: the Quill button's bubble, set by the box UI (nil: no badge).
@@ -359,6 +359,9 @@ func (d *desk) quillMoveNoticeMove() {
 	if o != nil {
 		if a := d.quillAssist(); a.state == asElsewhere {
 			d.quillMoveIn(a, o)
+			if a.s == o {
+				d.openQuillOperator() // the moved session shows where it went
+			}
 		}
 	}
 	d.syncQuillMoveBanner()
@@ -395,7 +398,7 @@ func (d *desk) quillMoveIn(a *assistant, o *deskSession) {
 		return
 	}
 	d.quillAdopt(a, o, fmt.Sprintf("Moved from the tab “%s”; it keeps running here.", title))
-	d.sendTo(o, quillOpMovedLine) // queued if it is mid-turn
+	d.sendOrQueue(o, quillOpMovedLine) // queued if it is mid-turn
 }
 
 // quillAdopt makes the running session o the hidden operator: its tab's
@@ -411,7 +414,11 @@ func (d *desk) quillAdopt(a *assistant, o *deskSession, note string) {
 	d.saveOrg()
 	if wasCurrent {
 		if len(d.tabs) > 0 {
+			// The box the user moved it into stays open (t653485: the tab
+			// switch closed the overlay, so the moved session vanished).
+			d.keepBox = true
 			d.open(d.tabs[len(d.tabs)-1])
+			d.keepBox = false
 		} else {
 			d.current = nil
 			d.chat.show(nil)

@@ -239,7 +239,7 @@ func (d *desk) assistDeliver(a *assistant, text string) string {
 		return "empty"
 	}
 	if s := a.s; s != nil && s.running() && !s.stopping && (a.state == asLive || a.state == asStarting) {
-		d.sendTo(s, text)
+		d.sendOrQueue(s, text)
 		d.assistRefresh(a)
 		return "sent to the running assistant"
 	}
