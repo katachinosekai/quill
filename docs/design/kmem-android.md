@@ -1,6 +1,6 @@
 # kmem on Quill Android (design)
 
-Status: design, 2026-11-22. kmem task tc6efac (includes t90b538's "needs
+Status: design, 2026-11-22; open questions decided 2026-11-22 (fd77947). kmem task tc6efac (includes t90b538's "needs
 you" mark). Base: Quill Desktop master 088a937, Quill Android master c6f872b
 (0.9.29). Scope: both apps. No code in this document's commit.
 
@@ -425,17 +425,20 @@ answers "is the assistant waiting for me?".
 4. Turn control off: buttons disable, reads still work.
 5. Rotate the phone; open on the tablet in landscape.
 
-## 9. Open questions for the user
+## 9. Open questions (decided)
 
-1. Where does kmem open on Quill Android? A kmem button with bubble at the top of the side list opening a full kmem screen (recommended) / a pinned "kmem" row in the session list / a menu entry only.
-2. Which task actions may the phone take directly? None, the buttons only fill the assistant's input / Done and Release with confirmation, never a live session's claim (recommended) / any Done or Release, with --force.
-3. What may the phone do with the recycle bin? Show the count only / show the list read-only / show the list and Restore with confirmation (recommended).
-4. How is the assistant session exposed? Its own /phone/kmem/assistant routes, still hidden from the session list (recommended) / listed in /phone/sessions with an "assistant" flag.
-5. When does the phone notify about kmem? Only when the assistant waits for the user (plan, question, permission, save timeout) (recommended) / also for new "Waiting for you" items (bin, audit, maintenance, issues) / never, mark only.
-6. May the phone stop the assistant? Start, Stop, Restart and Save now all on the phone (recommended) / Start, Restart and Save now only; Stop only on Quill Desktop.
-7. The save-timeout question (Stop without saving / Keep running until saved / Keep it running): on both apps, first answer wins (recommended) / only on Quill Desktop.
-8. How far does the Memory view go? Read-only find and get (recommended) / also "Ask the assistant to add or fix a fact" / also direct add, retire and trash.
-9. May the phone change the kmem assistant's model setting? No, Quill Desktop only (recommended) / yes, in the Assistant header with a Restart.
-10. Does the kmem screen need a first-run question after the update? No, it appears silently when Quill Desktop supports it (recommended) / ask once "Show kmem on this phone?" with Yes picked.
-11. Landscape layout? Panels left and the assistant right, like the kmem window (recommended) / the same four tabs as portrait.
-12. Release order? Each phase on Quill Desktop first, Quill Android after (recommended) / both apps together per phase.
+All 12 decided by the user on 2026-11-22, each with the recommended option
+(kmem fact fd77947).
+
+1. Where does kmem open on Quill Android? **Decided:** a kmem button with bubble at the top of the side list opening a full kmem screen.
+2. Which task actions may the phone take directly? **Decided:** Done and Release with confirmation, never a live session's claim.
+3. What may the phone do with the recycle bin? **Decided:** show the list and Restore with confirmation (emptying stays on Quill Desktop only).
+4. How is the assistant session exposed? **Decided:** its own /phone/kmem/assistant routes, still hidden from the session list.
+5. When does the phone notify about kmem? **Decided:** only when the assistant waits for the user (plan, question, permission, save timeout).
+6. May the phone stop the assistant? **Decided:** Start, Stop, Restart and Save now all on the phone.
+7. The save-timeout question (Stop without saving / Keep running until saved / Keep it running): **Decided:** on both apps, first answer wins.
+8. How far does the Memory view go? **Decided:** read-only find and get.
+9. May the phone change the kmem assistant's model setting? **Decided:** no, Quill Desktop only.
+10. Does the kmem screen need a first-run question after the update? **Decided:** no, it appears silently when Quill Desktop supports it.
+11. Landscape layout? **Decided:** panels left and the assistant right, like the kmem window.
+12. Release order? **Decided:** each phase on Quill Desktop first, Quill Android after.
