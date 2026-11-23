@@ -134,8 +134,19 @@ func Run() {
 						if !ok {
 							return
 						}
-						if r["type"] == "control_request" && r["request"].(map[string]any)["subtype"] == "interrupt" {
+						if req, _ := r["request"].(map[string]any); r["type"] == "control_request" && req["subtype"] == "interrupt" {
 							ack(r, map[string]any{"still_queued": []any{}})
+							kind := "all"
+							if req["spare_background_tasks"] == true {
+								kind = "spare"
+							}
+							emit(map[string]any{"type": "system", "subtype": "fake_interrupt", "status": kind, "session_id": sid})
+							if out := os.Getenv("FAKE_ARGS_OUT"); out != "" {
+								if f, err := os.OpenFile(out, os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+									f.WriteString("\ninterrupt:" + kind)
+									f.Close()
+								}
+							}
 							break loop
 						}
 					}

@@ -157,3 +157,18 @@ func TestLastContextUsesTheCurrentModel(t *testing.T) {
 		t.Fatalf("unknown model: largest window: %d", w)
 	}
 }
+
+func TestInterruptSparesBackgroundTasks(t *testing.T) {
+	var spare, all struct {
+		Request map[string]any `json:"request"`
+	}
+	if json.Unmarshal(Interrupt("a"), &spare) != nil || json.Unmarshal(InterruptAll("b"), &all) != nil {
+		t.Fatal("bad json")
+	}
+	if spare.Request["subtype"] != "interrupt" || spare.Request["spare_background_tasks"] != true {
+		t.Errorf("Interrupt %v", spare.Request)
+	}
+	if all.Request["subtype"] != "interrupt" || all.Request["spare_background_tasks"] != nil {
+		t.Errorf("InterruptAll %v", all.Request)
+	}
+}

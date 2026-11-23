@@ -248,7 +248,18 @@ func Initialize(id string) []byte {
 	return ControlRequestLine(id, map[string]any{"subtype": "initialize"})
 }
 
+// Interrupt is a person's Stop: it ends the current turn only. Without
+// spare_background_tasks the CLI also kills the session's running background
+// agents and workflows (it "fails closed" unless the client declared
+// perTaskStopAffordance at initialize, which needs a per-task stop_task
+// control Quill Desktop does not have). Checked against Claude Code 2.1.323;
+// a CLI that does not read the field treats it as a plain interrupt.
 func Interrupt(id string) []byte {
+	return ControlRequestLine(id, map[string]any{"subtype": "interrupt", "spare_background_tasks": true})
+}
+
+// InterruptAll ends the turn and the session's background agents too.
+func InterruptAll(id string) []byte {
 	return ControlRequestLine(id, map[string]any{"subtype": "interrupt"})
 }
 

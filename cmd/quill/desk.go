@@ -1903,6 +1903,9 @@ func (d *desk) sendNow(text string) {
 	}()
 }
 
+// interrupt is Stop / Esc / stop & send: it ends the current turn only and
+// leaves the session's running background subagents and tasks alone (the
+// interrupt carries spare_background_tasks, see protocol.Interrupt).
 func (d *desk) interrupt(s *deskSession) {
 	if s != nil && s.remote != nil {
 		d.remoteWrite(s, "interrupt", map[string]any{})
@@ -1916,6 +1919,20 @@ func (d *desk) interrupt(s *deskSession) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = p.Interrupt(ctx)
+	}()
+}
+
+// interruptAll ends the turn and the session's background subagents and
+// tasks ("Stop everything" in the background tasks menu). Local sessions only.
+func (d *desk) interruptAll(s *deskSession) {
+	if s == nil || s.remote != nil || s.proc == nil || s.proc.Exited() {
+		return
+	}
+	p := s.proc
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = p.InterruptAll(ctx)
 	}()
 }
 

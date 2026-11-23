@@ -578,8 +578,18 @@ func (p *Process) Request(ctx context.Context, build func(id string) []byte) (*p
 	}
 }
 
+// Interrupt ends the current turn and leaves running background subagents
+// alone. No SIGINT fallback here: in print mode the CLI answers SIGINT by
+// aborting and exiting, which would kill those subagents (and the session).
 func (p *Process) Interrupt(ctx context.Context) error {
 	_, err := p.Request(ctx, protocol.Interrupt)
+	return err
+}
+
+// InterruptAll ends the turn and the session's background subagents; if the
+// CLI does not answer it falls back to SIGINT.
+func (p *Process) InterruptAll(ctx context.Context) error {
+	_, err := p.Request(ctx, protocol.InterruptAll)
 	if err != nil && !errors.Is(err, ErrExited) && p.osProc != nil {
 		interruptProcess(p.osProc)
 	}
@@ -651,7 +661,7 @@ func (p *Process) Stop(grace time.Duration) error {
 	}
 	if p.busy.Load() {
 		ctx, cancel := context.WithTimeout(context.Background(), grace/2)
-		_ = p.Interrupt(ctx)
+		_ = p.InterruptAll(ctx)
 		cancel()
 	}
 	p.writeMu.Lock()

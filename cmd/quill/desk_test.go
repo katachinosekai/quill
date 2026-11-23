@@ -421,6 +421,69 @@ func TestResumePermissionAndInterrupt(t *testing.T) {
 	if !s.running() {
 		t.Fatal("interrupt should keep the process")
 	}
+	if a := h.args(); !strings.Contains(a, "interrupt:spare") || strings.Contains(a, "interrupt:all") {
+		t.Fatalf("Stop must spare background subagents: %q", a)
+	}
+}
+
+// Stop keeps a running background subagent: the interrupt spares it and the
+// session still lists it; "Stop everything" in the tasks menu ends it all.
+func TestStopKeepsBackgroundSubagents(t *testing.T) {
+	h := newHarness(t)
+	var s *deskSession
+	h.ui(func() {
+		s = h.d.createSession(h.proj, "default", "default")
+		h.d.send("slow")
+	})
+	h.eventually("streaming text", func() bool {
+		it := lastItem(s)
+		return it != nil && it.Kind == chat.Assistant && it.Streaming && len(it.Text) > 2
+	})
+	var stopAll *fyne.MenuItem
+	h.ui(func() {
+		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"ag1","name":"Agent","input":{"description":"Check docs","prompt":"look","run_in_background":true}}]`)}})
+		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"ag1","content":"Async agent launched successfully. agentId: a1b2c3d4e5"}]`)}})
+		if s.conv.Background() != 1 {
+			t.Fatalf("background agent not tracked: %d", s.conv.Background())
+		}
+		for _, it := range h.d.taskItems(s) {
+			if it.Label == stopEverythingLabel {
+				stopAll = it
+			}
+		}
+		if stopAll == nil {
+			t.Fatalf("tasks menu has no stop-everything item: %v", menuLabels(h.d.taskItems(s)))
+		}
+		test.Tap(h.d.stopBtn)
+	})
+	// The session still shows as working: its background subagent runs on.
+	h.eventually("interrupted", func() bool {
+		it := lastItem(s)
+		return it != nil && it.Kind == chat.Notice && it.Text == "Interrupted" && !s.conv.Busy && s.status() == stRunning
+	})
+	h.ui(func() {
+		if a := h.args(); !strings.Contains(a, "interrupt:spare") {
+			t.Fatalf("Stop sent %q", a)
+		}
+		if s.conv.Background() != 1 {
+			t.Fatal("Stop must not drop the running background subagent")
+		}
+		h.d.send("slow")
+	})
+	h.eventually("streaming again", func() bool {
+		it := lastItem(s)
+		return it != nil && it.Kind == chat.Assistant && it.Streaming && len(it.Text) > 2
+	})
+	h.ui(func() { stopAll.Action() })
+	h.eventually("stopped everything", func() bool { return strings.Contains(h.args(), "interrupt:all") })
+	h.ui(func() {
+		s.conv.ClearBackground()
+		for _, it := range h.d.taskItems(s) {
+			if it.Label == stopEverythingLabel {
+				t.Fatal("no stop-everything item without background tasks")
+			}
+		}
+	})
 }
 
 func TestNewSessionsRunSideBySide(t *testing.T) {

@@ -263,6 +263,10 @@ func TestInterruptAndMultiTurn(t *testing.T) {
 	if err := p.Interrupt(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// A person's Stop must spare the session's background subagents.
+	if ev := r.waitFor(t, func(ev *protocol.Event) bool { return ev.Subtype == "fake_interrupt" }); ev.Status != "spare" {
+		t.Fatalf("Interrupt sent %q, want spare_background_tasks", ev.Status)
+	}
 	res := r.waitFor(t, isType("result"))
 	if res.TerminalReason != "aborted_streaming" {
 		t.Fatal(res.TerminalReason)
@@ -286,6 +290,26 @@ func TestInterruptAndMultiTurn(t *testing.T) {
 	if p.Exited() {
 		t.Fatal("process should still run between turns")
 	}
+}
+
+// TestInterruptAllEndsBackgroundTasks: Stop everything sends the plain
+// interrupt, which also ends the session's background subagents.
+func TestInterruptAllEndsBackgroundTasks(t *testing.T) {
+	r := newRecorder()
+	p := start(t, Options{}, r)
+	if err := p.Send("slow"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitFor(t, func(ev *protocol.Event) bool { return ev.Type == "stream_event" && ev.Event.Delta != nil })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.InterruptAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ev := r.waitFor(t, func(ev *protocol.Event) bool { return ev.Subtype == "fake_interrupt" }); ev.Status != "all" {
+		t.Fatalf("InterruptAll sent %q", ev.Status)
+	}
+	r.waitFor(t, isType("result"))
 }
 
 func TestRemoteControlAndModeRequests(t *testing.T) {

@@ -93,6 +93,8 @@ func (d *desk) voiceItems() []*fyne.MenuItem {
 	return []*fyne.MenuItem{lang, fyne.NewMenuItemSeparator(), on}
 }
 
+const stopEverythingLabel = "Stop everything (reply and background tasks)"
+
 func (d *desk) taskItems(s *deskSession) []*fyne.MenuItem {
 	var out []*fyne.MenuItem
 	for _, t := range s.conv.BackgroundTasks() {
@@ -105,7 +107,12 @@ func (d *desk) taskItems(s *deskSession) []*fyne.MenuItem {
 	if len(out) > 0 {
 		out = append(out, fyne.NewMenuItemSeparator())
 	}
-	return append(out, fyne.NewMenuItem("Show background tasks...", func() { d.cmdTasks(s) }))
+	out = append(out, fyne.NewMenuItem("Show background tasks...", func() { d.cmdTasks(s) }))
+	// Stop keeps background subagents running; this is the way to end them all.
+	if len(s.conv.BackgroundTasks()) > 0 && s.remote == nil && s.running() {
+		out = append(out, fyne.NewMenuItem(stopEverythingLabel, func() { d.interruptAll(s) }))
+	}
+	return out
 }
 
 // menuButton: a bar button that opens items() above itself.
