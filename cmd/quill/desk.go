@@ -2035,6 +2035,7 @@ func (d *desk) answerQuestions(s *deskSession, it *chat.Item, answers map[string
 		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not answer: " + err.Error())})
 		return
 	}
+	d.dialogGate(s, it, answers)
 	var lines []string
 	for _, q := range protocol.ParseQuestions(it.Input) {
 		if a, ok := answers[q.Question]; ok {
@@ -2831,6 +2832,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 				d.approveNow(s)
 			} else if !isRetry(it.Text) && !s.inTurn {
 				endPlan(s)
+				d.chatFor(s, s.conv.CancelPlans()) // the session moved on: the plan card is stale
 			}
 			s.inTurn = true
 		}
@@ -3016,6 +3018,9 @@ func coversPlan(s *deskSession, text string) bool {
 }
 
 func approvesPlan(s *deskSession, text string) bool {
+	if notFromUser(text) {
+		return false // peer, channel and scheduled messages never approve
+	}
 	if isPlanGo(text) {
 		return true
 	}
@@ -3133,6 +3138,9 @@ func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
 // answerPlanWith approves (or not) and, with choice, answers the choice the
 // approval question offered (user 2026-11-21).
 func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice, changes string) {
+	if planSuperseded(d.ownerOf(s, it), it) {
+		return
+	}
 	if s != nil && s.remote != nil {
 		if s = d.cardOwner(s, it); s != nil {
 			d.remotePlan(s, it, ok, choice, nil, changes)
@@ -3145,6 +3153,9 @@ func (d *desk) answerPlanWith(s *deskSession, it *chat.Item, ok bool, choice, ch
 // answerPlanAnswers approves with every plan question's answer (plan card
 // with questions; planquestions.go).
 func (d *desk) answerPlanAnswers(s *deskSession, it *chat.Item, qs []planQ, ans map[int]planAnswer) {
+	if planSuperseded(d.ownerOf(s, it), it) {
+		return
+	}
 	if s != nil && s.remote != nil {
 		if s = d.cardOwner(s, it); s != nil {
 			d.remotePlan(s, it, true, "", planAnswersJSON(qs, ans), "")
@@ -3156,7 +3167,7 @@ func (d *desk) answerPlanAnswers(s *deskSession, it *chat.Item, qs []planQ, ans 
 
 // answerPlanMsg approves (sending msg) or turns the plan down.
 func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string) {
-	if s = d.cardOwner(s, it); s == nil {
+	if s = d.cardOwner(s, it); s == nil || planSuperseded(s, it) {
 		return
 	}
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {

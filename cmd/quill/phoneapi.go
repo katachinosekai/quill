@@ -754,6 +754,9 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 		}
 	case chat.Permission, chat.Plan, chat.Rotate:
 		req := map[string]any{"id": requestID(it), "state": apiStates[it.PermState]}
+		if it.Kind == chat.Plan {
+			req["planState"] = planState(s.conv, it) // active|approved|rejected|replaced|moved_on
+		}
 		switch {
 		case it.Kind == chat.Plan:
 			text := s.conv.PlanText(it)

@@ -271,6 +271,18 @@ func actionAsk(q, rest string) bool {
 	return actionStart.MatchString(q)
 }
 
+// ApprovalQuestion: q, a question put to the user (a dialog's question),
+// asks to go ahead with work: its last sentence is an approval question
+// (asksToApprove) or proposes doing something (ProposesWork).
+func ApprovalQuestion(q string) bool {
+	q = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(q), "*_ "))
+	if !strings.HasSuffix(q, "?") {
+		return false
+	}
+	last := lastQuestion(q)
+	return asksToApprove(last) || ProposesWork(last)
+}
+
 // ProposesWork: question q (one sentence) proposes doing something: an offer
 // ("Can I run …", "Want me to …") or an action verb ("Merge it", "Fix 2 and 3").
 func ProposesWork(q string) bool {

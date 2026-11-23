@@ -65,7 +65,7 @@ func replyPlan(c *chat.Conversation, reply *chat.Item) *chat.Item {
 // overlay can show them there: the plan is pending, every question is
 // numbered, and the reply alone yields the same questions as the card.
 func planOverlayQs(s *deskSession, plan, reply *chat.Item) []planQ {
-	if s == nil || plan == nil || reply == nil || plan.PermState != chat.PermPending || reply.Streaming {
+	if s == nil || plan == nil || reply == nil || plan.PermState != chat.PermPending || planState(s.conv, plan) != planActive || reply.Streaming {
 		return nil
 	}
 	qs := planItemQuestions(s, plan)

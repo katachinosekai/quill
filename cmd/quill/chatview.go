@@ -1718,7 +1718,11 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	parts := []fyne.CanvasObject{title, msg}
 	border := colAccent
 	owner := v.s
-	if it.PermState == chat.PermPending {
+	state := planActive
+	if owner != nil {
+		state = planState(owner.conv, it)
+	}
+	if it.PermState == chat.PermPending && state == planActive {
 		no := glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() { v.d.answerPlan(owner, it, false) }))
 		approve := glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() { v.d.answerPlan(owner, it, true) }))
 		var qs []planQ
@@ -1771,7 +1775,20 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		case chat.PermCancelled:
 			text = "No longer needed"
 		}
-		parts = append(parts, v.muted(text, fontBody))
+		if it.PermState == chat.PermPending {
+			text = "No longer needed"
+		}
+		// Inactive buttons with a small label: a stale card can't be clicked.
+		if owner != nil {
+			if appr := planItemApproval(owner, it); appr != nil {
+				parts = append(parts, v.approvalButtonsOn(owner, it, appr, nil, nil, false))
+			} else {
+				parts = append(parts, v.buttonRow(
+					glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, false, nil),
+					glowButton("Don't run", theme.CancelIcon(), colError, false, nil)))
+			}
+		}
+		parts = append(parts, v.muted(text+" ("+planStateLabel(state)+")", fontBody))
 		border = color.NRGBA{0x44, 0x44, 0x40, 0xff}
 	}
 	r := canvas.NewRectangle(colCard)

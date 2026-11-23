@@ -223,7 +223,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		if it.Kind != chat.Plan {
 			return nil, badReq(in.Action + " needs a plan item")
 		}
-		if !pending {
+		if !pending || planSuperseded(s, it) {
 			return nil, stale("the plan is no longer pending")
 		}
 		if in.ApprovalChoice != nil {

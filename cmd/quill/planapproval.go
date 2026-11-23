@@ -180,6 +180,9 @@ func (d *desk) answerPlanApproval(s *deskSession, it *chat.Item, a *approvalOpts
 	if a == nil || (i < 0 || i >= len(a.Options)) && !(i == dontRunPick && a.DontRun) {
 		return
 	}
+	if planSuperseded(d.ownerOf(s, it), it) {
+		return
+	}
 	stop, choice := true, ""
 	if i >= 0 {
 		stop, choice = a.Stop[i], approvalChoice(a.Options[i])
@@ -226,6 +229,11 @@ func (v *chatView) approvalPick(plan *chat.Item) int {
 // questions a click answers the plan; with them it marks the pick (it can be
 // changed) and "Send answers" sends everything.
 func (v *chatView) approvalButtons(owner *deskSession, plan *chat.Item, a *approvalOpts, qs []planQ, ans map[int]planAnswer) fyne.CanvasObject {
+	return v.approvalButtonsOn(owner, plan, a, qs, ans, true)
+}
+
+// approvalButtonsOn: approvalButtons, all disabled when the card isn't active.
+func (v *chatView) approvalButtonsOn(owner *deskSession, plan *chat.Item, a *approvalOpts, qs []planQ, ans map[int]planAnswer, active bool) fyne.CanvasObject {
 	pick := v.approvalPick(plan)
 	var btns []fyne.CanvasObject
 	for i, o := range a.Options {
@@ -246,7 +254,7 @@ func (v *chatView) approvalButtons(owner *deskSession, plan *chat.Item, a *appro
 		} else if pick == i {
 			icon, tint = theme.ConfirmIcon(), colAccent
 		}
-		enabled := a.Stop[i] || v.d.canAnswer(owner)
+		enabled := active && (a.Stop[i] || v.d.canAnswer(owner))
 		btns = append(btns, glowButton(label, icon, tint, enabled, v.guarded(func() {
 			if len(qs) == 0 {
 				v.d.answerPlanApproval(owner, plan, a, i, nil, nil, "")
@@ -262,7 +270,7 @@ func (v *chatView) approvalButtons(owner *deskSession, plan *chat.Item, a *appro
 	if a.DontRun {
 		// No option stops: the card's own way to turn the plan down, at
 		// once (with the other questions' answers, if any).
-		btns = append(btns, glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() {
+		btns = append(btns, glowButton("Don't run", theme.CancelIcon(), colError, active, v.guarded(func() {
 			v.d.answerPlanApproval(owner, plan, a, dontRunPick, qs, ans, "")
 		})))
 	}
