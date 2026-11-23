@@ -117,6 +117,8 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.kmemAssistItems(w, r)
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "kmem/assistant/"):
 		a.kmemAssistWrite(w, r, strings.TrimPrefix(path, "kmem/assistant/"))
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "kmem/"):
+		a.kmemWrite(w, r, path)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "kmem/"):
 		a.kmemRoute(w, r, path)
 	case r.Method == http.MethodGet && path == "stream":

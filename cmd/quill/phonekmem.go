@@ -25,7 +25,8 @@ import (
 // each phone runs at most one kmem read at a time (409 kmem_busy). Text that
 // leaves Quill Desktop has the home folder replaced by ~, the user name by
 // "user" and e-mail addresses removed; the maintenance report is a file name.
-// No route here writes to kmem.
+// No route here writes to kmem; phase 4's task and bin writes are in
+// phonekmemwrite.go.
 
 // kmemPhoneAPI is the level in hello's "kmem" entry; a breaking change raises it.
 const kmemPhoneAPI = 1
@@ -46,6 +47,8 @@ type phoneKmem struct {
 	loading chan struct{}
 	busy    map[string]bool // phone id -> a kmem read of this phone runs
 	find    kmemFindLimit   // phase 3: find at most once a second per phone
+	// phase 4 (phonekmemwrite.go): open confirm ids of task and bin writes
+	confirms map[string]*kmemConfirm
 }
 
 // begin marks a kmem read for phone; false when one already runs (409).
@@ -164,7 +167,13 @@ func (a *phoneAPI) kmemRoute(w http.ResponseWriter, r *http.Request, path string
 		a.kmemGet(w, r, phone)
 	case "kmem/fact":
 		a.kmemFact(w, r, phone)
+	case "kmem/bin":
+		a.kmemBin(w, phone)
 	default:
+		if id, ok := strings.CutPrefix(path, "kmem/task/"); ok {
+			a.kmemTaskShow(w, phone, id)
+			return
+		}
 		folders.WriteError(w, http.StatusNotFound, "not_found", "unknown path")
 	}
 }
@@ -235,7 +244,7 @@ func kmemClaim(t kmemTask) string {
 func kmemPhoneTaskOf(t kmemTask, sc func(string) string) kmemPhoneTask {
 	title, _ := capText(sc(t.Title), kmemPhoneTitleMax)
 	out := kmemPhoneTask{ID: t.ID, Prio: t.Prio, Status: t.Status, Title: title, Topic: sc(t.Topic), Claim: kmemClaim(t),
-		NeedsUser: userTask(t), Issue: kmemIssue(t), Actions: []string{}} // no task writes before phase 4
+		NeedsUser: userTask(t), Issue: kmemIssue(t), Actions: kmemTaskActions(t)} // phase 4: what the write routes accept
 	if t.Owner != nil {
 		out.Owner = sc(*t.Owner)
 	}
