@@ -44,16 +44,45 @@ func TestEveryNumberedQuestionGetsButtons(t *testing.T) {
 		for _, b := range swapButtons(card) {
 			labels = append(labels, b.Text)
 		}
-		want := []string{"Use blue", "Red", "Ship now", "Later", "Keep the old file", "Replace it", "Small", "Large", "Yes", "No"}
+		want := []string{"Use blue", "Red", "Ship now", "Later", "Keep the old file", "Replace it", "Small", "Large", "Yes", "No", "Send answers"}
 		if !reflect.DeepEqual(labels, want) {
 			t.Fatalf("buttons %q, want %q", labels, want)
 		}
-		// A click answers its own question.
+		// Picks are collected: a click sends nothing, the other questions'
+		// buttons stay, and a pick can be changed.
 		h.d.chat.btnChanged = time.Time{}
 		swapButtons(card)[3].OnTapped() // "Later" of question 2
+		if last := s.conv.Items[len(s.conv.Items)-1]; last != msg {
+			t.Fatalf("a pick sent %+v", last)
+		}
+		_, card = h.d.chat.choiceCard(msg)
+		bs := swapButtons(card)
+		if len(bs) != len(want) || !bs[len(bs)-1].Disabled() {
+			t.Fatalf("after one pick: %d buttons, send disabled %v", len(bs), bs[len(bs)-1].Disabled())
+		}
+		for _, i := range []int{0, 4, 7, 8} { // Use blue, Keep, Large, Yes
+			swapButtons(card)[i].OnTapped()
+			_, card = h.d.chat.choiceCard(msg)
+		}
+		swapButtons(card)[1].OnTapped() // change question 1 to Red
+		_, card = h.d.chat.choiceCard(msg)
+		bs = swapButtons(card)
+		if bs[len(bs)-1].Disabled() {
+			t.Fatal("Send answers still disabled with every question picked")
+		}
+		bs[len(bs)-1].OnTapped()
 		last := s.conv.Items[len(s.conv.Items)-1]
-		if last.Kind != chat.User || last.Text != "Question 2: I pick the second option: Later." {
+		wantReply := "Question 1: I pick the second option: Red.\nQuestion 2: I pick the second option: Later.\n" +
+			"Question 3: I pick the first option: Keep the old file.\nQuestion 4: I pick the second option: Large.\nQuestion 5: I pick the first option: Yes."
+		if last.Kind != chat.User || last.Text != wantReply {
 			t.Fatalf("reply %+v", last)
+		}
+		if got := choicePicks(last.Text); !reflect.DeepEqual(got, []string{"Red", "Later", "Keep the old file", "Large", "Yes"}) {
+			t.Fatalf("choicePicks %q", got)
+		}
+		// Answered: the buttons are gone.
+		if _, c2 := h.d.chat.choiceCard(msg); len(swapButtons(c2)) != 0 {
+			t.Fatalf("buttons left after the reply")
 		}
 	})
 }

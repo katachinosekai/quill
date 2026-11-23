@@ -2905,8 +2905,10 @@ func approvesPlan(s *deskSession, text string) bool {
 	}
 	// A quick-choice pick of the approval question's Yes ("I pick the first
 	// option: Yes."; user 2026-11-22: picking Yes didn't count).
-	if opt, ok := choicePick(text); ok && isApproval(opt) {
-		return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
+	for _, opt := range choicePicks(text) {
+		if isApproval(opt) {
+			return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
+		}
 	}
 	if approves(text) {
 		return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
@@ -3077,6 +3079,20 @@ func choicePick(text string) (string, bool) {
 		return "", false
 	}
 	return m[1], true
+}
+
+// choicePicks: the options of a reply made only of quick-choice lines (one
+// per question after "Send answers"), or nil.
+func choicePicks(text string) []string {
+	var out []string
+	for _, l := range strings.Split(strings.TrimSpace(text), "\n") {
+		o, ok := choicePick(l)
+		if !ok {
+			return nil
+		}
+		out = append(out, o)
+	}
+	return out
 }
 
 // notFromUser: text Claude Code puts in a user turn that the user didn't

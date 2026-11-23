@@ -85,6 +85,7 @@ type chatView struct {
 	planAns       map[*chat.Item]map[int]planAnswer // plan card answers, kept across redraws
 	planPlain     map[*chat.Item]bool               // plans shown as written plus the card, not overlaid
 	btnKinds      map[int]string                    // buttons each item shows now (click guard)
+	choicePicks   map[*chat.Item]map[string]int     // picks on a multi-question reply, kept until sent
 	btnChanged    time.Time                         // when any item's buttons last changed
 	frame         *fyne.Container
 	inner         *fyne.Container
@@ -2244,16 +2245,57 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 		return head
 	}
 	if multi != nil {
-		// Each numbered question gets its own card and buttons; a click
-		// answers that question ("Question 2: I pick the first option: X.").
+		// Each numbered question gets its own card and buttons. A click
+		// only marks the pick (it can be changed); "Send answers" sends all
+		// of them in one reply, one line per question (multiChoiceReply).
+		// A button each time would drop the other questions' buttons, and
+		// sending on the last pick would give no chance to change one.
+		if v.choicePicks == nil {
+			v.choicePicks = map[*chat.Item]map[string]int{}
+		}
+		picks := v.choicePicks[it]
+		if picks == nil {
+			picks = map[string]int{}
+			v.choicePicks[it] = picks
+		}
 		var cards []fyne.CanvasObject
+		missing := 0
 		for _, q := range multi {
+			q := q
 			parts := []fyne.CanvasObject{label(q.title)}
 			if latest && len(q.opts) > 0 {
 				kind += "|" + q.num + ":" + strings.Join(q.opts, "/")
-				parts = append(parts, buttons("Question "+q.num+": ", q.opts))
+				var btns []fyne.CanvasObject
+				for i, o := range q.opts {
+					i := i
+					icon, tint := fyne.Resource(nil), color.Color(colIdle)
+					if p, ok := picks[q.num]; ok && p == i {
+						icon, tint = theme.ConfirmIcon(), colAccent
+					}
+					btns = append(btns, glowButton(shortLabel(o, 60), icon, tint, v.d.canAnswer(s), v.guarded(func() {
+						picks[q.num] = i
+						if iv, ok := v.views[it.Seq]; ok {
+							v.refreshItem(it, iv)
+						}
+					})))
+				}
+				if _, ok := picks[q.num]; !ok {
+					missing++
+				}
+				parts = append(parts, v.buttonRow(btns...))
 			}
 			cards = append(cards, questionCard(parts, latest))
+		}
+		if latest {
+			send := glowButton("Send answers", theme.MailSendIcon(), colIdle, v.d.canAnswer(s) && missing == 0, v.guarded(func() {
+				v.d.pickChoice(s, it, multiChoiceReply(multi, picks))
+			}))
+			cards = append(cards, v.buttonRow(send))
+			if missing > 0 {
+				note := widget.NewLabel("Pick an answer for each question, then send.")
+				note.SizeName = theme.SizeNameCaptionText
+				cards = append(cards, note)
+			}
 		}
 		v.noteButtons(it.Seq, kind)
 		return multiBody, container.NewVBox(cards...)
@@ -2317,6 +2359,19 @@ func (d *desk) refreshChoiceCards(s *deskSession, reply *chat.Item) {
 	}
 }
 
+// multiChoiceReply: the picks of a multi-question reply as one message, one
+// line per question ("Question 2: I pick the second option: Later."), in
+// question order. choicePicks reads it back.
+func multiChoiceReply(qs []numChoiceQ, picks map[string]int) string {
+	var lines []string
+	for _, q := range qs {
+		if p, ok := picks[q.num]; ok && p >= 0 && p < len(q.opts) {
+			lines = append(lines, "Question "+q.num+": "+choiceReply(p, q.opts[p]))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func choiceReply(n int, option string) string {
 	which := "next"
 	if n >= 0 && n < 4 {
@@ -2377,9 +2432,12 @@ func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.Can
 	// an overlong question wraps balanced (balance.go).
 	size := theme.Size(theme.SizeNameText)
 	var lines []wrapText
+	// Numbers are the plan's own, so the reply matches them; a question the
+	// Approve button covers is noted, not renumbered away.
+	gaps := planQGaps(qs)
 	for i, q := range qs {
 		q := q
-		l := widget.NewLabel(fmt.Sprintf("%d. %s", i+1, q.Text))
+		l := widget.NewLabel(fmt.Sprintf("%d. %s", planQNum(q, i), q.Text))
 		l.Wrapping = fyne.TextWrapWord
 		lines = append(lines, measureWords(l.Text, size, fyne.TextStyle{}))
 		labels := recommendedLabels(q)
@@ -2388,6 +2446,11 @@ func (v *chatView) planQuestionForm(qs []planQ, ans map[int]planAnswer) fyne.Can
 		}
 		ctl := planControl(q, labels, ans)
 		box.Add(container.NewVBox(l, ctl))
+	}
+	if gaps != "" {
+		g := widget.NewLabel(gaps)
+		g.SizeName = theme.SizeNameCaptionText
+		box.Add(g)
 	}
 	note := widget.NewLabel("Unanswered questions are sent as \"no answer\".")
 	note.SizeName = theme.SizeNameCaptionText

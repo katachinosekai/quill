@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -38,6 +39,9 @@ type planQ struct {
 	// line, end: the original lines of the plan text the question is on
 	// (end exclusive), for showing its control in place (planoverlay.go).
 	line, end int
+	// covered: the numbers of the plan's lines the Approve button answers
+	// (set on every question; planQGaps).
+	covered []int
 }
 
 var (
@@ -127,6 +131,7 @@ func planQuestions(text string) []planQ {
 		}
 	}
 	var out []planQ
+	var covered []int
 	seen := map[string]bool{}
 	lineOf := -1 // the line of the last question in out
 	for li, l := range lines[start:] {
@@ -142,8 +147,14 @@ func planQuestions(text string) []planQ {
 		line = strings.TrimSpace(listLead.ReplaceAllString(line, ""))
 		line = strings.TrimSpace(strings.TrimLeft(line, "#>*_ "))
 		afterApproval := false
-		for _, sent := range questionSentences(line) {
+		for si, sent := range questionSentences(line) {
 			key := strings.ToLower(sent)
+			// A later sentence of a line ("yes (recommended) or no?") is the
+			// same words on every question: dedupe it per line, or only the
+			// first question gets its yes/no (Zomboid, 2026-11-22).
+			if si > 0 {
+				key = fmt.Sprintf("%d#%s", li, key)
+			}
 			if seen[key] {
 				continue
 			}
@@ -182,6 +193,9 @@ func planQuestions(text string) []planQ {
 			q, ok := classifyQuestion(sent, letters)
 			if !ok {
 				afterApproval = true // the approval itself: the card's main button
+				if num > 0 {
+					covered = append(covered, num)
+				}
 				continue
 			}
 			q.ID, q.Num = len(out)+1, num
@@ -192,6 +206,9 @@ func planQuestions(text string) []planQ {
 			out = append(out, q)
 			lineOf = li
 		}
+	}
+	for i := range out {
+		out[i].covered = covered
 	}
 	return out
 }
@@ -354,6 +371,41 @@ func isYesNoPair(opts []string) bool {
 	return strings.HasSuffix(a, "yes") && strings.HasPrefix(b, "no")
 }
 
+// planQNum: the number a question is shown and answered under: its own in the
+// plan, else its place in the list.
+func planQNum(q planQ, i int) int {
+	if q.Num > 0 {
+		return q.Num
+	}
+	return i + 1
+}
+
+// planQGaps: a note for the numbers of questions the Approve button covers
+// ("1. answered by Approve"), or "". Other missing numbers (plan steps) get
+// none.
+func planQGaps(qs []planQ) string {
+	if len(qs) == 0 {
+		return ""
+	}
+	have := map[int]bool{}
+	for i, q := range qs {
+		have[planQNum(q, i)] = true
+	}
+	var nums []string
+	seen := map[int]bool{}
+	for _, n := range qs[0].covered {
+		if !have[n] && !seen[n] {
+			seen[n] = true
+			nums = append(nums, fmt.Sprint(n))
+		}
+	}
+	if len(nums) == 0 {
+		return ""
+	}
+	sort.Strings(nums)
+	return strings.Join(nums, ", ") + ". answered by Approve"
+}
+
 // planAnswer is one question's answer from a card or the phone API.
 type planAnswer struct {
 	Yes    *bool  // yesno
@@ -403,11 +455,7 @@ func planGoAnswers(qs []planQ, ans map[int]planAnswer) string {
 				}
 			}
 		}
-		n := i + 1
-		if q.Num > 0 {
-			n = q.Num
-		}
-		fmt.Fprintf(&b, " %d. %s → %s.", n, shortLabel(q.Text, 90), val)
+		fmt.Fprintf(&b, " %d. %s → %s.", planQNum(q, i), shortLabel(q.Text, 90), val)
 	}
 	return b.String()
 }
@@ -530,12 +578,19 @@ func planQuestionsFor(title, text string) []planQ {
 		own = normQ(sents[len(sents)-1])
 	}
 	var out []planQ
+	var ownNums []int
 	for _, q := range planQuestions(text) {
 		if own != "" && normQ(q.Text) == own {
+			if q.Num > 0 {
+				ownNums = append(ownNums, q.Num)
+			}
 			continue
 		}
 		q.ID = len(out) + 1
 		out = append(out, q)
+	}
+	for i := range out {
+		out[i].covered = append(append([]int(nil), out[i].covered...), ownNums...)
 	}
 	return out
 }
