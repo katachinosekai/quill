@@ -286,11 +286,13 @@ func (d *desk) setupAtStart() {
 		time.Sleep(3 * time.Second) // the account check runs first
 		d.do(func() {
 			if fresh && !d.app.Preferences().Bool(prefWelcomeSeen) {
-				d.showWelcome(d.setupIfMissing)
+				d.showWelcome(func() { d.setupIfMissing(); d.askKwinWhenReady() })
 				return
 			}
 			d.setupIfMissing()
 			d.askFeatureQuestionsWhenReady()
+			d.syncKwinRules()
+			d.askKwinWhenReady()
 		})
 	}()
 }

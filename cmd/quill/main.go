@@ -131,6 +131,7 @@ func runWindowWith(claudeBin, sock string) int {
 		ClaudeBin:    claudeBin,
 	})
 	d.animate = true
+	d.kwin = newKwinRules()
 	go func() {
 		home, _ := os.UserHomeDir()
 		if msg, err := updateKmem(home, bundledKmemDir()); err != nil {
