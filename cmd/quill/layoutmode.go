@@ -35,16 +35,19 @@ func (d *desk) layoutButtons() fyne.CanvasObject {
 	d.layoutBtn.Importance = widget.MediumImportance
 	d.settingsBtn = widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	d.settingsBtn.Importance = widget.MediumImportance
-	d.kmemBtn = widget.NewButtonWithIcon("kmem", theme.StorageIcon(), d.showKmem)
+	// Settings · Quill · kmem: the assistants open in the box (assistbox.go).
+	d.kmemBtn = widget.NewButtonWithIcon("kmem", theme.StorageIcon(), func() { d.toggleAssistBox(boxKmem) })
 	d.pcsBtn = d.pcsButton()
 	d.refreshPCsButton()
 	d.kmemBtn.Importance = widget.MediumImportance
-	d.kmemBtnBox = d.kmemButtonWithBubble()
+	d.kmemBtnBox = d.kmemButtonBox()
+	d.quillBtnBox = d.quillButton()
+	d.syncAssistButtons()
 	return d.layoutBtn
 }
 
 func (d *desk) setLayoutMode(mode string) {
-	if d.animate {
+	if d.animate && !d.reduceMotion() {
 		glideUntil = time.Now().Add(glideWindow)
 	}
 	d.app.Preferences().SetString("tabLayout", mode)
@@ -137,7 +140,7 @@ func (d *desk) closeSettings() {
 }
 
 func (d *desk) viewToolbar() fyne.CanvasObject {
-	d.toolbarRow = container.NewHBox(d.settingsBtn, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.splitButtons())
+	d.toolbarRow = container.NewHBox(d.settingsBtn, d.quillBtnBox, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.splitButtons())
 	return d.toolbarRow
 }
 
@@ -152,7 +155,7 @@ func (d *desk) placeToolbar() {
 		}
 	}
 	if !d.split() {
-		d.toolbarRow.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.viewBox}
+		d.toolbarRow.Objects = []fyne.CanvasObject{d.settingsBtn, d.quillBtnBox, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.viewBox}
 		d.toolbarRow.Refresh()
 		if d.toolbarBox != nil {
 			d.toolbarBox.Show()
@@ -165,10 +168,10 @@ func (d *desk) placeToolbar() {
 		d.toolbarBox.Hide()
 	}
 	first, last := d.panes[0], d.panes[len(d.panes)-1]
-	first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtnBox, d.pcsBtn}
+	first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, d.quillBtnBox, d.kmemBtnBox, d.pcsBtn}
 	last.slot.Objects = append(last.slot.Objects, layout.NewSpacer(), d.viewBox)
 	if first == last {
-		first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.viewBox}
+		first.slot.Objects = []fyne.CanvasObject{d.settingsBtn, d.quillBtnBox, d.kmemBtnBox, d.pcsBtn, layout.NewSpacer(), d.viewBox}
 	}
 	first.slot.Layout = layout.NewHBoxLayout()
 	last.slot.Layout = layout.NewHBoxLayout()

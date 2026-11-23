@@ -58,3 +58,14 @@ func (d *desk) escapeOverlay() bool {
 	dialog.DismissOverlay(top)
 	return true
 }
+
+// canvasEscape: Escape with nothing focused. The box's overlay (or the box
+// holding the focus) handles it first: a popup, its own selection, then it
+// closes; it never interrupts the assistant or the current tab then
+// (§3.6). Otherwise today's order for the current tab.
+func (d *desk) canvasEscape() bool {
+	if d.assistOverlayOpen() || d.boxFocused() {
+		return d.assistBoxEscape()
+	}
+	return d.escape(d.current)
+}

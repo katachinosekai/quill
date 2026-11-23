@@ -45,6 +45,29 @@ type pane struct {
 
 	pending []*chat.Item
 	timer   *time.Timer
+
+	// The history's chain inside root, for the assistant box's overlay rect.
+	padded fyne.CanvasObject
+	body   fyne.CanvasObject
+	center fyne.CanvasObject
+}
+
+// historyRect: the pane's chat history (title row and message box excluded)
+// in the pane row's coordinates; false before the first layout.
+func (p *pane) historyRect() (fyne.Position, fyne.Size, bool) {
+	if p.root == nil || p.center == nil || !p.root.Visible() {
+		return fyne.Position{}, fyne.Size{}, false
+	}
+	sz := p.center.Size()
+	if sz.IsZero() {
+		return fyne.Position{}, fyne.Size{}, false
+	}
+	x, y := float32(0), float32(0)
+	for _, o := range []fyne.CanvasObject{p.root, p.padded, p.body, p.center} {
+		x += o.Position().X
+		y += o.Position().Y
+	}
+	return fyne.NewPos(x, y), sz, true
 }
 
 type paneBox struct {
@@ -175,13 +198,16 @@ func (d *desk) newPane() *pane {
 	p.choices = container.NewVBox()
 	hint := widget.NewLabelWithStyle(emptyPaneText, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	p.picker = container.NewCenter(container.NewVBox(hint, p.choices))
-	body := container.NewBorder(head, container.NewPadded(inputRow), nil, nil, container.NewStack(p.view.root, p.picker))
+	center := container.NewStack(p.view.root, p.picker)
+	body := container.NewBorder(head, container.NewPadded(inputRow), nil, nil, center)
 	p.dropHL = canvas.NewRectangle(fade(colAccent, 0.14))
 	p.dropHL.CornerRadius = 14
 	p.dropHL.StrokeColor = colAccent
 	p.dropHL.StrokeWidth = 2
 	p.dropHL.Hide()
-	box := &paneBox{p: p, content: container.NewStack(p.outline, container.NewPadded(body), p.dropHL)}
+	padded := container.NewPadded(body)
+	p.padded, p.body, p.center = padded, body, center
+	box := &paneBox{p: p, content: container.NewStack(p.outline, padded, p.dropHL)}
 	box.ExtendBaseWidget(box)
 	p.root = box
 	return p
@@ -419,6 +445,9 @@ func (d *desk) afterSplit() {
 		relayout(d.mainPane)
 		relayout(d.usageBox)
 	}
+	// The box spans all panes and the docked panel leaves them their width.
+	d.layoutRoot()
+	d.layoutArea()
 	d.updateChrome()
 	d.refreshSidebar()
 }

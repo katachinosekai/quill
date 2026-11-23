@@ -257,6 +257,7 @@ type desk struct {
 	kmemBubble    *bubble
 	kmemRunDot    *canvas.Circle // the kmem assistant runs (kmembadge.go)
 	kmemBtnBox    fyne.CanvasObject
+	quillBtnBox   fyne.CanvasObject // the Quill operator's button with its badge and dot (assistbox.go)
 	kmemNeedsNow  kmemNeeds
 	kmemCo        kmemCoalescer // read-only kmem commands: one load per event (kmemload.go)
 	kmemGot       bool          // kmem has answered once (the badge may prune seen records)
@@ -319,6 +320,8 @@ type desk struct {
 	panes         []*pane
 	focused       *pane
 	chatHost      *fyne.Container
+	mainRoot      *fyne.Container // the main area with the docked assistant panel (assistbox.go)
+	abox          *assistBox      // the assistant box (assistbox.go)
 	tipLayer      *fyne.Container // top layer of the window content for tooltips (agentstrip.go)
 	chatDropHL    *canvas.Rectangle
 	viewBtn       *widget.Button
@@ -583,6 +586,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	speedSel := widget.NewSelect(animSpeedNames, func(v string) { d.app.Preferences().SetString(prefAnimateSpeed, speedKey(v)) })
 	speedSel.Selected = speedName(d.animateSpeed())
 	speedRow := container.NewHBox(widget.NewLabel("Text animation speed"), speedSel)
+	motionRows := d.boxSettings()
 	chipChk := widget.NewCheck("New tool chips start collapsed", d.setCollapseChips)
 	chipChk.Checked = d.collapseChips
 	rulesBtn := widget.NewButtonWithIcon("Format Rules...", theme.SettingsIcon(), d.rulesDialog)
@@ -607,17 +611,18 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	_ = roBtn
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
-	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, coordNote, animChk, speedRow, chipChk, updChk, notifyChk, d.kwinSetting(), widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Voice input"), d.voiceSettings(), widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
+	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, coordNote, animChk, speedRow, motionRows, chipChk, updChk, notifyChk, d.kwinSetting(), widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Voice input"), d.voiceSettings(), widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
 	d.setSessions = container.NewVBox(rcChk, rcLocalChk, widget.NewSeparator(), d.pauseSettings(), widget.NewSeparator(), d.handoffSettings(), widget.NewSeparator(), heading("Devices"), d.buildPhoneRow(), widget.NewSeparator(), heading("Other PCs"), d.remotePCsRow())
 	openSettings := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), d.showSettings)
 	openSettings.Importance = widget.LowImportance
 	openSettings.Alignment = widget.ButtonAlignLeading
-	openKmem := widget.NewButtonWithIcon("kmem", theme.StorageIcon(), d.showKmem)
-	openKmem.Importance = widget.LowImportance
-	openKmem.Alignment = widget.ButtonAlignLeading
+	// Settings · Quill · kmem (docs/design/quill-operator.md §3.2), with the
+	// toolbar's badges and dots mirrored (assistbox.go).
+	openQuill := d.sideAssistButton(boxQuill, "Quill", appIcon)
+	openKmem := d.sideAssistButton(boxKmem, "kmem", theme.StorageIcon())
 	d.pcBox = container.NewVBox()
 	d.refreshPCBox()
-	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), d.pcBox, openSettings, openKmem, legend)
+	d.settingsBox = container.NewVBox(padTop(6), widget.NewSeparator(), d.pcBox, openSettings, openQuill, openKmem, legend)
 	d.settingsSlot = container.NewStack(d.settingsBox)
 	bottom := d.settingsSlot
 	r := canvas.NewRectangle(colSidebar)
@@ -1113,7 +1118,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.backendBtn = widget.NewButton(backendOnline, func() {
 		d.showBackendMenu(d.current, d.backendBtn, d.updateChrome)
 	})
-	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands", fontMeta)
+	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands · Ctrl+Shift+O Quill · Ctrl+Shift+K kmem", fontMeta)
 	d.stats = mutedText("", fontMeta)
 	d.stopBtn = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
 		if d.current != nil {
@@ -1154,10 +1159,15 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.chatHost = container.NewStack(d.chat.root, d.chatDropHL)
 	spare := canvas.NewRectangle(color.Transparent)
 	spare.Hide()
-	d.usageBox = container.New(usageLayout{d}, d.chatHost, d.usage.root, spare)
+	// The assistant box covers the chat history only (all panes' in split
+	// view); docked, it sits right of the main area (assistbox.go).
+	box := d.box()
+	box.area = container.New(&boxAreaLayout{d}, d.chatHost, box.layer)
+	d.usageBox = container.New(usageLayout{d}, box.area, d.usage.root, spare)
 	d.mainPane = container.New(glideBorder{}, headerBox, bottom, d.usageBox)
+	d.mainRoot = container.New(&assistRootLayout{d}, d.mainPane, box.panel, box.handle, box.ghostL)
 	d.updateChrome()
-	return d.mainPane
+	return d.mainRoot
 }
 
 func (d *desk) updateChrome() {
@@ -1368,6 +1378,7 @@ func (d *desk) open(id string) {
 		d.showKmem()
 		return
 	}
+	d.closeAssistOverlay() // a tab or sidebar row closes the box first, then switches (Q16)
 	if r := s.remote; r != nil && r.fetched != r.rev {
 		defer r.link.fetchItems(s)
 	}
