@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -36,63 +35,8 @@ func (d *desk) refuseSecondSession(name, via string, owner *deskSession) {
 }
 
 // kmemAssistDeliver hands text (the Monday check-in, say) to the kmem
-// assistant: a message to the running one (queued if it is mid-turn, as user
-// messages are); a new assistant starts only when none runs, and gets the
-// message after its resume prompt. Returns what happened, for the log.
-func (d *desk) kmemAssistDeliver(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "empty"
-	}
-	a := d.assist()
-	if s := a.s; s != nil && s.running() && !s.stopping && (a.state == asLive || a.state == asStarting) {
-		d.sendTo(s, text)
-		d.kmemAssistRefresh(a)
-		return "sent to the running assistant"
-	}
-	if o := d.kmemAssistOwner(); o != nil && o.running() && !o.stopping {
-		d.sendTo(o, text) // live in a tab: it is the one kmem-lock-audit
-		return "sent to the live tab"
-	}
-	a.pending = append(a.pending, text)
-	switch a.state {
-	case asProbing, asSaving, asStopping, asStarting:
-		return "queued until the assistant is up" // flushed by the start (or restarted after the stop)
-	}
-	a.userStopped = false
-	d.kmemAssistProbe(a)
-	return "starting the assistant"
-}
-
-// kmemAssistFlush sends the queued messages to the running assistant.
-func (d *desk) kmemAssistFlush(a *kmemAssist, s *deskSession) {
-	p := a.pending
-	a.pending = nil
-	for _, t := range p {
-		d.sendTo(s, t)
-	}
-}
-
-// kmemAssistWaitStopped: a previous hidden session still stops (rotation,
-// Restart on a new model): start nothing until its process is gone.
-func (d *desk) kmemAssistWaitStopped(a *kmemAssist, o *deskSession) {
-	d.kmemAssistReason(a, "Waiting for the previous kmem assistant to stop...")
-	run := a.run
-	var poll func(n int)
-	poll = func(n int) {
-		d.afterUI(100*time.Millisecond, func() {
-			if a.run != run || a.state != asProbing {
-				return
-			}
-			if o.running() && n < 100 {
-				poll(n + 1)
-				return
-			}
-			d.kmemAssistProbe(a)
-		})
-	}
-	poll(0)
-}
+// assistant (assistDeliver, assist.go).
+func (d *desk) kmemAssistDeliver(text string) string { return d.assistDeliver(d.assist(), text) }
 
 // stopThen stops old's process (it has saved its handoff), then runs f on
 // the UI thread: rotation stops first and only then starts the new session.

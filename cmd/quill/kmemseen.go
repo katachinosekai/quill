@@ -1,12 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
-
-	"github.com/katachinosekai/quill/internal/chat"
 )
 
 // The kmem button's badge (user 2026-11-23, kmem task t491363) counts only
@@ -79,113 +75,28 @@ func (d *desk) kmemBadgeOn() bool {
 	return d.app.Preferences().BoolWithFallback(prefKmemBadge, true)
 }
 
-func (d *desk) loadKmemSeen() map[string]seenRec {
-	m := map[string]seenRec{}
-	if raw := d.app.Preferences().String(prefKmemSeen); raw != "" {
-		if json.Unmarshal([]byte(raw), &m) != nil || m == nil {
-			m = map[string]seenRec{}
-		}
-	}
-	return m
-}
+func (d *desk) loadKmemSeen() map[string]seenRec { return d.loadSeen(prefKmemSeen) }
 
-func (d *desk) saveKmemSeen(m map[string]seenRec) {
-	b, _ := json.Marshal(m)
-	d.app.Preferences().SetString(prefKmemSeen, string(b))
-}
+func (d *desk) saveKmemSeen(m map[string]seenRec) { d.saveSeen(prefKmemSeen, m) }
 
-// kmemAssistWait: the kmem assistant waits for the user: a plan to approve or
-// a question (a permission or a reply to its question), with a signature that
-// changes with each new one. UI thread.
-func (d *desk) kmemAssistWait() (kind, sig string) {
-	s := d.assist().s
-	if s == nil || s.conv == nil || !s.running() {
-		return "", ""
-	}
-	c := s.conv
-	for _, it := range c.PendingPermissions() {
-		if it.Kind == chat.Plan {
-			return "plan", fmt.Sprint(it.Seq, it.RequestID)
-		}
-	}
-	if p := c.PendingPermissions(); len(p) > 0 {
-		return "question", fmt.Sprint(p[0].Seq, p[0].RequestID)
-	}
-	if !c.Busy && (c.AsksApproval() || c.AwaitsReply()) {
-		for i := len(c.Items) - 1; i >= 0; i-- {
-			if it := c.Items[i]; it.Kind == chat.Assistant && strings.TrimSpace(it.Text) != "" {
-				return "question", fmt.Sprint(it.Seq, it.UUID)
-			}
-		}
-		return "question", "text"
-	}
-	return "", ""
-}
+// The kmem role's names for the generic badge (assist.go: assistNeeds,
+// updateAssistBadge, markAssistSeen).
 
-func (d *desk) kmemBadgeNow() []badgeItem {
-	k, sig := d.kmemAssistWait()
-	return badgeItems(d.kmemNeedsNow, k, sig)
-}
+func (d *desk) kmemAssistWait() (kind, sig string) { return d.assistWait(d.assist()) }
+
+func (d *desk) kmemBadgeNow() []badgeItem { return d.assistNeeds(d.assist()) }
 
 // updateKmemBadge recomputes the bubble from the needs, the assistant and the
-// seen records (UI thread). Records of items that are gone are dropped, so an
-// item that comes back is new again; only once kmem has answered.
-func (d *desk) updateKmemBadge() {
-	if d.kmemBubble == nil {
-		return
-	}
-	items := d.kmemBadgeNow()
-	seen := d.loadKmemSeen()
-	if d.kmemGot {
-		live := map[string]bool{}
-		for _, it := range items {
-			live[it.Key] = true
-		}
-		drop := false
-		for k := range seen {
-			if !live[k] {
-				delete(seen, k)
-				drop = true
-			}
-		}
-		if drop {
-			d.saveKmemSeen(seen)
-		}
-	}
-	if !d.kmemBadgeOn() {
-		d.kmemBubble.set(0)
-		return
-	}
-	d.kmemBubble.set(len(unreadBadgeItems(items, seen)))
-}
+// seen records (UI thread).
+func (d *desk) updateKmemBadge() { d.updateAssistBadge(d.assist()) }
 
 // markKmemSeen records that the items were shown in the kmem window (UI
-// thread). all (Mark all read) marks every shown item; a pending question still badges until answered.
-func (d *desk) markKmemSeen(all bool) {
-	items := d.kmemBadgeNow()
-	seen := d.loadKmemSeen()
-	now := kmemNow()
-	changed := false
-	for _, it := range items {
-		old, ok := seen[it.Key]
-		if ok && old.Sig == it.Sig {
-			continue // already recorded: keep its first seen time
-		}
-		seen[it.Key] = seenRec{Sig: it.Sig, At: now}
-		changed = true
-	}
-	if changed {
-		d.saveKmemSeen(seen)
-	}
-	d.updateKmemBadge()
-}
+// thread). all (Mark all read) marks every shown item; a pending question
+// still badges until answered.
+func (d *desk) markKmemSeen(all bool) { d.markAssistSeen(d.assist(), all) }
 
 // kmemUnread: how many items would badge now.
-func (d *desk) kmemUnread() int {
-	return len(unreadBadgeItems(d.kmemBadgeNow(), d.loadKmemSeen()))
-}
+func (d *desk) kmemUnread() int { return d.assistUnread(d.assist()) }
 
 // kmemAssistIs: s is the kmem assistant's session.
-func (d *desk) kmemAssistIs(s *deskSession) bool {
-	return s != nil && d.assist().s == s
-}
+func (d *desk) kmemAssistIs(s *deskSession) bool { return d.assistIs(d.assist(), s) }
