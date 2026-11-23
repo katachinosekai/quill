@@ -86,6 +86,7 @@ type kmemAssist struct {
 	run         int          // bumped on every probe and stop: stale lifecycle callbacks drop out
 	tickGen     int
 	reason      string
+	button      string    // the label of the button after the reason line ("" if none)
 	userStopped bool      // the user pressed Stop assistant: opening the window doesn't start it
 	untilSaved  bool      // the user chose to keep it running until it saves
 	rebootNext  bool      // Restart (new model setting): start again once stopped
@@ -200,7 +201,7 @@ func (d *desk) kmemAssistStoppedReason(a *kmemAssist) {
 
 // kmemAssistReason shows one line instead of the chat (no assistant).
 func (d *desk) kmemAssistReason(a *kmemAssist, reason string) {
-	a.reason = reason
+	a.reason, a.button = reason, ""
 	if a.w == nil {
 		return
 	}
@@ -209,7 +210,7 @@ func (d *desk) kmemAssistReason(a *kmemAssist, reason string) {
 }
 
 func (d *desk) kmemAssistReasonWith(a *kmemAssist, reason, button string, tap func()) {
-	a.reason = reason
+	a.reason, a.button = reason, button
 	if a.w == nil {
 		return
 	}
@@ -225,7 +226,7 @@ const kmemAssistOffReason = "The kmem assistant is off (Settings → General →
 // reason line.
 func (d *desk) kmemAssistProbe(a *kmemAssist) {
 	a.state = asProbing
-	a.reason = ""
+	a.reason, a.button = "", ""
 	a.run++
 	run := a.run
 	model := d.kmemAssistModel()
@@ -401,7 +402,7 @@ func (d *desk) kmemAssistAttach(a *kmemAssist) {
 	if w == nil || s == nil {
 		return
 	}
-	a.reason = ""
+	a.reason, a.button = "", ""
 	if a.chat == nil {
 		a.chat = d.kmemAssistChat(a)
 	}

@@ -51,6 +51,9 @@ type phoneAPI struct {
 	lastSet  string
 
 	lan *lanMem // home-network unlock (phoneunlock.go)
+
+	kmem     phoneKmem // /phone/kmem/* reads (phonekmem.go)
+	lastKmem string    // the last "kmem" stream change
 }
 
 type apiChange struct {
@@ -110,6 +113,8 @@ func (a *phoneAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handoffs(w)
 	case r.Method == http.MethodGet && path == "handoffs/slug":
 		a.handoffSlug(w, r)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "kmem/"):
+		a.kmemRoute(w, r, path)
 	case r.Method == http.MethodGet && path == "stream":
 		a.stream(w, r)
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "session" && parts[2] == "items":
@@ -162,7 +167,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 	}
 	phone := folders.PhoneID(r)
 	conn, snap := lanConnOf(r), lanSnapshot()
-	var ctl, unlock, lan bool
+	var ctl, unlock, lan, kmemOn bool
 	a.ui(func() {
 		list := a.d.phones()
 		changed := false
@@ -191,8 +196,10 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		}
 		ctl = a.control(phone)
 		lan = a.lanHello(phone, conn, snap)
+		kmemOn = a.d.kmemOn()
 	})
-	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan})
+	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan,
+		"kmem": map[string]any{"api": kmemPhoneAPI, "on": kmemOn}})
 }
 
 type apiSession struct {
@@ -522,8 +529,14 @@ func (a *phoneAPI) scan() {
 			changes = append(changes, map[string]any{"type": "session", "session": json.RawMessage(js)})
 		}
 	}
+	// The kmem assistant is hidden but keeps its tracker: its rev and epoch
+	// go into the "kmem" stream change (docs/design/kmem-android.md §4.3).
+	assistID := a.kmemAssistTrackID()
+	if s := d.sessions[assistID]; s != nil && s.loaded {
+		a.track(s)
+	}
 	for id := range a.tracks {
-		if d.sessions[id] == nil || d.hiddenID(id, "") {
+		if d.sessions[id] == nil || d.hiddenID(id, "") && id != assistID {
 			delete(a.tracks, id)
 		}
 	}
@@ -549,6 +562,9 @@ func (a *phoneAPI) scan() {
 		if !first {
 			changes = append(changes, map[string]any{"type": "settings", "settings": json.RawMessage(sb)})
 		}
+	}
+	if c := a.kmemChange(); c != nil {
+		changes = append(changes, c)
 	}
 	for _, p := range d.phones() {
 		c := a.control(p.ID)

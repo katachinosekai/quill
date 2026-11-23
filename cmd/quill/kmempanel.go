@@ -124,6 +124,7 @@ type kmemPanelData struct {
 	needs    kmemNeeds
 	rows     []topicTask       // tasks with their checkpoints
 	status   map[string]string // top-level topic -> status fact text
+	read     time.Time         // when it was read
 }
 
 type kmemHandoffRow struct {
@@ -195,34 +196,8 @@ func (p *kmemPanel) reload() {
 	d := p.d
 	d.reconcileKmemNames(true, nil) // tab links follow handoffs renamed outside Quill Desktop
 	go func() {
-		var brief struct {
-			Brief string `json:"brief"`
-		}
-		d.kmemJSON(&brief, "brief")
-		topicsOut, _ := d.runKmem("kmem", "topics")
-		var hs struct {
-			Handoffs []kmemHandoffRow `json:"handoffs"`
-		}
-		d.kmemJSON(&hs, "handoff", "list")
-		var ts struct {
-			Tasks []kmemTask `json:"tasks"`
-		}
-		d.kmemJSON(&ts, "task", "list")
-		var tr struct {
-			Tasks []topicTask `json:"tasks"`
-		}
-		d.kmemJSON(&tr, "task", "list")
-		needs := parseKmemNeeds(brief.Brief, ts.Tasks)
-		needs.RolloutWait = d.readRolloutWait()
-		data := &kmemPanelData{brief: brief.Brief, topics: parseTopics(topicsOut), handoffs: hs.Handoffs, tasks: ts.Tasks, needs: needs, rows: tr.Tasks, status: map[string]string{}}
-		// Assumption (kmem 1.8.1 has no status facts yet): a topic's status
-		// is the current fact under "TOPIC/status", read when that topic exists.
-		for _, t := range data.topics {
-			if top := topLevel(t.Name); t.Name == top+"/status" {
-				out, _ := d.runKmem("kmem", "get", t.Name)
-				data.status[top] = statusText(out)
-			}
-		}
+		data, _ := d.readKmemPanelData(true)
+		needs := data.needs
 		d.do(func() {
 			d.setKmemNeeds(needs)
 			p.data = data
@@ -232,6 +207,42 @@ func (p *kmemPanel) reload() {
 			p.filterTopics("")
 		})
 	}()
+}
+
+// readKmemPanelData reads what the kmem window shows (background goroutine
+// only); the phone API's /phone/kmem/* reads use it too. ok is false when
+// kmem didn't answer `kmem brief --json`. withStatus also reads each
+// "TOPIC/status" fact (the Topics tab).
+func (d *desk) readKmemPanelData(withStatus bool) (*kmemPanelData, bool) {
+	var brief struct {
+		Brief string `json:"brief"`
+	}
+	ok := d.kmemJSON(&brief, "brief")
+	topicsOut, _ := d.runKmem("kmem", "topics")
+	var hs struct {
+		Handoffs []kmemHandoffRow `json:"handoffs"`
+	}
+	d.kmemJSON(&hs, "handoff", "list")
+	var tr struct {
+		Tasks []topicTask `json:"tasks"`
+	}
+	d.kmemJSON(&tr, "task", "list")
+	tasks := make([]kmemTask, len(tr.Tasks))
+	for i, t := range tr.Tasks {
+		tasks[i] = t.kmemTask
+	}
+	needs := parseKmemNeeds(brief.Brief, tasks)
+	needs.RolloutWait = d.readRolloutWait()
+	data := &kmemPanelData{brief: brief.Brief, topics: parseTopics(topicsOut), handoffs: hs.Handoffs, tasks: tasks, needs: needs, rows: tr.Tasks, status: map[string]string{}, read: time.Now()}
+	// Assumption (kmem 1.8.1 has no status facts yet): a topic's status
+	// is the current fact under "TOPIC/status", read when that topic exists.
+	for _, t := range data.topics {
+		if top := topLevel(t.Name); withStatus && t.Name == top+"/status" {
+			out, _ := d.runKmem("kmem", "get", t.Name)
+			data.status[top] = statusText(out)
+		}
+	}
+	return data, ok
 }
 
 // render fills Overview, Handoffs and Tasks from the last reload (again when

@@ -39,6 +39,7 @@ type kmemTask struct {
 	Title  string  `json:"title"`
 	Topic  string  `json:"topic"`
 	Owner  *string `json:"owner"`
+	Line   string  `json:"line"` // kmem's text line; its "<- owner [state]" tells the claim state
 }
 
 // kmemNeeds is what kmem waits on the user for.
