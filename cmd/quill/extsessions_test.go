@@ -151,7 +151,13 @@ func TestExternalCache(t *testing.T) {
 			h.d.projectGroups(nil)
 		}
 	})
-	h.eventually("first load", func() bool { return n.Load() == 1 })
+	// n counts the kmem call, which returns before loadExtSessions stores the
+	// list and clears busy; back-dating the cache earlier would be overwritten.
+	h.eventually("first load", func() bool {
+		extCache.mu.Lock()
+		defer extCache.mu.Unlock()
+		return n.Load() == 1 && extCache.loaded && !extCache.busy
+	})
 	h.ui(func() {
 		for i := 0; i < 5; i++ {
 			h.d.projectGroups(nil)
@@ -165,6 +171,11 @@ func TestExternalCache(t *testing.T) {
 	extCache.mu.Unlock()
 	h.ui(func() { h.d.projectGroups(nil) })
 	h.eventually("reload after 30 s", func() bool { return n.Load() == 2 })
+	h.eventually("reload stored", func() bool {
+		extCache.mu.Lock()
+		defer extCache.mu.Unlock()
+		return !extCache.busy
+	})
 	h.ui(func() { h.d.refreshExtSessions(true) })
 	h.eventually("forced reload", func() bool { return n.Load() == 3 })
 }
