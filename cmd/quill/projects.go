@@ -24,6 +24,31 @@ type kmemSessionCfg struct {
 	As      string `json:"as"`
 	Topic   string `json:"topic"`
 	Project string `json:"project"`
+	// Topic labels (assumed K1, docs/design/topic-tabs.md §3.1/§4): a label
+	// keyed by a top-level topic with a scope marks a topic coordinator.
+	Title string    `json:"title"`
+	Scope scopeList `json:"scope"`
+}
+
+// scopeList reads a scope written as a JSON list or as "a,b,c".
+type scopeList []string
+
+func (l *scopeList) UnmarshalJSON(b []byte) error {
+	var list []string
+	if json.Unmarshal(b, &list) != nil {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return nil // an unknown shape is no scope, not a broken config
+		}
+		list = strings.Split(s, ",")
+	}
+	*l = nil
+	for _, t := range list {
+		if t = strings.TrimSpace(t); t != "" {
+			*l = append(*l, t)
+		}
+	}
+	return nil
 }
 
 var (
@@ -96,6 +121,11 @@ func (d *desk) projectOf(id string) string {
 	}
 	if p := d.org.Projects[d.projectKeyFor(id)]; p != "" {
 		return p
+	}
+	if k := d.topicOf(id); k != "" { // a topic coordinator groups under its topic
+		if t, ok := cachedTopic(k); ok {
+			return t.Title
+		}
 	}
 	if c, ok := kmemSessions()[d.org.Kmem[id]]; ok {
 		if c.Project != "" {
@@ -235,6 +265,17 @@ func (d *desk) projectGroups(entries []sideEntry) []projectGroup {
 	tabPos := map[string]int{}
 	for i, t := range d.tabs {
 		tabPos[t] = i
+	}
+	// kmem mode: topic coordinators group under their topic; other live
+	// sessions (old names until merged, scratch) stay under their project
+	// with a one-time merge notice (topic-tabs decision 14).
+	if d.kmemMemory() {
+		d.refreshTopics()
+		if topicsLoaded() {
+			for _, e := range entries {
+				d.noteLegacy(e.id)
+			}
+		}
 	}
 	by := map[string][]sideEntry{}
 	for _, e := range entries {

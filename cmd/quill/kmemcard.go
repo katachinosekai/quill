@@ -29,7 +29,7 @@ func (d *desk) handoffOwner(name string, self *deskSession) *deskSession {
 	return nil
 }
 
-// ownerLabel: where a live handoff runs, for resume lists.
+// ownerLabel: where a live handoff or topic runs, for the start card.
 func (d *desk) ownerLabel(owner *deskSession) string {
 	if isHiddenSession(owner) {
 		return "live in the kmem window"
@@ -38,62 +38,72 @@ func (d *desk) ownerLabel(owner *deskSession) string {
 	return "open in tab " + title
 }
 
+// kmemCard is a new tab's "Open a topic" card (docs/design/topic-tabs.md
+// §3.2): pick a top-level kmem topic or name a new one; the tab's title,
+// kmem name and fresh session follow the topic. A live topic switches to its
+// tab instead.
 func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
-	head := canvas.NewText("Start this session", colText)
+	head := canvas.NewText("Open a topic", colText)
 	head.TextSize = 16
 	head.TextStyle.Bold = true
-	sub := mutedText("Resume a kmem handoff, or name a new one. Anything you type now waits until you pick.", fontMeta)
-	resume := container.NewVBox(mutedText("Loading handoffs...", fontMeta))
+	sub := mutedText("Each topic has one coordinator session that starts fresh from kmem. Anything you type now waits until you pick.", fontMeta)
+	list := container.NewVBox(mutedText("Loading topics...", fontMeta))
 	name := widget.NewEntry()
-	name.SetPlaceHolder("Name, e.g. Quill Android")
+	name.SetPlaceHolder("New topic, e.g. Garden planner")
 	preview := mutedText("", fontMeta)
 	name.OnChanged = func(t string) {
 		if strings.TrimSpace(t) == "" {
 			setText(preview, "")
 			return
 		}
-		d.hsMu.Lock()
-		known := d.lastHandoffs
-		d.hsMu.Unlock()
-		setText(preview, "kmem name: "+kmemSlug(t, d.kmemTaken(known)))
+		slug := kmemSlug(t, func(string) bool { return false })
+		if _, ok := cachedTopic(slug); ok {
+			setText(preview, "kmem topic: "+slug+" (exists; opens it)")
+			return
+		}
+		setText(preview, "kmem topic: "+slug)
 	}
-	start := widget.NewButton("Start new", func() { d.pickNew(s, name.Text) })
+	start := widget.NewButton("Open", func() { d.pickNewTopic(s, name.Text) })
 	start.Importance = widget.HighImportance
-	name.OnSubmitted = func(string) { d.pickNew(s, name.Text) }
+	name.OnSubmitted = func(string) { d.pickNewTopic(s, name.Text) }
 	newRow := container.NewBorder(nil, nil, nil, start, name)
-	body := container.NewVBox(head, sub, widget.NewSeparator(), mutedText("Resume", fontMeta), resume,
-		widget.NewSeparator(), mutedText("New", fontMeta), newRow, preview)
+	scroll := container.NewVScroll(list) // there can be dozens of top-level topics
+	scroll.SetMinSize(fyne.NewSize(0, list.MinSize().Height))
+	body := container.NewVBox(head, sub, widget.NewSeparator(), mutedText("Topics", fontMeta), scroll,
+		widget.NewSeparator(), mutedText("New topic…", fontMeta), newRow, preview)
 	bgr := canvas.NewRectangle(colCard)
 	bgr.CornerRadius = 14
 	card := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(12, 12, 16, 16), body))
 	go func() {
-		hs := d.kmemHandoffs()
+		ts := d.loadTopics()
 		d.do(func() {
 			var rows []fyne.CanvasObject
-			for _, h := range hs {
-				h := h
-				label := h.Name + " · saved " + h.Saved.Local().Format("Jan 2 15:04")
+			for _, t := range ts {
+				t := t
 				var b *widget.Button
-				if owner := d.handoffOwner(h.Name, s); owner != nil {
-					b = widget.NewButton(label+" · "+d.ownerLabel(owner), func() { d.open(owner.id) })
+				if owner := d.topicOwner(t.Slug, s); owner != nil {
+					b = widget.NewButton(t.Title+" · "+d.ownerLabel(owner), func() { d.open(owner.id) })
 					b.Importance = widget.LowImportance
 				} else {
-					b = widget.NewButton(label, func() { d.pickResume(s, h.Name) })
+					b = widget.NewButton(topicButtonLabel(t), func() { d.pickTopic(s, t, false) })
 				}
 				b.Alignment = widget.ButtonAlignLeading
 				rows = append(rows, b)
 			}
 			if len(rows) == 0 {
-				rows = append(rows, mutedText("No saved handoffs yet.", fontMeta))
+				rows = append(rows, mutedText("No kmem topics yet: name a new one below.", fontMeta))
 			}
-			resume.Objects = rows
-			resume.Refresh()
+			list.Objects = rows
+			list.Refresh()
+			scroll.SetMinSize(fyne.NewSize(0, min(list.MinSize().Height, 380)))
 			relayoutTree(card)
 		})
 	}()
 	return container.NewVBox(padTop(60), container.NewCenter(sized(560, 0, card)))
 }
 
+// pickResume / pickNew: the handoff start paths, still used by the phone API
+// and the kmem window until they move to topics (topic-tabs §8 D, G).
 func (d *desk) pickResume(s *deskSession, name string) {
 	if !s.pickPending {
 		return

@@ -13,6 +13,8 @@ import (
 
 func TestNewTabKmemCard(t *testing.T) {
 	h := newHarness(t)
+	resetTopicCache()
+	t.Cleanup(resetTopicCache)
 	h.d.kmemOff = false
 	saved := time.Now().Add(-time.Hour).Format(time.RFC3339)
 	var mu sync.Mutex
@@ -22,6 +24,8 @@ func TestNewTabKmemCard(t *testing.T) {
 		calls = append(calls, prog+" "+strings.Join(args, " "))
 		mu.Unlock()
 		switch {
+		case prog == "kmem" && len(args) > 0 && args[0] == "topics":
+			return "quill/core  2 facts, 1 KB\nnetworking/open  1 facts, 1 KB\n", nil
 		case prog == "kmem" && len(args) > 1 && args[0] == "handoff" && args[1] == "list":
 			return "quill  3 items, saved " + saved + "\nnetworking  2 items, saved " + saved + "\n", nil
 		case prog == "kmem" && len(args) > 2 && args[0] == "handoff" && args[1] == "rename" && args[2] == "my-work":
@@ -40,7 +44,7 @@ func TestNewTabKmemCard(t *testing.T) {
 		h.d.newSessionDialog()
 		s = h.d.current
 		if !s.pickPending {
-			t.Fatal("a new tab asks resume or new")
+			t.Fatal("a new tab asks for a topic")
 		}
 		h.d.send("hello first")
 		if len(s.queue) != 1 || len(s.conv.Items) != 0 {
@@ -48,17 +52,17 @@ func TestNewTabKmemCard(t *testing.T) {
 		}
 	})
 	var labels []string
-	h.eventually("handoff rows", func() bool {
+	h.eventually("topic rows", func() bool {
 		labels = nil
 		deepWalk(h.d.chat.box, func(o fyne.CanvasObject) {
 			if b, ok := o.(*widget.Button); ok {
 				labels = append(labels, b.Text)
 			}
 		})
-		return strings.Contains(strings.Join(labels, "|"), "quill · saved")
+		return strings.Contains(strings.Join(labels, "|"), "Quill")
 	})
 	joined := strings.Join(labels, "|")
-	if !strings.Contains(joined, "networking · saved") || !strings.Contains(joined, "open in tab") || !strings.Contains(joined, "Start new") || strings.Contains(joined, "No kmem") {
+	if !strings.Contains(joined, "Networking · open in tab") || !strings.Contains(joined, "Open") || strings.Contains(joined, "saved") {
 		t.Fatalf("card buttons: %v", labels)
 	}
 	h.ui(func() {
