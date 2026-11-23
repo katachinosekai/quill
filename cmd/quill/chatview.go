@@ -804,7 +804,7 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 				if _, src := chat.SplitSources(it.Text); src != "" {
 					parts = append(parts, msgText(v.markdownBlocks(src)))
 				}
-				return container.NewVBox(parts...)
+				return stackBlocks(parts...)
 			}
 		}
 		md := msgText(v.markdownBlocks(it.Text))
@@ -998,7 +998,7 @@ func blocks(segs []widget.RichTextSegment, center bool) fyne.CanvasObject {
 	if len(parts) == 1 {
 		return parts[0]
 	}
-	return container.NewVBox(parts...)
+	return stackBlocks(parts...)
 }
 
 func listNaturalWidth(l *widget.ListSegment, depth int) float32 {

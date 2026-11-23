@@ -218,3 +218,33 @@ func TestColumnFollowsResize(t *testing.T) {
 		t.Fatalf("at 1200: width %v x %v calls %d", o.Size().Width, o.Position().X, calls)
 	}
 }
+
+// A wrapped RichText reports its real MinSize only after it is resized to its
+// column (see settledVBox), so a column stacked in a VBox must not leave the
+// next block over its last wrapped lines, at any chat width, on the first
+// layout and after every resize.
+func TestColumnsStackedWithoutOverlap(t *testing.T) {
+	test.NewTempApp(t)
+	para := func() *widget.RichText {
+		r := widget.NewRichTextFromMarkdown("Quill Desktop lays this paragraph out in a column that scales with the chat, so at narrow widths it wraps onto many lines and the block below it must move down with it.")
+		r.Wrapping = fyne.TextWrapWord
+		return r
+	}
+	for _, widths := range [][]float32{{900, 500, 300, 700}, {320, 1200, 400}, {600}} {
+		cols := []fyne.CanvasObject{
+			newColumn(true, func(avail float32) float32 { return avail / 2 }, para()),
+			newColumn(true, func(avail float32) float32 { return avail * 0.4 }, para()),
+			newColumn(true, func(avail float32) float32 { return avail * 0.6 }, para()),
+		}
+		box := stackBlocks(cols...)
+		for _, w := range widths {
+			box.Resize(fyne.NewSize(w, 2000))
+			for i := 0; i+1 < len(cols); i++ {
+				bottom := cols[i].Position().Y + cols[i].MinSize().Height
+				if next := cols[i+1].Position().Y; next < bottom-0.5 {
+					t.Fatalf("widths %v at %v: block %d ends at %v but block %d starts at %v", widths, w, i, bottom, i+1, next)
+				}
+			}
+		}
+	}
+}

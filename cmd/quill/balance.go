@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -138,6 +139,15 @@ type colLayout struct {
 	// new width, so their container needs one more pass.
 	onWidth func()
 	laidW   float32
+}
+
+// stackBlocks stacks message blocks (columns and wrapped text) top to bottom.
+// A column's wrapped text reports its real height only after the column is
+// laid out at its width, so a plain VBox placed the next block by the height
+// from before the wrap and drew it over the column's last lines; settledVBox
+// lays out again when a height changed.
+func stackBlocks(objs ...fyne.CanvasObject) *fyne.Container {
+	return container.New(settledVBox{}, objs...)
 }
 
 func newColumn(center bool, width func(avail float32) float32, o fyne.CanvasObject) *fyne.Container {

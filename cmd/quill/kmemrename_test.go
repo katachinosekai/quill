@@ -170,7 +170,13 @@ func TestKmemResumeFollowsRenamedName(t *testing.T) {
 		h.d.org.Kmem[other.id] = "unsaved"
 		h.d.reconcileKmemNames(true, nil)
 	})
-	h.eventually("asked once", func() bool { return k.asked("handoff resolve unsaved") == 1 })
+	// Asked is not applied: the scan's result reaches kmemNoHandoff on the UI
+	// thread afterwards, and a minute check started before that (under load)
+	// legitimately asks again. Wait for the applied result.
+	h.eventually("asked once and the answer applied", func() bool {
+		// eventually already holds the UI lock
+		return h.d.kmemNoHandoff["unsaved"] && k.asked("handoff resolve unsaved") == 1
+	})
 	ran := false
 	h.ui(func() { h.d.reconcileKmemNames(false, func(kmemRenameScan) { ran = true }) })
 	h.eventually("the minute check ran", func() bool { return ran })
