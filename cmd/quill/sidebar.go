@@ -62,7 +62,7 @@ func (d *desk) build() fyne.CanvasObject {
 		d.sideOff = true
 		d.syncToggle()
 	}
-	return container.NewStack(newBgTap(d.clearSelections), d.root)
+	return container.NewStack(newBgTap(d.clearSelections), d.root, d.tipLayer)
 }
 
 func (d *desk) syncToggle() {

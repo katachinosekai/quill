@@ -10,6 +10,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -191,6 +192,7 @@ func TestAgentTipSteady(t *testing.T) {
 	g := chat.AgentUse{ID: "a1", Name: "Fix join stall", Type: "Explore", LastTool: "Read", Tokens: 900, Started: start, Status: "running"}
 	cur := &g
 	chip := newAgentChip("● Fix join stall", colIdle, nil, func() string { return agentTip(*cur, start.Add(90*time.Second)) })
+	chip.host = h.d.agentStrip.tips
 	h.ui(func() {
 		h.d.agentStrip.row.Objects = []fyne.CanvasObject{chip}
 		chip.MouseIn(nil)
@@ -198,14 +200,14 @@ func TestAgentTipSteady(t *testing.T) {
 	if chip.host.pop == nil {
 		t.Skip("no canvas for the chip in this harness")
 	}
-	pop, size := chip.host.pop, chip.host.pop.Content.MinSize()
+	pop, size := chip.host.pop, chip.host.pop.MinSize()
 	h.ui(func() {
 		g.Tokens, g.LastTool = 123456, "Edit"
 		cur = &g
 		h.d.agentStrip.sync()
 	})
-	if chip.host.pop != pop || chip.host.pop.Content.MinSize() != size {
-		t.Fatalf("tooltip rebuilt or resized: %v -> %v", size, chip.host.pop.Content.MinSize())
+	if chip.host.pop != pop || chip.host.pop.MinSize() != size {
+		t.Fatalf("tooltip rebuilt or resized: %v -> %v", size, chip.host.pop.MinSize())
 	}
 	found := false
 	for _, l := range chip.host.lines {
@@ -218,7 +220,7 @@ func TestAgentTipSteady(t *testing.T) {
 
 // hoverChips: two chips sharing one tooltip host, placed in the strip row.
 func hoverChips(h *harness) (*agentChip, *agentChip, *agentTipHost) {
-	host := newAgentTipHost()
+	host := newAgentTipHost(h.d.tipLayer)
 	host.do = func(f func()) { f() }
 	host.grace = 40 * time.Millisecond
 	mk := func(name string) *agentChip {
@@ -230,6 +232,8 @@ func hoverChips(h *harness) (*agentChip, *agentChip, *agentTipHost) {
 	h.ui(func() {
 		h.d.agentStrip.row.Objects = []fyne.CanvasObject{a, b}
 		h.d.agentStrip.row.Refresh()
+		h.d.agentStrip.root.Show() // hit-testing needs a visible strip
+		relayoutTree(h.w.Content())
 	})
 	return a, b, host
 }
@@ -245,7 +249,7 @@ func TestAgentTipAnchoredToChip(t *testing.T) {
 			t.Skip("no canvas for the chip in this harness")
 		}
 		p := fyne.CurrentApp().Driver().AbsolutePositionForObject(a)
-		pos, sz := host.pop.Position(), host.pop.Size()
+		pos, sz := fyne.CurrentApp().Driver().AbsolutePositionForObject(host.pop), host.pop.Size()
 		if pos.Y != p.Y+a.Size().Height {
 			t.Fatalf("tooltip y %v, chip bottom %v", pos.Y, p.Y+a.Size().Height)
 		}
@@ -322,4 +326,81 @@ func TestAgentTipSwitchChips(t *testing.T) {
 			t.Fatal("the old chip's MouseOut hid the swapped tooltip")
 		}
 	})
+}
+
+// The real cause of the open/close loop: with the tooltip in a Fyne overlay,
+// hover goes to the overlay only, so the chip and the tooltip never saw the
+// pointer. Now the tooltip is a plain layer object; moving the pointer along
+// the chip, through the gap and along the tooltip opens it once and closes it
+// once, after the pointer leaves both.
+func TestAgentTipPointerPath(t *testing.T) {
+	h := newHarness(t)
+	a, _, host := hoverChips(h)
+	var opens, closes int
+	var last *tipHover
+	check := func() {
+		h.ui(func() {
+			if host.pop != last {
+				if last != nil {
+					closes++
+				}
+				if host.pop != nil {
+					opens++
+				}
+				last = host.pop
+			}
+		})
+	}
+	cv := h.w.Canvas()
+	var chipPos fyne.Position
+	var csz fyne.Size
+	h.ui(func() {
+		chipPos = fyne.CurrentApp().Driver().AbsolutePositionForObject(a)
+		csz = a.Size()
+	})
+	if csz.Width == 0 {
+		t.Skip("chip not laid out in this harness")
+	}
+	move := func(p fyne.Position) {
+		h.ui(func() { test.MoveMouse(cv, p) })
+		check()
+	}
+	y := chipPos.Y + csz.Height/2
+	// along the chip
+	for x := chipPos.X + 2; x < chipPos.X+csz.Width-2; x += 3 {
+		move(fyne.NewPos(x, y))
+	}
+	if opens != 1 || closes != 0 {
+		t.Fatalf("on the chip: %d opens, %d closes", opens, closes)
+	}
+	if last == nil {
+		t.Fatal("tooltip not open on the chip")
+	}
+	var pos fyne.Position
+	var size fyne.Size
+	h.ui(func() {
+		pos = fyne.CurrentApp().Driver().AbsolutePositionForObject(host.pop)
+		size = host.pop.Size()
+	})
+	// down through the gap (if any) and along the tooltip, slower than the grace is long in total
+	for yy := y; yy < pos.Y+size.Height-2; yy += 2 {
+		move(fyne.NewPos(chipPos.X+csz.Width/2, yy))
+	}
+	for x := pos.X + 2; x < pos.X+size.Width-2; x += 4 {
+		move(fyne.NewPos(x, pos.Y+size.Height/2))
+		time.Sleep(2 * time.Millisecond)
+	}
+	// resting on the tooltip longer than the grace keeps it open
+	time.Sleep(2 * host.grace)
+	check()
+	if opens != 1 || closes != 0 {
+		t.Fatalf("on the tooltip: %d opens, %d closes", opens, closes)
+	}
+	// away from both: one close
+	move(fyne.NewPos(cv.Size().Width-2, cv.Size().Height-2))
+	time.Sleep(3 * host.grace)
+	check()
+	if opens != 1 || closes != 1 {
+		t.Fatalf("after leaving: %d opens, %d closes", opens, closes)
+	}
 }

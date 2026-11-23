@@ -51,7 +51,10 @@ type agentStrip struct {
 }
 
 func newAgentStrip(d *desk) *agentStrip {
-	a := &agentStrip{d: d, now: time.Now, tips: newAgentTipHost()}
+	if d.tipLayer == nil {
+		d.tipLayer = container.NewWithoutLayout()
+	}
+	a := &agentStrip{d: d, now: time.Now, tips: newAgentTipHost(d.tipLayer)}
 	a.row = container.NewHBox()
 	// The chat column's width and shift (chatview.go), so the strip sits over
 	// the chat: chips centred with centring on, else on its left edge.
@@ -313,7 +316,7 @@ type agentChip struct {
 func newAgentChip(text string, col color.Color, onTap func(fyne.CanvasObject), tip func() string) *agentChip {
 	t := canvas.NewText(text, col)
 	t.TextSize = fontMeta
-	c := &agentChip{text: t, col: col, onTap: onTap, tip: tip, host: newAgentTipHost()}
+	c := &agentChip{text: t, col: col, onTap: onTap, tip: tip, host: newAgentTipHost(nil)}
 	c.ExtendBaseWidget(c)
 	return c
 }
@@ -367,11 +370,21 @@ func tipLines(s string) []string {
 // the next chip) do not flicker it.
 const agentTipGrace = 150 * time.Millisecond
 
-// agentTipHost: the one tooltip popup of a strip. It is anchored to its owner
-// chip (just below it, centred on it), hides after agentTipGrace, stays while
-// the pointer is on it, and moves to another chip without a new fade.
+// agentTipHost: the one tooltip of a strip. It is anchored to its owner chip
+// (just below it, centred on it), hides after agentTipGrace, stays while the
+// pointer is on it, and moves to another chip without a new fade.
+//
+// It is NOT a widget.PopUp: Fyne dispatches hover events only to the top
+// overlay while one is up, so with a popup the chip (and the strip) get no
+// hover at all and a full-canvas overlay container takes over; moving the
+// pointer along the tooltip or back to the chip then counts as "left
+// everything", the tooltip hides after the grace, the chip is hovered again
+// and reopens it: an open/close loop. The tooltip is instead a child of
+// layer, a plain object layer on top of the window content, where hover
+// reaches the chip and the tooltip like any other widgets.
 type agentTipHost struct {
-	pop   *widget.PopUp
+	layer *fyne.Container // overlay-free tooltip layer (desk.tipLayer)
+	pop   *tipHover
 	lines []*canvas.Text // the open tooltip's lines, updated in place
 	owner *agentChip
 	timer *time.Timer
@@ -379,21 +392,34 @@ type agentTipHost struct {
 	do    func(func()) // runs on the UI thread
 }
 
-func newAgentTipHost() *agentTipHost {
-	return &agentTipHost{grace: agentTipGrace, do: fyne.Do}
+func newAgentTipHost(layer *fyne.Container) *agentTipHost {
+	return &agentTipHost{layer: layer, grace: agentTipGrace, do: fyne.Do}
 }
 
-// tipHover reports the pointer entering or leaving the tooltip itself.
+// tipHover is the tooltip box. It is hoverable so that being on it keeps it
+// open (it is not tappable: clicks fall through to what is below).
 type tipHover struct {
 	widget.BaseWidget
-	content fyne.CanvasObject
-	h       *agentTipHost
+	box *fyne.Container // the lines, padded; replaced when the owner changes
+	h   *agentTipHost
 }
 
-func (t *tipHover) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimpleRenderer(t.content) }
-func (t *tipHover) MouseIn(*desktop.MouseEvent)         { t.h.keep() }
-func (t *tipHover) MouseMoved(*desktop.MouseEvent)      { t.h.keep() }
-func (t *tipHover) MouseOut()                           { t.h.leave() }
+func newTipHover(h *agentTipHost, content fyne.CanvasObject) *tipHover {
+	t := &tipHover{h: h, box: container.NewPadded(content)}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+func (t *tipHover) CreateRenderer() fyne.WidgetRenderer {
+	bg := canvas.NewRectangle(theme.Color(theme.ColorNameOverlayBackground))
+	bg.StrokeColor = theme.Color(theme.ColorNameInputBorder)
+	bg.StrokeWidth = 1
+	bg.CornerRadius = theme.InputRadiusSize()
+	return widget.NewSimpleRenderer(container.NewStack(bg, t.box))
+}
+func (t *tipHover) MouseIn(*desktop.MouseEvent)    { t.h.keep() }
+func (t *tipHover) MouseMoved(*desktop.MouseEvent) { t.h.keep() }
+func (t *tipHover) MouseOut()                      { t.h.leave() }
 
 // keep cancels a pending hide.
 func (h *agentTipHost) keep() {
@@ -423,7 +449,7 @@ func (h *agentTipHost) leave() {
 func (h *agentTipHost) hideNow() {
 	h.keep()
 	if h.pop != nil {
-		h.pop.Hide()
+		h.layer.Remove(h.pop)
 		h.pop = nil
 		h.lines = nil
 		h.owner = nil
@@ -431,11 +457,11 @@ func (h *agentTipHost) hideNow() {
 }
 
 // show opens the tooltip for c, or, when one is open for another chip, moves
-// and refills the same popup (no new fade).
+// and refills the same tooltip (no new fade).
 func (h *agentTipHost) show(c *agentChip) {
 	h.keep()
 	cv := fyne.CurrentApp().Driver().CanvasForObject(c)
-	if c.tip == nil || cv == nil || (h.pop != nil && h.owner == c) {
+	if c.tip == nil || cv == nil || h.layer == nil || (h.pop != nil && h.owner == c) {
 		return
 	}
 	lines := tipLines(c.tip())
@@ -461,19 +487,17 @@ func (h *agentTipHost) show(c *agentChip) {
 		h.lines = append(h.lines, t)
 		objs[i] = t
 	}
-	body := &tipHover{h: h, content: container.NewPadded(container.New(&agentTipLayout{size: fyne.NewSize(w, ht)}, objs...))}
-	body.ExtendBaseWidget(body)
+	body := container.New(&agentTipLayout{size: fyne.NewSize(w, ht)}, objs...)
 	h.owner = c
 	if swap {
-		h.pop.Content = body
-		h.pop.Resize(h.pop.MinSize())
-		h.pop.Move(tipPos(c, h.pop.Size(), cv.Size()))
-		h.pop.Refresh()
+		h.pop.box.Objects = []fyne.CanvasObject{body}
+		h.pop.box.Refresh()
+		h.place(c)
 		return
 	}
-	h.pop = widget.NewPopUp(body, cv)
-	h.pop.Resize(h.pop.MinSize())
-	h.pop.ShowAtPosition(tipPos(c, h.pop.Size(), cv.Size()))
+	h.pop = newTipHover(h, body)
+	h.place(c)
+	h.layer.Add(h.pop)
 	lns := h.lines
 	fyne.NewAnimation(agentTipFade, func(p float32) {
 		for _, t := range lns {
@@ -483,11 +507,19 @@ func (h *agentTipHost) show(c *agentChip) {
 	}).Start()
 }
 
-// tipPos: just below the chip, centred on it, kept inside the canvas.
-func tipPos(c *agentChip, tip, canvasSize fyne.Size) fyne.Position {
-	p := fyne.CurrentApp().Driver().AbsolutePositionForObject(c)
+// place sizes the tooltip and puts it below c.
+func (h *agentTipHost) place(c *agentChip) {
+	h.pop.Resize(h.pop.MinSize())
+	h.pop.Move(tipPos(c, h.layer, h.pop.Size()))
+}
+
+// tipPos: just below the chip, centred on it, kept inside the layer (which
+// covers the window content); the result is relative to the layer.
+func tipPos(c *agentChip, layer fyne.CanvasObject, tip fyne.Size) fyne.Position {
+	d := fyne.CurrentApp().Driver()
+	p := d.AbsolutePositionForObject(c).Subtract(d.AbsolutePositionForObject(layer))
 	x := p.X + (c.Size().Width-tip.Width)/2
-	x = min(x, canvasSize.Width-tip.Width)
+	x = min(x, layer.Size().Width-tip.Width)
 	return fyne.NewPos(max(x, 0), p.Y+c.Size().Height)
 }
 

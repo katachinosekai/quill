@@ -302,6 +302,7 @@ type desk struct {
 	panes         []*pane
 	focused       *pane
 	chatHost      *fyne.Container
+	tipLayer      *fyne.Container // top layer of the window content for tooltips (agentstrip.go)
 	chatDropHL    *canvas.Rectangle
 	viewBtn       *widget.Button
 	viewBox       *fyne.Container
