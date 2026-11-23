@@ -449,3 +449,21 @@ func TestPhoneTopicModeGate(t *testing.T) {
 		})
 	}
 }
+
+func TestPhoneTopicSlugNonLatin(t *testing.T) {
+	_, a := topicPhone(t, true)
+	resetTopicExtra(t)
+	for i, title := range nonLatinNames {
+		want := "topic-" + string(rune('1'+i))
+		q := url.QueryEscape(title)
+		code, m, _ := a.do("GET", "/phone/topics/slug?title="+q, "", nil)
+		if code != 200 || m["slug"] != want || m["exists"] != false {
+			t.Fatalf("slug %q: %d %v", title, code, m)
+		}
+		code, m, _ = a.do("POST", "/phone/sessions/new", wkey(), map[string]any{"openTopic": map[string]string{"new": title}})
+		tp, _ := m["topic"].(map[string]any)
+		if code != 200 || tp["slug"] != want || tp["title"] != strings.TrimSpace(title) {
+			t.Fatalf("open %q: %d %v", title, code, m)
+		}
+	}
+}

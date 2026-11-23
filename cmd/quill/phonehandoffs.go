@@ -308,7 +308,7 @@ func (a *phoneAPI) topicSlug(w http.ResponseWriter, r *http.Request) {
 		if title == "" {
 			return
 		}
-		slug := kmemSlug(title, func(string) bool { return false })
+		slug := topicSlugFor(title)
 		if slug == "kmem" {
 			fail = &apiErr{http.StatusUnprocessableEntity, "bad_request", "kmem is the kmem window's topic, not a tab"}
 			return
@@ -379,7 +379,7 @@ func (a *phoneAPI) openTopicWrite(in writeBody) (map[string]any, *apiErr) {
 		if utf8.RuneCountInString(title) > apiTitleMax {
 			return nil, badReq("new is longer than 200 characters")
 		}
-		slug := kmemSlug(title, func(string) bool { return false })
+		slug := topicSlugFor(title)
 		if slug == "kmem" {
 			return nil, &apiErr{http.StatusUnprocessableEntity, "bad_request", "kmem is the kmem window's topic, not a tab"}
 		}

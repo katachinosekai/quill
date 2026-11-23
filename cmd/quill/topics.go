@@ -193,6 +193,22 @@ func cachedTopic(slug string) (topicInfo, bool) {
 	return topicInfo{}, false
 }
 
+// topicSlugFor is the slug "New topic" gives a typed title, for the card's
+// preview, pickNewTopic and the phone API alike. A title with no Latin letter
+// or digit (e.g. Japanese, "!!!") has nothing to slugify: it gets "topic-N",
+// the first N no known topic (loaded or named this run) uses.
+func topicSlugFor(title string) string {
+	if strings.Trim(slugJunk.ReplaceAllString(strings.ToLower(title), "-"), "-") != "" {
+		return kmemSlug(title, func(string) bool { return false })
+	}
+	for n := 1; ; n++ {
+		slug := fmt.Sprintf("topic-%d", n)
+		if _, ok := cachedTopic(slug); !ok {
+			return slug
+		}
+	}
+}
+
 func topicsLoaded() bool {
 	topicCache.mu.Lock()
 	defer topicCache.mu.Unlock()
@@ -295,7 +311,7 @@ func (d *desk) pickNewTopic(s *deskSession, text string) {
 	if title == "" || !s.pickPending {
 		return
 	}
-	slug := kmemSlug(title, func(string) bool { return false })
+	slug := topicSlugFor(title)
 	if slug == "kmem" {
 		d.notify(s, "kmem is the kmem window's topic, not a tab: open it with the kmem button.")
 		return

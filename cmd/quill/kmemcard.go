@@ -58,7 +58,7 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 			setText(preview, "")
 			return
 		}
-		slug := kmemSlug(t, func(string) bool { return false })
+		slug := topicSlugFor(t)
 		if _, ok := cachedTopic(slug); ok {
 			setText(preview, "kmem topic: "+slug+" (exists; opens it)")
 			return
