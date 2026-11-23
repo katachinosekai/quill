@@ -247,3 +247,65 @@ func TestReloadKeepsPlanScope(t *testing.T) {
 		t.Fatalf("scope not handed over: %+v", fresh)
 	}
 }
+
+// Zomboid 2026-11-23: deploys went to an earlier subagent by SendMessage in
+// a covered turn; the plan hadn't started it, so a user message moments
+// later left its first command refused. The resume result names the agent
+// (resumedAgentId); it is granted from its first call until its task
+// notification, and a user message meanwhile doesn't end that grant.
+func TestSendMessageResumeGrantsResumedAgent(t *testing.T) {
+	for _, field := range []string{"resumedAgentId", "revivedAgentId"} {
+		t.Run(field, func(t *testing.T) {
+			h := newHarness(t)
+			s := approvedSession(t, h)
+			subCall := func(id string) chat.PermState {
+				return gateRequest(t, h, s, `{"type":"control_request","request_id":"r`+id+`","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"make deploy"},"tool_use_id":"toolu_`+id+`","agent_id":"agentOld1"}}`).PermState
+			}
+			h.ui(func() {
+				mainToolUse(t, h, s, "toolu_send", "SendMessage", `{"to":"agentOld1","message":"deploy 1.3.11"}`)
+				feed(t, h, s, `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_send","type":"tool_result","content":"{\"success\":true,\"`+field+`\":\"agentOld1\"}"}]},"parent_tool_use_id":null,"session_id":"s1"}`)
+				endTurn(t, h, s)
+				userEvent(h, s, "what's the status of the build?", nil)
+				if s.runAll {
+					t.Fatal("the user's message ends the approval for new work")
+				}
+				if st := subCall("d1"); st != chat.PermAutoAllowed {
+					t.Fatalf("the resumed subagent's first call runs: %v", st)
+				}
+				if st := ownCall(h, s, "own1", "make deploy"); st == chat.PermAutoAllowed {
+					t.Fatal("the session's own new work is gated")
+				}
+				endTurn(t, h, s)
+				userEvent(h, s, "<task-notification>\n<task-id>agentOld1</task-id>\n<status>completed</status>\n</task-notification>", nil)
+				endTurn(t, h, s)
+				if st := subCall("d2"); st == chat.PermAutoAllowed {
+					t.Fatal("after its notification its calls are gated")
+				}
+			})
+		})
+	}
+}
+
+// A SendMessage to a peer session (no resumed agent in its result), or one
+// in an uncovered turn, grants nothing.
+func TestSendMessageToPeerGrantsNothing(t *testing.T) {
+	h := newHarness(t)
+	s := approvedSession(t, h)
+	subCall := func(id, agent string) chat.PermState {
+		return gateRequest(t, h, s, `{"type":"control_request","request_id":"r`+id+`","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"make deploy"},"tool_use_id":"toolu_`+id+`","agent_id":"`+agent+`"}}`).PermState
+	}
+	h.ui(func() {
+		mainToolUse(t, h, s, "toolu_peer", "SendMessage", `{"to":"peer-session","message":"hi"}`)
+		feed(t, h, s, `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_peer","type":"tool_result","content":"{\"success\":true,\"message\":\"delivered\"}"}]},"parent_tool_use_id":null,"session_id":"s1"}`)
+		if len(s.agentGrants) != 0 {
+			t.Fatalf("no grant for a peer: %v", s.agentGrants)
+		}
+		endTurn(t, h, s)
+		userEvent(h, s, `<cross-session-message from="peer">resume it</cross-session-message>`, nil)
+		mainToolUse(t, h, s, "toolu_send2", "SendMessage", `{"to":"agentOld2","message":"deploy"}`)
+		feed(t, h, s, `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_send2","type":"tool_result","content":"{\"resumedAgentId\":\"agentOld2\"}"}]},"parent_tool_use_id":null,"session_id":"s1"}`)
+		if st := subCall("p1", "agentOld2"); st == chat.PermAutoAllowed {
+			t.Fatal("a resume in a peer-started turn isn't covered")
+		}
+	})
+}

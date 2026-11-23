@@ -1,11 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
 )
 
@@ -25,17 +32,39 @@ import (
 //   - Privileged commands (privilegedCommand) never go through an allowlist
 //     or a fallback; only an approved plan (or a subagent's grant under one)
 //     runs them.
+//   - The same holds for a subagent's own batch (one assistant message of
+//     the subagent). A foreground subagent's messages are streamed; a
+//     background one's are read from its transcript
+//     (<session>/subagents/agent-<id>.jsonl), which has each tool_use block
+//     before the CLI asks about it. A call whose message can't be found is
+//     gated on its own, as before.
+//
+// Agent calls of a refused batch (Zomboid, 2026-11-23). The CLI starts a
+// subagent without a can_use_tool request, so the gate never sees the call
+// itself: in a batch of an Agent call and a Bash call the gate refused, the
+// subagent ran (and did the refused work). The rule:
+//
+//   - An Agent call of a batch the gate refused a call of is refused too: the
+//     subagent is stopped (stop_task) as soon as its task id is known, from
+//     its launch result or task_started event, whichever order the calls and
+//     the refusal come in, and any call it still makes is refused.
+//   - An Agent call in a batch with no refusal starts; its own calls are
+//     gated as always (a subagent's call is never the session's own call).
 
 // maxBatchCalls caps the tool_use ids remembered per turn.
 const maxBatchCalls = 1024
 
-// noteBatch remembers which assistant message each of the session's own
-// tool_use blocks belongs to (the stream sends one event per block, sharing
-// the message id).
-func noteBatch(s *deskSession, ev *protocol.Event) {
-	if ev.Type != "assistant" || ev.IsSubagent() || ev.Message == nil || ev.Message.ID == "" {
-		return
+// stoppedAgentMessage: what a stopped subagent's late calls are told.
+const stoppedAgentMessage = "Quill plan-first approval: this subagent was started in the same batch as a call the user has not approved, so it was stopped and nothing was run. Stop and report back; the main session will ask the user for a plan."
+
+// noteBatch remembers which assistant message each tool_use block belongs to
+// (the stream sends one event per block, sharing the message id), the
+// session's own and a streamed subagent's, and the session's Agent calls.
+func noteBatch(s *deskSession, ev *protocol.Event) []*chat.Item {
+	if ev.Type != "assistant" || ev.Message == nil || ev.Message.ID == "" {
+		return nil
 	}
+	var out []*chat.Item
 	for _, b := range ev.Message.Blocks() {
 		if b.Type != "tool_use" || b.ID == "" || len(s.batchOf) >= maxBatchCalls {
 			continue
@@ -44,37 +73,220 @@ func noteBatch(s *deskSession, ev *protocol.Event) {
 			s.batchOf = map[string]string{}
 		}
 		s.batchOf[b.ID] = ev.Message.ID
+		if (b.Name == "Agent" || b.Name == "Task") && !ev.IsSubagent() {
+			if s.batchAgents == nil {
+				s.batchAgents = map[string]string{}
+			}
+			s.batchAgents[b.ID] = ""
+			if s.batchRefused[ev.Message.ID] {
+				out = append(out, refuseAgentCall(s, b.ID)...)
+			}
+		}
 	}
+	return out
 }
 
-// refuseBatch: the gate refused r; the rest of its batch is refused too.
-func refuseBatch(s *deskSession, r *protocol.ControlRequest) {
-	if r == nil || r.AgentID != "" {
-		return
+// callBatch: the assistant message r's call belongs to, or "".
+func (d *desk) callBatch(s *deskSession, r *protocol.ControlRequest) string {
+	if r == nil || r.ToolUseID == "" {
+		return ""
 	}
-	msg, ok := s.batchOf[r.ToolUseID]
-	if !ok {
-		return
+	if msg, ok := s.batchOf[r.ToolUseID]; ok {
+		return msg
+	}
+	if r.AgentID == "" {
+		return ""
+	}
+	return subagentCallMessage(d.subagentTranscript(s, r.AgentID), r.ToolUseID)
+}
+
+// subagentTranscript: where Claude Code writes a subagent's transcript.
+func (d *desk) subagentTranscript(s *deskSession, agent string) string {
+	p := d.transcriptPath(s)
+	if p == "" || agent == "" || strings.ContainsAny(agent, "/\\.") {
+		return ""
+	}
+	return filepath.Join(strings.TrimSuffix(p, ".jsonl"), "subagents", "agent-"+agent+".jsonl")
+}
+
+// subagentCallMessage: the message id of the tool_use id in a transcript's
+// tail, or "".
+func subagentCallMessage(path, id string) string {
+	if path == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	off := max(0, st.Size()-approvalTail)
+	buf := make([]byte, st.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return ""
+	}
+	key := []byte(`"` + id + `"`)
+	lines := bytes.Split(buf, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !bytes.Contains(lines[i], key) {
+			continue
+		}
+		var o struct {
+			Type    string            `json:"type"`
+			Message *protocol.Message `json:"message"`
+		}
+		if json.Unmarshal(lines[i], &o) != nil || o.Type != "assistant" || o.Message == nil {
+			continue
+		}
+		for _, b := range o.Message.Blocks() {
+			if b.Type == "tool_use" && b.ID == id {
+				return o.Message.ID
+			}
+		}
+	}
+	return ""
+}
+
+// refuseBatch: the gate refused r; the rest of its batch is refused too,
+// the session's Agent calls in it included.
+func (d *desk) refuseBatch(s *deskSession, r *protocol.ControlRequest) []*chat.Item {
+	msg := d.callBatch(s, r)
+	if msg == "" {
+		return nil
+	}
+	if r.AgentID != "" {
+		// A subagent's batch can outlive the session's turn.
+		if len(s.subRefused) >= maxBatchCalls {
+			s.subRefused = nil
+		}
+		if s.subRefused == nil {
+			s.subRefused = map[string]bool{}
+		}
+		s.subRefused[msg] = true
+		return nil
 	}
 	if s.batchRefused == nil {
 		s.batchRefused = map[string]bool{}
 	}
 	s.batchRefused[msg] = true
+	var out []*chat.Item
+	for id := range s.batchAgents {
+		if s.batchOf[id] == msg {
+			out = append(out, refuseAgentCall(s, id)...)
+		}
+	}
+	return out
 }
 
-// inRefusedBatch: r is the session's own call in a batch the gate already
-// refused a call of.
-func inRefusedBatch(s *deskSession, r *protocol.ControlRequest) bool {
-	if r == nil || r.AgentID != "" || r.ToolUseID == "" {
+// inRefusedBatch: r's call is in a batch the gate already refused a call of.
+func (d *desk) inRefusedBatch(s *deskSession, r *protocol.ControlRequest) bool {
+	if r == nil || r.ToolUseID == "" {
 		return false
+	}
+	if r.AgentID != "" {
+		if len(s.subRefused) == 0 {
+			return false
+		}
+		msg := d.callBatch(s, r)
+		return msg != "" && s.subRefused[msg]
 	}
 	msg, ok := s.batchOf[r.ToolUseID]
 	return ok && s.batchRefused[msg]
 }
 
-// endBatches: the turn is over.
+// refuseAgentCall: the Agent call id belongs to a refused batch. Its
+// subagent is stopped now, or as soon as its task id is known.
+func refuseAgentCall(s *deskSession, id string) []*chat.Item {
+	if s.stopAgents[id] {
+		return nil
+	}
+	if s.stopAgents == nil {
+		s.stopAgents = map[string]bool{}
+	}
+	s.stopAgents[id] = true
+	if task := s.batchAgents[id]; task != "" {
+		return stopRefusedAgent(s, task)
+	}
+	return nil
+}
+
+// stopRefusedAgent stops the subagent task and refuses its later calls.
+func stopRefusedAgent(s *deskSession, task string) []*chat.Item {
+	if s.refusedAgents[task] || len(s.refusedAgents) >= maxBatchCalls {
+		return nil
+	}
+	if s.refusedAgents == nil {
+		s.refusedAgents = map[string]bool{}
+	}
+	s.refusedAgents[task] = true
+	stopSubagent(s, task)
+	return []*chat.Item{s.conv.AddNotice("Stopped a subagent started together with a refused call: plan-first needs your approval for that batch.")}
+}
+
+// stopSubagent asks the CLI to stop a subagent task (tests replace it).
+var stopSubagent = func(s *deskSession, task string) {
+	p := s.proc
+	if p == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		p.Control(ctx, map[string]any{"subtype": "stop_task", "task_id": task})
+	}()
+}
+
+// noteAgentTask learns the task id of this turn's Agent calls (task_started,
+// or the launch result) and stops the subagent of a refused batch.
+func noteAgentTask(s *deskSession, ev *protocol.Event) []*chat.Item {
+	if len(s.batchAgents) == 0 {
+		return nil
+	}
+	learn := func(id, task string) []*chat.Item {
+		if old, ok := s.batchAgents[id]; !ok || task == "" || old != "" {
+			return nil
+		}
+		s.batchAgents[id] = task
+		if s.stopAgents[id] {
+			return stopRefusedAgent(s, task)
+		}
+		return nil
+	}
+	if ev.Type == "system" && ev.Subtype == "task_started" {
+		return learn(ev.ToolUseID, ev.TaskID)
+	}
+	if ev.Type != "user" || ev.IsSubagent() || ev.Message == nil {
+		return nil
+	}
+	var out []*chat.Item
+	var results []protocol.Block
+	for _, b := range ev.Message.Blocks() {
+		if _, ok := s.batchAgents[b.ToolUseID]; b.Type == "tool_result" && ok {
+			results = append(results, b)
+		}
+	}
+	for _, b := range results {
+		if m := agentIDRe.FindSubmatch(b.Content); m != nil {
+			out = append(out, learn(b.ToolUseID, string(m[1]))...)
+		} else if len(results) == 1 {
+			var r struct {
+				AgentID string `json:"agentId"`
+			}
+			json.Unmarshal(ev.ToolUseResult, &r)
+			out = append(out, learn(b.ToolUseID, r.AgentID)...)
+		}
+	}
+	return out
+}
+
+// endBatches: the session's turn is over.
 func endBatches(s *deskSession) {
 	s.batchOf, s.batchRefused = nil, nil
+	s.batchAgents, s.stopAgents, s.planSends = nil, nil, nil
 }
 
 // escalators run a command as another user (root).

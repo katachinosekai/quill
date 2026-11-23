@@ -203,7 +203,49 @@ func planCall(s *deskSession, name, id string, input json.RawMessage) {
 			addPlanAgent(s, in.Name, id)
 		}
 	case "SendMessage":
-		resumeAgent(s, in.To, id)
+		if !resumeAgent(s, in.To, id) && len(s.planSends) < maxBatchCalls {
+			if s.planSends == nil {
+				s.planSends = map[string]bool{}
+			}
+			s.planSends[id] = true // granted if its result names a resumed subagent
+		}
+	}
+}
+
+// A SendMessage in a covered turn that resumes a subagent of this session
+// grants it like an Agent call made then, whether or not a plan started it
+// (Zomboid 2026-11-23: the ELTF 1.3.10 and 1.3.11 deploys went to an earlier
+// subagent by SendMessage; it wasn't in planAgents, so a user message moments
+// later ended the turn's cover and its first command was refused). The
+// result names the subagent (resumedAgentId); a peer session's never does.
+var resumedAgentRe = regexp.MustCompile(`\\?"(?:resumedAgentId|revivedAgentId)\\?"\s*:\s*\\?"([A-Za-z0-9_-]+)`)
+
+// learnResumes grants the subagent a covered SendMessage resumed.
+func learnResumes(s *deskSession, ev *protocol.Event) {
+	if len(s.planSends) == 0 || ev.Type != "user" || ev.IsSubagent() || ev.Message == nil {
+		return
+	}
+	for _, b := range ev.Message.Blocks() {
+		if b.Type != "tool_result" || !s.planSends[b.ToolUseID] {
+			continue
+		}
+		delete(s.planSends, b.ToolUseID)
+		m := resumedAgentRe.FindSubmatch(b.Content)
+		if m == nil {
+			m = resumedAgentRe.FindSubmatch(ev.ToolUseResult)
+		}
+		if m == nil {
+			continue
+		}
+		g, agent := b.ToolUseID, string(m[1])
+		if s.agentGrants == nil {
+			s.agentGrants = map[string]agentGrant{}
+		}
+		s.agentGrants[g] = agentGrant{Background: true, At: gateNow()}
+		s.grantRev++
+		addAgentID(s, agent, g)
+		addPlanWork(s, agent, g)
+		addPlanWork(s, g, g)
 	}
 }
 
@@ -219,10 +261,10 @@ func addPlanAgent(s *deskSession, agent, g string) {
 
 // resumeAgent: a covered SendMessage to a subagent a plan started (by agent
 // id or name) grants it again until its next notification.
-func resumeAgent(s *deskSession, to, id string) {
+func resumeAgent(s *deskSession, to, id string) bool {
 	g, ok := s.planAgents[to]
 	if !ok {
-		return
+		return false
 	}
 	if s.agentGrants == nil {
 		s.agentGrants = map[string]agentGrant{}
@@ -237,6 +279,7 @@ func resumeAgent(s *deskSession, to, id string) {
 	}
 	addPlanWork(s, g, g)
 	addPlanWork(s, id, g)
+	return true
 }
 
 // learnPlanWork: a launch result or task_started event names the task id of

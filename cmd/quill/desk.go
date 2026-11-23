@@ -103,6 +103,11 @@ type deskSession struct {
 	gateUnsure     bool                  // restored after a restart: no call is presumed a subagent's until the turn ends
 	batchOf        map[string]string     // this turn's own tool_use ids -> their assistant message (gatebatch.go)
 	batchRefused   map[string]bool       // assistant messages with a call plan-first refused this turn
+	batchAgents    map[string]string     // this turn's own Agent calls -> their task (agent) id once known, "" before
+	stopAgents     map[string]bool       // Agent calls of a refused batch, stopped once their task id is known
+	refusedAgents  map[string]bool       // agent ids of subagents stopped with their refused batch: their calls are refused
+	subRefused     map[string]bool       // subagents' assistant messages with a call plan-first refused
+	planSends      map[string]bool       // SendMessage calls of a covered turn: a resumed subagent is granted (planscope.go)
 	queue          []string
 	lastSent       string
 	inTurn         bool
@@ -1708,6 +1713,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	s.inTurn, s.planWait = false, false
 	s.agentGrants, s.agentCalls, s.agentIDs = nil, nil, nil // the process and its subagents are gone
 	s.planWork, s.planAgents, s.turnCovered, s.autoTurn = nil, nil, false, false
+	s.refusedAgents, s.subRefused = nil, nil
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
 		msg := "Claude process exited: " + err.Error()
@@ -2780,7 +2786,12 @@ func planAsk(s *deskSession) string {
 
 func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
 	trackAgentCalls(s, ev)
-	noteBatch(s, ev)
+	out := noteBatch(s, ev)
+	out = append(out, noteAgentTask(s, ev)...)
+	return append(out, d.planGateEvent(s, ev, items)...)
+}
+
+func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.Item) []*chat.Item {
 	switch {
 	case ev.Type == "control_request" && ev.Request != nil && ev.Request.Subtype == "can_use_tool":
 		var it *chat.Item
@@ -2811,9 +2822,18 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 			}
 			return nil
 		}
+		// A subagent stopped with its refused batch gets nothing more
+		// (gatebatch.go).
+		if r := it.Request; r.AgentID != "" && s.refusedAgents[r.AgentID] {
+			if s.proc.DenyWith(it.RequestID, r, stoppedAgentMessage) == nil {
+				it.PermState = chat.PermDenied
+			}
+			return nil
+		}
 		// A batch is decided as a whole: once plan-first refused one of its
-		// calls, its other gated calls are refused too (ta43580).
-		if d.planFirst && inRefusedBatch(s, it.Request) && !readOnlyRequest(it.Request, d.readOnlyExtra()) {
+		// calls, its other gated calls are refused too (ta43580), a
+		// subagent's batch too.
+		if d.planFirst && d.inRefusedBatch(s, it.Request) && !readOnlyRequest(it.Request, d.readOnlyExtra()) {
 			if s.proc.DenyWith(it.RequestID, it.Request, planAsk(s)) == nil {
 				it.PermState = chat.PermPlanAsked
 				s.planWait = true
@@ -2891,7 +2911,7 @@ func (d *desk) planGate(s *deskSession, ev *protocol.Event, items []*chat.Item) 
 		if s.proc.DenyWith(it.RequestID, it.Request, planAsk(s)) == nil {
 			it.PermState = chat.PermPlanAsked
 			s.planWait = true
-			refuseBatch(s, it.Request)
+			return d.refuseBatch(s, it.Request)
 		}
 	case ev.Type == "user":
 		// A subagent's own messages, peer messages and background-task
@@ -3427,6 +3447,7 @@ func trackAgentCalls(s *deskSession, ev *protocol.Event) {
 		}
 	}
 	learnPlanWork(s, ev)
+	learnResumes(s, ev)
 	if len(s.agentGrants) == 0 {
 		return
 	}

@@ -211,7 +211,9 @@ func TestChoiceYesApprovesThePlan(t *testing.T) {
 func TestReadOnlyKmem(t *testing.T) {
 	for cmd, want := range map[string]bool{
 		"kmem brief":                            true,
-		`kmem --as "Quill" get quill/decisions`: false,
+		`kmem --as "Quill" get quill/decisions`: true, // user 2026-11-23: --as reads count too
+		"kmem --as quill add quill/x text":      false,
+		"kmem --as=quill task claim t1":         false,
 		"kmem get quill/decisions":              true,
 		"kmem find lock audit":                  true,
 		"kmem show f37efdb":                     true,

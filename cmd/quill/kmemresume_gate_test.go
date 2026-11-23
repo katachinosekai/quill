@@ -16,7 +16,7 @@ func TestKmemResumeGateOnlyForResumeTurn(t *testing.T) {
 		gated := []string{
 			`kmem --as demo add "x"`,
 			`kmem --as demo task claim t0000a1`,
-			`kmem --as other brief`,
+			`kmem --as other add "x"`, // reads with --as are read-only anywhere (user 2026-11-23)
 			`rm -rf /home/user/Projects/demo`,
 		}
 		// A new tab (no resume prompt sent) gets no exception.

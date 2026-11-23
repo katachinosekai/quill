@@ -32,7 +32,7 @@ func TestKmemFirstTurnGate(t *testing.T) {
 		gated := []string{
 			`kmem --as demo add "x"`,
 			`kmem --as demo task claim t0000a1`,
-			`kmem --as other brief`,
+			`kmem --as other add "x"`, // reads with --as are read-only anywhere (user 2026-11-23)
 			`rm -rf /home/user/Projects/demo`,
 		}
 		h.d.sendTo(s, `You are the demo session; use kmem name "demo" (kmem --as "demo" ...). Start by running kmem brief.`)
@@ -67,8 +67,8 @@ func TestKmemFirstTurnGateSessionName(t *testing.T) {
 		if !h.d.kmemResumeAllowed(s, bashReq(`kmem --as demo brief`)) {
 			t.Fatal("session's own kmem name passes on the first turn")
 		}
-		if h.d.kmemResumeAllowed(s, bashReq(`kmem --as other brief`)) {
-			t.Fatal("other names stay gated")
+		if h.d.kmemResumeAllowed(s, bashReq(`kmem --as other task claim t0000a1`)) {
+			t.Fatal("other names' writes stay gated")
 		}
 	})
 }

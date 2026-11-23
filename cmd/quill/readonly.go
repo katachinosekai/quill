@@ -26,12 +26,12 @@ var readOnlyCommands = map[string]bool{
 	"realpath": true, "readlink": true, "tree": true, "jq": true, "column": true, "nl": true, "strings": true,
 	"cd": true, "test": true, "[": true, "tac": true, "rev": true, "od": true, "hexdump": true, "sha1sum": true,
 	"sha512sum": true, "uname": true, "nproc": true, "lscpu": true, "lsblk": true, "printenv": true, "seq": true,
-	"type": true,
+	"type": true, "findmnt": true,
 }
 
 var argChecked = map[string]bool{
 	"kmem": true, "sed": true, "find": true, "git": true, "sort": true, "tree": true, "rg": true, "file": true, "uniq": true,
-	"awk": true, "journalctl": true, "date": true,
+	"awk": true, "journalctl": true, "date": true, "systemctl": true,
 }
 
 var readOnlyGit = map[string]bool{"status": true, "log": true, "diff": true, "show": true, "branch": true, "remote": true, "rev-parse": true, "ls-files": true, "blame": true, "describe": true}
@@ -332,6 +332,20 @@ func readOnlyGitArgs(sub string, args []string) bool {
 			}
 		}
 	case "remote":
+		// "git remote get-url [--push] [--all] NAME" only prints a URL.
+		if len(args) > 0 && args[0] == "get-url" {
+			names := 0
+			for _, a := range args[1:] {
+				switch {
+				case a == "--push" || a == "--all":
+				case strings.HasPrefix(a, "-"):
+					return false
+				default:
+					names++
+				}
+			}
+			return names == 1
+		}
 		for _, a := range args {
 			if a != "-v" && a != "--verbose" {
 				return false
@@ -498,6 +512,15 @@ func readOnlySegment(seg []shWord, extra [][]string) bool {
 				}
 			}
 		}
+	case "systemctl":
+		// Status and listing verbs only (systemctlReads), user or system
+		// units; privilegedWords already refused every other system verb.
+		for _, a := range args {
+			if !strings.HasPrefix(a, "-") {
+				return systemctlReads[a]
+			}
+		}
+		return false
 	case "date":
 		for _, a := range args {
 			if strings.HasPrefix(a, "--set") || strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "s") {
@@ -557,12 +580,16 @@ func (d *desk) readOnlyDialog() {
 // readOnlyKmem: kmem commands that only read (Kmem Lock Audit, 2026-11-22:
 // `kmem brief`, `get`, `find`, `show` needed a plan). "kmem fixed TOPIC" sets
 // a mark (kmem 1.7.0), so only the bare "kmem fixed" list counts; "kmem
-// rules" only marks the rules read. Commands with --as are left to the kmem
-// gates, which know the session's own name.
+// rules" only marks the rules read. "--as NAME" in front counts the same
+// (user 2026-11-23: `kmem --as zomboid find …` needed a plan; brief and rules
+// only mark them read for that name).
 func readOnlyKmem(args []string) bool {
-	// "--as NAME" reads as another session (it marks rules and briefs read
-	// for that name); the kmem gates decide those by the session's own name.
-	if len(args) == 0 || args[0] == "--as" {
+	if len(args) >= 2 && args[0] == "--as" {
+		args = args[2:]
+	} else if len(args) >= 1 && strings.HasPrefix(args[0], "--as=") {
+		args = args[1:]
+	}
+	if len(args) == 0 {
 		return false
 	}
 	var words []string

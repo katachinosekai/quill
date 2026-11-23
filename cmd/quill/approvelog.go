@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
 )
 
@@ -75,5 +76,23 @@ func (d *desk) approvedInTranscript(s *deskSession) bool {
 		return false
 	}
 	text, ok := lastHumanMessage(path)
-	return ok && approvesPlan(s, text)
+	return ok && !judgedMessage(s, text) && approvesPlan(s, text)
+}
+
+// judgedMessage: text is the user's latest message in Quill's own chat, so
+// the gate already decided whether it approved (send, or the user event).
+// Read back later it would be judged against a newer plan card it never
+// answered (Zomboid 2026-11-23: a "Yes" that didn't count for one plan
+// approved the card the next turn ended with, and let a subagent's writes
+// run).
+func judgedMessage(s *deskSession, text string) bool {
+	t := strings.TrimSpace(text)
+	for i := len(s.conv.Items) - 1; i >= 0; i-- {
+		it := s.conv.Items[i]
+		if it.Kind != chat.User || notFromUser(it.Text) {
+			continue
+		}
+		return strings.TrimSpace(it.Text) == t
+	}
+	return false
 }
