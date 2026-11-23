@@ -244,6 +244,59 @@ func redact(text string, o redactOptions) string {
 	return text
 }
 
+// gpuResetSignatures lists graphics-driver reset messages. A line matches an
+// entry when it contains every (lowercase) phrase of that entry, which keeps
+// generic words such as "context" from matching on their own.
+var gpuResetSignatures = [][]string{
+	{"the cs has cancelled because the context is lost"},
+	{"amdgpu", "context is lost"},
+	{"amdgpu", "gpu reset"},
+	{"radeonsi", "gpu hang"},
+	{"radeonsi", "device lost"},
+	{"mesa", "gpu hang"},
+	{"mesa", "device lost"},
+	{"i915", "gpu hang"},
+	{"i915", "context lost"},
+	{"iris", "gpu hang"},
+	{"iris", "context lost"},
+	{"nvrm", "xid"},
+	{"nvidia", "xid"},
+	{"gl_context_lost"},
+	{"vk_error_device_lost"},
+	{"egl_context_lost"},
+}
+
+// isGPUReset reports whether the captured output shows that the graphics
+// driver was reset (so the crash was not caused by Quill Desktop).
+func isGPUReset(output string) bool {
+	for _, line := range strings.Split(strings.ToLower(output), "\n") {
+		for _, sig := range gpuResetSignatures {
+			all := true
+			for _, p := range sig {
+				if !strings.Contains(line, p) {
+					all = false
+					break
+				}
+			}
+			if all {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+const gpuResetNotice = "Quill Desktop restarted after a graphics driver reset (not a Quill Desktop bug). Your sessions were reopened."
+
+// crashIssueLink returns the new-issue link for a crash, or nil when the crash
+// was a graphics driver reset, which is not reported as a Quill Desktop bug.
+func crashIssueLink(r crashReport, title, body string) *url.URL {
+	if isGPUReset(r.Output) {
+		return nil
+	}
+	return issueURL(title, body)
+}
+
 func reportBody(r crashReport) string {
 	out := r.Output
 	if len(out) > crashBodyMax {
@@ -378,6 +431,10 @@ func (d *desk) checkCrashReports() {
 		_ = os.Remove(path)
 		return
 	}
+	if isGPUReset(r.Output) {
+		d.gpuResetNotice(path, r)
+		return
+	}
 	msg := widget.NewLabel(fmt.Sprintf("Quill closed unexpectedly at %s and restarted on its own; your sessions kept running.\n\nWould you like to send a crash report to Quill's GitHub so it can be fixed? You will choose what to remove and see the exact text before anything is sent.", r.When.Format("3:04 PM")))
 	msg.Wrapping = fyne.TextWrapWord
 	var dlg dialog.Dialog
@@ -398,6 +455,27 @@ func (d *desk) checkCrashReports() {
 	})
 	dlg = dialog.NewCustomWithoutButtons("Quill crashed", container.NewVBox(msg, container.NewHBox(review, later, never)), d.win)
 	dlg.Resize(fyne.NewSize(520, 220))
+	dlg.Show()
+}
+
+func (d *desk) gpuResetNotice(path string, r crashReport) {
+	msg := widget.NewLabel(gpuResetNotice)
+	msg.Wrapping = fyne.TextWrapWord
+	var dlg dialog.Dialog
+	details := widget.NewButton("Details", func() {
+		log := widget.NewMultiLineEntry()
+		log.SetText(strings.TrimSpace(tailText(r.Output, 4096)))
+		log.Wrapping = fyne.TextWrapBreak
+		log.SetMinRowsVisible(10)
+		dialog.ShowCustom("Details", "Close", log, d.win)
+	})
+	ok := widget.NewButton("OK", func() {
+		dlg.Hide()
+		_ = os.Remove(path)
+	})
+	ok.Importance = widget.HighImportance
+	dlg = dialog.NewCustomWithoutButtons("Quill Desktop restarted", container.NewVBox(msg, container.NewHBox(ok, details)), d.win)
+	dlg.Resize(fyne.NewSize(520, 160))
 	dlg.Show()
 }
 

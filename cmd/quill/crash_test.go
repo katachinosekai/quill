@@ -138,3 +138,59 @@ func TestPrivateFilesAreNotPredictable(t *testing.T) {
 		t.Fatalf("restore files must be private and unguessable: %s %v", a, st.Mode())
 	}
 }
+
+func TestIsGPUReset(t *testing.T) {
+	cases := []struct {
+		name, out string
+		want      bool
+	}{
+		{"amdgpu cs", "amdgpu: The CS has cancelled because the context is lost. This context is innocent.", true},
+		{"amdgpu reset", "[drm] amdgpu 0000:03:00.0: amdgpu: GPU reset begin!", true},
+		{"radeonsi hang", "radeonsi: GPU hang detected", true},
+		{"mesa device lost", "MESA: error: VK device lost", true},
+		{"i915 hang", "i915 0000:00:02.0: GPU HANG: ecode 9:1:85dffffb", true},
+		{"iris lost", "iris: Context lost", true},
+		{"nvidia xid", "NVRM: Xid (PCI:0000:01:00): 79, GPU has fallen off the bus", true},
+		{"gl lost", "error GL_CONTEXT_LOST", true},
+		{"vk lost", "vkQueueSubmit: VK_ERROR_DEVICE_LOST", true},
+		{"egl lost", "eglSwapBuffers failed: EGL_CONTEXT_LOST", true},
+		{"go panic context", "panic: context canceled\n\ngoroutine 1 [running]:\nmain.main()", false},
+		{"context is lost elsewhere", "network: the context is lost for session", false},
+		{"xid word", "panic: invalid xid in request", false},
+		{"gpu hang no driver", "user said the gpu hang was fun", false},
+		{"sample panic", samplePanic, false},
+		{"empty", "", false},
+	}
+	for _, c := range cases {
+		if got := isGPUReset(c.out); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestGPUResetNoticeAndNoIssue(t *testing.T) {
+	want := "Quill Desktop restarted after a graphics driver reset (not a Quill Desktop bug). Your sessions were reopened."
+	if gpuResetNotice != want {
+		t.Fatalf("notice: %q", gpuResetNotice)
+	}
+	gpu := crashReport{Exit: "signal: aborted (core dumped)", Output: "amdgpu: The CS has cancelled because the context is lost. This context is innocent."}
+	if crashIssueLink(gpu, "t", reportBody(gpu)) != nil {
+		t.Fatal("no issue link for a GPU reset")
+	}
+	bug := crashReport{Exit: "signal: aborted", Output: samplePanic}
+	if crashIssueLink(bug, "t", reportBody(bug)) == nil {
+		t.Fatal("other crashes still offer a report")
+	}
+}
+
+func TestGPUResetDialogHasNoReportButton(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	h := newHarness(t)
+	saveCrash("signal: aborted (core dumped)", "amdgpu: The CS has cancelled because the context is lost.")
+	h.ui(func() {
+		h.d.checkCrashReports()
+		if len(h.w.Canvas().Overlays().List()) == 0 {
+			t.Fatal("the user is told about the restart")
+		}
+	})
+}
