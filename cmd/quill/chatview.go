@@ -2208,6 +2208,7 @@ type numChoiceQ struct {
 	idx   int // unique in the reply (numbers can repeat: markdown's "1." on every item)
 	title string
 	opts  []string
+	rec   int // index of the option marked "(recommended)", -1 if none
 	// line, end: the original lines of the reply the question is on (end
 	// exclusive), for showing its buttons in place (choiceoverlay.go).
 	line, end int
@@ -2254,9 +2255,10 @@ func numberedChoiceQs(text string) (string, []numChoiceQ) {
 			body = append(body, l)
 			continue
 		}
-		q := numChoiceQ{num: m[1], idx: len(qs), title: m[1] + ". " + strings.Trim(rest, "*_ ")}
+		q := numChoiceQ{num: m[1], idx: len(qs), rec: -1, title: m[1] + ". " + strings.Trim(rest, "*_ ")}
 		if title, opts, ok := parseChoices(rest); ok {
 			q.title, q.opts = m[1]+". "+title, opts
+			q.rec = choiceRecommended(rest, len(opts))
 		}
 		q.line, q.end = first[i], nOrig
 		if i+1 < len(first) {
@@ -2307,6 +2309,10 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 	cut := strings.LastIndex(text, "\n")
 	line := text[cut+1:]
 	title, opts, ok := parseChoices(line)
+	rec := -1
+	if ok {
+		rec = choiceRecommended(line, len(opts))
+	}
 	var multi []numChoiceQ
 	multiBody := ""
 	if mb, mq := numberedChoiceQs(text); mq != nil {
@@ -2332,12 +2338,9 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 		var btns []fyne.CanvasObject
 		for _, o := range opts {
 			o := o
-			label := o
-			if r := []rune(label); len(r) > 60 {
-				label = string(r[:59]) + "…"
-			}
 			n := len(btns)
-			btns = append(btns, glowButton(label, theme.ConfirmIcon(), colIdle, v.d.canAnswer(s), v.guarded(func() { v.d.pickChoice(s, it, prefix+choiceReply(n, o)) })))
+			label, tint := recommendedButton(shortLabel(o, 60), n == rec, true, colIdle)
+			btns = append(btns, glowButton(label, nil, tint, v.d.canAnswer(s), v.guarded(func() { v.d.pickChoice(s, it, prefix+choiceReply(n, o)) })))
 		}
 		return v.buttonRow(btns...)
 	}
@@ -2372,11 +2375,12 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 				var btns []fyne.CanvasObject
 				for i, o := range q.opts {
 					i := i
-					icon, tint := fyne.Resource(nil), color.Color(colIdle)
+					icon := fyne.Resource(nil)
+					label, tint := recommendedButton(shortLabel(o, 60), i == q.rec, true, colIdle)
 					if p, ok := picks[q.idx]; ok && p == i {
 						icon, tint = theme.ConfirmIcon(), colAccent
 					}
-					btns = append(btns, glowButton(shortLabel(o, 60), icon, tint, v.d.canAnswer(s), v.guarded(func() {
+					btns = append(btns, glowButton(label, icon, tint, v.d.canAnswer(s), v.guarded(func() {
 						picks[q.idx] = i
 						if iv, ok := v.views[it.Seq]; ok {
 							v.refreshItem(it, iv)
@@ -2506,6 +2510,29 @@ func answeredPicks(qs []numChoiceQ, msg string) (map[int]int, map[int]string) {
 		}
 	}
 	return picks, texts
+}
+
+// choiceRecommended: which of the n options of a choice line says
+// "(recommended)" (-1 if none). parseChoices drops that aside from the
+// option, so the line is read again here.
+func choiceRecommended(line string, n int) int {
+	clean := strings.TrimSpace(strings.TrimLeft(mdNoise.Replace(line), "#>*-_ "))
+	clean = numLead.ReplaceAllString(clean, "")
+	return recommendedOption(strings.TrimRight(clean, "*_ "), n)
+}
+
+// recommendedButton: a choice button's label and tint; the recommended
+// option says "(recommended)" and is highlighted (only while its buttons are
+// live). The reply sent keeps the plain option (choiceReply).
+func recommendedButton(label string, rec, active bool, tint color.Color) (string, color.Color) {
+	if !rec {
+		return label, tint
+	}
+	label += " (recommended)"
+	if active {
+		tint = colAccent
+	}
+	return label, tint
 }
 
 func choiceReply(n int, option string) string {

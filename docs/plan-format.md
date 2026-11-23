@@ -13,7 +13,9 @@ and the plan card read plans in this format.
    `**Can I run steps 1–N? Yes (recommended) or no?**`
 4. Numbered choice questions may follow it, one per line, with their options
    in the line and the recommended one marked "(recommended)". The plan card
-   turns each into buttons, checkboxes or a text field.
+   turns each into buttons, checkboxes or a text field; the recommended
+   option shows "(recommended)" and is highlighted, and no button shows a
+   check until the user picks.
 
 ## What an approval covers
 

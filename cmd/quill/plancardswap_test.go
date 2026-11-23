@@ -44,7 +44,7 @@ func TestEveryNumberedQuestionGetsButtons(t *testing.T) {
 		for _, b := range swapButtons(card) {
 			labels = append(labels, b.Text)
 		}
-		want := []string{"Use blue", "Red", "Ship now", "Later", "Keep the old file", "Replace it", "Small", "Large", "Yes", "No", "Send answers"}
+		want := []string{"Use blue", "Red", "Ship now", "Later", "Keep the old file", "Replace it", "Small", "Large", "Yes (recommended)", "No", "Send answers"}
 		if !reflect.DeepEqual(labels, want) {
 			t.Fatalf("buttons %q, want %q", labels, want)
 		}

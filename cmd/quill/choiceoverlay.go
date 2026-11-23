@@ -1,7 +1,6 @@
 package main
 
 import (
-	"image/color"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -48,6 +47,10 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 	lines := strings.Split(text, "\n")
 	line := lines[len(lines)-1]
 	_, opts, single := parseChoices(line)
+	rec := -1
+	if single {
+		rec = choiceRecommended(line, len(opts))
+	}
 	var multi []numChoiceQ
 	if _, mq := numberedChoiceQs(text); mq != nil {
 		for _, q := range mq {
@@ -79,14 +82,16 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 		var btns []fyne.CanvasObject
 		for n, opt := range opts {
 			n, opt := n, opt
-			icon, tint := theme.ConfirmIcon(), color.Color(colIdle)
+			// No check before a pick: it marks only the picked option of an
+			// answered reply.
+			var icon fyne.Resource
+			label, tint := recommendedButton(shortLabel(opt, 60), n == rec, active, colIdle)
 			if !active {
-				icon = nil
 				if answer == choiceReply(n, opt) {
 					icon, tint = theme.ConfirmIcon(), colAccent
 				}
 			}
-			btns = append(btns, glowButton(shortLabel(opt, 60), icon, tint, active && v.d.canAnswer(s), v.guarded(func() { v.d.pickChoice(s, it, choiceReply(n, opt)) })))
+			btns = append(btns, glowButton(label, icon, tint, active && v.d.canAnswer(s), v.guarded(func() { v.d.pickChoice(s, it, choiceReply(n, opt)) })))
 		}
 		box := container.NewVBox()
 		if len(lines) > 1 {
@@ -159,11 +164,12 @@ func (v *chatView) renderChoiceReply(it *chat.Item) (o fyne.CanvasObject, plain 
 			var btns []fyne.CanvasObject
 			for i, o := range q.opts {
 				i := i
-				icon, tint := fyne.Resource(nil), color.Color(colIdle)
+				icon := fyne.Resource(nil)
+				label, tint := recommendedButton(shortLabel(o, 60), i == q.rec, active, colIdle)
 				if p, ok := picks[q.idx]; ok && p == i {
 					icon, tint = theme.ConfirmIcon(), colAccent
 				}
-				btns = append(btns, glowButton(shortLabel(o, 60), icon, tint, active && v.d.canAnswer(s), v.guarded(func() {
+				btns = append(btns, glowButton(label, icon, tint, active && v.d.canAnswer(s), v.guarded(func() {
 					picks[q.idx] = i
 					if iv, ok := v.views[it.Seq]; ok {
 						v.refreshItem(it, iv)

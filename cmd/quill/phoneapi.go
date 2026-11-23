@@ -889,6 +889,9 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 			if _, opts, ok := parseChoices(text[strings.LastIndex(text, "\n")+1:]); ok {
 				m["choices"] = opts
 				m["choicesOpen"] = it == open
+				if rec := choiceRecommended(text[strings.LastIndex(text, "\n")+1:], len(opts)); rec >= 0 {
+					m["choicesRecommended"] = rec // Quill Android marks that button "(recommended)"
+				}
 			}
 		}
 	}

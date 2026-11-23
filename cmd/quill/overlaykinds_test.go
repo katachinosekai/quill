@@ -148,7 +148,7 @@ func TestChoiceRepliesOverlay(t *testing.T) {
 		if o == nil || plain {
 			t.Fatal("several questions: overlay")
 		}
-		if got := buttonLabels(o); !reflect.DeepEqual(got, []string{"On disk A", "On disk B", "Small", "Large", "Send answers"}) {
+		if got := buttonLabels(o); !reflect.DeepEqual(got, []string{"On disk A", "On disk B (recommended)", "Small", "Large", "Send answers"}) {
 			t.Fatalf("buttons %q", got)
 		}
 		txt := richTexts(o)
