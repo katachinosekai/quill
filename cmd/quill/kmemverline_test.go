@@ -48,7 +48,7 @@ func TestKmemVersionCached(t *testing.T) {
 	h.d.kmemRun = func(prog string, args ...string) (string, error) {
 		if strings.Join(args, " ") == "version --json" {
 			calls++
-			return `{"version": "1.7.0", "api": 1}`, nil
+			return `{"kmem": "1.7.0", "api": 1}`, nil
 		}
 		return "", nil
 	}

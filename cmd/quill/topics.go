@@ -64,14 +64,19 @@ func topicTitle(slug string) string {
 	return string(r)
 }
 
-// statusLine: the text of the first fact `kmem get T/status` prints
-// ("[f1234ab] fact: text"), "" when there is none.
+// statusLine: the text of the newest fact `kmem get T/status` prints
+// ("[f1234ab] fact: text"), "" when there is none. kmem prints several
+// current facts oldest first (by recorded time) and uses the last one, so the
+// last fact line wins.
 func statusLine(out string) string {
+	var facts []string
 	for _, l := range strings.Split(out, "\n") {
-		l = strings.TrimSpace(l)
-		if !strings.HasPrefix(l, "[") {
-			continue
+		if l = strings.TrimSpace(l); strings.HasPrefix(l, "[") {
+			facts = append(facts, l)
 		}
+	}
+	if len(facts) > 0 {
+		l := facts[len(facts)-1]
 		if i := strings.Index(l, "] "); i > 0 {
 			l = strings.TrimSpace(l[i+2:])
 		}
@@ -81,6 +86,26 @@ func statusLine(out string) string {
 		return l
 	}
 	return ""
+}
+
+// countTasks sets each topic's claimed/open counts from the tasks whose
+// top-level topic is in its scope.
+func countTasks(list []topicInfo, tasks []kmemTask) {
+	for i := range list {
+		t := &list[i]
+		t.Claimed, t.Open = 0, 0
+		for _, task := range tasks {
+			if !contains(t.Scope, topLevel(task.Topic)) {
+				continue
+			}
+			switch task.Status {
+			case "claimed":
+				t.Claimed++
+			case "open":
+				t.Open++
+			}
+		}
+	}
 }
 
 // buildTopics assembles the topic list from `kmem topics`, the config labels
@@ -122,20 +147,9 @@ func buildTopics(topicsOut string, labels map[string]kmemSessionCfg, tasks []kme
 		out = append(out, topicInfo{Slug: k, Title: title, Scope: []string{k}})
 	}
 	for i := range out {
-		t := &out[i]
-		t.Status = status[t.Slug]
-		for _, task := range tasks {
-			if !contains(t.Scope, topLevel(task.Topic)) {
-				continue
-			}
-			switch task.Status {
-			case "claimed":
-				t.Claimed++
-			case "open":
-				t.Open++
-			}
-		}
+		out[i].Status = status[out[i].Slug]
 	}
+	countTasks(out, tasks)
 	return out
 }
 
@@ -158,7 +172,9 @@ func (d *desk) loadTopics() []topicInfo {
 		}
 	}
 	list := buildTopics(topicsOut, labels, ts.Tasks, status)
-	d.applyKmemScopes(list)
+	if d.applyKmemScopes(list) {
+		countTasks(list, ts.Tasks) // kmem's scope, as in its briefing
+	}
 	applySavedTitles(list, labels)
 	topicCache.mu.Lock()
 	topicCache.list, topicCache.at, topicCache.loaded, topicCache.busy = list, time.Now(), true, false
@@ -174,21 +190,28 @@ const topicScopeFeature = "topic-scope"
 
 // applyKmemScopes reads each topic's stored scope (`kmem scope T --json`)
 // for display and the task counts. A topic with no stored scope keeps what
-// it had. Not on the UI thread.
-func (d *desk) applyKmemScopes(list []topicInfo) {
+// it had. Reports whether kmem's scopes were used. Not on the UI thread.
+func (d *desk) applyKmemScopes(list []topicInfo) bool {
 	if !d.kmemHasFeature(topicScopeFeature) {
-		return
+		return false
 	}
 	for i := range list {
 		t := &list[i]
+		// kmem 1.10.1: {"scope": {"topic": T, "topics": [T, ...]}, "api": 1};
+		// "topics" starts with T and is [T] with no stored scope.
 		var r struct {
-			Scope scopeList `json:"scope"`
+			Scope struct {
+				Topics []string `json:"topics"`
+			} `json:"scope"`
 		}
-		if d.kmemJSON(&r, "scope", t.Slug) && len(r.Scope) > 0 {
-			t.Scope = r.Scope
-			t.Labeled = true
+		if d.kmemJSON(&r, "scope", t.Slug) && len(r.Scope.Topics) > 0 {
+			if len(r.Scope.Topics) > 1 {
+				t.Labeled = true
+			}
+			t.Scope = r.Scope.Topics
 		}
 	}
+	return true
 }
 
 // refreshTopics reloads the cache in the background when it is older than a

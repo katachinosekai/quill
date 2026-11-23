@@ -21,13 +21,16 @@ func (f *fakeKmem) run(_ string, args ...string) (string, error) {
 	switch args[0] {
 	case "version":
 		if f.scope {
-			return `{"version": "1.10.1", "api": 1, "features": ["topic-context","end-check","sessions","topic-scope"]}`, nil
+			return `{"kmem": "1.10.1", "platform": "linux", "api": 1, "features": ["topic-context","end-check","sessions","topic-scope"]}`, nil
 		}
-		return `{"version": "1.9.3", "api": 1}`, nil
+		return `{"kmem": "1.9.3", "platform": "linux", "api": 1}`, nil
 	case "recall", "find":
 		return "alpha/core: [f1] fact: zebra\n", nil
 	case "scope":
-		return `{"topic": "alpha", "scope": ["alpha","alpha-extra"], "api": 1}`, nil
+		if args[1] == "plain" {
+			return `{"scope": {"topic": "plain", "topics": ["plain"]}, "api": 1}`, nil
+		}
+		return `{"scope": {"topic": "alpha", "topics": ["alpha", "alpha-extra"]}, "api": 1}`, nil
 	}
 	return "", errors.New("unexpected")
 }
@@ -128,5 +131,49 @@ func TestTopicScopeFeature(t *testing.T) {
 func TestScopeReadOnly(t *testing.T) {
 	if !readOnlyKmemWords([]string{"scope", "quill", "--json"}) || readOnlyKmemWords([]string{"scope", "quill", "a,b"}) {
 		t.Fatal("scope T reads; scope T list writes")
+	}
+}
+
+func TestKmemVersionField(t *testing.T) {
+	for _, c := range []struct {
+		scope bool
+		want  string
+	}{{false, "1.9.3"}, {true, "1.10.1"}} {
+		d, _ := compatDesk(t, c.scope)
+		if got := d.kmemInstalledVersion(); got != c.want {
+			t.Errorf("version %q want %q", got, c.want)
+		}
+	}
+}
+
+func TestScopeCountsFromKmem(t *testing.T) {
+	d, _ := compatDesk(t, true)
+	list := []topicInfo{{Slug: "alpha", Scope: []string{"alpha"}}, {Slug: "plain", Scope: []string{"plain"}}}
+	tasks := []kmemTask{
+		{ID: "t1", Status: "claimed", Topic: "alpha"},
+		{ID: "t2", Status: "open", Topic: "alpha-extra/x"},
+		{ID: "t3", Status: "claimed", Topic: "alpha-extra"},
+		{ID: "t4", Status: "open", Topic: "plain"},
+	}
+	countTasks(list, tasks)
+	if list[0].Claimed != 1 || list[0].Open != 0 {
+		t.Fatalf("own scope only: %+v", list[0])
+	}
+	if !d.applyKmemScopes(list) {
+		t.Fatal("scopes applied")
+	}
+	countTasks(list, tasks)
+	if list[0].Claimed != 2 || list[0].Open != 1 || !list[0].Labeled {
+		t.Fatalf("kmem's scope: %+v", list[0])
+	}
+	if list[1].Open != 1 || list[1].Labeled || len(list[1].Scope) != 1 {
+		t.Fatalf("no stored scope: %+v", list[1])
+	}
+}
+
+func TestStatusLineNewest(t *testing.T) {
+	out := "[f2c3bfa] decision: older status\n[f427744] fact: middle\n[fa99658] fact: newest status\n"
+	if got := statusLine(out); got != "newest status" {
+		t.Fatalf("status line %q", got)
 	}
 }

@@ -46,7 +46,7 @@ func (d *desk) kmemAPILevel() int {
 	out, err := d.runKmem("kmem", "version", "--json")
 	var r struct {
 		API      int      `json:"api"`
-		Version  string   `json:"version"`
+		Version  string   `json:"kmem"`
 		Features []string `json:"features"`
 	}
 	if err == nil && json.Unmarshal([]byte(strings.TrimSpace(out)), &r) == nil {

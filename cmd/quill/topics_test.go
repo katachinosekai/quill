@@ -43,7 +43,7 @@ func TestBuildTopics(t *testing.T) {
 }
 
 func TestTopicParsing(t *testing.T) {
-	if got := statusLine("[f12ab34] fact: Zero open bugs; release next\n[f99] fact: older\n"); got != "Zero open bugs; release next" {
+	if got := statusLine("[f99] fact: older\n[f12ab34] fact: Zero open bugs; release next\n"); got != "Zero open bugs; release next" {
 		t.Fatalf("status line %q", got)
 	}
 	if statusLine("no facts in x/status\n") != "" {
