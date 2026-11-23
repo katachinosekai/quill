@@ -129,3 +129,15 @@ func TestAgentCallDescriptionAndModel(t *testing.T) {
 		t.Fatalf("agent from the call: %+v", g)
 	}
 }
+
+// task_progress carries what the agent is doing now in "description"; the
+// name it was started with stays.
+func TestAgentNameSurvivesProgress(t *testing.T) {
+	c := New()
+	applyLine(t, c, `{"type":"system","subtype":"task_started","task_id":"agentN1","tool_use_id":"toolu_N","description":"Fix join stall","subagent_type":"Explore","task_type":"local_agent"}`)
+	applyLine(t, c, `{"type":"system","subtype":"task_progress","task_id":"agentN1","tool_use_id":"toolu_N","description":"Reading foo.go","usage":{"total_tokens":10,"tool_uses":1},"last_tool_name":"Read"}`)
+	a, _ := agentByID(c, "agentN1")
+	if a.Name != "Fix join stall" || a.LastTool != "Read" || a.Tokens != 10 {
+		t.Fatalf("name replaced by progress: %+v", a)
+	}
+}

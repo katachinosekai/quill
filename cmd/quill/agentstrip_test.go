@@ -180,3 +180,36 @@ func TestAgentChipDescription(t *testing.T) {
 		t.Fatalf("failed mark: %q", got)
 	}
 }
+
+// The open tooltip keeps its size while time and tokens change: the text is
+// updated in place, the popup is neither rebuilt nor resized.
+func TestAgentTipSteady(t *testing.T) {
+	h := newHarness(t)
+	start := time.Now()
+	g := chat.AgentUse{ID: "a1", Name: "Fix join stall", Type: "Explore", LastTool: "Read", Tokens: 900, Started: start, Status: "running"}
+	cur := &g
+	chip := newAgentChip("● Fix join stall", colIdle, nil, func() string { return agentTip(*cur, start.Add(90*time.Second)) })
+	h.ui(func() {
+		h.d.agentStrip.row.Objects = []fyne.CanvasObject{chip}
+		chip.MouseIn(nil)
+	})
+	if chip.pop == nil {
+		t.Skip("no canvas for the chip in this harness")
+	}
+	pop, size := chip.pop, chip.pop.Content.MinSize()
+	h.ui(func() {
+		g.Tokens, g.LastTool = 123456, "Edit"
+		cur = &g
+		h.d.agentStrip.sync()
+	})
+	if chip.pop != pop || chip.pop.Content.MinSize() != size {
+		t.Fatalf("tooltip rebuilt or resized: %v -> %v", size, chip.pop.Content.MinSize())
+	}
+	found := false
+	for _, l := range chip.tipLines {
+		found = found || l.Text == "now: Edit"
+	}
+	if !found {
+		t.Fatalf("text not updated in place: %v", chip.tipLines)
+	}
+}

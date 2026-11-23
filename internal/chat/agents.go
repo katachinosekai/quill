@@ -193,7 +193,10 @@ func (c *Conversation) applyTaskEvent(ev *protocol.Event) {
 		}
 		a = c.newAgent(e.TaskID, e.ToolUseID)
 	}
-	if e.Description != "" {
+	// The name is the one the subagent was started with (the Agent call's
+	// description, else task_started's); later events (task_progress carries
+	// what it is doing now) never replace it.
+	if e.Description != "" && a.Name == "" {
 		a.Name = e.Description
 	}
 	if e.Type != "" {

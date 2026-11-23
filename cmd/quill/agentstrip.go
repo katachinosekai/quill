@@ -147,6 +147,9 @@ func agentTip(g chat.AgentUse, now time.Time) string {
 	if len(more) > 0 {
 		lines = append(lines, strings.Join(more, " · "))
 	}
+	if g.Running() && g.LastTool != "" {
+		lines = append(lines, "now: "+g.LastTool)
+	}
 	st := "Running for " + agentDur(now.Sub(g.Started))
 	if !g.Running() {
 		w := g.Status
@@ -175,6 +178,12 @@ func agentChipText(g chat.AgentUse, _ time.Time) string {
 }
 
 func (a *agentStrip) sync() {
+	// A hovered chip's tooltip follows time and tokens in place (no resize).
+	for _, o := range a.row.Objects {
+		if c, ok := o.(*agentChip); ok {
+			c.updateTip()
+		}
+	}
 	s := a.d.current
 	if (s == nil || s.conv == nil || s.conv.AgentsRev() == 0) && !a.root.Visible() {
 		return
@@ -211,6 +220,11 @@ func (a *agentStrip) sync() {
 			col = colMuted
 		}
 		objs = append(objs, newAgentChip(t, col, func(c fyne.CanvasObject) { menuAbove(c, a.items(s, g)) }, func() string { return agentTip(g, a.now()) }))
+	}
+	for _, o := range a.row.Objects { // a rebuilt chip must not leave its tooltip up
+		if c, ok := o.(*agentChip); ok {
+			c.MouseOut()
+		}
 	}
 	a.row.Objects = objs
 	a.row.Refresh()
@@ -288,6 +302,8 @@ type agentChip struct {
 	onTap func(fyne.CanvasObject)
 	tip   func() string // the tooltip text, built on hover (times move)
 	pop   *widget.PopUp
+
+	tipLines []*canvas.Text // the open tooltip's lines, updated in place
 }
 
 func newAgentChip(text string, col color.Color, onTap func(fyne.CanvasObject), tip func() string) *agentChip {
@@ -309,20 +325,102 @@ func (c *agentChip) Tapped(*fyne.PointEvent) {
 	}
 }
 
-// MouseIn shows the tooltip under the chip, MouseOut and a tap hide it.
+// agentTipMinText: the widest state line a tooltip normally shows, so its
+// width has a stable floor however short the first text is.
+const agentTipMinText = "Completed after 99 h 59 min · 999.9k tok"
+
+// agentTipMaxChars: the longest line a tooltip shows (longer ones are cut).
+const agentTipMaxChars = 72
+
+// agentTipFade: the tooltip's fade-in.
+const agentTipFade = 150 * time.Millisecond
+
+// agentTipLayout stacks the tooltip's lines at one fixed size: the size is
+// set when the tooltip opens and never follows the text afterwards.
+type agentTipLayout struct{ size fyne.Size }
+
+func (l *agentTipLayout) MinSize([]fyne.CanvasObject) fyne.Size { return l.size }
+func (l *agentTipLayout) Layout(objs []fyne.CanvasObject, _ fyne.Size) {
+	var y float32
+	for _, o := range objs {
+		h := o.MinSize().Height
+		o.Move(fyne.NewPos(0, y))
+		o.Resize(fyne.NewSize(l.size.Width, h))
+		y += h + theme.Padding()/2
+	}
+}
+
+func tipLines(s string) []string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = cutTo(l, agentTipMaxChars)
+	}
+	return lines
+}
+
+// MouseIn shows the tooltip under the chip once, with a short fade-in; its
+// size is fixed from the first text (and a floor), later ticks only change
+// the text (updateTip). MouseOut and a tap hide it.
 func (c *agentChip) MouseIn(*desktop.MouseEvent) {
 	cv := fyne.CurrentApp().Driver().CanvasForObject(c)
 	if c.tip == nil || cv == nil || c.pop != nil {
 		return
 	}
-	c.pop = widget.NewPopUp(widget.NewLabel(c.tip()), cv)
+	lines := tipLines(c.tip())
+	objs := make([]fyne.CanvasObject, len(lines))
+	c.tipLines = c.tipLines[:0]
+	var w, h float32
+	w = canvas.NewText(agentTipMinText, theme.ForegroundColor()).MinSize().Width
+	for i, l := range lines {
+		t := canvas.NewText(l, color.Transparent)
+		t.TextSize = fontMeta
+		t.Text = l
+		ms := t.MinSize()
+		w = max(w, ms.Width)
+		h += ms.Height
+		if i > 0 {
+			h += theme.Padding() / 2
+		}
+		c.tipLines = append(c.tipLines, t)
+		objs[i] = t
+	}
+	size := fyne.NewSize(w, h)
+	c.pop = widget.NewPopUp(container.NewPadded(container.New(&agentTipLayout{size: size}, objs...)), cv)
 	c.pop.ShowAtPosition(fyne.CurrentApp().Driver().AbsolutePositionForObject(c).Add(fyne.NewPos(0, c.Size().Height)))
+	fg := theme.ForegroundColor()
+	fyne.NewAnimation(agentTipFade, func(p float32) {
+		for _, t := range c.tipLines {
+			t.Color = fade(fg, float64(p))
+			t.Refresh()
+		}
+	}).Start()
 }
+
+// updateTip: refreshes the open tooltip's text in place; the popup is not
+// rebuilt or resized (the line count and width were fixed on open).
+func (c *agentChip) updateTip() {
+	if c.pop == nil || c.tip == nil {
+		return
+	}
+	lines := tipLines(c.tip())
+	for i, t := range c.tipLines {
+		l := ""
+		if i < len(lines) {
+			l = lines[i]
+		}
+		if t.Text != l {
+			t.Text = l
+			t.Refresh()
+		}
+	}
+}
+
 func (c *agentChip) MouseMoved(*desktop.MouseEvent) {}
 func (c *agentChip) MouseOut() {
 	if c.pop != nil {
 		c.pop.Hide()
 		c.pop = nil
+		c.tipLines = nil
 	}
 }
 
