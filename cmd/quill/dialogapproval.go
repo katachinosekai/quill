@@ -67,10 +67,22 @@ func (d *desk) dialogGate(s *deskSession, it *chat.Item, answers map[string]stri
 	switch {
 	case stop:
 		revokePlan(s)
+		d.settlePlans(s, chat.PermDenied)
 	case goAhead:
-		startPlan(s)
+		d.approveNow(s) // a pending plan card is answered too: its buttons go inactive
 	default:
 		return
 	}
 	d.keepGate(s)
+}
+
+// settlePlans marks the session's pending plan cards answered (state) so
+// their buttons go inactive, on the desktop, in the mirror and on the phone.
+func (d *desk) settlePlans(s *deskSession, state chat.PermState) {
+	for _, it := range s.conv.PendingPermissions() {
+		if it.Kind == chat.Plan {
+			it.PermState = state
+			d.chatFor(s, []*chat.Item{it})
+		}
+	}
 }

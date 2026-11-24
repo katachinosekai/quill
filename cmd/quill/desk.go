@@ -2021,6 +2021,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 			d.approveByText(s)
 		} else if !planGo && !isRetry(text) && !s.inTurn {
 			endPlan(s)
+			s.planWait = false // an approval question kept past a blocked call is answered otherwise
 			d.chatFor(s, s.conv.CancelPlans())
 		}
 		if nearMiss {
@@ -3033,6 +3034,7 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 				d.approveNow(s)
 			} else if !isRetry(it.Text) && !s.inTurn {
 				endPlan(s)
+				s.planWait = false
 				d.chatFor(s, s.conv.CancelPlans()) // the session moved on: the plan card is stale
 			}
 			s.inTurn = true
@@ -3059,9 +3061,12 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 		// option buttons, and the plan comes after the answer (user
 		// 2026-11-21: "Approve plan & run all" under a "which did you mean"
 		// question).
+		// An approval question asked earlier in the turn, before the blocked
+		// call, still waits: the blocked call doesn't clear it, so the user's
+		// pick of its Yes still approves (td0cabd, user 2026-11-24).
 		asks := d.planFirst && s.conv.AsksApproval()
 		if s.planWait && !asks && s.conv.AsksQuestion() {
-			s.planWait = false
+			s.planWait = turnAskedApproval(s.conv)
 			return nil
 		}
 		// A turn that failed (API errors such as ECONNREFUSED after retries)
@@ -3089,6 +3094,29 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 		}
 	}
 	return nil
+}
+
+// turnAskedApproval: a text of the current turn before its last one asked
+// for approval (chat.TextAsksApproval), and no user message came since.
+func turnAskedApproval(c *chat.Conversation) bool {
+	last := true
+	for i := len(c.Items) - 1; i >= 0; i-- {
+		it := c.Items[i]
+		if it.Kind == chat.User || it.Kind == chat.Plan {
+			return false
+		}
+		if it.Kind != chat.Assistant || strings.TrimSpace(it.Text) == "" {
+			continue
+		}
+		if last {
+			last = false // the closing text: AsksApproval's
+			continue
+		}
+		if chat.TextAsksApproval(it.Text) {
+			return true
+		}
+	}
+	return false
 }
 
 // turnFailed: the turn's result reports an error (not a user interrupt).
@@ -3122,6 +3150,7 @@ func (d *desk) approveNow(s *deskSession) {
 		}
 	}
 	startPlan(s)
+	s.planWait = false // approved: no card for it at the turn's end
 }
 
 var approvalWords = map[string]bool{
@@ -3235,20 +3264,36 @@ func approvesPlan(s *deskSession, text string) bool {
 	if isPlanGo(text) {
 		// Only while a plan or approval question waits; the card's own
 		// Approve path does not come through here (sendTo's cardGo).
-		return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
+		return planPending(s)
 	}
 	// A quick-choice pick of the approval question's Yes ("I pick the first
 	// option: Yes."; user 2026-11-22: picking Yes didn't count).
 	for _, opt := range choicePicks(text) {
 		if isApproval(opt) {
-			return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
+			return planPending(s)
 		}
 	}
+	if !typedApprovalCounts() {
+		return false
+	}
 	if approves(text) {
-		return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
+		return planPending(s)
 	}
 	return isStepList(text) && coversPlan(s, text)
 }
+
+// planPending: a plan card, an approval question or a blocked call's plan
+// waits for the user's answer.
+func planPending(s *deskSession) bool {
+	return hasPendingPlan(s) || s.conv.AsksApproval() || s.planWait
+}
+
+// typedApprovalCounts: whether a go-ahead the user types ("yes", "go ahead",
+// "approve the plan", a step list "1-3") approves a waiting plan, as the
+// card's buttons, a quick-choice pick, the dialog and the card's "Approved."
+// do. Undecided (td0cabd, user 2026-11-24): it counts, as before; return
+// false here to make only buttons, picks and the dialog approve.
+func typedApprovalCounts() bool { return true }
 
 func isRetry(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), retryPrefix)
@@ -3342,6 +3387,7 @@ func (d *desk) approveByText(s *deskSession) {
 		}
 	}
 	startPlan(s)
+	s.planWait = false // approved: no card for it at the turn's end
 }
 
 func (d *desk) answerPlan(s *deskSession, it *chat.Item, ok bool) {
