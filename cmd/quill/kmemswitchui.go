@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -204,6 +205,12 @@ func (d *desk) showKmemSwitchResult(v *kmemSwitchView, res kmemSwitchResult) {
 		objs = append(objs, boldLabel("Switched to kmem."))
 		for _, p := range res.Projects {
 			objs = append(objs, wrapLabel(fmt.Sprintf("• %s → topic %s: %d imported, %d already there", tildePath(p.File), p.Topic, p.Imported, p.Skipped)))
+			if len(p.Missing) > 0 {
+				objs = append(objs, wrapLabel("    Linked notes not found: "+strings.Join(p.Missing, ", ")))
+			}
+			if len(p.Refused) > 0 {
+				objs = append(objs, wrapLabel("    Not imported (kmem refused): "+strings.Join(p.Refused, ", ")))
+			}
 		}
 		objs = append(objs, wrapLabel("Sessions started or resumed from now on use kmem; running sessions keep going unchanged. Claude Code's auto memory is off."))
 		d.refreshKmemVer()

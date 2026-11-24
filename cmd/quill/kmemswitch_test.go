@@ -20,9 +20,32 @@ import (
 
 // fakeKmemOpts: how the fake kmem binary answers.
 type fakeKmemOpts struct {
-	old       bool   // kmem 1.13: no `features`, no import
-	noRules   bool   // `kmem rules` lists none
-	failTopic string // the import into this topic fails (exit 2)
+	old        bool   // kmem 1.13: no `features`, no import
+	noRules    bool   // `kmem rules` lists none
+	failTopic  string // the import into this topic fails (exit 2)
+	listsTopic string // the import into this topic reports missing/refused notes
+}
+
+// TestKmemImportMissingRefused: kmem 1.14.1's "missing" (strings) and
+// "refused" (objects) lists reach the project result.
+func TestKmemImportMissingRefused(t *testing.T) {
+	bin, _ := fakeKmemBinary(t, fakeKmemOpts{listsTopic: "lists"})
+	d := &desk{}
+	useFakeKmem(d, bin)
+	r, err := d.kmemImport("/placeholder/MEMORY.md", "lists")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Imported != 1 || len(r.Missing) != 1 || r.Missing[0] != "gone.md" {
+		t.Fatalf("missing: %+v", r)
+	}
+	if len(r.Refused) != 1 || !strings.Contains(r.Refused[0], "big.md") || !strings.Contains(r.Refused[0], "over 2 MB") {
+		t.Fatalf("refused: %+v", r)
+	}
+	r, err = d.kmemImport("/placeholder/MEMORY.md", "plain")
+	if err != nil || r.Missing != nil || r.Refused != nil || r.Imported != 2 {
+		t.Fatalf("plain import: %+v %v", r, err)
+	}
 }
 
 // fakeKmemBinary writes a kmem stand-in (a shell script) that logs its
@@ -55,7 +78,10 @@ import)
   if [ "$5" = '` + o.failTopic + `' ]; then
     echo '{"error":"placeholder store failure","code":"store_error"}'; exit 2
   fi
-  echo "{\"imported\": 2, \"skipped\": 1, \"topic\": \"$5\", \"file\": \"$3\", \"kmem\": \"1.14.0\", \"extra\": true}" ;;
+  if [ "$5" = '` + o.listsTopic + `' ]; then
+    echo "{\"imported\": 1, \"skipped\": 0, \"topic\": \"$5\", \"file\": \"$3\", \"kmem\": \"1.14.1\", \"api\": 1, \"missing\": [\"gone.md\"], \"refused\": [{\"file\": \"big.md\", \"reason\": \"over 2 MB\"}]}"; exit 0
+  fi
+  echo "{\"imported\": 2, \"skipped\": 1, \"topic\": \"$5\", \"file\": \"$3\", \"kmem\": \"1.14.1\", \"api\": 1, \"extra\": true}" ;;
 *) echo "fake kmem: $1 not supported" >&2; exit 1 ;;
 esac
 `

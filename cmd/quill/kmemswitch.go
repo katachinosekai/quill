@@ -264,7 +264,26 @@ type kmemSwitchProject struct {
 	Topic    string `json:"topic"`
 	Imported int    `json:"imported"`
 	Skipped  int    `json:"skipped"`
-	Done     bool   `json:"done"`
+	// Missing / Refused: kmem 1.14.1's lists of linked notes it couldn't find
+	// or wouldn't import (omitted by kmem when empty).
+	Missing []string `json:"missing,omitempty"`
+	Refused []string `json:"refused,omitempty"`
+	Done    bool     `json:"done"`
+}
+
+// kmemListItems turns kmem's missing/refused entries into lines: strings as
+// they are, anything else (an object with a reason) as compact JSON.
+func kmemListItems(raw []json.RawMessage) []string {
+	var out []string
+	for _, r := range raw {
+		var s string
+		if json.Unmarshal(r, &s) == nil {
+			out = append(out, s)
+			continue
+		}
+		out = append(out, strings.TrimSpace(string(r)))
+	}
+	return out
 }
 
 // kmemSwitchRecord is switch.json in the backup folder: what the switch
@@ -313,11 +332,13 @@ func (d *desk) kmemImport(file, topic string) (kmemSwitchProject, error) {
 	r := kmemSwitchProject{File: file, Topic: topic}
 	out, err := d.runKmemRaw("kmem", "import", "memory-md", file, "--topic", topic, "--json")
 	var ok struct {
-		Imported *int   `json:"imported"`
-		Skipped  int    `json:"skipped"`
-		Topic    string `json:"topic"`
-		Error    string `json:"error"`
-		Code     string `json:"code"`
+		Imported *int              `json:"imported"`
+		Skipped  int               `json:"skipped"`
+		Topic    string            `json:"topic"`
+		Error    string            `json:"error"`
+		Code     string            `json:"code"`
+		Missing  []json.RawMessage `json:"missing"`
+		Refused  []json.RawMessage `json:"refused"`
 	}
 	perr := kmemJSONOut(out, &ok)
 	switch {
@@ -333,6 +354,7 @@ func (d *desk) kmemImport(file, topic string) (kmemSwitchProject, error) {
 		return r, fmt.Errorf("kmem's answer to the import of %s is not the expected JSON: %q", tildePath(file), strings.TrimSpace(out))
 	}
 	r.Imported, r.Skipped, r.Done = *ok.Imported, ok.Skipped, true
+	r.Missing, r.Refused = kmemListItems(ok.Missing), kmemListItems(ok.Refused)
 	if ok.Topic != "" {
 		r.Topic = ok.Topic
 	}
