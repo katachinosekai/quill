@@ -44,7 +44,7 @@ const dontRunPick = -2
 // f4684ce), which get a "Don't run" of their own. nil: the card keeps its
 // Approve button.
 func planApprovalOptions(title string) *approvalOpts {
-	sents := questionSentences(strings.TrimSpace(strings.Trim(mdNoise.Replace(title), "*_ ")))
+	sents := questionSentences(strings.TrimSpace(strings.Trim(mdNoise.Replace(chat.NormYesNo(title)), "*_ ")))
 	for i := len(sents) - 1; i >= 0; i-- {
 		_, opts, ok := parseChoices(sents[i])
 		if !ok {

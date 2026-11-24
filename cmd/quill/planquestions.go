@@ -579,16 +579,22 @@ func planQuestionsFor(title, text string) []planQ {
 	// its question the approval itself.
 	own := ""
 	explicit := false
-	sents := questionSentences(strings.TrimSpace(strings.Trim(mdNoise.Replace(title), "*_ ")))
+	sents := questionSentences(strings.TrimSpace(strings.Trim(mdNoise.Replace(chat.NormYesNo(title)), "*_ ")))
 	for _, q := range sents {
 		explicit = explicit || approveOnly.MatchString(strings.TrimSpace(qQuoted.ReplaceAllString(q, " ")))
 	}
 	if !explicit && len(sents) > 0 {
 		own = normQ(sents[len(sents)-1])
+		// "Fix both and commit? Yes (recommended) or no?": the options
+		// sentence answers the question before it, which is the card's own
+		// (td0cabd: it showed again as a question under the Yes/No buttons).
+		if len(sents) > 1 && yesNoOnly.MatchString(sents[len(sents)-1]) {
+			own = normQ(sents[len(sents)-2])
+		}
 	}
 	var out []planQ
 	var ownNums []int
-	for _, q := range planQuestions(text) {
+	for _, q := range planQuestions(chat.NormYesNo(text)) {
 		if own != "" && normQ(q.Text) == own {
 			if q.Num > 0 {
 				ownNums = append(ownNums, q.Num)
@@ -603,6 +609,10 @@ func planQuestionsFor(title, text string) []planQ {
 	}
 	return out
 }
+
+// yesNoOnly: a sentence that only offers Yes and no ("Yes (recommended) or
+// no?", "Yes or No?").
+var yesNoOnly = regexp.MustCompile(`(?i)^\W*yes\b(?:\s*\([^)]*\))?\s*,?\s*or\s+no\W*$`)
 
 func normQ(s string) string {
 	s = strings.ToLower(mdNoise.Replace(s))

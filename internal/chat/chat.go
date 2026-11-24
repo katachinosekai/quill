@@ -228,21 +228,56 @@ var yesNoOptsRe = regexp.MustCompile(`(?i)^\W*yes\b.*\bor\b.*\bno\b`)
 // the question names no plan words (user 2026-11-22, tf2db21: a quick-choice
 // Yes to it didn't count as plan approval).
 func yesNoProposal(line string) bool {
-	line = quotedSpans.ReplaceAllString(numberedQ.ReplaceAllString(strings.TrimSpace(line), ""), " ")
+	line = quotedSpans.ReplaceAllString(numberedQ.ReplaceAllString(NormYesNo(strings.TrimSpace(line)), ""), " ")
 	i := strings.Index(line, "?")
 	if i < 0 {
 		return false
 	}
-	q := line[:i]
+	q, before := line[:i], ""
 	if m := sentenceEnd.FindAllStringIndex(q, -1); len(m) > 0 {
-		q = q[m[len(m)-1][1]:]
+		q, before = q[m[len(m)-1][1]:], q[:m[len(m)-1][1]]
 	}
 	q = strings.TrimLeft(q, "*_ ")
 	rest := strings.Trim(line[i+1:], "*_ ")
 	if !yesNoOptsRe.MatchString(rest) {
 		return false
 	}
-	return proposalAsk.MatchString(q) || actionAsk(q, rest)
+	return proposalAsk.MatchString(q) || actionAsk(q, rest) || okAfterProposal(q, before, rest)
+}
+
+// Yes/no option forms besides "Yes or no?" (td0cabd, user 2026-11-24):
+// "(yes/no)", "(yes or no)", "Yes / no", "Yes (recommended)/No", "y/n".
+var (
+	parenYesNo = regexp.MustCompile(`(?i)\(\s*(?:yes|y)\s*(?:/|\bor\b)\s*(?:no|n)\s*\)`)
+	yesSlashNo = regexp.MustCompile(`(?i)\b(?:yes|y)\b(\s*\([^)]*\))?\s*/\s*(?:no|n)\b`)
+)
+
+// NormYesNo writes the yes/no option forms of line as "Yes … or no", the
+// form the approval question's buttons and checks read.
+func NormYesNo(line string) string {
+	line = parenYesNo.ReplaceAllString(line, "Yes or no?")
+	line = strings.ReplaceAll(line, "??", "?")
+	return yesSlashNo.ReplaceAllString(line, "Yes${1} or no")
+}
+
+// okAsk: a bare "OK?" asking about the sentence before it.
+var okAsk = regexp.MustCompile(`(?i)^\W*(?:ok|okay|alright|all right|sounds? good|good|fine|agreed|deal)\W*$`)
+
+// ownProposal: a sentence where Claude says what it would do next ("I'd fix
+// both and push", "Next I'll tag it").
+var ownProposal = regexp.MustCompile(`(?i)\bI(?:'d| would|'ll| will| can| want to| plan to| am going to|'m going to)\s+(?:\w+\s+){0,2}?(?:` + actionVerbs + `|` + moreActionVerbs + `)\b|^\W*(?:let me|next,?\s+I(?:'ll| will))\b`)
+
+// okAfterProposal: "I'd fix both and push. OK? Yes (recommended) or no?":
+// the proposal is the sentence before a bare "OK?".
+func okAfterProposal(q, before, rest string) bool {
+	if !okAsk.MatchString(q) || !plainYesNo.MatchString(strings.Join(strings.Fields(rest), " ")) {
+		return false
+	}
+	before = strings.TrimSpace(strings.TrimLeft(before, "*_ "))
+	if m := sentenceEnd.FindAllStringIndex(strings.TrimRight(before, ".!"), -1); len(m) > 0 {
+		before = before[m[len(m)-1][1]:]
+	}
+	return len(before) <= 300 && ownProposal.MatchString(before)
 }
 
 // actionVerbs: verbs a proposal of work starts with ("Fix 2 and 3?",
@@ -257,7 +292,12 @@ var namesWork = regexp.MustCompile(`(?i)\b(?:` + actionVerbs + `|execute|launch|
 // a pick between things to approve does; a pick between preferences doesn't.
 func NamesWork(s string) bool { return namesWork.MatchString(s) }
 
-var actionStart = regexp.MustCompile(`(?i)^(?:(?:ok|okay|so|and|also|then|now)[,:]?\s+)?(?:` + actionVerbs + `)\b|^(?:ok|okay) to\b`)
+// moreActionVerbs: more verbs a yes/no proposal starts with (td0cabd, user
+// 2026-11-24: "Make the change and rerun the tests? Yes (recommended) or
+// no?" got no card). Kept out of NamesWork, which sorts choice options.
+const moreActionVerbs = `make|wire|wire up|hook up|kick off|edit|change|adjust|convert|split|generate|regenerate|reinstall|uninstall|upgrade|downgrade|sync|rebuild|redeploy|reload|test|retest|re-test|file|open|close|mark|prune|purge|import|export|submit|backport|wrap up|finalize|extend|link|unlink|go on|keep going`
+
+var actionStart = regexp.MustCompile(`(?i)^(?:(?:ok|okay|so|and|also|then|now|next)[,:]?\s+)?(?:` + actionVerbs + `|` + moreActionVerbs + `)\b|^(?:ok|okay) to\b`)
 
 // plainYesNo: the options of a bare yes/no question ("Yes or no?", "Yes
 // (recommended) or no?" with the parentheses blanked).
@@ -310,34 +350,40 @@ func (c *Conversation) AsksApproval() bool {
 		if it.Kind != Assistant || strings.TrimSpace(it.Text) == "" {
 			continue
 		}
-		body, _ := SplitSources(it.Text)
-		t := strings.TrimRight(strings.TrimSpace(JoinOptionLines(body)), "*_ ")
-		last := t[strings.LastIndex(t, "\n")+1:]
-		if strings.HasSuffix(t, "?") && asksToApprove(lastQuestion(last)) {
-			return true
-		}
-		// "Can I run steps 1–6? Yes (recommended) or no?": the options
-		// sentence follows the approval question on its line.
-		if q := firstQuestion(numberedQ.ReplaceAllString(last, "")); q != "" && asksToApprove(q) && strings.HasSuffix(t, "?") {
-			return true
-		}
-		// The approval question can be followed by a note on the same line
-		// ("Do you approve steps 1–3? Your approval also covers …."; user
-		// 2026-11-21: a typed "Yes" to that was not taken as approval).
-		if q := lastQuestion(last); q != "" && asksToApprove(q) {
-			return true
-		}
-		// Rule 28 (user 2026-11-21): a plan ends with its questions numbered,
-		// one per line; the approval can be any of them, not just the last.
-		if ClosingApproval(t) != "" || yesNoProposal(last) {
-			return true
-		}
-		if RequestsYes(t) {
-			return true
-		}
-		return proposes(last)
+		return TextAsksApproval(it.Text)
 	}
 	return false
+}
+
+// TextAsksApproval: reply text ends in a question asking to approve, or in a
+// proposal of work (AsksApproval for one text).
+func TextAsksApproval(text string) bool {
+	body, _ := SplitSources(text)
+	t := strings.TrimRight(strings.TrimSpace(JoinOptionLines(body)), "*_ ")
+	last := t[strings.LastIndex(t, "\n")+1:]
+	if strings.HasSuffix(t, "?") && asksToApprove(lastQuestion(last)) {
+		return true
+	}
+	// "Can I run steps 1–6? Yes (recommended) or no?": the options
+	// sentence follows the approval question on its line.
+	if q := firstQuestion(numberedQ.ReplaceAllString(last, "")); q != "" && asksToApprove(q) && strings.HasSuffix(t, "?") {
+		return true
+	}
+	// The approval question can be followed by a note on the same line
+	// ("Do you approve steps 1–3? Your approval also covers …."; user
+	// 2026-11-21: a typed "Yes" to that was not taken as approval).
+	if q := lastQuestion(last); q != "" && asksToApprove(q) {
+		return true
+	}
+	// Rule 28 (user 2026-11-21): a plan ends with its questions numbered,
+	// one per line; the approval can be any of them, not just the last.
+	if ClosingApproval(t) != "" || yesNoProposal(last) {
+		return true
+	}
+	if RequestsYes(t) {
+		return true
+	}
+	return proposes(last)
 }
 
 // yesPlanHead: a plan heading that says it waits for the user's go-ahead
@@ -411,7 +457,7 @@ func asksToApprove(q string) bool {
 // that end a message ("1. Do you approve steps 1–6? …", "2. …?"), or "".
 func ClosingApproval(text string) string {
 	lines := strings.Split(strings.TrimRight(strings.TrimSpace(JoinOptionLines(text)), "*_ "), "\n")
-	seen := false
+	seen, proposal := false, ""
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := strings.TrimSpace(lines[i])
 		if l == "" {
@@ -424,15 +470,30 @@ func ClosingApproval(text string) string {
 			if q := firstQuestion(strings.Trim(l, "*_ ")); seen && q != "" && asksToApprove(q) {
 				return q
 			}
+			if proposal != "" {
+				return proposal
+			}
+			// A bold yes/no proposal ("**Fix both and commit? Yes
+			// (recommended) or no?**") before numbered choice questions: the
+			// whole line, so the card offers its Yes and No (td0cabd).
+			if l := strings.TrimSpace(strings.Trim(l, "*_ ")); seen && yesNoProposal(l) {
+				return l
+			}
 			return ""
 		}
 		seen = true
 		q := strings.TrimSpace(strings.Trim(numberedQ.ReplaceAllString(l, ""), "*_ "))
-		if lq := lastQuestionOf(q); lq != "" && asksToApprove(lq) || yesNoProposal(q) {
+		if lq := lastQuestionOf(q); lq != "" && asksToApprove(lq) {
 			return q
 		}
+		// A yes/no proposal among them is the approval only when none asks
+		// for it outright ("1. Do you approve steps 1–2? 2. Should I push the
+		// tag too? Yes or no?": the push is a choice).
+		if proposal == "" && yesNoProposal(q) {
+			proposal = q
+		}
 	}
-	return ""
+	return proposal
 }
 
 // firstQuestion: the sentence that ends at the first "?" of line (quotes and
