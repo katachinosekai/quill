@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.26
+Version:        0.1.27
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -74,6 +74,15 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/quill/
 
 %changelog
+* Mon Nov 23 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.27-1
+- Quill operator: Quill Desktop's own assistant behind the Quill button (settings with Undo, explanations; developer role with a Quill source folder, which now defaults to the checkout Quill Desktop runs from)
+- Assistant box: undocked, it takes over the main message box (own drafts and suggestions, name chip, accent frame) and dims the rest; click outside or press Esc to close, click a tab to close and switch
+- Approvals waiting in the Quill operator or kmem assistant turn their button amber and get their own notification, also on the phone
+- Tray menu: Restart Quill Desktop, keeping sessions running
+- Copy image: right-click an image in the chat or the viewer (needs wl-clipboard or xclip)
+- Plan and choice cards: options with commas or colons stay whole; questions stay live through status replies
+- Approved subagents keep their approval when resumed
+- Bundles kmem 1.10.2 and Quill Android 0.9.38
 * Mon Nov 23 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.26-1
 - Languages: topic titles in any language; autocorrect follows the system language (with a picker); dates, sorting and search follow your language; voice input auto-detects the language with larger models
 - Whole-letter text streaming
