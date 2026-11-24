@@ -587,6 +587,11 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 		d.app.Preferences().SetBool("planFirst", on)
 	})
 	planChk.Checked = d.planFirst
+	splitChk := widget.NewCheck("Allow reads and kmem notes without a plan", func(on bool) {
+		d.app.Preferences().SetBool(prefGateSplit, on)
+	})
+	splitChk.Checked = d.gateSplitOn()
+	splitNote := caption(gateSplitExplain)
 	buildChk := widget.NewCheck("Ask before building (plan card: more features, debug, secure, or build)", func(on bool) {
 		if on != d.buildGateOn() {
 			d.app.Preferences().SetBool(prefBuildGate, on)
@@ -634,7 +639,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	_ = roBtn
 	d.sizesCard = d.sizePanel()
 	sizes := container.NewHBox(container.NewGridWrap(fyne.NewSize(360, d.sizesCard.MinSize().Height), d.sizesCard))
-	d.setGeneral = container.NewVBox(planChk, buildChk, coordChk, coordNote, animChk, speedRow, motionRows, chipChk, updChk, notifyChk, d.kwinSetting(), widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Voice input"), d.voiceSettings(), widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
+	d.setGeneral = container.NewVBox(planChk, splitChk, splitNote, buildChk, coordChk, coordNote, animChk, speedRow, motionRows, chipChk, updChk, notifyChk, d.kwinSetting(), widget.NewSeparator(), heading("Alignment"), alignRow, widget.NewSeparator(), heading("Sizes"), sizes, widget.NewSeparator(), heading("New sessions"), newSessions, widget.NewSeparator(), heading("Message times"), d.timeSettings(), widget.NewSeparator(), heading("Voice input"), d.voiceSettings(), widget.NewSeparator(), heading("Typing"), d.autocorrectSettings(), widget.NewSeparator(), heading("Memory (kmem)"), d.kmemSettings())
 	d.setGeneral.Add(widget.NewSeparator()) // quilloperator.go
 	d.setGeneral.Add(heading("Quill operator"))
 	d.setGeneral.Add(d.quillOpSettings())
@@ -2969,7 +2974,11 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 		if !d.planFirst {
 			return nil
 		}
-		if readOnlyRequest(it.Request, d.readOnlyExtraFor(s)) {
+		// Reads, and with the gate split on (gatesplit.go) kmem bookkeeping
+		// under the session's own name and Zomboid launches kmem-guard owns:
+		// allowed, so they never refuse their batch and never stop a
+		// subagent started next to them.
+		if c := requestClass(it.Request, d.readOnlyExtraFor(s)); c != classGated {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
 			}

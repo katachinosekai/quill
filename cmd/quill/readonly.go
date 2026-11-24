@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path"
 	"regexp"
@@ -828,35 +827,11 @@ func readOnlyGitArgs(sub string, args []string) bool {
 }
 
 func readOnlyRequest(r *protocol.ControlRequest, extra [][]string) bool {
-	if r == nil {
-		return false
-	}
-	if readOnlyTools[r.ToolName] {
-		return true
-	}
-	if r.ToolName != "Bash" {
-		return false
-	}
-	var in struct {
-		Command string `json:"command"`
-	}
-	if json.Unmarshal(r.Input, &in) != nil {
-		return false
-	}
-	return readOnlyCommand(in.Command, extra)
+	return requestClass(r, extra) == classRead
 }
 
 func readOnlyCommand(cmd string, extra [][]string) bool {
-	segs, ok := shSegments(cmd)
-	if !ok || len(segs) == 0 {
-		return false
-	}
-	for _, seg := range segs {
-		if !readOnlySegment(seg, extra) {
-			return false
-		}
-	}
-	return true
+	return commandClass(cmd, extra) == classRead
 }
 
 func hasWordPrefix(f, prefix []string) bool {
@@ -871,23 +846,30 @@ func hasWordPrefix(f, prefix []string) bool {
 	return true
 }
 
-// readOnlySegment: one simple command from shSegments only reads. A word
-// holding a for-loop variable is checked with each of its values.
+// readOnlySegment: one simple command from shSegments only reads.
 func readOnlySegment(seg []shWord, extra [][]string) bool {
+	return segmentClass(seg, extra) == classRead
+}
+
+// segmentClass: the class of one simple command from shSegments. A word
+// holding a for-loop variable is checked with each of its values; the
+// strictest wins.
+func segmentClass(seg []shWord, extra [][]string) gateClass {
 	if len(seg) > 0 && seg[0].plain && seg[0].text == "for" {
-		return true // a loop header shSegments checked: sets the loop variable only
+		return classRead // a loop header shSegments checked: sets the loop variable only
 	}
 	n := 1
 	for _, w := range seg {
 		if len(w.alts) > 1 {
 			if n *= len(w.alts); n > 256 {
-				return false
+				return classGated
 			}
 		}
 	}
 	if n == 1 {
-		return readOnlyWords(seg, extra)
+		return wordsClass(seg, extra)
 	}
+	c := classRead
 	for k := 0; k < n; k++ {
 		one := make([]shWord, len(seg))
 		r := k
@@ -898,18 +880,20 @@ func readOnlySegment(seg []shWord, extra [][]string) bool {
 				r /= len(w.alts)
 			}
 		}
-		if !readOnlyWords(one, extra) {
-			return false
+		if c = max(c, wordsClass(one, extra)); c == classGated {
+			return c
 		}
 	}
-	return true
+	return c
 }
 
 func readOnlyWords(seg []shWord, extra [][]string) bool {
-	isRead := false
+	o := gateOptsOf(extra)
+	isRead, isKmem := false, false
 	for _, w := range seg {
 		if !assignName.MatchString(w.text) {
 			isRead = w.text == "read"
+			isKmem = binName(w.text) == "kmem"
 			break
 		}
 	}
@@ -918,8 +902,11 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 		if m == nil {
 			break
 		}
-		// `IFS= read -r line` only changes how read splits its input.
-		if !safeAssign(m[1], seg[0].text[len(m[0]):], !seg[0].unknown) && !(isRead && m[1] == "IFS") {
+		v := seg[0].text[len(m[0]):]
+		// `IFS= read -r line` only changes how read splits its input;
+		// KMEM_SESSION=<own name> kmem … is `kmem --as <own name>` (gatesplit.go).
+		ownKmem := isKmem && m[1] == "KMEM_SESSION" && o.own != "" && !seg[0].unknown && v == o.own
+		if !safeAssign(m[1], v, !seg[0].unknown) && !(isRead && m[1] == "IFS") && !ownKmem {
 			return false
 		}
 		seg = seg[1:]
@@ -947,7 +934,7 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 	if name == "kmem" {
 		// kmem takes its options anywhere (`kmem rules --as x`), so word
 		// prefixes don't fit it: kmemAllowed matches extra lines itself.
-		return kmemAllowed(f[1:], unknownArg, extra)
+		return kmemAllowed(f[1:], unknownArg, extra, o.split)
 	}
 	for _, e := range extra {
 		if hasWordPrefix(f, e) {
@@ -958,6 +945,14 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 		return false
 	}
 	args := f[1:]
+	if o.split {
+		switch name {
+		case "timeout":
+			return timeoutRead(seg, extra)
+		case "pzlock":
+			return !unknownArg && readOnlyPzlock(args)
+		}
+	}
 	switch name {
 	case "sed":
 		return readOnlySed(args)
@@ -978,7 +973,10 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 				return false
 			}
 		}
-		return len(args) > 0 && readOnlyGit[args[0]] && readOnlyGitArgs(args[0], args[1:])
+		if len(args) > 0 && readOnlyGit[args[0]] && readOnlyGitArgs(args[0], args[1:]) {
+			return true
+		}
+		return o.split && len(args) > 0 && readOnlyGitMore(args[0], args[1:])
 	case "sort":
 		for _, a := range args {
 			if longOpt(a, "--output", "--compress-program") || shortFlag(a, "o") {
@@ -1076,6 +1074,9 @@ func readOnlyWords(seg []shWord, extra [][]string) bool {
 func parseReadOnlyExtra(text string) [][]string {
 	var out [][]string
 	for _, line := range strings.Split(text, "\n") {
+		if strings.IndexByte(line, 0) >= 0 {
+			continue // marker lines (gatesplit.go) are Quill's own
+		}
 		segs, ok := shSegments(strings.TrimSpace(line))
 		if !ok || len(segs) != 1 {
 			continue
@@ -1100,7 +1101,28 @@ const builtinReadOnly = "kmem brief\nkmem get\nkmem find\nkmem show\nkmem contex
 const quillReadOnly = "quill settings list\nquill settings get"
 
 func (d *desk) readOnlyExtra() [][]string {
-	return parseReadOnlyExtra(builtinReadOnly + "\n" + quillReadOnly + "\n" + d.app.Preferences().String("extraReadOnly"))
+	extra := append(parseReadOnlyExtra(builtinReadOnly+"\n"+quillReadOnly), userReadOnlyExtra(d.app.Preferences().String("extraReadOnly"))...)
+	if d.gateSplitOn() {
+		extra = append(extra, []string{markSplit})
+	}
+	return extra
+}
+
+// userReadOnlyExtra: the user's Read-only commands. A kmem line counts only
+// when it names a kmem read (`kmem get`, `kmem --as x brief`): kmem is
+// classified by its verb, so a bare `kmem` line or `kmem retire` can't let a
+// kmem write through (guard audit §4).
+func userReadOnlyExtra(text string) [][]string {
+	var out [][]string
+	for _, e := range parseReadOnlyExtra(text) {
+		if e[0] == "kmem" {
+			if _, words, ok := kmemSplit(e[1:]); !ok || len(words) == 0 || !readOnlyKmemWords(words, true) {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // readOnlyExtraFor: readOnlyExtra plus `kmem --as <own name> brief|rules` for
@@ -1111,10 +1133,17 @@ func (d *desk) readOnlyExtraFor(s *deskSession) [][]string {
 	if s == nil {
 		return extra
 	}
+	split := d.gateSplitOn()
 	if k := d.org.Kmem[s.id]; k != "" {
 		for _, sub := range []string{"brief", "rules"} {
 			extra = append(extra, []string{"kmem", "--as", k, sub}, []string{"kmem", "--as=" + k, sub})
 		}
+		if split {
+			extra = append(extra, []string{markOwn, k})
+		}
+	}
+	if split && d.kmemFeatureCached(pzLockClosed) {
+		extra = append(extra, []string{markPZ})
 	}
 	return extra
 }
@@ -1126,7 +1155,8 @@ func (d *desk) readOnlyDialog() {
 	e.SetMinRowsVisible(6)
 	explain := widget.NewLabel("With Plan first on, commands that only read run without a plan round. " +
 		"Add your own here, one per line: a command that starts with one of these lines counts as read-only " +
-		"(\"kmem get\" also lets \"kmem get notes\" through). Only add commands that never change anything.")
+		"(\"kmem get\" also lets \"kmem get notes\" through). Only add commands that never change anything. " +
+		"kmem lines count only for kmem reads: a kmem write never runs without a plan from this list.")
 	explain.Wrapping = fyne.TextWrapWord
 	explain.SizeName = theme.SizeNameCaptionText
 	dlg := dialog.NewCustomConfirm("Read-only commands", "Save", "Cancel", container.NewBorder(nil, explain, nil, nil, e), func(ok bool) {
@@ -1148,7 +1178,7 @@ func (d *desk) readOnlyDialog() {
 //
 // kmem takes options anywhere in the line (`kmem rules --as other`), so
 // --as is looked for in every word (kmemSplit).
-func readOnlyKmem(args []string) bool {
+func readOnlyKmem(args []string, split bool) bool {
 	as, words, ok := kmemSplit(args)
 	if !ok || len(words) == 0 {
 		return false
@@ -1156,7 +1186,7 @@ func readOnlyKmem(args []string) bool {
 	if as != "" && (words[0] == "brief" || words[0] == "rules") {
 		return false
 	}
-	return readOnlyKmemWords(words)
+	return readOnlyKmemWords(words, split)
 }
 
 // kmemSplit takes `--as NAME` / `--as=NAME` out of a kmem command line,
@@ -1193,13 +1223,18 @@ func kmemSplit(args []string) (as string, words []string, ok bool) {
 	return as, words, true
 }
 
-// kmemValueOpts: kmem read options that take a value.
-var kmemValueOpts = map[string]bool{"--cap": true, "--topic": true, "-n": true, "--token": true}
+// kmemValueOpts: kmem read options that take a value; kmemSplitValueOpts
+// those the gate split adds (end-check, context --scope).
+var (
+	kmemValueOpts      = map[string]bool{"--cap": true, "--topic": true, "-n": true, "--token": true}
+	kmemSplitValueOpts = map[string]bool{"--scope": true, "--session": true, "--pid": true, "--since": true}
+)
 
 // readOnlyKmemWords: a kmem command (without --as) that only reads. Any
 // option other than --json, --all and the value options in kmemValueOpts
-// makes it a write or unknown.
-func readOnlyKmemWords(words []string) bool {
+// makes it a write or unknown. split: the gate split's reads too
+// (gatesplit.go).
+func readOnlyKmemWords(words []string, split bool) bool {
 	if len(words) == 1 && (words[0] == "--version" || words[0] == "--help" || words[0] == "-h") {
 		return true
 	}
@@ -1207,8 +1242,8 @@ func readOnlyKmemWords(words []string) bool {
 	for i := 0; i < len(words); i++ {
 		w := words[i]
 		switch {
-		case w == "--json" || w == "--all":
-		case kmemValueOpts[w]:
+		case w == "--json" || w == "--all" || split && w == "--live":
+		case kmemValueOpts[w] || split && kmemSplitValueOpts[w]:
 			if i+1 >= len(words) || strings.HasPrefix(words[i+1], "-") {
 				return false
 			}
@@ -1237,6 +1272,17 @@ func readOnlyKmemWords(words []string) bool {
 	case "trash":
 		return len(ops) == 2 && ops[1] == "list"
 	}
+	if !split {
+		return false
+	}
+	switch ops[0] {
+	case "sessions", "features", "end-check":
+		return len(ops) == 1
+	case "howto":
+		return len(ops) == 2 && ops[1] == "list" || len(ops) == 3 && ops[1] == "show"
+	case "relate":
+		return len(ops) == 2 // `kmem relate A` lists; with B it records
+	}
 	return false
 }
 
@@ -1244,8 +1290,10 @@ func readOnlyKmemWords(words []string) bool {
 // kmem match on the command's --as name (wherever it stands) and words; a
 // line matches a longer command only when that command is a read
 // (`kmem handoff policy` doesn't let `kmem handoff policy set …` through).
-// A bare `kmem` line (Quill's handoff save) lets every kmem command through.
-func kmemAllowed(args []string, unknown bool, extra [][]string) bool {
+// A bare `kmem` line (Quill's own windows: kmemSaveExtra) lets every kmem
+// command through; the user's Read-only commands never hold one
+// (userReadOnlyExtra).
+func kmemAllowed(args []string, unknown bool, extra [][]string, split bool) bool {
 	for _, e := range extra {
 		if len(e) == 1 && e[0] == "kmem" {
 			return true
@@ -1266,11 +1314,11 @@ func kmemAllowed(args []string, unknown bool, extra [][]string) bool {
 		if !eok || eas != as || !hasWordPrefix(words, ew) {
 			continue
 		}
-		if len(words) == len(ew) || readOnlyKmemWords(words) {
+		if len(words) == len(ew) || readOnlyKmemWords(words, split) {
 			return true
 		}
 	}
-	return readOnlyKmem(args)
+	return readOnlyKmem(args, split)
 }
 
 // readOnlyCommandV: `command -v|-V NAME…` only looks names up; any other

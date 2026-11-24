@@ -32,11 +32,11 @@ func testSessionKey(t *testing.T) {
 }
 
 func TestSettingsRegistryExcludesSecurity(t *testing.T) {
-	mustSecurity := []string{"planFirst", "buildGate", "autoApprove", "newMode", "extraReadOnly", "permissions",
+	mustSecurity := []string{"planFirst", prefGateSplit, "buildGate", "autoApprove", "newMode", "extraReadOnly", "permissions",
 		"checkUpdates", "autoRemoteControl", "rcLocal", "phoneServe", "phoneControl", "phoneNotify", "phoneFilesDeny",
 		"pcLock", "remoteAccess", "remotePCs", "memoryMode", "kmemSetup", "kmemAssistModel", "operatorModel"}
 	// Preference keys of security settings no writable entry may touch.
-	securityPrefs := []string{"planFirst", prefBuildGate, prefNewMode, "extraReadOnly", "checkUpdates", "autoRemoteControl",
+	securityPrefs := []string{"planFirst", prefGateSplit, prefBuildGate, prefNewMode, "extraReadOnly", "checkUpdates", "autoRemoteControl",
 		"rcLocal", "phoneServe", "phoneControl", "phoneNotify", "phones", prefPhoneFilesDeny, prefPCPassword, prefPCIdle,
 		prefLanUnlock, prefRemoteAccess, "remotePCs", memoryModeKey, prefKmemAssistModel}
 	seen := map[string]bool{}

@@ -129,7 +129,7 @@ func TestTopicScopeFeature(t *testing.T) {
 }
 
 func TestScopeReadOnly(t *testing.T) {
-	if !readOnlyKmemWords([]string{"scope", "quill", "--json"}) || readOnlyKmemWords([]string{"scope", "quill", "a,b"}) {
+	if !readOnlyKmemWords([]string{"scope", "quill", "--json"}, false) || readOnlyKmemWords([]string{"scope", "quill", "a,b"}, false) {
 		t.Fatal("scope T reads; scope T list writes")
 	}
 }

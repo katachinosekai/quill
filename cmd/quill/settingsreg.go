@@ -117,6 +117,7 @@ func buildSettingsRegistry() []settingDef {
 	defs := []settingDef{
 		// Security settings: Settings only (decision 7; §3.8).
 		secDef("planFirst", "Plan first, then approve all", "Settings → General → Plan first, then approve all"),
+		secDef(prefGateSplit, "Allow reads and kmem notes without a plan", "Settings → General → Allow reads and kmem notes without a plan"),
 		secDef("buildGate", "Ask before building", "Settings → General → Ask before building"),
 		secDef("autoApprove", "Auto-approve", "the Auto-approve chip under a tab's message box"),
 		secDef("newMode", "New sessions start in mode", "Settings → General → New sessions"),
