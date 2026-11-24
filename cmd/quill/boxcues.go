@@ -191,7 +191,7 @@ func newDimPiece(d *desk) *dimPiece {
 }
 
 func (p *dimPiece) CreateRenderer() fyne.WidgetRenderer { return widget.NewSimpleRenderer(p.rect) }
-func (p *dimPiece) Tapped(*fyne.PointEvent)             { p.d.dimTapped() }
+func (p *dimPiece) Tapped(e *fyne.PointEvent)           { p.d.dimTapped(e.AbsolutePosition) }
 func (p *dimPiece) SecondaryTapped(*fyne.PointEvent)    {}
 func (p *dimPiece) MouseIn(*fyne.PointEvent)            {}
 func (p *dimPiece) MouseMoved(*fyne.PointEvent)         {}
@@ -199,11 +199,36 @@ func (p *dimPiece) MouseOut()                           {}
 func (p *dimPiece) Dragged(*fyne.DragEvent)             {}
 func (p *dimPiece) DragEnd()                            {}
 
-// dimTapped: a click on the dimmed area closes the box (like Escape).
-func (d *desk) dimTapped() {
-	if d.assistOverlayOpen() {
-		d.closeAssistBox()
+// dimTapped: a click on the dimmed area closes the box (like Escape); on a
+// tab it then switches to that tab, as before the dimming (user 2026-11-23).
+func (d *desk) dimTapped(abs fyne.Position) {
+	if !d.assistOverlayOpen() {
+		return
 	}
+	chip := d.tabChipAt(abs)
+	d.closeAssistBox()
+	if chip != nil && chip.onTap != nil {
+		chip.onTap()
+	}
+}
+
+// tabChipAt: the tab strip's tab under the absolute point abs, or nil.
+func (d *desk) tabChipAt(abs fyne.Position) *tabChip {
+	if d.strip == nil || d.strip.box == nil || fyne.CurrentApp() == nil {
+		return nil
+	}
+	drv := fyne.CurrentApp().Driver()
+	for _, o := range d.strip.box.Objects {
+		c, ok := o.(*tabChip)
+		if !ok || !c.Visible() {
+			continue
+		}
+		p, sz := drv.AbsolutePositionForObject(c), c.Size()
+		if abs.X >= p.X && abs.X < p.X+sz.Width && abs.Y >= p.Y && abs.Y < p.Y+sz.Height {
+			return c
+		}
+	}
+	return nil
 }
 
 func dimColor(level float32) color.Color {

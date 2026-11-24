@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/test"
 )
 
 // dimmedAt: a shown dimming piece covers the absolute point p.
@@ -154,11 +153,12 @@ func TestBoxCuesClickDimCloses(t *testing.T) {
 		d.openAssistBox(boxQuill)
 		d.input.SetText("op draft")
 		d.layoutDim()
-		pc := dimmedAt(d, centerOf(d.tabRow))
-		if pc == nil {
-			t.Fatal("the tab row is dimmed")
+		at := centerOf(d.toolbarBox)
+		pc := dimmedAt(d, at)
+		if pc == nil || d.tabChipAt(at) != nil {
+			t.Fatal("the toolbar is dimmed")
 		}
-		test.Tap(pc)
+		pc.Tapped(&fyne.PointEvent{AbsolutePosition: at})
 		if d.assistBoxRole() != "" || d.input.Text != "tab draft" || d.input.cue.chip.Visible() || shownPieces(d) != 0 {
 			t.Fatalf("the click closes the box, the tab's draft is back: %q", d.input.Text)
 		}
@@ -167,6 +167,32 @@ func TestBoxCuesClickDimCloses(t *testing.T) {
 			t.Fatalf("the operator's draft is kept: %q", d.input.Text)
 		}
 		d.closeAssistBox()
+	})
+}
+
+// A click on a dimmed tab closes the box and switches to that tab, as before
+// the dimming.
+func TestBoxCuesClickDimTabSwitches(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		d := h.d
+		d.open(smokeID)
+		d.open(editsID)
+		d.openAssistBox(boxQuill)
+		d.layoutDim()
+		chip := d.tabChips[smokeID]
+		if chip == nil || d.current == nil || d.current.id != editsID {
+			t.Fatal("two tabs, the edits one current")
+		}
+		at := centerOf(chip)
+		pc := dimmedAt(d, at)
+		if pc == nil || d.tabChipAt(at) != chip {
+			t.Fatal("the tab is dimmed and found under the click")
+		}
+		pc.Tapped(&fyne.PointEvent{AbsolutePosition: at})
+		if d.assistBoxRole() != "" || d.current == nil || d.current.id != smokeID || shownPieces(d) != 0 {
+			t.Fatal("the click closes the box and switches to the tab")
+		}
 	})
 }
 
