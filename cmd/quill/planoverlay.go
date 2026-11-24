@@ -236,7 +236,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	if qs == nil {
 		return nil
 	}
-	if v.planPlain[plan] {
+	if v.planPlain[plan] && !v.cardOnly {
 		return container.NewVBox(v.planToggle(plan, reply), msgText(v.markdownBlocks(reply.Text)))
 	}
 	owner := v.s
@@ -254,7 +254,10 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			skip[i] = true
 		}
 	}
-	box := container.New(settledVBox{}, v.planToggle(plan, reply))
+	box := container.New(settledVBox{})
+	if !v.cardOnly {
+		box.Add(v.planToggle(plan, reply))
+	}
 	caption := func(text string) fyne.CanvasObject {
 		msg := widget.NewLabel(text)
 		msg.Wrapping = fyne.TextWrapWord
@@ -289,7 +292,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		}
 		for i := from; i < to && i < len(lines); i++ {
 			inAppr := appr != nil && apprLine >= from && apprLine < to && i >= apprStart && i <= apprLine
-			if !skip[i] && !inAppr {
+			if !skip[i] && !inAppr && !v.cardOnly { // a mirror (cardOnly) shows the card alone
 				// Numbers stay as written: keepNumbers keeps a list from 1 a
 				// real list and puts a later piece ("3.") on lines of its own.
 				keep = append(keep, lines[i])

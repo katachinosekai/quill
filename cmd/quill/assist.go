@@ -56,6 +56,7 @@ type assistRole struct {
 	items    func(d *desk) []badgeItem
 	ready    func(d *desk) bool
 	badgeOn  func(d *desk) bool
+	mirrored func(d *desk) int // cards of other sessions waiting in this role's box (Quill: planmirror.go), added to the bubble
 	seenPref string
 	bubble   func(d *desk) *bubble
 
@@ -384,7 +385,11 @@ func (d *desk) updateAssistBadge(a *assistant) {
 		b.set(0)
 		return
 	}
-	b.set(len(unreadBadgeItems(items, seen)))
+	n := len(unreadBadgeItems(items, seen))
+	if a.role.mirrored != nil {
+		n += a.role.mirrored(d) // other tabs' plan cards waiting in this box (one count)
+	}
+	b.set(n)
 }
 
 // markAssistSeen records that the items were shown (UI thread). all (Mark all

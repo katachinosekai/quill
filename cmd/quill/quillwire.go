@@ -20,8 +20,9 @@ import (
 // attachQuillBox registers the operator's box content and the change cards.
 func (d *desk) attachQuillBox() {
 	d.quillChat = d.attachAssistBox(quillRole, "Quill operator", "Message the Quill operator")
-	d.quillChat.mirrors = newPlanMirrors()
-	d.quillChat.top.Add(d.quillChat.mirrors.scroll)
+	c := d.quillChat
+	c.mirrors = newPlanMirrors(func() float32 { return c.root.Size().Height })
+	c.top.Add(c.mirrors.wrap)
 	d.syncPlanMirrors()
 	d.setSettingsCard(d.quillSettingsCard)
 }
@@ -62,6 +63,7 @@ func quillBoxRefresh(d *desk, a *assistant) {
 func (d *desk) syncReasonStrip(c *assistChat) {
 	a := c.a
 	on := a.reason != "" && !d.assistRunning(a)
+	defer c.syncTop()
 	if !on {
 		c.reasonBox.Hide()
 		return

@@ -1187,6 +1187,24 @@ type assistChat struct {
 	tap       func()
 }
 
+// syncTop shows c.top only while something in it shows: a visible empty
+// top would still take the Border's padding and shift the chat down.
+func (c *assistChat) syncTop() {
+	on := false
+	for _, o := range c.top.Objects {
+		if o.Visible() {
+			on = true
+		}
+	}
+	if on != c.top.Visible() {
+		if on {
+			c.top.Show()
+		} else {
+			c.top.Hide()
+		}
+	}
+}
+
 // attachAssistBox builds role's chat for the box (once), registers it as the
 // role's box content and as the role's hidden host (events, seen, open on a
 // notification click).
@@ -1234,6 +1252,7 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 	c.reasonBox = container.NewVBox(bg(colBackground, 10, container.NewVBox(c.reasonLbl, c.reasonBtn)))
 	c.reasonBox.Hide()
 	c.top = container.NewVBox(c.reasonBox)
+	c.top.Hide() // nothing above the chat: laid out as without c.top (syncTop)
 	c.root = container.NewBorder(c.top, in, nil, nil, c.view.root)
 	c.box = &assistBoxView{
 		title:   title,

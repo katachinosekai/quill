@@ -36,7 +36,7 @@ func (d *desk) assistAlerting(role string) bool {
 // syncAssistAlert puts role's button in the approval-waiting state or takes
 // it out (syncAssistButtons, after the dots).
 func (d *desk) syncAssistAlert(bt *assistButton) {
-	on := d.assistAlerting(bt.role)
+	on := d.assistAlerting(bt.role) || d.mirrorAlerting(bt.role) // a mirrored card waits too (planmirror.go)
 	for _, dot := range []*canvas.Circle{bt.dot, bt.sideDot} {
 		if dot != nil && on && (dot.FillColor != colWaiting || !dot.Visible()) {
 			dot.FillColor = colWaiting

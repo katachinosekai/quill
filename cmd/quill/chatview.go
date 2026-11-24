@@ -123,6 +123,7 @@ type chatView struct {
 	sel           *selLayer
 	jumpBar       *fyne.Container
 	mirrorRedraw  func() // set on a mirrored plan card's view (planmirror.go): redrawPlan redraws the mirror
+	cardOnly      bool   // a mirrored card's view: the plan reply's questions and controls, no prose
 }
 
 type sessView struct {

@@ -63,6 +63,7 @@ func newQuillRole() *assistRole {
 		offReason:   "The Quill operator is off.",
 		items:       func(d *desk) []badgeItem { return quillIssueItems(d.kmemNeedsNow.QuillIssues) },
 		ready:       func(d *desk) bool { return d.kmemGot },
+		mirrored:    func(d *desk) int { return d.waitingMirrors() },
 		seenPref:    prefQuillOpSeen,
 		bubble:      func(d *desk) *bubble { return quillOpBubble(d) },
 		reason:      quillBoxReason,
