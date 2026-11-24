@@ -264,14 +264,22 @@ func TestKmemWindowShowsStatus(t *testing.T) {
 		if got := a.view.live.Text; got != "✻ Thinking…" {
 			t.Fatalf("kmem window while thinking: %q", got)
 		}
-		// Its header shows the same state, without the age (t9a3a6a).
-		if got := a.stateLbl.Text; got != "✻ Thinking…" {
-			t.Fatalf("kmem chat header while thinking: %q", got)
+		// Its header label would repeat the plain state: hidden (user
+		// 2026-11-24); it shows only starting/saving/stopping/failures.
+		if !a.stateLbl.Hidden {
+			t.Fatalf("kmem chat header shown while thinking: %q", a.stateLbl.Text)
 		}
 		s.conv.Busy, s.conv.Thinking = false, false
 		h.d.kmemAssistRefresh(a)
-		if got := a.stateLbl.Text; got != "Ready" {
-			t.Fatalf("kmem chat header idle: %q", got)
+		if !a.stateLbl.Hidden {
+			t.Fatalf("kmem chat header shown idle: %q", a.stateLbl.Text)
 		}
+		a.state = asStopping
+		h.d.kmemAssistRefresh(a)
+		if a.stateLbl.Hidden || a.stateLbl.Text != "● stopping" {
+			t.Fatalf("kmem chat header while stopping: hidden=%v %q", a.stateLbl.Hidden, a.stateLbl.Text)
+		}
+		a.state = asLive
+		h.d.kmemAssistRefresh(a)
 	})
 }

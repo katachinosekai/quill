@@ -298,6 +298,10 @@ func kmemWinRefresh(d *desk, a *assistant) {
 	now := statusNow()
 	s.trackTurn(now)
 	st := liveStatus(s, now).state
+	// The plain state repeats the box header and the line under the chat, so
+	// the label is hidden then (user 2026-11-24); it shows only what those
+	// don't: starting, saving (with its countdown), stopping, a failure.
+	special := true
 	failed := !s.running() && (a.state == asLive || a.state == asStarting)
 	switch {
 	case failed && s.failed != "":
@@ -313,8 +317,14 @@ func kmemWinRefresh(d *desk, a *assistant) {
 		st = "● stopping"
 	case s.status() == stNone:
 		st = "● starting"
+	default:
+		special = false
 	}
 	setLabel(a.stateLbl, st)
+	if a.stateLbl.Hidden == special {
+		a.stateLbl.Hidden = !special
+		a.stateLbl.Refresh()
+	}
 	if a.view != nil && a.view.s == s {
 		a.view.setStatus(s)
 	}
