@@ -2123,56 +2123,24 @@ func parseChoices(line string) (string, []string, bool) {
 	if p := lastQOutsideParens(body); p >= 0 {
 		body = strings.TrimSpace(listLead.ReplaceAllString(strings.TrimSpace(body[p+1:]), ""))
 	}
-	ask := strings.TrimSpace(parenAside.ReplaceAllString(body, ""))
-	sep := ", or "
-	i := strings.LastIndex(ask, sep)
-	if i < 0 {
-		sep = " or "
-		i = strings.LastIndex(ask, sep)
-	}
-	if i < 0 {
+	// The options are split at the top level only: commas, colons and "or"
+	// inside quotes or parentheses belong to their option (user 2026-11-23,
+	// tc3712f: 'as in "Message the Quill operator: <suggestion> (Tab)"' came
+	// back as just '<suggestion>"'). choiceParts has the rules.
+	opts, wh := choiceParts(body)
+	if opts == nil || wh {
 		return "", nil, false
 	}
-	a := strings.TrimSpace(ask[:i])
-	b := strings.TrimSpace(ask[i+len(sep):])
-	if c := strings.LastIndex(a, ": "); c >= 0 {
-		a = strings.TrimSpace(a[c+2:])
-	}
-	low := strings.ToLower(a)
-	for _, stem := range []string{"do you want me to ", "would you like me to ", "should i ", "shall i ", "should we ", "shall we ", "do you want to ", "want me to ", "should it ", "do i "} {
-		if strings.HasPrefix(low, stem) {
-			a = strings.TrimSpace(a[len(stem):])
-			break
-		}
-	}
-	// "Which panels should I build, or is there something else?": the first
-	// part is the question itself, not an option.
-	if f := strings.ToLower(strings.Fields(a + " x")[0]); f == "which" || f == "what" || f == "who" || f == "where" || f == "when" || f == "why" || f == "how" {
-		return "", nil, false
-	}
-	opts := []string{a}
-	// "Yes, 2 subagents (recommended) or no, I'll do it myself?" is two
-	// options: commas inside a yes/no pair don't split it.
-	if yesNoOptions(a, b) {
-		// keep a whole
-	} else if strings.Contains(a, ", ") {
-		// "a, b, or c" and "a, b or c" both list three options.
-		opts = mergeContinuations(strings.Split(a, ", "))
-		// A lead-in before the first comma is not an option ("For the icon,
-		// use blue, green, or red?").
-		if len(opts) >= 2 && leadIn.MatchString(opts[0]) {
-			opts = opts[1:]
-		}
-	}
-	opts = append(opts, b)
-	if len(opts) > 4 || strings.Contains(b, " or ") {
+	if len(opts) > 4 || len(topCuts(opts[len(opts)-1], " or ")) > 0 {
 		return "", nil, false
 	}
 	if len(marks) == len(opts) {
 		return strings.TrimRight(clean, "*_ "), marks, true
 	}
 	for i, o := range opts {
-		o = strings.TrimSpace(o)
+		// Asides in parentheses ("(recommended)", "(Quill's paired PCs)")
+		// go; parentheses inside a quoted option stay.
+		o = strings.TrimSpace(stripAsides(o))
 		if o == "" || len(strings.Fields(o)) > maxOptionWords {
 			return "", nil, false
 		}
@@ -2305,7 +2273,10 @@ func (v *chatView) choiceGate(it *chat.Item) (ok, latest bool) {
 		if x.Kind == chat.Plan {
 			return false, false
 		}
-		if x.Kind == chat.User || x.Kind == chat.Assistant && !x.Streaming && asksNewQuestion(x.Text) {
+		// A user message answers it, a newer question replaces it; status
+		// replies and automated messages (peer, channel, scheduled) don't
+		// (user 2026-11-23, tc3712f).
+		if x.Kind == chat.User && !notFromUser(x.Text) || x.Kind == chat.Assistant && !x.Streaming && asksNewQuestion(x.Text) {
 			latest = false
 		}
 	}

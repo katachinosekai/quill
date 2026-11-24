@@ -158,3 +158,14 @@ func asksNewQuestion(text string) bool {
 	_, qs := numberedChoiceQs(body)
 	return qs != nil
 }
+
+// statusAfterQuestion: the latest reply asks nothing and an earlier reply's
+// question, with no user message since, is still open (a status line in a
+// turn a task notification started; user 2026-11-23, tc3712f).
+func statusAfterQuestion(c *chat.Conversation) bool {
+	last := lastTurnText(c)
+	if strings.TrimSpace(last) == "" || asksNewQuestion(last) {
+		return false
+	}
+	return openChoiceItem(c) != nil
+}

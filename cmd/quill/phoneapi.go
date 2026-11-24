@@ -943,7 +943,7 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 func openChoiceItem(c *chat.Conversation) *chat.Item {
 	for i := len(c.Items) - 1; i >= 0; i-- {
 		it := c.Items[i]
-		if it.Kind == chat.User || it.Kind == chat.Plan {
+		if it.Kind == chat.User && !notFromUser(it.Text) || it.Kind == chat.Plan {
 			return nil
 		}
 		if it.Kind == chat.Assistant && strings.TrimSpace(it.Text) != "" && !it.Streaming && asksNewQuestion(it.Text) {

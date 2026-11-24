@@ -3050,7 +3050,8 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 			s.planWait = false
 			// A status reply (no new question) leaves an unanswered card live,
 			// even when a call in its turn was blocked (user 2026-11-23).
-			if !asks && livePlan(s.conv) != nil {
+			// The same for an unanswered choice question (tc3712f).
+			if !asks && (livePlan(s.conv) != nil || statusAfterQuestion(s.conv)) {
 				return nil
 			}
 			if keptPlan(s.conv, lastTurnText(s.conv)) != nil {

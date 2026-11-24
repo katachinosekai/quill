@@ -27,8 +27,8 @@ func (v *chatView) answerAfter(it *chat.Item) string {
 			after = true
 			continue
 		}
-		if after && x.Kind == chat.User {
-			return x.Text
+		if after && x.Kind == chat.User && !notFromUser(x.Text) {
+			return x.Text // automated messages (peer, channel, scheduled) answer nothing
 		}
 	}
 	return ""
