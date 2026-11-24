@@ -117,6 +117,9 @@ type deskSession struct {
 	refusedAgents  map[string]bool       // agent ids of subagents stopped with their refused batch: their calls are refused
 	subRefused     map[string]bool       // subagents' assistant messages with a call plan-first refused
 	planSends      map[string]bool       // SendMessage calls of a covered turn: a resumed subagent is granted (planscope.go)
+	planShells     map[string]bool       // Bash calls of a covered turn: plan work if the CLI moves one to the background
+	queuedResumes  map[string]string     // agent id of a granted subagent a covered SendMessage was queued to -> its grant (planscope.go)
+	peerTurn       bool                  // a peer, channel or scheduled message started or joined this turn
 	queue          []string
 	lastSent       string
 	inTurn         bool
@@ -1796,6 +1799,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	s.inTurn, s.planWait = false, false
 	s.agentGrants, s.agentCalls, s.agentIDs = nil, nil, nil // the process and its subagents are gone
 	s.planWork, s.planAgents, s.turnCovered, s.autoTurn = nil, nil, false, false
+	s.queuedResumes, s.peerTurn = nil, false
 	s.refusedAgents, s.subRefused = nil, nil
 	if s.autoApprove {
 		endAutoApprove(s) // the session ended or restarts (autoapprove.go)
@@ -2930,6 +2934,7 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 		// A background subagent's events don't reach this stream, so its
 		// calls are known by the agent_id its requests carry (agent gap,
 		// 2026-11-22).
+		regrantQueued(s, it.Request)
 		if g, ok := grantedRequest(s, it.Request); ok {
 			if s.proc.Respond(it.RequestID, protocol.Allow, it.Request) == nil {
 				it.PermState = chat.PermAutoAllowed
@@ -3443,13 +3448,13 @@ func grantAgentCall(s *deskSession, id string, input json.RawMessage) {
 		return
 	}
 	var in struct {
-		Background bool `json:"run_in_background"`
+		Background flexBool `json:"run_in_background"`
 	}
 	json.Unmarshal(input, &in)
 	if s.agentGrants == nil {
 		s.agentGrants = map[string]agentGrant{}
 	}
-	s.agentGrants[id] = agentGrant{Background: in.Background, At: gateNow()}
+	s.agentGrants[id] = agentGrant{Background: bool(in.Background), At: gateNow()}
 	s.grantRev++
 }
 
@@ -3520,6 +3525,17 @@ func grantFor(s *deskSession, id string) (string, bool) {
 // An Agent call the session makes while an approved plan is in force is
 // granted from its assistant event too: the CLI need not ask for it.
 func trackAgentCalls(s *deskSession, ev *protocol.Event) {
+	if ev.Type == "assistant" && !ev.IsSubagent() && ev.Message != nil {
+		for _, b := range ev.Message.Blocks() {
+			if b.Type == "tool_use" && b.Name == "SendMessage" {
+				var in struct {
+					To string `json:"to"`
+				}
+				json.Unmarshal(b.Input, &in)
+				forgetQueued(s, in.To)
+			}
+		}
+	}
 	if ev.Type == "assistant" && !ev.IsSubagent() && planCovers(s) && ev.Message != nil {
 		for _, b := range ev.Message.Blocks() {
 			if b.Type == "tool_use" {
@@ -3570,23 +3586,53 @@ func trackAgentCalls(s *deskSession, ev *protocol.Event) {
 			}
 			// The launch result names the agent (a nested agent's too, when
 			// its parent's results are streamed).
+			agent := ""
 			if m := agentIDRe.FindSubmatch(b.Content); m != nil {
-				addAgentID(s, string(m[1]), g)
+				agent = string(m[1])
 			} else if len(results) == 1 {
 				var r struct {
 					AgentID string `json:"agentId"`
 				}
 				json.Unmarshal(ev.ToolUseResult, &r)
-				addAgentID(s, r.AgentID, g)
+				agent = r.AgentID
 			}
+			addAgentID(s, agent, g)
 			if ev.IsSubagent() {
 				continue
 			}
 			if gr, ok := s.agentGrants[b.ToolUseID]; ok && !gr.Background {
+				if asyncLaunch(b, ev, len(results) == 1) {
+					// The CLI ran it in the background although the call
+					// didn't say so: it goes on until its notification, and
+					// that notification is the plan's.
+					gr.Background = true
+					s.agentGrants[b.ToolUseID] = gr
+					s.grantRev++
+					if s.runAll {
+						addPlanWork(s, b.ToolUseID, b.ToolUseID)
+						addPlanWork(s, agent, b.ToolUseID)
+					}
+					continue
+				}
 				endAgentGrant(s, b.ToolUseID)
 			}
 		}
 	}
+}
+
+// asyncLaunch: b, an Agent call's result, says the subagent was launched
+// in the background (its result comes with the task notification).
+func asyncLaunch(b protocol.Block, ev *protocol.Event, single bool) bool {
+	if single {
+		var r struct {
+			Status  string `json:"status"`
+			IsAsync bool   `json:"isAsync"`
+		}
+		if json.Unmarshal(ev.ToolUseResult, &r) == nil && (r.Status == "async_launched" || r.IsAsync) {
+			return true
+		}
+	}
+	return strings.HasPrefix(strings.TrimSpace(protocol.ContentText(b.Content)), "Async agent launched")
 }
 
 // agentIDRe: the agent id in an Agent call's launch result.

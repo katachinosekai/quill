@@ -287,7 +287,7 @@ func noteAgentTask(s *deskSession, ev *protocol.Event) []*chat.Item {
 // endBatches: the session's turn is over.
 func endBatches(s *deskSession) {
 	s.batchOf, s.batchRefused = nil, nil
-	s.batchAgents, s.stopAgents, s.planSends = nil, nil, nil
+	s.batchAgents, s.stopAgents, s.planSends, s.planShells = nil, nil, nil, nil
 }
 
 // escalators run a command as another user (root).
@@ -376,8 +376,32 @@ func privilegedWords(f []string) bool {
 }
 
 // privilegedCommand: a shell command runs (or may run) something as root. A
-// command the parser can't follow counts when it names an escalator at all.
+// command the parser can't follow counts when it names an escalator at all,
+// except in the text of a here-document only a non-shell reads (t4b7838: a
+// subagent's `cat > x_test.go <<EOF` holding a test that mentions sudo was
+// taken for a root command).
 func privilegedCommand(cmd string) bool {
+	if strings.Contains(cmd, "<<") {
+		if outer, bodies, ok := stripHeredocs(cmd); ok && len(bodies) > 0 {
+			if privilegedText(outer) {
+				return true
+			}
+			if heredocRuns(outer) {
+				for _, b := range bodies {
+					if privilegedCommand(b) || escalatorWord.MatchString(b) {
+						return true
+					}
+				}
+			}
+			return false
+		}
+	}
+	return privilegedText(cmd)
+}
+
+// privilegedText: privilegedCommand, here-documents read as part of the
+// command.
+func privilegedText(cmd string) bool {
 	segs, ok := shSegments(cmd)
 	if !ok {
 		return escalatorWord.MatchString(cmd)
@@ -397,6 +421,123 @@ func privilegedCommand(cmd string) bool {
 		}
 	}
 	return strings.Contains(cmd, "$(") && escalatorWord.MatchString(cmd) || strings.Contains(cmd, "`") && escalatorWord.MatchString(cmd)
+}
+
+// heredocOp: a here-document's operator and delimiter at the start of the
+// text (<<EOF, <<-'EOF', << "EOF").
+var heredocOp = regexp.MustCompile(`^<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_.-]*)(['"]?)`)
+
+// stripHeredocs: cmd without the bodies of its here-documents, and the
+// bodies. Only the plain case is followed: a here-document `cat` or `tee`
+// reads, outside quotes, one per line, nothing quoted after it on its line;
+// anything else (a comment, arithmetic, quotes) is not (ok false), and the
+// caller reads the command whole.
+func stripHeredocs(cmd string) (outer string, bodies []string, ok bool) {
+	var out strings.Builder
+	inS, inD, esc := false, false, false
+	seg, last := 0, 0 // start of the current simple command; text not yet copied
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		switch {
+		case esc:
+			esc = false
+		case inS:
+			inS = c != '\''
+		case c == '\\':
+			esc = true
+		case inD:
+			inD = c != '"'
+		case c == '\'':
+			inS = true
+		case c == '"':
+			inD = true
+		case c == '#' && (i == 0 || strings.IndexByte(" \t\n;&|()", cmd[i-1]) >= 0):
+			return "", nil, false
+		case strings.IndexByte(";&|()\n`", c) >= 0:
+			seg = i + 1
+		case c == '<' && strings.HasPrefix(cmd[i:], "<<") && !strings.HasPrefix(cmd[i:], "<<<") && (i == 0 || cmd[i-1] != '<'):
+			m := heredocOp.FindStringSubmatch(cmd[i:])
+			if m == nil || m[2] != m[4] || !heredocSink(cmd[seg:i]) {
+				return "", nil, false
+			}
+			nl := strings.IndexByte(cmd[i:], '\n')
+			if nl < 0 {
+				return "", nil, false
+			}
+			rest := cmd[i+len(m[0]) : i+nl]
+			if strings.Contains(rest, "<<") || strings.ContainsAny(rest, "'\"\\`#") {
+				return "", nil, false
+			}
+			out.WriteString(cmd[last : i+nl+1])
+			j := i + nl + 1
+			var body []string
+			end := false
+			for j <= len(cmd) {
+				k := strings.IndexByte(cmd[j:], '\n')
+				line := cmd[j:]
+				if k >= 0 {
+					line = cmd[j : j+k]
+				}
+				next := len(cmd) + 1
+				if k >= 0 {
+					next = j + k + 1
+				}
+				if strings.TrimLeft(line, "\t") == m[3] {
+					end = true
+					out.WriteString(line)
+					if k >= 0 {
+						out.WriteByte('\n')
+					}
+					j = next
+					break
+				}
+				body = append(body, line)
+				j = next
+			}
+			if !end {
+				return "", nil, false
+			}
+			bodies = append(bodies, strings.Join(body, "\n"))
+			last, seg = j, j
+			i = j - 1
+		}
+	}
+	if inS || inD || esc {
+		return "", nil, false
+	}
+	if last < len(cmd) {
+		out.WriteString(cmd[last:])
+	}
+	return out.String(), bodies, true
+}
+
+// heredocSink: the simple command before a here-document only writes its
+// text out (cat, tee), no arithmetic.
+func heredocSink(prefix string) bool {
+	if strings.Contains(prefix, "((") {
+		return false
+	}
+	f := strings.Fields(prefix)
+	for len(f) > 0 && assignName.MatchString(f[0]) {
+		f = f[1:]
+	}
+	if len(f) == 0 {
+		return false
+	}
+	n := cmdName(f[0])
+	return n == "cat" || n == "tee"
+}
+
+// heredocRuns: the command around a here-document may run its text (a
+// shell, an interpreter, a runner).
+func heredocRuns(outer string) bool {
+	for _, w := range autoWordRe.FindAllString(outer, -1) {
+		n := cmdName(w)
+		if autoRunners[n] || autoInterps[n] || autoShellWords[n] || wrappers[n] || escalators[n] {
+			return true
+		}
+	}
+	return false
 }
 
 // privilegedRequest: r is a Bash call running a privileged command.

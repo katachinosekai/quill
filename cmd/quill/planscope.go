@@ -32,9 +32,19 @@ import (
 //     after the suite, commit after the subagent) run without asking again.
 //     The notification is matched by its <tool-use-id> or <task-id> against
 //     the work the plan started; any other notification starts an uncovered
-//     turn.
+//     turn. A turn another notification started is covered from the moment
+//     the plan's own notification joins it, unless a peer, channel or
+//     scheduled message is in that turn (t4b7838: the CLI hands a turn
+//     several queued notifications).
+//     Background work is known by its call (run_in_background, true or
+//     "true") or by its result: an Agent call the CLI launched in the
+//     background, a Bash call it moved there.
 //  4. A SendMessage resume, made in a covered turn, of a subagent a plan
-//     started: its grant is renewed until it finishes again.
+//     started: its grant is renewed until it finishes again. A message
+//     queued to a granted subagent still running carries the grant over:
+//     when that run ends first, the CLI resumes it with the message, and the
+//     grant is renewed for that run (queuedResumes, t4b7838/t1c7f2a). Any
+//     later SendMessage of the session to it drops that carry-over.
 //
 // Nothing else covers a turn. A turn started by a peer (cross-session) or
 // channel message or a scheduled trigger is never covered, and such a
@@ -108,13 +118,14 @@ func endPlan(s *deskSession) {
 func revokePlan(s *deskSession) {
 	endPlan(s)
 	s.agentGrants, s.agentCalls, s.agentIDs, s.planAgents = nil, nil, nil, nil
+	s.queuedResumes = nil
 	s.planRevoked = true
 	s.grantRev++
 }
 
 // turnEnded: the session's turn is over; the next one starts uncovered.
 func turnEnded(s *deskSession) {
-	s.turnCovered, s.autoTurn, s.gateUnsure, s.autoPeer = false, false, false, false
+	s.turnCovered, s.autoTurn, s.gateUnsure, s.autoPeer, s.peerTurn = false, false, false, false, false
 }
 
 // notUserMessage classifies a message the user didn't write (notFromUser).
@@ -137,12 +148,18 @@ func notUserMessage(s *deskSession, text string) {
 			s.turnCovered = ours && s.runAll
 			// Auto-approve covers it only for work it covered (autoapprove.go).
 			s.autoPeer = !autoOwnNotice(s, t)
+		} else if ours && s.runAll && s.autoTurn && !s.peerTurn {
+			// Joins a turn another notification started (no user, peer,
+			// channel or scheduled message in it): the plan's remaining
+			// steps run in it.
+			s.turnCovered = true
 		}
 	default:
 		if idle {
 			s.autoTurn = true
 		}
 		s.turnCovered = false
+		s.peerTurn = true
 		s.autoPeer = true // nor auto-approve, for the rest of this turn
 	}
 }
@@ -200,15 +217,20 @@ func planCall(s *deskSession, name, id string, input json.RawMessage) {
 		return
 	}
 	var in struct {
-		Background bool   `json:"run_in_background"`
-		Name       string `json:"name"`
-		To         string `json:"to"`
+		Background flexBool `json:"run_in_background"`
+		Name       string   `json:"name"`
+		To         string   `json:"to"`
 	}
 	json.Unmarshal(input, &in)
 	switch name {
 	case "Bash":
 		if in.Background {
 			addPlanWork(s, id, id)
+		} else if len(s.planShells) < maxBatchCalls {
+			if s.planShells == nil {
+				s.planShells = map[string]bool{}
+			}
+			s.planShells[id] = true // plan work if the CLI moves it to the background
 		}
 	case "Agent", "Task":
 		grantAgentCall(s, id, input)
@@ -226,6 +248,17 @@ func planCall(s *deskSession, name, id string, input json.RawMessage) {
 			s.planSends[id] = true // granted if its result names a resumed subagent
 		}
 	}
+}
+
+// flexBool: a JSON boolean that may come as a string ("true"): Claude
+// sometimes writes run_in_background that way, and the CLI runs the call in
+// the background all the same.
+type flexBool bool
+
+func (b *flexBool) UnmarshalJSON(p []byte) error {
+	t := strings.TrimSpace(string(p))
+	*b = t == "true" || t == `"true"` // anything else: the foreground (an async launch result still says so)
+	return nil
 }
 
 // A SendMessage in a covered turn that resumes a subagent of this session
@@ -282,6 +315,19 @@ func resumeAgent(s *deskSession, to, id string) bool {
 	if !ok {
 		return false
 	}
+	if id != "" && s.planWork[id] == g {
+		return true // this call was seen already (stream event, then its request)
+	}
+	if _, live := s.agentGrants[g]; live {
+		// Still running, or its notification hasn't come yet: the message
+		// may resume it after that notification.
+		for a, root := range s.planAgents {
+			if root == g {
+				queueResume(s, a, g)
+			}
+		}
+		queueResume(s, to, g)
+	}
 	if s.agentGrants == nil {
 		s.agentGrants = map[string]agentGrant{}
 	}
@@ -298,9 +344,66 @@ func resumeAgent(s *deskSession, to, id string) bool {
 	return true
 }
 
+func queueResume(s *deskSession, agent, g string) {
+	if agent == "" || len(s.queuedResumes) >= maxAgentCalls {
+		return
+	}
+	if s.queuedResumes == nil {
+		s.queuedResumes = map[string]string{}
+	}
+	s.queuedResumes[agent] = g
+}
+
+// forgetQueued: the session sends to the subagent again; what an earlier
+// message carried over no longer counts (a covered send makes its own).
+func forgetQueued(s *deskSession, to string) {
+	if len(s.queuedResumes) == 0 || to == "" {
+		return
+	}
+	g, ok := s.queuedResumes[to]
+	if !ok {
+		if g, ok = s.planAgents[to]; !ok {
+			return
+		}
+	}
+	for a, root := range s.queuedResumes {
+		if root == g {
+			delete(s.queuedResumes, a)
+		}
+	}
+}
+
+// regrantQueued: a request of a subagent whose grant ended while a message
+// of the plan was queued to it: the CLI resumed it with that message, so
+// the grant is renewed until its next notification.
+func regrantQueued(s *deskSession, r *protocol.ControlRequest) {
+	if r == nil || r.AgentID == "" {
+		return
+	}
+	g, ok := s.queuedResumes[r.AgentID]
+	if !ok {
+		return
+	}
+	if _, live := s.agentGrants[g]; live {
+		return
+	}
+	for a, root := range s.queuedResumes {
+		if root == g {
+			delete(s.queuedResumes, a)
+		}
+	}
+	if s.agentGrants == nil {
+		s.agentGrants = map[string]agentGrant{}
+	}
+	s.agentGrants[g] = agentGrant{Background: true, At: gateNow()}
+	s.grantRev++
+	addAgentID(s, r.AgentID, g)
+}
+
 // learnPlanWork: a launch result or task_started event names the task id of
 // plan work (a background shell's id, an agent's id).
 func learnPlanWork(s *deskSession, ev *protocol.Event) {
+	learnMovedShells(s, ev)
 	if len(s.planWork) == 0 {
 		return
 	}
@@ -326,6 +429,25 @@ func learnPlanWork(s *deskSession, ev *protocol.Event) {
 	}
 }
 
+// learnMovedShells: a Bash call of a covered turn the CLI ran in the
+// background although the call didn't ask (a long command it moved there)
+// is plan work too.
+func learnMovedShells(s *deskSession, ev *protocol.Event) {
+	if len(s.planShells) == 0 || ev.Type != "user" || ev.IsSubagent() || ev.Message == nil {
+		return
+	}
+	for _, b := range ev.Message.Blocks() {
+		if b.Type != "tool_result" || !s.planShells[b.ToolUseID] {
+			continue
+		}
+		delete(s.planShells, b.ToolUseID)
+		if m := bgShellIDRe.FindSubmatch(b.Content); m != nil {
+			addPlanWork(s, b.ToolUseID, b.ToolUseID)
+			addPlanWork(s, string(m[1]), b.ToolUseID)
+		}
+	}
+}
+
 // handedGate: the plan-scope state a reload hands over with the session,
 // and the copy the keeper holds for a restart after a crash.
 type handedGate struct {
@@ -338,6 +460,8 @@ type handedGate struct {
 	AgentIDs   map[string]string     `json:"agentIds,omitempty"`
 	Work       map[string]string     `json:"work,omitempty"`
 	PlanAgents map[string]string     `json:"planAgents,omitempty"`
+	Queued     map[string]string     `json:"queued,omitempty"`
+	Peer       bool                  `json:"peer,omitempty"`
 	Session    string                `json:"session,omitempty"` // whose state it is
 	PID        int                   `json:"pid,omitempty"`     // the Claude process it belongs to
 	At         time.Time             `json:"at,omitzero"`       // when it was taken
@@ -349,7 +473,7 @@ var gateNow = time.Now
 func saveGate(s *deskSession) *handedGate {
 	g := &handedGate{Covered: s.turnCovered, AutoTurn: s.autoTurn, InTurn: s.inTurn, Revoked: s.planRevoked,
 		Grants: s.agentGrants, Calls: s.agentCalls, AgentIDs: s.agentIDs, Work: s.planWork, PlanAgents: s.planAgents,
-		Session: s.id, At: gateNow()}
+		Queued: s.queuedResumes, Peer: s.peerTurn, Session: s.id, At: gateNow()}
 	if s.proc != nil {
 		g.PID = s.proc.PID()
 	}
@@ -362,6 +486,7 @@ func (g *handedGate) restore(s *deskSession) {
 	}
 	s.turnCovered, s.autoTurn, s.inTurn, s.planRevoked = g.Covered, g.AutoTurn, g.InTurn, g.Revoked
 	s.agentGrants, s.agentCalls, s.agentIDs, s.planWork, s.planAgents = g.Grants, g.Calls, g.AgentIDs, g.Work, g.PlanAgents
+	s.queuedResumes, s.peerTurn = g.Queued, g.Peer
 }
 
 // restoreRestart: the restart rule above. id and pid are the session and
@@ -369,6 +494,7 @@ func (g *handedGate) restore(s *deskSession) {
 func (g *handedGate) restoreRestart(s *deskSession, id string, pid int) {
 	s.turnCovered, s.inTurn, s.autoTurn, s.gateUnsure = false, false, false, false
 	s.agentGrants, s.agentCalls, s.agentIDs, s.planWork, s.planAgents = nil, nil, nil, nil, nil
+	s.queuedResumes, s.peerTurn = nil, false // the safe side
 	if g == nil || g.Revoked || g.Session != id || g.PID == 0 || g.PID != pid {
 		s.runAll, s.runAllNext = false, false
 		s.planRevoked = g != nil && g.Revoked
@@ -380,6 +506,7 @@ func (g *handedGate) restoreRestart(s *deskSession, id string, pid int) {
 	}
 	// A turn that was running goes on, uncovered.
 	s.autoTurn = g.InTurn || g.AutoTurn
+	s.peerTurn = s.autoTurn // nor does a notification joining it cover it
 	s.gateUnsure = true
 	s.grantRev++
 }
