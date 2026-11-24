@@ -64,7 +64,7 @@ func TestQuillBadgeDotAndStatusFollowRole(t *testing.T) {
 			t.Fatal("the Quill button's badge counts the issue")
 		}
 		d.openAssistBox(boxQuill)
-		if !strings.HasPrefix(d.box().status.Text, "●") {
+		if !strings.HasPrefix(d.box().status.Text, "Ready") { // the main chat's indicator (t9a3a6a)
 			t.Fatalf("status line: %q", d.box().status.Text)
 		}
 		if d.assistBubble(roleQuill).box.Visible() {

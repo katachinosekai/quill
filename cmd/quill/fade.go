@@ -77,7 +77,10 @@ func (v *chatView) runFade(r *canvas.Rectangle, d time.Duration, from float64) {
 }
 
 // veil: the background colour at a share of full opacity (premultiplied).
-func veil(f float64) color.RGBA {
+func veil(f float64) color.RGBA { return veilOver(colBackground, f) }
+
+// veilOver: bg at a share of full opacity (premultiplied).
+func veilOver(bg color.NRGBA, f float64) color.RGBA {
 	s := func(c uint8) uint8 { return uint8(float64(c) * f) }
-	return color.RGBA{s(colBackground.R), s(colBackground.G), s(colBackground.B), s(colBackground.A)}
+	return color.RGBA{s(bg.R), s(bg.G), s(bg.B), s(bg.A)}
 }

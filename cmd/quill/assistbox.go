@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"image/color"
 	"os"
 	"os/exec"
@@ -79,7 +78,7 @@ type assistBoxView struct {
 	inputFn func() fyne.Focusable    // instead of input when it is built later (kmem: after the chat attaches)
 	popOut  func()                   // a Pop out button in the header (kmem: the box as its own window)
 	escape  func() bool              // Escape inside the box, before it closes (a popup, a selection); true = handled
-	status  func() string            // the header's status line (refreshed every second while open)
+	status  func() statusInfo        // the header's status line (refreshed every second while open)
 	shown   func(on bool)            // the box opened (true) or closed / switched away (false)
 	inRow   func() fyne.CanvasObject // its own message box row: hidden over the chat (mainbox.go)
 }
@@ -105,6 +104,7 @@ type assistBox struct {
 	headRow *fyne.Container
 	title   *widget.Label
 	status  *widget.Label
+	stPulse pulseVeil // the still-working pulse over status (status.go)
 	note    *widget.Label
 	dockBtn *widget.Button
 	popBtn  *widget.Button
@@ -154,6 +154,8 @@ func (d *desk) box() *assistBox {
 	b.title = boldLabel("")
 	b.status = caption("")
 	b.status.Truncation = fyne.TextTruncateEllipsis
+	b.stPulse.tint = func(f float64) color.RGBA { return veilOver(colInput, f) }
+	b.stPulse.veil = canvas.NewRectangle(b.stPulse.color(0))
 	b.note = caption("")
 	b.note.Hide()
 	b.dockBtn = widget.NewButtonWithIcon("Dock", theme.ViewRestoreIcon(), func() {
@@ -183,7 +185,7 @@ func (d *desk) box() *assistBox {
 	b.popBtn.Importance = widget.LowImportance
 	b.popBtn.Hide()
 	b.headRow = container.NewBorder(nil, nil, nil, container.NewHBox(b.popBtn, b.dockBtn, b.closeX), b.title)
-	head := container.NewVBox(b.headRow, b.status, b.note, widget.NewSeparator())
+	head := container.NewVBox(b.headRow, container.NewStack(b.status, b.stPulse.veil), b.note, widget.NewSeparator())
 	b.body = container.NewStack()
 	bgRect := canvas.NewRectangle(colInput)
 	bgRect.CornerRadius = 12
@@ -568,11 +570,12 @@ func (d *desk) refreshBoxHeader() {
 		return
 	}
 	v := d.viewOf(b.role)
-	st := ""
+	var st statusInfo
 	if v.status != nil {
 		st = v.status()
 	}
-	setLabel(b.status, st)
+	setLabel(b.status, st.text)
+	b.stPulse.set(d, st.pulse)
 	if b.docked {
 		b.dockBtn.SetText("Undock")
 	} else {
@@ -1240,7 +1243,7 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 			}
 			return false
 		},
-		status: func() string { return d.assistStatusText(a) },
+		status: func() statusInfo { return d.assistIndicator(a) },
 		inRow:  func() fyne.CanvasObject { return c.inRow },
 		shown: func(on bool) {
 			if !on {
@@ -1275,25 +1278,33 @@ func (d *desk) assistBoxSend(c *assistChat, text string) {
 	}
 }
 
-// assistStatusText: the header's status: "● thinking (2 subagents)",
-// the reason line, or stopped.
-func (d *desk) assistStatusText(a *assistant) string {
+// assistIndicator: the box header's status, the main chat's indicator
+// (liveStatus: "✻ Thinking…", "● Bash: go test", "Waiting for your
+// approval", "Ready", "Stopped", "· last activity 12 s ago" and the 30 s
+// pulse) plus the subagents it waits on and its model; the reason line or
+// "Stopped" while it doesn't run.
+func (d *desk) assistIndicator(a *assistant) statusInfo {
 	s := a.s
 	if s == nil || !d.assistRunning(a) {
 		if a.reason != "" {
-			return a.reason
+			return statusInfo{text: a.reason, state: a.reason}
 		}
-		return "stopped"
+		return statusInfo{text: "Stopped", state: "Stopped"}
 	}
-	st := "● " + s.status().String()
-	if n := len(s.agentGrants); n > 0 {
-		st += fmt.Sprintf(" (%d subagents)", n)
+	now := statusNow()
+	s.trackTurn(now)
+	st := liveStatus(s, now)
+	if n := len(s.agentGrants); n > 0 && !strings.Contains(st.text, "subagent") {
+		st.text = st.state + " · " + plural(n, "subagent") + strings.TrimPrefix(st.text, st.state)
 	}
 	if s.model != "" {
-		st += " · " + s.model
+		st.text += " · " + s.model
 	}
 	return st
 }
+
+// assistStatusText is the header's status text.
+func (d *desk) assistStatusText(a *assistant) string { return d.assistIndicator(a).text }
 
 // focusable: the view's own message box, nil if none (yet).
 func (v *assistBoxView) focusable() fyne.Focusable {
@@ -1327,7 +1338,7 @@ func (d *desk) registerKmemBox() {
 			}
 			return false
 		},
-		status: func() string { return d.assistStatusText(d.assist()) },
+		status: func() statusInfo { return d.assistIndicator(d.assist()) },
 		popOut: d.popOutKmem,
 		inRow: func() fyne.CanvasObject {
 			if a := d.assist(); a.inRow != nil {

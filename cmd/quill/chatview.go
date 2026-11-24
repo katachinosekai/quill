@@ -78,9 +78,7 @@ func itemCheapTag(it *chat.Item) uint64 {
 }
 
 type chatView struct {
-	veil          *canvas.Rectangle // pulse veil over the status line (status.go)
-	pulse         *fyne.Animation
-	pulsing       bool
+	pulseVeil     // still-working pulse over the status line (status.go)
 	d             *desk
 	s             *deskSession
 	box           *fyne.Container

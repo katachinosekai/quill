@@ -293,7 +293,11 @@ func kmemWinRefresh(d *desk, a *assistant) {
 	if s == nil || a.stateLbl == nil {
 		return
 	}
-	st := "● " + s.status().String()
+	// The main chat's indicator state (status.go); the age and the pulse are
+	// on the status line under this chat and in the box header.
+	now := statusNow()
+	s.trackTurn(now)
+	st := liveStatus(s, now).state
 	failed := !s.running() && (a.state == asLive || a.state == asStarting)
 	switch {
 	case failed && s.failed != "":

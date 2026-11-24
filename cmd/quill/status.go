@@ -16,7 +16,9 @@ import (
 // session's state (user 2026-11-23): Starting…, Ready, Thinking, the running
 // tool, Writing…, Waiting for you, Stopped, Not running. Quill Desktop's main
 // chat, every split pane and the kmem window chat share this one component
-// (liveStatus + chatView.setStatus).
+// (liveStatus + chatView.setStatus). The assistant box header (kmem assistant,
+// Quill operator) and the kmem chat's header show the same indicator
+// (assistIndicator, t9a3a6a), with the same pulse (pulseVeil).
 //
 // Suffixes: "· N subagents running" / "· N background jobs" from the
 // conversation's background tasks, and "· last activity 12 s ago" while a turn
@@ -41,9 +43,10 @@ var (
 // statusInfo is the state function's result.
 type statusInfo struct {
 	text   string
-	active bool // normal colour (something is going on or needs the user); else muted
-	busy   bool // a turn is running: age suffix and ticker
-	pulse  bool // the turn has run longer than statusPulseAfter
+	state  string // the state alone, without the subagent/job/age suffixes
+	active bool   // normal colour (something is going on or needs the user); else muted
+	busy   bool   // a turn is running: age suffix and ticker
+	pulse  bool   // the turn has run longer than statusPulseAfter
 }
 
 // trackTurn records when the running turn began; call from the UI thread
@@ -94,6 +97,7 @@ func liveStatus(s *deskSession, now time.Time) statusInfo {
 		default:
 			st.text = "Not running"
 		}
+		st.state = st.text
 		return st
 	}
 	busy := c.Busy
@@ -119,6 +123,7 @@ func liveStatus(s *deskSession, now time.Time) statusInfo {
 	default:
 		st.text = "Ready"
 	}
+	st.state = st.text
 	var agents, jobs int
 	for _, t := range c.BackgroundTasks() {
 		if t.Tool == "Agent" || t.Tool == "Task" {
@@ -201,44 +206,66 @@ func (v *chatView) setStatus(s *deskSession) {
 }
 
 // setPulse starts or stops the still-working pulse.
-func (v *chatView) setPulse(on bool) {
-	if on && v.d != nil {
-		on = v.d.animateText() && v.d.animateSpeed() != "instant"
+func (v *chatView) setPulse(on bool) { v.pulseVeil.set(v.d, on) }
+
+// pulseVeil is the still-working pulse: a veil over a label that fades in
+// and out. Used by the chat's status line and the assistant box header.
+type pulseVeil struct {
+	veil    *canvas.Rectangle
+	pulse   *fyne.Animation
+	pulsing bool
+	tint    func(f float64) color.RGBA // the veil colour at strength f; nil: veil (the chat background)
+}
+
+func (p *pulseVeil) color(f float64) color.RGBA {
+	if p.tint != nil {
+		return p.tint(f)
 	}
-	if on == v.pulsing {
+	return veil(f)
+}
+
+// set starts or stops the pulse; the text animation settings apply.
+func (p *pulseVeil) set(d *desk, on bool) {
+	if on && d != nil {
+		on = d.animateText() && d.animateSpeed() != "instant"
+	}
+	if on == p.pulsing {
 		return
 	}
-	v.pulsing = on
-	if v.pulse != nil {
-		v.pulse.Stop()
-		v.pulse = nil
+	p.pulsing = on
+	if p.pulse != nil {
+		p.pulse.Stop()
+		p.pulse = nil
 	}
-	if v.veil == nil {
+	if p.veil == nil {
 		return
 	}
 	if !on {
-		v.veil.FillColor = veil(0)
-		v.veil.Refresh()
+		p.veil.FillColor = p.color(0)
+		p.veil.Refresh()
 		return
 	}
 	if fyne.CurrentApp() == nil {
 		return
 	}
-	half := 1600 * time.Millisecond
-	switch v.d.animateSpeed() {
+	half, speed := 1600*time.Millisecond, ""
+	if d != nil {
+		speed = d.animateSpeed()
+	}
+	switch speed {
 	case "slow":
 		half = 2400 * time.Millisecond
 	case "fast":
 		half = 1000 * time.Millisecond
 	}
-	a := canvas.NewColorRGBAAnimation(veil(0), veil(0.65), half, func(c color.Color) {
-		v.veil.FillColor = c
-		v.veil.Refresh()
+	a := canvas.NewColorRGBAAnimation(p.color(0), p.color(0.65), half, func(c color.Color) {
+		p.veil.FillColor = c
+		p.veil.Refresh()
 	})
 	a.Curve = fyne.AnimationEaseInOut
 	a.AutoReverse = true
 	a.RepeatCount = fyne.AnimationRepeatForever
-	v.pulse = a
+	p.pulse = a
 	a.Start()
 }
 
