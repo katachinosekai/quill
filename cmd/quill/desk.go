@@ -225,6 +225,7 @@ type desk struct {
 	kmemRun        func(prog string, args ...string) (string, error)
 	kmemOff        bool
 	kmemAdverts    []*fyne.Container // kmemoptional.go
+	kmemOnlySet    *fyne.Container   // Settings' kmem-only controls (kmemsetup.go)
 	kmemSwitch     *fyne.Container
 	escClosers     map[fyne.CanvasObject]func()
 	kmemVer        kmemVersion

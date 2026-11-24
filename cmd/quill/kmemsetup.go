@@ -291,7 +291,7 @@ func kmemStatus(home, bin string) (text string, offerHooks bool) {
 func (d *desk) kmemSettings() fyne.CanvasObject {
 	status := widget.NewLabel("")
 	status.Wrapping = fyne.TextWrapWord
-	advert := d.kmemAdvert()
+	card := d.kmemStatusCard(status)
 	btn := widget.NewButton("Add the kmem hooks...", nil)
 	btn.Importance = widget.LowImportance
 	refresh := func() {
@@ -314,8 +314,12 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 	if !d.kmemAvailable() {
 		d.kmemBinSetBtn.Disable()
 	}
-	return container.NewVBox(status, advert, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.kmemAssistSetting(), d.kmemBadgeSetting(), widget.NewSeparator(), d.defaultRulesSettings(),
+	// Everything below the card does nothing without kmem: hidden until kmem
+	// is installed (syncKmemOnlySettings).
+	d.kmemOnlySet = container.NewVBox(d.memoryModeRadio(nil), widget.NewSeparator(), d.kmemAssistSetting(), d.kmemBadgeSetting(), widget.NewSeparator(), d.defaultRulesSettings(),
 		widget.NewSeparator(), caption("Facts and tasks sessions moved to kmem's recycle bin: review, restore, or delete them for good."), d.kmemBinSetBtn)
+	d.kmemOnlySet.Hidden = !d.kmemAvailable()
+	return container.NewVBox(card, btn, d.kmemOnlySet)
 }
 
 // kmemHooksDialog adds the hooks of an installed kmem (after asking).

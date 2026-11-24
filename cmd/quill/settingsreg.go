@@ -259,6 +259,12 @@ func buildSettingsRegistry() []settingDef {
 			set: func(d *desk, v string) {
 				d.app.Preferences().SetBool(prefKmemBadge, v == "on")
 				d.updateKmemBadge()
+			},
+			avail: func(d *desk) string {
+				if !d.kmemAvailable() {
+					return "kmem is not installed"
+				}
+				return ""
 			}},
 		{id: "usagePause", label: "Pause sessions near the usage limit", section: sess, kind: settingBool,
 			get: func(d *desk) string { return boolStr(d.pauseEnabled()) },

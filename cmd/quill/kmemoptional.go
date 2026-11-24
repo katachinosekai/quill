@@ -41,21 +41,44 @@ func (d *desk) kmemAdvertShown() bool {
 
 // kmemAdvert is the advert card; dismissing one hides them all, for good.
 func (d *desk) kmemAdvert() *fyne.Container {
+	card := container.NewStack(cardBg(), kmemAdvertRow(d))
+	d.trackKmemAdvert(card)
+	return card
+}
+
+// kmemAdvertRow: the advert's text, Learn more and dismiss (not tracked).
+func kmemAdvertRow(d *desk) *fyne.Container {
 	lbl := widget.NewLabel(kmemAdvertText)
 	lbl.Wrapping = fyne.TextWrapWord
 	learn := widget.NewButton("Learn more", d.openKmemPatreon)
 	learn.Importance = widget.LowImportance
 	dismiss := widget.NewButtonWithIcon("", theme.CancelIcon(), d.dismissKmemAdvert)
 	dismiss.Importance = widget.LowImportance
-	bg := canvas.NewRectangle(colCard)
-	bg.CornerRadius = 8
-	card := container.NewStack(bg, container.NewBorder(nil, nil, nil, container.NewHBox(container.NewCenter(learn), container.NewCenter(dismiss)), lbl))
-	card.Hidden = !d.kmemAdvertShown()
+	return container.NewBorder(nil, nil, nil, container.NewHBox(container.NewCenter(learn), container.NewCenter(dismiss)), lbl)
+}
+
+// kmemStatusCard: Settings → General → Memory (kmem)'s card, the kmem
+// status on the first line and, without kmem, the advert on the second; the
+// dismiss hides only the advert (user 2026-11-24).
+func (d *desk) kmemStatusCard(status *widget.Label) *fyne.Container {
+	row := kmemAdvertRow(d)
+	d.trackKmemAdvert(row)
+	return container.NewStack(cardBg(), container.NewVBox(status, row))
+}
+
+// trackKmemAdvert registers c with syncKmemAdverts and sets its visibility.
+func (d *desk) trackKmemAdvert(c *fyne.Container) {
+	c.Hidden = !d.kmemAdvertShown()
 	if len(d.kmemAdverts) >= 16 { // old Settings/Welcome views
 		d.kmemAdverts = d.kmemAdverts[len(d.kmemAdverts)-15:]
 	}
-	d.kmemAdverts = append(d.kmemAdverts, card)
-	return card
+	d.kmemAdverts = append(d.kmemAdverts, c)
+}
+
+func cardBg() *canvas.Rectangle {
+	bg := canvas.NewRectangle(colCard)
+	bg.CornerRadius = 8
+	return bg
 }
 
 func (d *desk) dismissKmemAdvert() {
@@ -110,7 +133,17 @@ func (d *desk) syncKmemButton() {
 		d.closeAssistBox()
 	}
 	d.syncKmemAdverts()
+	d.syncKmemOnlySettings()
 	d.syncKmemSwitchBanner()
+}
+
+// syncKmemOnlySettings hides the kmem-only controls of Settings → General →
+// Memory (kmem) without kmem: they do nothing then (UI thread).
+func (d *desk) syncKmemOnlySettings() {
+	if c := d.kmemOnlySet; c != nil && c.Hidden == d.kmemAvailable() {
+		c.Hidden = !d.kmemAvailable()
+		c.Refresh()
+	}
 }
 
 // kmemSwitchOffer: kmem is installed, sessions still use Claude's memory, and
