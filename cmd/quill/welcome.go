@@ -154,6 +154,10 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 		// Without kmem sessions use Claude's auto memory; the saved
 		// choice stays, so an installed kmem is used once it is set up.
 		done = append(done, "Sessions use Claude's auto memory (kmem is not installed).")
+	case c.KmemMemory && d.kmemByDefault():
+		// kmem is already the default (no mode chosen); the switch
+		// (welcomeMemoryNext) imports Claude's notes and adds the hooks.
+		done = append(done, "kmem memory: \"Switch to kmem\" opens next to import Claude's notes and add kmem's hooks.")
 	case c.KmemMemory && !d.kmemMemory():
 		// The mode changes only through the switch (welcomeMemoryNext
 		// opens it after the Welcome; user 2026-11-24).
@@ -192,7 +196,7 @@ func (d *desk) welcomeMemoryNext(c welcomeChoices) bool {
 		return false
 	}
 	if c.KmemMemory {
-		return !d.kmemMemory()
+		return d.kmemSwitchWanted()
 	}
 	return d.kmemMemory() && d.kmemSwitchUndoDir() != ""
 }

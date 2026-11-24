@@ -10,20 +10,61 @@ import (
 
 func TestMemoryModeUsesKmem(t *testing.T) {
 	cases := []struct {
-		mode               string
-		setup, avail, want bool
+		mode        string
+		avail, want bool
 	}{
-		{"", true, true, true},
-		{"", false, true, false},
-		{"", true, false, false},
-		{memoryModeKmem, false, true, true},
-		{memoryModeKmem, true, false, false},
-		{memoryModeClaude, true, true, false},
+		{"", true, true}, // no choice: kmem when installed (user 2026-11-24)
+		{"", false, false},
+		{memoryModeKmem, true, true},
+		{memoryModeKmem, false, false},
+		{memoryModeClaude, true, false},
+		{memoryModeClaude, false, false},
 	}
 	for _, c := range cases {
-		if got := memoryModeUsesKmem(c.mode, c.setup, c.avail); got != c.want {
-			t.Errorf("mode %q setup %v avail %v: got %v want %v", c.mode, c.setup, c.avail, got, c.want)
+		if got := memoryModeUsesKmem(c.mode, c.avail); got != c.want {
+			t.Errorf("mode %q avail %v: got %v want %v", c.mode, c.avail, got, c.want)
 		}
+	}
+}
+
+// TestKmemMemoryDefault: with no mode chosen, sessions use kmem while it is
+// installed (no hooks or setup needed) and Claude's memory without it, also
+// when kmem goes away later; an explicit choice wins and is stored.
+func TestKmemMemoryDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d := newHarness(t).d
+	p := d.app.Preferences()
+	if p.String(memoryModeKey) != "" || d.kmemMemory() {
+		t.Fatal("no kmem, no choice: Claude's memory")
+	}
+	d.kmemOff = false
+	d.kmemRun = func(string, ...string) (string, error) { return "", nil }
+	if !d.kmemMemory() || !d.kmemByDefault() || !d.kmemSwitchWanted() {
+		t.Fatal("kmem installed, no choice: kmem by default, switch still wanted")
+	}
+	if !slices.Contains(sessionMemoryEnv(d.kmemMemory()), autoMemoryOffEnv) {
+		t.Fatal("kmem by default: auto memory off in Quill sessions")
+	}
+	d.kmemOff = true
+	if d.kmemMemory() || d.kmemByDefault() || d.kmemSwitchWanted() {
+		t.Fatal("kmem removed: back to Claude's memory on its own")
+	}
+	if p.String(memoryModeKey) != "" {
+		t.Fatal("the fallback stores nothing")
+	}
+	d.kmemOff = false
+	p.SetString(memoryModeKey, memoryModeClaude)
+	if d.kmemMemory() || d.kmemByDefault() || !d.kmemSwitchWanted() {
+		t.Fatal("Claude chosen: wins over the installed kmem")
+	}
+	p.SetString(memoryModeKey, memoryModeKmem)
+	if !d.kmemMemory() || d.kmemByDefault() || d.kmemSwitchWanted() {
+		t.Fatal("kmem chosen: kmem, nothing to switch")
+	}
+	p.SetString(memoryModeKey, "")
+	p.SetString(prefKmemSwitchBackup, "/placeholder/backup")
+	if !d.kmemMemory() || d.kmemByDefault() || d.kmemSwitchWanted() {
+		t.Fatal("a recorded switch: not the default case")
 	}
 }
 

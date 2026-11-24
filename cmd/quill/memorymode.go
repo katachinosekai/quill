@@ -22,22 +22,30 @@ const (
 	memoryModeClaude = "claude"
 )
 
-func memoryModeUsesKmem(mode string, setupComplete, available bool) bool {
-	switch mode {
-	case memoryModeClaude:
-		return false
-	case memoryModeKmem:
-		return available
-	}
-	return setupComplete && available
+// memoryModeUsesKmem: an explicit choice (Settings, /memory, Welcome, the
+// switch or its undo) wins; with none, sessions use kmem while kmem is
+// installed and Claude's memory otherwise, so removing kmem falls back on its
+// own (user 2026-11-24, kmem f3f9c92). kmem needs to be installed either way.
+func memoryModeUsesKmem(mode string, available bool) bool {
+	return mode != memoryModeClaude && available
 }
 
 func (d *desk) kmemMemory() bool {
-	mode := d.app.Preferences().String(memoryModeKey)
-	if mode == memoryModeClaude {
-		return false
-	}
-	return memoryModeUsesKmem(mode, kmemSetupComplete(homeDir()), d.kmemAvailable())
+	return memoryModeUsesKmem(d.app.Preferences().String(memoryModeKey), d.kmemAvailable())
+}
+
+// kmemByDefault: sessions use kmem only because no mode was chosen, and no
+// switch ever finished: Claude Code's notes were not imported and the switch
+// did not add kmem's hooks or turn auto memory off.
+func (d *desk) kmemByDefault() bool {
+	p := d.app.Preferences()
+	return p.String(memoryModeKey) == "" && p.String(prefKmemSwitchBackup) == "" && d.kmemAvailable()
+}
+
+// kmemSwitchWanted: "Switch to kmem" would change something: kmem is
+// installed and sessions use Claude's memory, or kmem only by default.
+func (d *desk) kmemSwitchWanted() bool {
+	return d.kmemAvailable() && (!d.kmemMemory() || d.kmemByDefault())
 }
 
 // planFormatHint: how a plan's questions should look so Quill's plan card can

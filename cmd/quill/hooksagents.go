@@ -277,7 +277,7 @@ func parseAgentFile(text string) agentDef {
 }
 
 func agentDirs(cwd string) [][2]string {
-	return [][2]string{{"User", filepath.Join(homeDir(), ".claude", "agents")}, {"Project", filepath.Join(cwd, ".claude", "agents")}}
+	return [][2]string{{"User", userAgentsDir()}, {"Project", filepath.Join(cwd, ".claude", "agents")}}
 }
 
 func saveAgent(dir string, a agentDef, old string) (string, error) {
@@ -333,7 +333,7 @@ func (d *desk) agentDialog(cwd string, a agentDef, old string, done func()) {
 	tools.SetPlaceHolder("all tools (or a list: Read, Grep, Glob, Bash)")
 	model := widget.NewSelect(agentModels, nil)
 	model.SetSelected(firstNonEmpty(a.Model, "inherit"))
-	where := widget.NewSelect([]string{"User (~/.claude/agents)", "Project (" + tildePath(filepath.Join(cwd, ".claude", "agents")) + ")"}, nil)
+	where := widget.NewSelect([]string{"User (" + tildePath(userAgentsDir()) + ")", "Project (" + tildePath(filepath.Join(cwd, ".claude", "agents")) + ")"}, nil)
 	where.SetSelected(where.Options[0])
 	if old != "" && strings.HasPrefix(old, filepath.Join(cwd, ".claude", "agents")) {
 		where.SetSelected(where.Options[1])
@@ -424,7 +424,7 @@ func (d *desk) agentsPane(s *deskSession, cwd string) fyne.CanvasObject {
 			box.Add(container.NewBorder(nil, nil, nil, container.NewHBox(edit, del), l))
 		}
 		if len(files) == 0 {
-			box.Add(widget.NewLabel("No agents of your own yet (~/.claude/agents, .claude/agents of this folder)."))
+			box.Add(widget.NewLabel("No agents of your own yet (" + tildePath(userAgentsDir()) + ", .claude/agents of this folder)."))
 		}
 		var built []fyne.CanvasObject
 		for _, a := range d.builtinAgents(s) {

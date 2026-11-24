@@ -91,6 +91,28 @@ Follow-up answers (user 2026-11-24, after the merge):
    /memory auto-memory toggle and the Permissions/Hooks "User" file.
 4. Facts imported before a failure stay in kmem (marked as imported from
    MEMORY.md); a retry skips them.
+5. The whole Claude Code config folder follows `CLAUDE_CONFIG_DIR`
+   (`claudeConfigDir`): besides settings.json also the user CLAUDE.md, the
+   auto-memory folder (`projects/<folder>/memory`) and the user agents
+   folder. Project-level `.claude` folders in a project stay where they are.
+
+### Memory mode default (user 2026-11-24, kmem f3f9c92)
+
+With no mode chosen (`memoryMode` unset), sessions use kmem while kmem is
+installed (`kmemAvailable`) and Claude's auto memory otherwise; removing kmem
+falls back on its own, nothing is stored. Setup state and hooks no longer
+matter. An explicit choice (Settings, /memory, Welcome, the switch, Undo)
+always wins and is stored. When kmem is used only this way and no switch ever
+finished (no `kmemSwitchBackup`), the header offer shows once
+(`kmemSwitchOffer`, `kmemByDefault`): "Switch to kmem..." opens the preview
+(imports the old notes, adds the hooks, stores kmem), "No thanks" marks it
+answered and leaves the default in place. Settings' "Switch to kmem..." and
+the Welcome's kmem choice open the switch in this case too. Until the switch,
+such sessions get the kmem prompt hint and auto memory off by environment
+(`CLAUDE_CODE_DISABLE_AUTO_MEMORY`), but no kmem hooks: no `kmem brief` hook at
+session start (the hint asks Claude to run it) and no kmem-guard, Claude Code's `autoMemoryEnabled` untouched
+(terminal sessions keep auto memory), and old MEMORY.md notes not imported.
+Setup's kmem row reports the missing hooks as before.
 
 ## Implementation notes (Quill Desktop, feat/kmem-switch)
 

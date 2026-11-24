@@ -15,6 +15,8 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 // kmemSwitchView: the "Switch to kmem" dialog (kmemswitch.go has the steps).
@@ -111,7 +113,7 @@ func (d *desk) fillKmemSwitch(v *kmemSwitchView, c kmemSwitchCheck, projects []m
 	objs = append(objs, widget.NewSeparator(), boldLabel("1. Import Claude Code's memory into kmem (one topic per project)"))
 	v.ticks, v.topics = nil, nil
 	if len(projects) == 0 {
-		objs = append(objs, caption("No project has notes in Claude Code's auto memory (~/.claude/projects/*/memory/MEMORY.md): nothing to import."))
+		objs = append(objs, caption("No project has notes in Claude Code's auto memory (" + tildePath(filepath.Join(transcript.DefaultRoot(), "*", "memory", "MEMORY.md")) + "): nothing to import."))
 	}
 	for _, p := range projects {
 		name := tildePath(p.Cwd)
@@ -255,8 +257,9 @@ func (d *desk) showKmemSwitchResult(v *kmemSwitchView, res kmemSwitchResult) {
 
 // requestMemoryMode: every memory-mode choice (Settings → General → Memory
 // (kmem) and /memory's radio, Welcome) goes through the switch (user
-// 2026-11-24): kmem while it isn't in use opens "Switch to kmem", and the mode
-// changes only if the switch completes; Claude after a recorded switch opens
+// 2026-11-24): kmem while it isn't in use (or in use only by default, never
+// switched: kmemSwitchWanted) opens "Switch to kmem", and the mode changes
+// only if the switch completes; Claude after a recorded switch opens
 // "Switch back to Claude memory". Otherwise the mode is just set. done runs
 // once the choice is settled (at once, or when the dialog closes).
 func (d *desk) requestMemoryMode(kmem bool, done func()) {
@@ -268,7 +271,7 @@ func (d *desk) requestMemoryMode(kmem bool, done func()) {
 	}
 	p := d.app.Preferences()
 	switch {
-	case kmem && !d.kmemMemory():
+	case kmem && d.kmemSwitchWanted():
 		if !d.kmemAvailable() {
 			finish()
 			return
@@ -354,7 +357,7 @@ func (d *desk) kmemSwitchButtons(after func()) (fyne.CanvasObject, func()) {
 				b.Refresh()
 			}
 		}
-		show(sw, d.kmemAvailable() && !d.kmemMemory())
+		show(sw, d.kmemSwitchWanted())
 		show(undo, d.kmemSwitchUndoDir() != "")
 		show(rm, !d.kmemAvailable() && kmemHooksAnyPresent(homeDir()))
 	}

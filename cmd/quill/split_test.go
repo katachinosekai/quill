@@ -590,6 +590,9 @@ func TestKmemRestartSavesThenDeletes(t *testing.T) {
 	h := newHarness(t)
 	saved, savedBy := "", ""
 	h.d.kmemOff = false
+	// Claude's memory chosen: with no choice an installed kmem is the
+	// default, and kmem mode adds a topic-tabs note after the save prompt.
+	h.d.app.Preferences().SetString(memoryModeKey, memoryModeClaude)
 	h.d.kmemRun = func(prog string, args ...string) (string, error) {
 		switch {
 		case prog == "kmem" && len(args) > 1 && args[1] == "list":

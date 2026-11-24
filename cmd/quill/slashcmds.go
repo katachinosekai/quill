@@ -284,13 +284,12 @@ func (d *desk) cmdDiff(s *deskSession) {
 var memoryNames = []string{"Your notes", "Project notes", "Project notes", "Private project notes", "Claude's auto memory"}
 
 func memoryFiles(cwd string) []string {
-	h := homeDir()
 	return []string{
-		filepath.Join(h, ".claude", "CLAUDE.md"),
+		filepath.Join(claudeConfigDir(homeDir()), "CLAUDE.md"),
 		filepath.Join(cwd, "CLAUDE.md"),
 		filepath.Join(cwd, ".claude", "CLAUDE.md"),
 		filepath.Join(cwd, "CLAUDE.local.md"),
-		filepath.Join(h, ".claude", "projects", transcript.Sanitize(cwd), "memory", "MEMORY.md"),
+		autoMemoryPath(cwd),
 	}
 }
 
@@ -405,7 +404,7 @@ func (d *desk) autoMemoryRow(cwd string) fyne.CanvasObject {
 			dialog.ShowError(err, d.win)
 		}
 	}
-	dir := filepath.Join(homeDir(), ".claude", "projects", transcript.Sanitize(cwd), "memory")
+	dir := filepath.Dir(autoMemoryPath(cwd))
 	open := widget.NewButtonWithIcon("Open auto-memory folder", theme.FolderOpenIcon(), func() {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			dialog.ShowError(err, d.win)
@@ -427,14 +426,25 @@ func (d *desk) cmdMemory(s *deskSession) {
 
 // settings files: permissions and hooks
 
-// claudeSettingsFile: Claude Code's user settings.json. Like Claude Code it
-// follows CLAUDE_CONFIG_DIR ($CLAUDE_CONFIG_DIR/settings.json), else
-// ~/.claude/settings.json (transcript.DefaultRoot does the same for projects).
-func claudeSettingsFile(home string) string {
+// claudeConfigDir: Claude Code's config folder, where its user settings.json,
+// CLAUDE.md, agents and projects (transcripts, auto memory) live. Like Claude
+// Code it is $CLAUDE_CONFIG_DIR when set, else ~/.claude
+// (transcript.DefaultRoot, live.DefaultDir and account follow the same rule).
+func claudeConfigDir(home string) string {
 	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return filepath.Join(d, "settings.json")
+		return d
 	}
-	return filepath.Join(home, ".claude", "settings.json")
+	return filepath.Join(home, ".claude")
+}
+
+// claudeSettingsFile: Claude Code's user settings.json.
+func claudeSettingsFile(home string) string {
+	return filepath.Join(claudeConfigDir(home), "settings.json")
+}
+
+// userAgentsDir: Claude Code's user agents folder.
+func userAgentsDir() string {
+	return filepath.Join(claudeConfigDir(homeDir()), "agents")
 }
 
 func settingsFiles(cwd string) [][2]string {
@@ -894,7 +904,7 @@ type agentFile struct {
 
 func agentFiles(cwd string) []agentFile {
 	var out []agentFile
-	for _, dir := range []string{filepath.Join(homeDir(), ".claude", "agents"), filepath.Join(cwd, ".claude", "agents")} {
+	for _, dir := range []string{userAgentsDir(), filepath.Join(cwd, ".claude", "agents")} {
 		matches, _ := filepath.Glob(filepath.Join(dir, "*.md"))
 		sort.Strings(matches)
 		for _, p := range matches {

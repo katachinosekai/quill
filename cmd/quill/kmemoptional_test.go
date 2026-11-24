@@ -227,3 +227,95 @@ func TestKmemSwitchOffer(t *testing.T) {
 		return h.d.kmemSwitchUI.buttons.Objects[0].(*widget.Button).Text != "Cancel" || len(h.d.kmemSwitchUI.buttons.Objects) > 1
 	})
 }
+
+// TestKmemSwitchOfferDefault: kmem installed and no mode chosen, so sessions
+// use kmem by default: the header offers the switch once (import Claude's
+// notes, add hooks); not after "No thanks", not after a finished switch, and
+// not when a mode was chosen.
+func TestKmemSwitchOfferDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	h := newHarness(t)
+	h.ui(func() {
+		p := h.d.app.Preferences()
+		h.d.syncKmemButton()
+		if h.d.kmemSwitch.Visible() {
+			t.Fatal("no kmem: no offer")
+		}
+		h.d.kmemOff = false
+		h.d.syncKmemButton()
+		if !h.d.kmemMemory() || !h.d.kmemSwitch.Visible() {
+			t.Fatal("kmem by default, never switched: the offer shows")
+		}
+		test.Tap(findButton(h.d.kmemSwitch, "No thanks"))
+		if h.d.kmemSwitch.Visible() || !p.Bool(prefKmemSwitchOffered) || p.String(memoryModeKey) != "" || !h.d.kmemMemory() {
+			t.Fatal("No thanks: answered for good, kmem stays the default, nothing stored")
+		}
+		h.d.syncKmemButton()
+		if h.d.kmemSwitch.Visible() {
+			t.Fatal("offered once")
+		}
+
+		// a finished switch (it stores the mode and its backup) answers it
+		p.SetBool(prefKmemSwitchOffered, false)
+		p.SetString(prefKmemSwitchBackup, "/placeholder/backup")
+		h.d.syncKmemButton()
+		if h.d.kmemSwitch.Visible() {
+			t.Fatal("after a switch: no offer")
+		}
+		p.RemoveValue(prefKmemSwitchBackup)
+		p.SetString(memoryModeKey, memoryModeKmem)
+		h.d.syncKmemButton()
+		if h.d.kmemSwitch.Visible() {
+			t.Fatal("kmem chosen explicitly: no offer")
+		}
+		p.SetString(memoryModeKey, "")
+		h.d.syncKmemButton()
+		test.Tap(findButton(h.d.kmemSwitch, "Switch to kmem..."))
+		if h.d.kmemSwitchUI == nil || p.String(memoryModeKey) != "" {
+			t.Fatal("Switch to kmem... opens the preview; nothing changes before Switch")
+		}
+	})
+	h.eventually("checked", func() bool {
+		return h.d.kmemSwitchUI.buttons.Objects[0].(*widget.Button).Text != "Cancel" || len(h.d.kmemSwitchUI.buttons.Objects) > 1
+	})
+}
+
+// TestClaudeConfigDirPaths: the user CLAUDE.md, the auto-memory folder and
+// the user agents folder follow CLAUDE_CONFIG_DIR like Claude Code.
+func TestClaudeConfigDirPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	cwd := "/placeholder/proj"
+	slug := filepath.Join("projects", "-placeholder-proj", "memory", "MEMORY.md")
+	def := filepath.Join(home, ".claude")
+	if claudeConfigDir(home) != def || claudeSettingsFile(home) != filepath.Join(def, "settings.json") || userAgentsDir() != filepath.Join(def, "agents") {
+		t.Fatalf("default ~/.claude: %s", claudeConfigDir(home))
+	}
+	if f := memoryFiles(cwd); f[0] != filepath.Join(def, "CLAUDE.md") || f[4] != filepath.Join(def, slug) {
+		t.Fatalf("memory files: %v", f)
+	}
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	if claudeConfigDir(home) != cfg || claudeSettingsFile(home) != filepath.Join(cfg, "settings.json") {
+		t.Fatalf("CLAUDE_CONFIG_DIR: %s", claudeConfigDir(home))
+	}
+	f := memoryFiles(cwd)
+	if f[0] != filepath.Join(cfg, "CLAUDE.md") || f[4] != filepath.Join(cfg, slug) || f[2] != filepath.Join(cwd, ".claude", "CLAUDE.md") {
+		t.Fatalf("memory files with CLAUDE_CONFIG_DIR: %v", f)
+	}
+	if dirs := agentDirs(cwd); dirs[0][1] != filepath.Join(cfg, "agents") || dirs[1][1] != filepath.Join(cwd, ".claude", "agents") {
+		t.Fatalf("agent dirs: %v", dirs)
+	}
+	os.MkdirAll(filepath.Join(cfg, "agents"), 0o755)
+	os.WriteFile(filepath.Join(cfg, "agents", "placeholder-agent.md"), []byte("---\nname: placeholder-agent\ndescription: placeholder\n---\nbody\n"), 0o600)
+	os.MkdirAll(filepath.Join(home, ".claude", "agents"), 0o755)
+	os.WriteFile(filepath.Join(home, ".claude", "agents", "stale-agent.md"), []byte("---\nname: stale-agent\n---\n"), 0o600)
+	var names []string
+	for _, a := range agentFiles(cwd) {
+		names = append(names, a.name)
+	}
+	if len(names) != 1 || names[0] != "placeholder-agent" {
+		t.Fatalf("user agents come from CLAUDE_CONFIG_DIR only: %v", names)
+	}
+}

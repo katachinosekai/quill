@@ -42,6 +42,9 @@ func TestMemoryModeRadioGoesThroughSwitch(t *testing.T) {
 	h.ui(func() {
 		useFakeKmem(h.d, bin)
 		h.d.kmemOff = false
+		// Claude chosen before (with no choice an installed kmem is the
+		// default: TestKmemMemoryDefault)
+		h.d.app.Preferences().SetString(memoryModeKey, memoryModeClaude)
 		r = findRadio(h.d.memoryModeRadio(func() { changed++ }))
 		if r.Selected != radioClaude || r.Disabled() {
 			t.Fatalf("starts on Claude, enabled: %q", r.Selected)
@@ -152,7 +155,8 @@ func TestClaudeSettingsFileConfigDir(t *testing.T) {
 }
 
 // TestWelcomeKmemGoesThroughSwitch: Welcome's kmem choice doesn't set the
-// mode; the switch dialog opens after it.
+// mode; the switch dialog opens after it, also when kmem is already the
+// default (no mode chosen, never switched).
 func TestWelcomeKmemGoesThroughSwitch(t *testing.T) {
 	switchHome(t, "")
 	h := newHarness(t)
@@ -160,12 +164,21 @@ func TestWelcomeKmemGoesThroughSwitch(t *testing.T) {
 	h.ui(func() {
 		useFakeKmem(h.d, bin)
 		h.d.kmemOff = false
+		p := h.d.app.Preferences()
 		c := welcomeChoices{Lang: "en", KmemMemory: true}
+		if !h.d.kmemMemory() || !h.d.welcomeMemoryNext(c) {
+			t.Fatal("kmem by default, never switched: the switch comes next")
+		}
+		h.d.applyWelcome(c)
+		if p.String(memoryModeKey) != "" || !h.d.kmemMemory() || !h.d.welcomeMemoryNext(c) {
+			t.Fatal("Welcome alone stores nothing; kmem stays the default until the switch")
+		}
+		p.SetString(memoryModeKey, memoryModeClaude)
 		if !h.d.welcomeMemoryNext(c) {
 			t.Fatal("kmem not in use: the switch comes next")
 		}
 		h.d.applyWelcome(c)
-		if h.d.app.Preferences().String(memoryModeKey) != memoryModeClaude || h.d.kmemMemory() {
+		if p.String(memoryModeKey) != memoryModeClaude || h.d.kmemMemory() {
 			t.Fatal("Welcome alone doesn't switch")
 		}
 		if h.d.welcomeMemoryNext(welcomeChoices{Lang: "en"}) {

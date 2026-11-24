@@ -24,8 +24,9 @@ import (
 // because kmemAvailable/kmemMemory are false. A small dismissible advert
 // (kmemAdvert) sits in Settings → General → Memory, the Memory tab, the
 // Claude memory panel and the Welcome; never when kmem is installed. With
-// kmem installed but sessions on Claude's memory, a card in the header offers
-// once to switch to kmem (kmemSwitchBanner).
+// kmem installed but sessions on Claude's memory, or on kmem only because no
+// mode was chosen (kmemByDefault), a card in the header offers once to switch
+// to kmem (kmemSwitchBanner).
 
 const (
 	prefKmemAdvertOff     = "kmemAdvertDismissed"
@@ -146,10 +147,11 @@ func (d *desk) syncKmemOnlySettings() {
 	}
 }
 
-// kmemSwitchOffer: kmem is installed, sessions still use Claude's memory, and
-// the offer was not answered yet.
+// kmemSwitchOffer: kmem is installed, sessions use Claude's memory or kmem
+// only by default (no mode chosen, no switch finished), and the offer was not
+// answered yet. Shown once: "No thanks" or a finished switch answers it.
 func (d *desk) kmemSwitchOffer() bool {
-	return d.kmemAvailable() && !d.kmemMemory() && !d.app.Preferences().Bool(prefKmemSwitchOffered)
+	return d.kmemSwitchWanted() && !d.app.Preferences().Bool(prefKmemSwitchOffered)
 }
 
 func (d *desk) buildKmemSwitchBanner() fyne.CanvasObject {
