@@ -1,6 +1,6 @@
 # Switching a Quill Desktop install from Claude memory to kmem
 
-Status: DRAFT for the user's review (2026-11-24). Target: Quill Desktop 0.1.29,
+Status: approved by the user 2026-11-24. Target: Quill Desktop 0.1.29,
 before the first patron release of kmem. kmem side: kmem-lock-audit, after the
 rules split (kmem task tf320c4).
 
@@ -23,7 +23,8 @@ the memory mode.
      to import, with its fact count and target topic (default: the project
      folder name, editable);
    - hooks to add to `~/.claude/settings.json` (kmem-guard);
-   - memory mode Claude → kmem.
+   - memory mode Claude → kmem;
+   - Claude Code's auto memory turned off.
    The user can untick projects. Nothing happens before "Switch".
 3. **Back up.** One dated folder
    `~/.local/share/quill/kmem-switch-backup-YYYYMMDD-HHMM/` with
@@ -33,8 +34,9 @@ the memory mode.
    (new kmem command): one fact per note/bullet, kind `fact`, tagged
    `imported-from: MEMORY.md <date>`, duplicates skipped, a summary
    `{imported, skipped, topic}` returned. `MEMORY.md` files stay as they are
-   (Claude Code keeps reading them unless the user turns auto memory off;
-   the dialog offers that as an unticked option).
+   on disk, but Claude Code's auto memory is turned off as part of the switch
+   (user 2026-11-24), so notes aren't kept in two places; the preview lists
+   this change, the backup holds the setting, and Undo turns it back on.
    `CLAUDE.md` files are never touched.
 5. **Rules.** kmem's core rules come with the kmem package. The user's own
    rules (if any) become local rules. Quill Desktop's "Install Quill's default
@@ -63,8 +65,9 @@ Fake `kmem` binary with the import JSON; temp HOME with sample `MEMORY.md`
 hooks merge (keeps the user's other hooks), mode switch, running session
 untouched, undo restore, failure rollback.
 
-## Open questions for the user
+## Decisions (user 2026-11-24)
 
-1. Topic per project (proposed) or one topic for everything imported?
-2. After import, turn off Claude's auto memory by default (so notes aren't kept
-   in two places), or leave it on (proposed: leave on, offer the switch)?
+1. One kmem topic per project (default: the project folder name, editable in
+   the preview).
+2. Claude Code's auto memory is turned off automatically after the import;
+   Undo turns it back on.
