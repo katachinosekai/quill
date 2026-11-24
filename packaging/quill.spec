@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.27
+Version:        0.1.28
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
@@ -69,6 +69,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
 
 %changelog
+* Tue Nov 24 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.28-1
+- kmem is no longer bundled: Quill Desktop uses an installed kmem only (python3 is only recommended)
+- Settings without kmem: one status card with a short intro; kmem-only controls are hidden
+- Topic snapshot shown in the Topics tab and on the phone
+- End-check message wording for carried-over claims
+- The kmem window and assistant box show the main chat's working indicator (thinking, tool, approval, ready, stopped, last activity, still-working pulse)
+- Bundles Quill Android 0.9.38
 * Mon Nov 23 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.27-1
 - Quill operator: Quill Desktop's own assistant behind the Quill button (settings with Undo, explanations; developer role with a Quill source folder, which now defaults to the checkout Quill Desktop runs from)
 - Assistant box: undocked, it takes over the main message box (own drafts and suggestions, name chip, accent frame) and dims the rest; click outside or press Esc to close, click a tab to close and switch
