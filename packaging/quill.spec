@@ -13,7 +13,7 @@ URL:            https://github.com/katachinosekai/quill
 Source0:        %{name}-%{version}.tar.gz
 ExclusiveArch:  x86_64
 
-Requires:       python3
+Recommends:     python3
 Recommends:     hunspell
 Recommends:     hunspell-en-US
 BuildRequires:  golang >= 1.26
