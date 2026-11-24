@@ -12,6 +12,7 @@ func TestYesNoProposalForms(t *testing.T) {
 		"**Next: wire it into the gate and add tests? Yes (recommended) or no?**": true,
 		"**I'd fix both and push. OK? Yes (recommended) or no?**":                 true,
 		"**Fix both? Yes (recommended) or no?**\n\n1. Which branch: main or dev?": true,
+		"**Use the new layout for all tabs? Yes (recommended) or no?**":           true, // user 2026-11-24
 		"**Did the card show up? Yes or no?**":                                    false,
 		"**Is that placement OK? Yes or no?**":                                    false,
 		"The tests passed. OK? Yes or no?":                                        false,

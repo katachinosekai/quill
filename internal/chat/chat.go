@@ -295,7 +295,7 @@ func NamesWork(s string) bool { return namesWork.MatchString(s) }
 // moreActionVerbs: more verbs a yes/no proposal starts with (td0cabd, user
 // 2026-11-24: "Make the change and rerun the tests? Yes (recommended) or
 // no?" got no card). Kept out of NamesWork, which sorts choice options.
-const moreActionVerbs = `make|wire|wire up|hook up|kick off|edit|change|adjust|convert|split|generate|regenerate|reinstall|uninstall|upgrade|downgrade|sync|rebuild|redeploy|reload|test|retest|re-test|file|open|close|mark|prune|purge|import|export|submit|backport|wrap up|finalize|extend|link|unlink|go on|keep going`
+const moreActionVerbs = `use|make|wire|wire up|hook up|kick off|edit|change|adjust|convert|split|generate|regenerate|reinstall|uninstall|upgrade|downgrade|sync|rebuild|redeploy|reload|test|retest|re-test|file|open|close|mark|prune|purge|import|export|submit|backport|wrap up|finalize|extend|link|unlink|go on|keep going`
 
 var actionStart = regexp.MustCompile(`(?i)^(?:(?:ok|okay|so|and|also|then|now|next)[,:]?\s+)?(?:` + actionVerbs + `|` + moreActionVerbs + `)\b|^(?:ok|okay) to\b`)
 
