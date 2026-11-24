@@ -152,6 +152,10 @@ func (v *chatView) planToggle(plan, reply *chat.Item) fyne.CanvasObject {
 
 // redrawPlan redraws a plan item and its reply.
 func (v *chatView) redrawPlan(plan, reply *chat.Item) {
+	if v.mirrorRedraw != nil {
+		v.mirrorRedraw() // a mirrored card (planmirror.go) has no item views
+		return
+	}
 	for _, it := range []*chat.Item{reply, plan} {
 		if it == nil {
 			continue

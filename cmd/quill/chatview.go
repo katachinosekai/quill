@@ -122,6 +122,7 @@ type chatView struct {
 	order         []*deskSession
 	sel           *selLayer
 	jumpBar       *fyne.Container
+	mirrorRedraw  func() // set on a mirrored plan card's view (planmirror.go): redrawPlan redraws the mirror
 }
 
 type sessView struct {

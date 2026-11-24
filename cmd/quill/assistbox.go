@@ -1179,6 +1179,8 @@ type assistChat struct {
 	// role's one action ("Move it here", "Take over").
 	inRow fyne.CanvasObject // its own message box: hidden over the chat (the main one messages it)
 
+	top       *fyne.Container // above the chat: the reason strip, the mirrored plan cards (Quill)
+	mirrors   *planMirrors    // the Quill operator's mirrored plan cards of other sessions (planmirror.go)
 	reasonBox *fyne.Container
 	reasonLbl *widget.Label
 	reasonBtn *widget.Button
@@ -1231,7 +1233,8 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 	c.reasonBtn.Importance = widget.HighImportance
 	c.reasonBox = container.NewVBox(bg(colBackground, 10, container.NewVBox(c.reasonLbl, c.reasonBtn)))
 	c.reasonBox.Hide()
-	c.root = container.NewBorder(c.reasonBox, in, nil, nil, c.view.root)
+	c.top = container.NewVBox(c.reasonBox)
+	c.root = container.NewBorder(c.top, in, nil, nil, c.view.root)
 	c.box = &assistBoxView{
 		title:   title,
 		content: c.root,

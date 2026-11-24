@@ -1233,6 +1233,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 func (d *desk) updateChrome() {
 	d.keepView()
 	defer d.syncQuillMoveBanner()
+	defer d.syncPlanMirrors()
 	if d.note != nil {
 		noteWas := d.note.Visible()
 		defer func() {
@@ -1701,6 +1702,7 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		// Any assistant's badge and button (not only kmem's): a question or
 		// plan came, or was answered, while its box is closed (t98af12).
 		d.assistEvent(s)
+		d.syncPlanMirrors() // another session's plan card came or was answered (planmirror.go)
 	}
 	if ev.Type == "result" {
 		d.flushQueue(s)
@@ -2077,6 +2079,7 @@ func oneLine(s string, n int) string {
 }
 
 func (d *desk) chatFor(s *deskSession, items []*chat.Item) {
+	defer d.syncPlanMirrors()
 	if d.current == s {
 		d.chat.update(items)
 	} else if p := d.paneFor(s); p != nil {

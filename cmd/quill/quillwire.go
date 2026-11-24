@@ -20,6 +20,9 @@ import (
 // attachQuillBox registers the operator's box content and the change cards.
 func (d *desk) attachQuillBox() {
 	d.quillChat = d.attachAssistBox(quillRole, "Quill operator", "Message the Quill operator")
+	d.quillChat.mirrors = newPlanMirrors()
+	d.quillChat.top.Add(d.quillChat.mirrors.scroll)
+	d.syncPlanMirrors()
 	d.setSettingsCard(d.quillSettingsCard)
 }
 
