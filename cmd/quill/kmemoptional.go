@@ -155,7 +155,7 @@ func (d *desk) kmemSwitchOffer() bool {
 func (d *desk) buildKmemSwitchBanner() fyne.CanvasObject {
 	lbl := widget.NewLabel(kmemSwitchText)
 	lbl.Wrapping = fyne.TextWrapWord
-	use := widget.NewButton("Use kmem", func() { d.answerKmemSwitch(true) })
+	use := widget.NewButton("Switch to kmem...", func() { d.answerKmemSwitch(true) })
 	use.Importance = widget.HighImportance
 	no := widget.NewButton("No thanks", func() { d.answerKmemSwitch(false) })
 	bg := canvas.NewRectangle(colCard)
@@ -181,16 +181,15 @@ func (d *desk) syncKmemSwitchBanner() {
 	}
 }
 
-// answerKmemSwitch: the offer is shown once; "Use kmem" switches the memory
-// mode (sessions started or resumed afterwards use it).
+// answerKmemSwitch: "Switch to kmem..." opens the switch's preview
+// (kmemswitchui.go; the offer goes away once the switch is done), "No
+// thanks" hides the offer for good (Settings → Memory keeps the switch).
 func (d *desk) answerKmemSwitch(use bool) {
-	p := d.app.Preferences()
-	p.SetBool(prefKmemSwitchOffered, true)
 	if use {
-		p.SetString(memoryModeKey, memoryModeKmem)
-		d.refreshKmemVer()
-		d.flashHint(d.folder, "Quill Desktop sessions started or resumed from now on use kmem.")
+		d.showKmemSwitch()
+		return
 	}
+	d.app.Preferences().SetBool(prefKmemSwitchOffered, true)
 	d.syncKmemSwitchBanner()
 }
 

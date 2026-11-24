@@ -71,3 +71,30 @@ untouched, undo restore, failure rollback.
    the preview).
 2. Claude Code's auto memory is turned off automatically after the import;
    Undo turns it back on.
+
+## Implementation notes (Quill Desktop, feat/kmem-switch)
+
+- Code: `cmd/quill/kmemswitch.go` (steps), `kmemswitchui.go` (dialog,
+  Settings buttons), tests in `kmemswitch_test.go` (fake kmem script).
+- Detection: `kmem version --json` (API 1), `kmem features --json` must list
+  `import-memory-md` (kmem 1.14.0; older: "too old, needs 1.14.0"),
+  `kmem rules --json` must list at least one rule (core rules), python3,
+  kmem-guard next to kmem, on PATH or in `~/.local/bin`.
+- Fact count follows MEMORY.md's links: one per linked `.md` note beside it
+  (each once), plus one per bullet that links no note.
+- Auto memory off: `"autoMemoryEnabled": false` in `~/.claude/settings.json`
+  (Claude Code reads it from its merged settings; the env var
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY` is the other switch, which Quill
+  Desktop already sets for its own kmem sessions). Written in the same
+  atomic settings.json write as the hooks.
+- Order: backup → imports → settings.json → preferences. Failure: settings.json
+  is restored from the backup copy (or removed if the switch created it),
+  preferences reset; `switch.json` in the backup records `rolled-back`.
+  Facts imported before the failure stay in kmem (marked; a retry skips them).
+- Undo reverts what `switch.json` recorded rather than copying the old
+  settings.json back: it removes only the hooks the switch added, restores
+  `autoMemoryEnabled` as it was (unset = on), and sets the mode to Claude, so
+  settings changed after the switch survive.
+- The header offer's "Switch to kmem..." opens the preview; Settings →
+  General → Memory (kmem) has "Switch to kmem...", "Switch back to Claude
+  memory..." and, with kmem gone and its hooks left, "Remove kmem hooks...".

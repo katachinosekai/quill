@@ -217,9 +217,13 @@ func TestKmemSwitchOffer(t *testing.T) {
 		}
 		p.SetBool(prefKmemSwitchOffered, false)
 		h.d.syncKmemButton()
-		test.Tap(findButton(h.d.kmemSwitch, "Use kmem"))
-		if h.d.kmemSwitch.Visible() || p.String(memoryModeKey) != memoryModeKmem || !h.d.kmemMemory() {
-			t.Fatal("Use kmem switches the memory mode")
+		test.Tap(findButton(h.d.kmemSwitch, "Switch to kmem..."))
+		if h.d.kmemSwitchUI == nil || !h.d.kmemSwitch.Visible() || p.String(memoryModeKey) != memoryModeClaude {
+			t.Fatal("Switch to kmem... opens the switch's preview; nothing changes before Switch (TestKmemSwitchFlow)")
 		}
+	})
+	// the preview's background check finishes before the test ends
+	h.eventually("checked", func() bool {
+		return h.d.kmemSwitchUI.buttons.Objects[0].(*widget.Button).Text != "Cancel" || len(h.d.kmemSwitchUI.buttons.Objects) > 1
 	})
 }

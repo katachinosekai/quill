@@ -296,6 +296,11 @@ type desk struct {
 	current       *deskSession
 	ownPIDs       sync.Map
 
+	// The "Switch to kmem" dialog when open (kmemswitchui.go), and the
+	// refresh of Settings → General → Memory (kmem).
+	kmemSwitchUI        *kmemSwitchView
+	kmemSettingsRefresh func()
+
 	rows          []sideRow
 	rowCaps       map[string]string
 	list          *widget.List

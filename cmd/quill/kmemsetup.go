@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -66,12 +67,17 @@ func kmemHooks(home string) map[string]map[string]any {
 // Bash all accept (PZ Lock Audit 2, kmem v1.5.0).
 func kmemHooksFor(goos, home, python string) map[string]map[string]any {
 	bin := filepath.Join(home, ".local", "bin")
-	brief := shellQuote(filepath.Join(bin, "kmem")) + " brief 2>&1 || true"
-	guard := shellQuote(filepath.Join(bin, "kmem-guard"))
+	return kmemHooksForPaths(goos, filepath.Join(bin, "kmem"), filepath.Join(bin, "kmem-guard"), python)
+}
+
+// kmemHooksForPaths: the hooks for the kmem and kmem-guard at these paths.
+func kmemHooksForPaths(goos, kmem, kmemGuard, python string) map[string]map[string]any {
+	brief := shellQuote(kmem) + " brief 2>&1 || true"
+	guard := shellQuote(kmemGuard)
 	if goos == "windows" {
 		fwd := func(p string) string { return `"` + strings.ReplaceAll(p, `\`, "/") + `"` }
-		brief = python + " " + fwd(filepath.Join(bin, "kmem")) + " brief"
-		guard = python + " " + fwd(filepath.Join(bin, "kmem-guard"))
+		brief = python + " " + fwd(kmem) + " brief"
+		guard = python + " " + fwd(kmemGuard)
 	}
 	return map[string]map[string]any{
 		"SessionStart": {"hooks": []any{map[string]any{"type": "command", "command": brief, "timeout": 10}}},
@@ -171,33 +177,13 @@ func mergeKmemHooks(settingsPath, home string, now time.Time) (bool, string, err
 	default:
 		return false, "", err
 	}
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-	changed := false
-	for event, group := range kmemHooks(home) {
-		groups, isList := hooks[event].([]any)
-		if hooks[event] != nil && !isList {
-			return false, "", fmt.Errorf("%s has an unexpected %q hook entry; not changed", settingsPath, event)
-		}
-		needle := "kmem brief"
-		if event == "PreToolUse" {
-			needle = "kmem-guard"
-		}
-		if hasHookCommand(groups, needle) {
-			if event == "PreToolUse" && addPowerShellToGuard(groups) {
-				changed = true
-			}
-			continue
-		}
-		hooks[event] = append(groups, group)
-		changed = true
+	_, changed, err := mergeKmemHookGroups(settings, kmemHooks(home))
+	if err != nil {
+		return false, "", fmt.Errorf("%s %w; not changed", settingsPath, err)
 	}
 	if !changed {
 		return false, "", nil
 	}
-	settings["hooks"] = hooks
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return false, "", err
@@ -217,6 +203,97 @@ func mergeKmemHooks(settingsPath, home string, now time.Time) (bool, string, err
 		return false, backup, err
 	}
 	return true, backup, os.Rename(tmp, settingsPath)
+}
+
+// kmemHookNeedle: what marks an event's kmem hook in a command.
+func kmemHookNeedle(event string) string {
+	if event == "PreToolUse" {
+		return "kmem-guard"
+	}
+	return "kmem brief"
+}
+
+// mergeKmemHookGroups adds the missing kmem hook groups to settings' "hooks"
+// in place; the user's other hooks stay. added lists the events that got a
+// new group; changed is also true when only the guard's matcher was widened.
+func mergeKmemHookGroups(settings map[string]any, kmem map[string]map[string]any) (added []string, changed bool, err error) {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if settings["hooks"] != nil && hooks == nil {
+		return nil, false, errors.New("has an unexpected \"hooks\" entry")
+	}
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	events := make([]string, 0, len(kmem))
+	for e := range kmem {
+		events = append(events, e)
+	}
+	sort.Strings(events)
+	for _, event := range events {
+		groups, isList := hooks[event].([]any)
+		if hooks[event] != nil && !isList {
+			return nil, false, fmt.Errorf("has an unexpected %q hook entry", event)
+		}
+		if hasHookCommand(groups, kmemHookNeedle(event)) {
+			if event == "PreToolUse" && addPowerShellToGuard(groups) {
+				changed = true
+			}
+			continue
+		}
+		hooks[event] = append(groups, kmem[event])
+		added = append(added, event)
+		changed = true
+	}
+	if changed {
+		settings["hooks"] = hooks
+	}
+	return added, changed, nil
+}
+
+// removeKmemHookGroups drops the kmem hooks of events from settings in place
+// (only the kmem commands; other hooks in the same group stay). An event or
+// "hooks" left empty is removed when keepEmpty doesn't name it.
+func removeKmemHookGroups(settings map[string]any, events []string, keepEmpty map[string]bool) bool {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		return false
+	}
+	changed := false
+	for _, event := range events {
+		groups, _ := hooks[event].([]any)
+		var kept []any
+		for _, g := range groups {
+			gm, _ := g.(map[string]any)
+			if gm == nil || !hasHookCommand([]any{gm}, kmemHookNeedle(event)) {
+				kept = append(kept, g)
+				continue
+			}
+			hs, _ := gm["hooks"].([]any)
+			var rest []any
+			for _, h := range hs {
+				if !hasHookCommand([]any{map[string]any{"hooks": []any{h}}}, kmemHookNeedle(event)) {
+					rest = append(rest, h)
+				}
+			}
+			changed = true
+			if len(rest) > 0 {
+				gm["hooks"] = rest
+				kept = append(kept, gm)
+			}
+		}
+		switch {
+		case len(kept) > 0:
+			hooks[event] = kept
+		case keepEmpty[event]:
+			hooks[event] = []any{}
+		default:
+			delete(hooks, event)
+		}
+	}
+	if len(hooks) == 0 && !keepEmpty["hooks"] {
+		delete(settings, "hooks")
+	}
+	return changed
 }
 
 func kmemHooksPresent(home string) bool {
@@ -307,6 +384,14 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 		d.syncKmemButton()
 	}
 	btn.OnTapped = func() { d.kmemHooksDialog(refresh) }
+	var switchRefresh func()
+	switchBtns, switchRefresh := d.kmemSwitchButtons(func() { refresh() })
+	inner := refresh
+	refresh = func() {
+		inner()
+		switchRefresh()
+	}
+	d.kmemSettingsRefresh = refresh
 	refresh()
 	d.kmemBinSetBtn = widget.NewButtonWithIcon(binButtonText(d.kmemNeedsNow.Bin), theme.DeleteIcon(), d.showBinDialog)
 	d.kmemBinSetBtn.Importance = widget.LowImportance
@@ -319,7 +404,7 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 	d.kmemOnlySet = container.NewVBox(d.memoryModeRadio(nil), widget.NewSeparator(), d.kmemAssistSetting(), d.kmemBadgeSetting(), widget.NewSeparator(), d.defaultRulesSettings(),
 		widget.NewSeparator(), caption("Facts and tasks sessions moved to kmem's recycle bin: review, restore, or delete them for good."), d.kmemBinSetBtn)
 	d.kmemOnlySet.Hidden = !d.kmemAvailable()
-	return container.NewVBox(card, btn, d.kmemOnlySet)
+	return container.NewVBox(card, btn, switchBtns, d.kmemOnlySet)
 }
 
 // kmemHooksDialog adds the hooks of an installed kmem (after asking).
