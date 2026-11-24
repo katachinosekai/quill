@@ -395,5 +395,6 @@ func (v *chatView) mediaCard(m mediaRef) fyne.CanvasObject {
 	}
 	card := container.NewStack(stack...)
 	foot := container.NewHBox(caption, layout.NewSpacer())
-	return newTapRow(container.NewVBox(card, foot), func() { d.viewMedia(m, loaded) })
+	return newMediaTap(container.NewVBox(card, foot), func() { d.viewMedia(m, loaded) },
+		func(at fyne.Position) { d.mediaMenu(v.s, m, at) })
 }

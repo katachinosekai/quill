@@ -147,7 +147,9 @@ func (d *desk) viewMedia(m mediaRef, preview fyne.Resource) {
 		}
 		img.FillMode = canvas.ImageFillContain
 		img.ScaleMode = canvas.ImageScaleSmooth
-		body := container.NewBorder(head(), nil, nil, nil, img)
+		s := d.current
+		pic := newMediaTap(img, nil, func(at fyne.Position) { d.mediaMenu(s, m, at) })
+		body := container.NewBorder(head(), nil, nil, nil, pic)
 		closeFn = d.showLightbox(bg(colCard, 12, container.NewPadded(body)), nil)
 	}
 }
