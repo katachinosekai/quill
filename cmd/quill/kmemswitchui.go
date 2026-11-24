@@ -35,13 +35,20 @@ type kmemSwitchView struct {
 
 // showKmemSwitch opens the dialog: detection and the MEMORY.md scan run in
 // the background, then the preview replaces "Checking kmem…".
-func (d *desk) showKmemSwitch() {
+func (d *desk) showKmemSwitch() { d.showKmemSwitchThen(nil) }
+
+// showKmemSwitchThen: showKmemSwitch; closed runs when the dialog closes
+// (switched, failed or cancelled).
+func (d *desk) showKmemSwitchThen(closed func()) {
 	v := &kmemSwitchView{body: container.NewVBox(wrapLabel("Checking kmem…")), buttons: container.NewHBox()}
 	d.kmemSwitchUI = v
 	cancel := widget.NewButton("Cancel", func() { v.dlg.Hide() })
 	v.buttons.Objects = []fyne.CanvasObject{cancel}
 	v.dlg = dialog.NewCustomWithoutButtons("Switch to kmem", container.NewBorder(nil, container.NewHBox(layout.NewSpacer(), v.buttons), nil, nil, container.NewVScroll(v.body)), d.win)
 	v.dlg.Resize(fyne.NewSize(760, 560))
+	if closed != nil {
+		v.dlg.SetOnClosed(closed)
+	}
 	v.dlg.Show()
 	home := homeDir()
 	go func() {
@@ -79,7 +86,7 @@ func (d *desk) fillKmemSwitch(v *kmemSwitchView, c kmemSwitchCheck, projects []m
 		v.buttons.Refresh()
 		return
 	}
-	settings := filepath.Join(home, ".claude", "settings.json")
+	settings := claudeSettingsFile(home)
 	v.hooks = kmemSwitchHooks(c)
 	m, err := readSettings(settingsTarget(settings))
 	if errors.Is(err, os.ErrNotExist) {
@@ -134,7 +141,7 @@ func (d *desk) fillKmemSwitch(v *kmemSwitchView, c kmemSwitchCheck, projects []m
 		objs = append(objs, caption("One fact per note (MEMORY.md's linked note files and plain bullets), marked as imported from MEMORY.md; facts already in the topic are skipped. MEMORY.md and CLAUDE.md files stay as they are."))
 	}
 
-	objs = append(objs, widget.NewSeparator(), boldLabel("2. Claude Code settings (~/.claude/settings.json; your other settings and hooks stay)"))
+	objs = append(objs, widget.NewSeparator(), boldLabel("2. Claude Code settings ("+tildePath(settings)+"; your other settings and hooks stay)"))
 	if len(v.newHooks) == 0 {
 		objs = append(objs, wrapLabel("• kmem hooks: already there, not changed"))
 	}
@@ -171,7 +178,7 @@ func (d *desk) fillKmemSwitch(v *kmemSwitchView, c kmemSwitchCheck, projects []m
 
 // startKmemSwitch checks the topics and runs the switch in the background.
 func (d *desk) startKmemSwitch(v *kmemSwitchView, home string) {
-	plan := kmemSwitchPlan{Home: home, Settings: filepath.Join(home, ".claude", "settings.json"), PrefsFile: d.prefsFile(),
+	plan := kmemSwitchPlan{Home: home, Settings: claudeSettingsFile(home), PrefsFile: d.prefsFile(),
 		BackupRoot: filepath.Join(home, ".local", "share", "quill"), Hooks: v.hooks, Now: time.Now()}
 	for i, p := range v.projects {
 		if !v.ticks[i].Checked {
@@ -246,20 +253,60 @@ func (d *desk) showKmemSwitchResult(v *kmemSwitchView, res kmemSwitchResult) {
 	v.buttons.Refresh()
 }
 
-// kmemUndoDialog: Settings → Memory "Switch back to Claude memory".
+// requestMemoryMode: every memory-mode choice (Settings → General → Memory
+// (kmem) and /memory's radio, Welcome) goes through the switch (user
+// 2026-11-24): kmem while it isn't in use opens "Switch to kmem", and the mode
+// changes only if the switch completes; Claude after a recorded switch opens
+// "Switch back to Claude memory". Otherwise the mode is just set. done runs
+// once the choice is settled (at once, or when the dialog closes).
+func (d *desk) requestMemoryMode(kmem bool, done func()) {
+	finish := func() {
+		d.refreshKmemVer()
+		if done != nil {
+			done()
+		}
+	}
+	p := d.app.Preferences()
+	switch {
+	case kmem && !d.kmemMemory():
+		if !d.kmemAvailable() {
+			finish()
+			return
+		}
+		d.showKmemSwitchThen(finish)
+		return
+	case kmem:
+		p.SetString(memoryModeKey, memoryModeKmem)
+	case d.kmemMemory() && d.kmemSwitchUndoDir() != "":
+		d.kmemUndoDialog(finish)
+		return
+	default:
+		p.SetString(memoryModeKey, memoryModeClaude)
+	}
+	finish()
+}
+
+// kmemUndoDialog: Settings → Memory "Switch back to Claude memory"; after
+// runs when it closes (switched back or cancelled).
 func (d *desk) kmemUndoDialog(after func()) {
 	dir := d.kmemSwitchUndoDir()
 	if dir == "" {
+		if after != nil {
+			after()
+		}
 		return
 	}
 	msg := wrapLabel("Switch back to Claude memory:\n" +
-		"• the kmem hooks the switch added are removed from ~/.claude/settings.json (your other settings stay)\n" +
+		"• the kmem hooks the switch added are removed from " + tildePath(claudeSettingsFile(homeDir())) + " (your other settings stay)\n" +
 		"• Claude Code's auto memory is turned back on as it was\n" +
 		"• Quill Desktop's memory mode goes back to Claude's auto memory\n" +
 		"Running sessions keep going; sessions started or resumed afterwards use Claude's memory. Facts imported into kmem stay there (marked), so switching again doesn't duplicate them.\n" +
 		"Backup of the switch: " + tildePath(dir))
 	dialog.ShowCustomConfirm("Switch back to Claude memory", "Switch back", "Cancel", msg, func(ok bool) {
 		if !ok {
+			if after != nil {
+				after()
+			}
 			return
 		}
 		if err := undoKmemSwitch(dir, d.app.Preferences()); err != nil {
@@ -276,7 +323,7 @@ func (d *desk) kmemUndoDialog(after func()) {
 
 // kmemRemoveHooksDialog: kmem is gone but its hooks are still there.
 func (d *desk) kmemRemoveHooksDialog(after func()) {
-	dialog.ShowConfirm("Remove kmem hooks", "kmem is no longer installed, but its hooks (kmem brief, kmem-guard) are still in ~/.claude/settings.json. Remove them? Your other hooks stay.", func(ok bool) {
+	dialog.ShowConfirm("Remove kmem hooks", "kmem is no longer installed, but its hooks (kmem brief, kmem-guard) are still in "+tildePath(claudeSettingsFile(homeDir()))+". Remove them? Your other hooks stay.", func(ok bool) {
 		if !ok {
 			return
 		}

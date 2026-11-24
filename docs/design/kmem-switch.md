@@ -72,6 +72,26 @@ untouched, undo restore, failure rollback.
 2. Claude Code's auto memory is turned off automatically after the import;
    Undo turns it back on.
 
+Follow-up answers (user 2026-11-24, after the merge):
+
+1. The memory-mode radio (Settings → General → Memory (kmem), also in
+   /memory) no longer flips Claude → kmem. Choosing kmem while kmem isn't in
+   use opens "Switch to kmem"; the radio stays on Claude unless the switch
+   completes (Cancel or a failure leaves Claude). Choosing Claude with a
+   recorded switch opens "Switch back to Claude memory" (Cancel keeps kmem);
+   without one it just sets the mode. Welcome's memory question goes the
+   same way: its kmem choice opens "Switch to kmem" after the Welcome closes
+   (`requestMemoryMode`). `quill settings` lists memory mode as a read-only
+   security entry, so it can't bypass the switch.
+2. The core-rules check stays as it is (at least one rule from `kmem rules`).
+3. Claude Code's user settings.json follows `CLAUDE_CONFIG_DIR` like Claude
+   Code does: `$CLAUDE_CONFIG_DIR/settings.json` when set, else
+   `~/.claude/settings.json` (`claudeSettingsFile`), for the switch and its
+   undo, the hooks dialog and repair, kmem setup, "Remove kmem hooks", the
+   /memory auto-memory toggle and the Permissions/Hooks "User" file.
+4. Facts imported before a failure stay in kmem (marked as imported from
+   MEMORY.md); a retry skips them.
+
 ## Implementation notes (Quill Desktop, feat/kmem-switch)
 
 - Code: `cmd/quill/kmemswitch.go` (steps), `kmemswitchui.go` (dialog,

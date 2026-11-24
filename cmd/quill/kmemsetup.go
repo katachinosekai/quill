@@ -297,7 +297,7 @@ func removeKmemHookGroups(settings map[string]any, events []string, keepEmpty ma
 }
 
 func kmemHooksPresent(home string) bool {
-	raw, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	raw, err := os.ReadFile(claudeSettingsFile(home))
 	if err != nil {
 		return false
 	}
@@ -333,20 +333,20 @@ func kmemHooksMissing(home string) bool {
 	return kmemGuardInstalled(home) && !kmemHooksPresent(home)
 }
 
-// addKmemHooks adds the kmem hooks of an installed kmem to
-// ~/.claude/settings.json. Quill Desktop never installs kmem itself.
+// addKmemHooks adds the kmem hooks of an installed kmem to Claude Code's
+// settings.json (claudeSettingsFile). Quill Desktop never installs kmem itself.
 func addKmemHooks(home string, now time.Time) ([]string, error) {
 	if !kmemGuardInstalled(home) {
 		return nil, errors.New("kmem and kmem-guard are not in ~/.local/bin; install kmem first")
 	}
-	changed, backup, err := mergeKmemHooks(filepath.Join(home, ".claude", "settings.json"), home, now)
+	changed, backup, err := mergeKmemHooks(claudeSettingsFile(home), home, now)
 	if err != nil {
 		return nil, err
 	}
 	if !changed {
-		return []string{"the kmem hooks were already in ~/.claude/settings.json"}, nil
+		return []string{"the kmem hooks were already in " + tildePath(claudeSettingsFile(home))}, nil
 	}
-	line := "added the kmem brief (SessionStart) and kmem-guard (PreToolUse) hooks to ~/.claude/settings.json"
+	line := "added the kmem brief (SessionStart) and kmem-guard (PreToolUse) hooks to " + tildePath(claudeSettingsFile(home))
 	if backup != "" {
 		line += "; backup " + tildePath(backup)
 	}
@@ -410,7 +410,7 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 // kmemHooksDialog adds the hooks of an installed kmem (after asking).
 func (d *desk) kmemHooksDialog(after func()) {
 	home := homeDir()
-	steps := widget.NewLabel("Quill will add two hooks to ~/.claude/settings.json (a backup is made first; your other hooks stay):\n" +
+	steps := widget.NewLabel("Quill will add two hooks to " + tildePath(claudeSettingsFile(home)) + " (a backup is made first; your other hooks stay):\n" +
 		"    SessionStart: kmem brief\n" +
 		"    PreToolUse (Bash, PowerShell, Agent, Task, Write, Edit): kmem-guard\n" +
 		"They run the kmem and kmem-guard in ~/.local/bin.")

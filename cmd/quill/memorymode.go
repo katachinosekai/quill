@@ -165,30 +165,36 @@ func sessionMemoryEnv(kmem bool) []string {
 	return nil
 }
 
-// memoryModeRadio: which memory Quill sessions use (the same setting as the
-// checkbox under Settings → General → Memory (kmem)).
+// memoryModeRadio: which memory Quill sessions use (Settings → General →
+// Memory (kmem) and /memory). A choice goes through requestMemoryMode: the
+// radio stays on the mode in use until the switch (or its undo) completes.
 func (d *desk) memoryModeRadio(changed func()) fyne.CanvasObject {
 	optKmem := "kmem (shared memory: handoffs, tasks, rules)"
 	optClaude := "Claude's auto memory (MEMORY.md per folder)"
 	r := widget.NewRadioGroup([]string{optKmem, optClaude}, nil)
-	if d.kmemMemory() {
-		r.SetSelected(optKmem)
-	} else {
-		r.SetSelected(optClaude)
+	r.Required = true
+	syncing := false
+	sync := func() {
+		syncing = true
+		if d.kmemMemory() {
+			r.SetSelected(optKmem)
+		} else {
+			r.SetSelected(optClaude)
+		}
+		syncing = false
 	}
+	sync()
 	r.OnChanged = func(v string) {
-		switch v {
-		case optKmem:
-			d.app.Preferences().SetString(memoryModeKey, memoryModeKmem)
-		case optClaude:
-			d.app.Preferences().SetString(memoryModeKey, memoryModeClaude)
-		default:
+		if syncing || (v != optKmem && v != optClaude) {
 			return
 		}
-		d.refreshKmemVer()
-		if changed != nil {
-			changed()
-		}
+		sync() // back to the mode in use until the choice is settled
+		d.requestMemoryMode(v == optKmem, func() {
+			sync()
+			if changed != nil {
+				changed()
+			}
+		})
 	}
 	if !d.kmemAvailable() {
 		r.Disable()

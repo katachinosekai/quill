@@ -414,7 +414,7 @@ func (d *desk) autoMemoryRow(cwd string) fyne.CanvasObject {
 		d.openPath(dir)
 	})
 	open.Importance = widget.MediumImportance
-	note := caption("Saved in ~/.claude/settings.json (autoMemoryEnabled); sessions started after the change use it. Folder: " + tildePath(dir))
+	note := caption("Saved in " + tildePath(claudeSettingsFile(homeDir())) + " (autoMemoryEnabled); sessions started after the change use it. Folder: " + tildePath(dir))
 	note.Wrapping = fyne.TextWrapBreak
 	return container.NewVBox(container.NewBorder(nil, nil, nil, container.NewCenter(open), chk), note)
 }
@@ -427,9 +427,19 @@ func (d *desk) cmdMemory(s *deskSession) {
 
 // settings files: permissions and hooks
 
+// claudeSettingsFile: Claude Code's user settings.json. Like Claude Code it
+// follows CLAUDE_CONFIG_DIR ($CLAUDE_CONFIG_DIR/settings.json), else
+// ~/.claude/settings.json (transcript.DefaultRoot does the same for projects).
+func claudeSettingsFile(home string) string {
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, "settings.json")
+	}
+	return filepath.Join(home, ".claude", "settings.json")
+}
+
 func settingsFiles(cwd string) [][2]string {
 	return [][2]string{
-		{"User", filepath.Join(homeDir(), ".claude", "settings.json")},
+		{"User", claudeSettingsFile(homeDir())},
 		{"Project", filepath.Join(cwd, ".claude", "settings.json")},
 		{"Local", filepath.Join(cwd, ".claude", "settings.local.json")},
 	}
@@ -619,7 +629,7 @@ func setWorkspaceDir(file, dir string, add bool) error {
 // autoMemoryOn: Claude Code's auto-memory setting (autoMemoryEnabled in the
 // user settings, default on), as its own /memory switch writes it.
 func autoMemoryOn() bool {
-	m, err := readSettings(filepath.Join(homeDir(), ".claude", "settings.json"))
+	m, err := readSettings(claudeSettingsFile(homeDir()))
 	if err != nil {
 		return true
 	}
@@ -628,7 +638,7 @@ func autoMemoryOn() bool {
 }
 
 func setAutoMemory(on bool) error {
-	return updateSettings(filepath.Join(homeDir(), ".claude", "settings.json"), func(m map[string]any) error {
+	return updateSettings(claudeSettingsFile(homeDir()), func(m map[string]any) error {
 		m["autoMemoryEnabled"] = on
 		return nil
 	})
@@ -667,7 +677,7 @@ func (d *desk) permissionsPane(cwd string) fyne.CanvasObject {
 		box.Refresh()
 	}
 	fill()
-	note := widget.NewLabel("Rules from ~/.claude/settings.json (User), .claude/settings.json (Project) and .claude/settings.local.json (Local) of " + tildePath(cwd) + ". Also added by \"Always allow...\" on a blocked command.")
+	note := widget.NewLabel("Rules from " + tildePath(claudeSettingsFile(homeDir())) + " (User), .claude/settings.json (Project) and .claude/settings.local.json (Local) of " + tildePath(cwd) + ". Also added by \"Always allow...\" on a blocked command.")
 	note.Wrapping = fyne.TextWrapWord
 	note.SizeName = theme.SizeNameCaptionText
 	ro := widget.NewButtonWithIcon("Read-only commands (run without a plan)...", theme.SettingsIcon(), d.readOnlyDialog)

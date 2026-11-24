@@ -250,7 +250,7 @@ func scanMemoryProjects(root string) []memoryProject {
 // kmemSwitchPlan: what "Switch" does.
 type kmemSwitchPlan struct {
 	Home       string
-	Settings   string // ~/.claude/settings.json
+	Settings   string // claudeSettingsFile: $CLAUDE_CONFIG_DIR or ~/.claude
 	PrefsFile  string // Quill Desktop's preferences file ("" if unknown)
 	BackupRoot string // ~/.local/share/quill
 	Hooks      map[string]map[string]any
@@ -603,7 +603,7 @@ func undoKmemSwitch(dir string, prefs fyne.Preferences) error {
 // removeLeftKmemHooks: kmem was removed but its hooks are still in
 // settings.json (the "Remove hooks" button).
 func removeLeftKmemHooks(home string) error {
-	return updateSettings(filepath.Join(home, ".claude", "settings.json"), func(m map[string]any) error {
+	return updateSettings(claudeSettingsFile(home), func(m map[string]any) error {
 		removeKmemHookGroups(m, []string{"PreToolUse", "SessionStart"}, nil)
 		return nil
 	})
@@ -611,7 +611,7 @@ func removeLeftKmemHooks(home string) error {
 
 // kmemHooksAnyPresent: any kmem hook in settings.json.
 func kmemHooksAnyPresent(home string) bool {
-	m, err := readSettings(filepath.Join(home, ".claude", "settings.json"))
+	m, err := readSettings(claudeSettingsFile(home))
 	if err != nil {
 		return false
 	}

@@ -41,9 +41,10 @@ func TestWelcomeChoices(t *testing.T) {
 		if p.Bool(prefSTTOff) || !h.d.stt.btn.Visible() {
 			t.Fatal("picking a language turns speech to text on again")
 		}
-		h.d.applyWelcome(welcomeChoices{Lang: "en", PlanFirst: true, KmemMemory: true})
-		if !h.d.planFirst || !p.Bool("planFirst") || p.String(memoryModeKey) != memoryModeKmem {
-			t.Fatal("ask first and kmem memory are set")
+		done = h.d.applyWelcome(welcomeChoices{Lang: "en", PlanFirst: true, KmemMemory: true})
+		// kmem not in use: the mode changes only through "Switch to kmem".
+		if !h.d.planFirst || !p.Bool("planFirst") || p.String(memoryModeKey) != memoryModeClaude || !strings.Contains(strings.Join(done, " "), "Switch to kmem") {
+			t.Fatalf("ask first set, kmem memory left to the switch: %q", done)
 		}
 		h.d.applyWelcome(welcomeChoices{Lang: "en", PlanFirst: false, KmemMemory: false})
 		if h.d.planFirst || p.Bool("planFirst") || p.String(memoryModeKey) != memoryModeClaude {

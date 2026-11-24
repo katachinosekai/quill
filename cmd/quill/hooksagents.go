@@ -90,7 +90,7 @@ func setHooksOff(path string, off bool) error {
 
 func (d *desk) hooksPane(cwd string) fyne.CanvasObject {
 	home := homeDir()
-	userFile := filepath.Join(home, ".claude", "settings.json")
+	userFile := claudeSettingsFile(home)
 	box := container.NewVBox()
 	var fill func()
 	fill = func() {
@@ -110,7 +110,7 @@ func (d *desk) hooksPane(cwd string) fyne.CanvasObject {
 						return
 					}
 					if changed {
-						text := "Added the kmem brief and kmem-guard hooks to ~/.claude/settings.json; new sessions use them."
+						text := "Added the kmem brief and kmem-guard hooks to " + tildePath(userFile) + "; new sessions use them."
 						if backup != "" {
 							text += " Backup: " + tildePath(backup)
 						}

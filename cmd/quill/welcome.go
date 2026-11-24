@@ -154,9 +154,16 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 		// Without kmem sessions use Claude's auto memory; the saved
 		// choice stays, so an installed kmem is used once it is set up.
 		done = append(done, "Sessions use Claude's auto memory (kmem is not installed).")
+	case c.KmemMemory && !d.kmemMemory():
+		// The mode changes only through the switch (welcomeMemoryNext
+		// opens it after the Welcome; user 2026-11-24).
+		p.SetString(memoryModeKey, memoryModeClaude)
+		done = append(done, "kmem memory: \"Switch to kmem\" opens next; sessions use Claude's auto memory until you switch.")
 	case c.KmemMemory:
 		p.SetString(memoryModeKey, memoryModeKmem)
 		done = append(done, "Sessions use kmem memory.")
+	case d.kmemMemory() && d.kmemSwitchUndoDir() != "":
+		done = append(done, "Claude's auto memory: \"Switch back to Claude memory\" opens next.")
 	default:
 		p.SetString(memoryModeKey, memoryModeClaude)
 		done = append(done, "Sessions use Claude's auto memory.")
@@ -176,6 +183,18 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 	}
 	p.SetBool(prefWelcomeSeen, true)
 	return done
+}
+
+// welcomeMemoryNext: the Welcome's memory choice needs the switch (or its
+// undo) dialog, which opens after the Welcome (requestMemoryMode).
+func (d *desk) welcomeMemoryNext(c welcomeChoices) bool {
+	if c.NoKmem || !d.kmemAvailable() {
+		return false
+	}
+	if c.KmemMemory {
+		return !d.kmemMemory()
+	}
+	return d.kmemMemory() && d.kmemSwitchUndoDir() != ""
 }
 
 // showWelcome asks the questions; after runs when it closes.
@@ -330,7 +349,7 @@ func (d *desk) showWelcome(after func()) {
 		if !ok {
 			d.app.Preferences().SetBool(prefWelcomeSeen, true)
 		} else {
-			done := d.applyWelcome(welcomeChoices{
+			c := welcomeChoices{
 				Local: model.Selected == welcomeLocal, LocalModel: local,
 				Lang:       byName[voice.Selected],
 				Rules:      rules.Selected == welcomeRules && !rules.Disabled(),
@@ -340,7 +359,9 @@ func (d *desk) showWelcome(after func()) {
 				NoKmem:     noKmem,
 				Remote:     remoteID(remote.Selected),
 				Typing:     append([]string{}, typing.Selected...),
-			})
+			}
+			memNext := d.welcomeMemoryNext(c) // before applyWelcome sets the mode
+			done := d.applyWelcome(c)
 			d.notifyWelcome(done)
 			if remoteID(remote.Selected) != "" {
 				inner := after
@@ -350,6 +371,10 @@ func (d *desk) showWelcome(after func()) {
 						inner()
 					}
 				}
+			}
+			if memNext {
+				inner := after
+				after = func() { d.requestMemoryMode(c.KmemMemory, inner) }
 			}
 		}
 		if after != nil {
