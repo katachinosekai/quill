@@ -106,11 +106,11 @@ func (d *desk) alert(s *deskSession, kind, body string) {
 			kind = "question" // waits for approval without a card (plan-first off): as the button shows it
 		}
 		def := roleDef(role)
-		if def.phone != nil && (kind == "plan" || kind == "question" || kind == "approval") {
+		if def.phone != nil && waitKind(kind) {
 			def.phone(d, strings.TrimSpace(alertTitles[kind])+": "+body)
 		}
 		if d.notifyOn() {
-			d.desktopNotify(s.id, def.title+alertTitles[kind], body)
+			d.desktopNotifyAs(s.id, def.title+alertTitles[kind], body, waitKind(kind))
 		}
 		return
 	}
@@ -119,7 +119,7 @@ func (d *desk) alert(s *deskSession, kind, body string) {
 	if !d.notifyOn() || d.seen(s) {
 		return
 	}
-	d.desktopNotify(s.id, title+alertTitles[kind], body)
+	d.desktopNotifyAs(s.id, title+alertTitles[kind], body, waitKind(kind))
 }
 
 func (d *desk) phoneEvent(sid, kind, title, body string) {
@@ -180,6 +180,16 @@ func lastReply(c *chat.Conversation) string {
 }
 
 func (d *desk) desktopNotify(sid, title, body string) {
+	d.desktopNotifyAs(sid, title, body, false)
+}
+
+// waitKind: an alert kind that waits for the user's approval or answer.
+func waitKind(kind string) bool {
+	return kind == "approval" || kind == "question" || kind == "plan"
+}
+
+// desktopNotifyAs: own = its own notification, replacing none (approvals).
+func (d *desk) desktopNotifyAs(sid, title, body string, own bool) {
 	if d.notifySink != nil {
 		d.notifySink(sid, title, body)
 		return
@@ -188,7 +198,7 @@ func (d *desk) desktopNotify(sid, title, body string) {
 	if n == nil {
 		return
 	}
-	go n.send(d, sid, title, body)
+	go n.send(d, sid, title, body, own)
 }
 
 func (d *desk) startNotifier() {
@@ -254,10 +264,8 @@ func (d *desk) kmemPoppedOut() bool {
 	return w != nil && w.win != nil && !w.closed
 }
 
-func (n *notifier) send(d *desk, sid, title, body string) {
-	n.mu.Lock()
-	replace := n.last[sid]
-	n.mu.Unlock()
+func (n *notifier) send(d *desk, sid, title, body string, own bool) {
+	replace := n.replaceID(sid, own)
 	hints := map[string]dbus.Variant{
 		"desktop-entry": dbus.MakeVariant(appID),
 		"urgency":       dbus.MakeVariant(byte(1)),
@@ -268,11 +276,32 @@ func (n *notifier) send(d *desk, sid, title, body string) {
 	if err != nil {
 		return
 	}
+	n.sent(sid, replace, id, own)
+}
+
+// replaceID: the notification a new one for sid replaces, 0 for none. An
+// approval's own notification (own) replaces nothing, so Plasma pops it up
+// instead of quietly updating an earlier "finished" one (user 2026-11-23).
+func (n *notifier) replaceID(sid string, own bool) uint32 {
+	if own {
+		return 0
+	}
 	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.last[sid]
+}
+
+// sent records notification id for sid (replacing replace). An own one is
+// never a replace target: the next other notification replaces the last
+// other one and leaves the approval's in place.
+func (n *notifier) sent(sid string, replace, id uint32, own bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if replace != 0 && replace != id {
 		delete(n.session, replace)
 	}
 	n.session[id] = sid
-	n.last[sid] = id
-	n.mu.Unlock()
+	if !own {
+		n.last[sid] = id
+	}
 }

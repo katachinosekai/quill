@@ -151,3 +151,29 @@ func TestPhoneUsageSnapshot(t *testing.T) {
 		}
 	})
 }
+
+// Approval alerts get their own notification (user 2026-11-23): they replace
+// no earlier one (Plasma pops them up) and are never replaced themselves.
+func TestApprovalNotificationsReplaceNothing(t *testing.T) {
+	n := &notifier{session: map[uint32]string{}, last: map[string]uint32{}}
+	if r := n.replaceID("s1", false); r != 0 {
+		t.Fatalf("nothing to replace yet: %d", r)
+	}
+	n.sent("s1", 0, 10, false) // "finished"
+	if r := n.replaceID("s1", true); r != 0 {
+		t.Fatalf("an approval replaces nothing, not the finished one: %d", r)
+	}
+	n.sent("s1", 0, 11, true) // "needs approval"
+	if r := n.replaceID("s1", false); r != 10 {
+		t.Fatalf("the next other notification replaces the finished one, not the approval: %d", r)
+	}
+	n.sent("s1", 10, 12, false)
+	if n.session[11] != "s1" || n.session[12] != "s1" || n.session[10] != "" {
+		t.Fatalf("the approval stays clickable; the replaced one is gone: %v", n.session)
+	}
+	for kind, want := range map[string]bool{"approval": true, "question": true, "plan": true, "finished": false, "error": false} {
+		if waitKind(kind) != want {
+			t.Errorf("waitKind(%q) = %v", kind, !want)
+		}
+	}
+}
