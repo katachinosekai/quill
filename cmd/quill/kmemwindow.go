@@ -71,7 +71,7 @@ func (d *desk) popOutKmem() {
 		return
 	}
 	if !d.kmemAvailable() {
-		dialog.ShowInformation("kmem", "kmem is not available on this computer. Set it up in Settings → General → Memory (kmem).", d.win)
+		d.showClaudeMemory() // no kmem: the Memory button (kmemoptional.go)
 		return
 	}
 	prefs := d.app.Preferences()

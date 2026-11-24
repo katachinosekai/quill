@@ -57,6 +57,7 @@ func (d *desk) build() fyne.CanvasObject {
 	d.sideToggle = smallArrow(theme.NavigateBackIcon(), func() { d.setSidebar(d.sideOff) })
 	d.root = container.New(slideLayout{d}, d.sidebar, main, edge, d.sideToggle)
 	defer d.applyLayoutMode()
+	d.syncKmemButton()
 	if d.app.Preferences().Bool("sidebarHidden") {
 		d.sideFrac = 0
 		d.sideOff = true

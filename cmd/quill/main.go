@@ -159,19 +159,9 @@ func runWindowWith(claudeBin, sock string) int {
 	})
 	d.animate = true
 	d.kwin = newKwinRules()
-	go func() {
-		home, _ := os.UserHomeDir()
-		if msg, err := updateKmem(home, bundledKmemDir()); err != nil {
-			fmt.Fprintln(os.Stderr, "kmem update:", err)
-		} else if msg != "" {
-			fmt.Fprintln(os.Stderr, msg)
-			d.kmemVer.reset()
-			d.refreshKmemVer() // the version line must not keep offering the update just done
-		}
-		// One-time move to topic tabs once kmem has the end-of-session
-		// check (topicmigrate.go); after the update so a new kmem counts.
-		d.migrateTopicsWhenReady()
-	}()
+	// One-time move to topic tabs once kmem has the end-of-session check
+	// (topicmigrate.go).
+	go d.migrateTopicsWhenReady()
 	d.watchFocus()
 	d.startNotifier()
 	d.setupAtStart()

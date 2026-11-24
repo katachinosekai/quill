@@ -224,6 +224,8 @@ type desk struct {
 	compactor      func(ctx context.Context, model, text string) (string, error)
 	kmemRun        func(prog string, args ...string) (string, error)
 	kmemOff        bool
+	kmemAdverts    []*fyne.Container // kmemoptional.go
+	kmemSwitch     *fyne.Container
 	escClosers     map[fyne.CanvasObject]func()
 	kmemVer        kmemVersion
 	pcLock         *pcLock
@@ -1094,7 +1096,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.usage = newUsagePanel(d)
 	d.usageRow = d.usage.buildStrip()
 	d.agentStrip = newAgentStrip(d) // subagent strip under the tabs, both layouts (agentstrip.go)
-	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildQuillMoveBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.agentStrip.root, d.usageRow, widget.NewSeparator())
+	headerBox := container.NewVBox(container.NewPadded(header), d.note, d.buildPauseBanner(), d.buildQuillMoveBanner(), d.buildKmemSwitchBanner(), d.buildUpdLine(), d.bookRow, d.tabRow, d.agentStrip.root, d.usageRow, widget.NewSeparator())
 	d.headerBox = headerBox
 
 	d.input = newSendEntry(func(t string) {

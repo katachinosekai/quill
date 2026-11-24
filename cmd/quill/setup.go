@@ -19,7 +19,8 @@ import (
 )
 
 // Setup (user 2026-11-21, Quill Desktop only): everything a default Quill
-// needs, with its state and one button each: Claude Code, sign-in, kmem,
+// needs, with its state and one button each: Claude Code, sign-in, kmem
+// (where to get it when missing; it is not part of Quill Desktop),
 // python3 and hunspell (Linux), the device password and local models.
 // Installers run in a visible terminal after asking; anything that needs
 // root goes through pkexec, so the user approves the elevation.
@@ -141,19 +142,21 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 	}
 	rows = append(rows, r)
 
-	// kmem
+	// kmem: not part of Quill Desktop; patrons get it (kmemsetup.go).
 	r = setupRow{title: "kmem (shared memory)", optional: true}
 	home := homeDir()
+	kb := firstNonEmpty(kmemBin(), "kmem")
 	switch {
-	case win && bundledKmemDir() != "" && windowsPython() == "":
-		r.state = "needs Python 3 (see the Python row)"
-	case kmemBin() != "" && kmemSetupComplete(home):
-		r.ok, r.state = true, "set up: "+tildePath(kmemBin())
-	case bundledKmemDir() != "":
-		r.state, r.action = "not set up: sessions don't get the kmem brief, handoffs or guards", "Set up..."
-		r.do = func() { d.kmemSetupDialog(refresh) }
+	case !d.kmemAvailable():
+		r.state, r.action = kmemGetHint, "Get kmem..."
+		r.do = d.openKmemPatreon
+	case win && windowsPython() == "":
+		r.state = "installed, but needs Python 3 (see the Python row)"
+	case kmemHooksMissing(home):
+		r.state, r.action = "installed ("+tildePath(kb)+"), but its Claude Code hooks are missing: sessions don't get the kmem brief or the guards", "Add hooks..."
+		r.do = func() { d.kmemHooksDialog(refresh) }
 	default:
-		r.state = "not bundled with this build"
+		r.ok, r.state = true, "installed: "+tildePath(kb)
 	}
 	rows = append(rows, r)
 
@@ -235,6 +238,7 @@ func (d *desk) setupPane() fyne.CanvasObject {
 	var fill func()
 	fill = func() {
 		box.Objects = nil
+		d.syncKmemButton() // kmem may have been installed meanwhile
 		box.Add(caption("Everything Quill Desktop needs, and what it can add. Quill for Android needs none of it: it only connects to this PC."))
 		for _, r := range d.setupRows(func() { d.do(fill) }) {
 			r := r

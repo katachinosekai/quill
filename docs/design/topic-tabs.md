@@ -527,8 +527,8 @@ of each topic is in kmem → Topics; N older conversations stay on disk."
 **As built (sub F, branch feat/topics-f, 2026-11-23):**
 
 - Gate: kmem memory mode and `"end-check"` in `kmem version --json`
-  (`migrateTopicsWhenReady`, run once at startup after the bundled kmem
-  update). Without the feature, End, rotation and `--resume-all` keep the
+  (`migrateTopicsWhenReady`, run once at startup; Quill Desktop no longer
+  bundles or updates kmem, 2026-11-24). Without the feature, End, rotation and `--resume-all` keep the
   handoff flows and the places (§3.9 "until K2/K4 ship"); the installed kmem
   (no features) changes nothing. Claude-memory mode never migrates.
 - `topicmigrate.go` `migrateTopics`: first a backup file

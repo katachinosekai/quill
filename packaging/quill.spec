@@ -55,10 +55,6 @@ install -Dm755 packaging/quill.sh %{buildroot}%{_bindir}/quill
 install -Dm644 packaging/io.github.katachinosekai.quill.desktop %{buildroot}%{_datadir}/applications/io.github.katachinosekai.quill.desktop
 install -Dm644 cmd/quill/Icon.png %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/io.github.katachinosekai.quill.png
 install -Dm644 cmd/quill/icon.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
-install -Dm755 third_party/kmem/kmem %{buildroot}%{_datadir}/quill/kmem/kmem
-install -Dm755 third_party/kmem/kmem-guard %{buildroot}%{_datadir}/quill/kmem/kmem-guard
-install -Dm644 third_party/kmem/VERSION %{buildroot}%{_datadir}/quill/kmem/VERSION
-install -Dm644 third_party/kmem/NOTICE %{buildroot}%{_datadir}/quill/kmem/NOTICE
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinosekai.quill.desktop
@@ -71,7 +67,6 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 %{_datadir}/applications/io.github.katachinosekai.quill.desktop
 %{_datadir}/icons/hicolor/256x256/apps/io.github.katachinosekai.quill.png
 %{_datadir}/icons/hicolor/scalable/apps/io.github.katachinosekai.quill.svg
-%{_datadir}/quill/
 
 %changelog
 * Mon Nov 23 2026 katachinosekai <74618991+katachinosekai@users.noreply.github.com> - 0.1.27-1

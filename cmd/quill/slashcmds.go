@@ -305,6 +305,7 @@ func (d *desk) memoryPane(s *deskSession, cwd string) fyne.CanvasObject {
 		box.Objects = nil
 		kmemMode := d.kmemMemory()
 		box.Add(d.memoryModeRadio(fill))
+		box.Add(d.kmemAdvert()) // without kmem, until dismissed (kmemoptional.go)
 		box.Add(widget.NewSeparator())
 		if d.kmemAvailable() {
 			box.Add(d.kmemMemoryRow())

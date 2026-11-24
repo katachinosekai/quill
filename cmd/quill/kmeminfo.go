@@ -19,7 +19,9 @@ import (
 // kmemBinWaitDays is kmem's purge wait for binned items.
 const kmemBinWaitDays = 7
 
-// kmemNow (kmemupdate.go) is the clock; tests replace it.
+// kmemNow is the clock for kmem times (bin waits, maintenance age); tests
+// replace it.
+var kmemNow = time.Now
 
 // kmemMaintDir is kmem's maintenance report folder (tests set it).
 var kmemMaintDir = func() string {

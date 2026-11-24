@@ -3,43 +3,80 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestKmemBundleAndSetup(t *testing.T) {
-	bundled, _ := filepath.Abs(filepath.Join("..", "..", "third_party", "kmem"))
-	t.Setenv("QUILL_KMEM_DIR", bundled)
-	if bundledKmemDir() != bundled || bundledKmemVersion(bundled) == "" {
-		t.Fatalf("bundled kmem found with its version: %q %q", bundledKmemDir(), bundledKmemVersion(bundled))
+// installFakeKmem puts stand-in kmem and kmem-guard scripts in home's
+// ~/.local/bin (Quill Desktop no longer ships kmem).
+func installFakeKmem(t *testing.T, home string, files ...string) {
+	t.Helper()
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for _, f := range []string{"kmem", "kmem-guard"} {
-		b, _ := os.ReadFile(filepath.Join(bundled, f))
-		for _, bad := range personalPatterns() {
-			if strings.Contains(string(b), bad) {
-				t.Fatalf("bundled %s carries personal data %q", f, bad)
-			}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(bin, f), []byte("#!/bin/sh\necho placeholder\n"), 0o755); err != nil {
+			t.Fatal(err)
 		}
 	}
+}
 
+func TestKmemNotBundled(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("..", "..", "third_party", "kmem")); err == nil {
+		t.Fatal("kmem is not part of Quill Desktop: third_party/kmem must not exist")
+	}
+	spec, err := os.ReadFile(filepath.Join("..", "..", "packaging", "quill.spec"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk, _ := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	for name, b := range map[string][]byte{"quill.spec": spec, "Makefile": mk} {
+		if strings.Contains(string(b), "third_party/kmem") || strings.Contains(string(b), "kmem-sync") {
+			t.Fatalf("%s still installs or vendors kmem", name)
+		}
+	}
+	if !strings.HasPrefix(kmemPatreonURL, "https://") {
+		t.Fatalf("kmemPatreonURL: %q", kmemPatreonURL)
+	}
+}
+
+func TestKmemStatusAndHooks(t *testing.T) {
 	home := t.TempDir()
+	if text, offer := kmemStatus(home, ""); text != kmemNoneText || offer {
+		t.Fatalf("no kmem: Claude memory, nothing to set up: %q %v", text, offer)
+	}
+	if _, err := addKmemHooks(home, time.Now()); err == nil {
+		t.Fatal("no hooks without an installed kmem")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); err == nil {
+		t.Fatal("and settings.json is not created")
+	}
+
+	installFakeKmem(t, home, "kmem", "kmem-guard")
+	kb := filepath.Join(home, ".local", "bin", "kmem")
+	if text, offer := kmemStatus(home, kb); !offer || !strings.Contains(text, "hooks are missing") {
+		t.Fatalf("installed without hooks: offer to add them: %q %v", text, offer)
+	}
 	settings := filepath.Join(home, ".claude", "settings.json")
 	os.MkdirAll(filepath.Dir(settings), 0o700)
 	orig := `{"model":"opus","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"other-tool ensure"}]}]},"permissions":{"allow":["Bash(ls:*)"]}}`
 	os.WriteFile(settings, []byte(orig), 0o600)
 	now := time.Date(2026, 11, 21, 4, 0, 0, 0, time.Local)
-	done, err := setupKmem(home, bundled, now)
-	if err != nil || len(done) != 3 {
-		t.Fatalf("setup: %v %v", done, err)
+	done, err := addKmemHooks(home, now)
+	if err != nil || len(done) != 1 || !strings.Contains(done[0], "added the kmem brief") {
+		t.Fatalf("hooks: %v %v", done, err)
 	}
-	for _, f := range []string{"kmem", "kmem-guard"} {
-		st, err := os.Stat(filepath.Join(home, ".local", "bin", f))
-		if err != nil || st.Mode()&0o111 == 0 {
-			t.Fatalf("%s installed executable: %v", f, err)
-		}
+	if b, _ := os.ReadFile(kb); string(b) != "#!/bin/sh\necho placeholder\n" {
+		t.Fatal("an installed kmem is never replaced")
+	}
+	if !kmemSetupComplete(home) {
+		t.Fatal("kmem + kmem-guard + hooks: setup complete")
+	}
+	if text, offer := kmemStatus(home, kb); offer || !strings.HasPrefix(text, "kmem is installed: ") {
+		t.Fatalf("complete: %q %v", text, offer)
 	}
 	var got map[string]any
 	raw, _ := os.ReadFile(settings)
@@ -57,8 +94,8 @@ func TestKmemBundleAndSetup(t *testing.T) {
 	if b, err := os.ReadFile(settings + ".bak-quill-20261121-040000"); err != nil || string(b) != orig {
 		t.Fatal("the original settings are backed up first")
 	}
-	if changed, _, _ := mergeKmemHooks(settings, home, now); changed {
-		t.Fatal("running setup twice adds nothing")
+	if done, err := addKmemHooks(home, now); err != nil || !strings.Contains(done[0], "already") {
+		t.Fatalf("running it twice adds nothing: %v %v", done, err)
 	}
 	broken := filepath.Join(t.TempDir(), "settings.json")
 	os.WriteFile(broken, []byte("{not json"), 0o600)
@@ -68,28 +105,9 @@ func TestKmemBundleAndSetup(t *testing.T) {
 	if b, _ := os.ReadFile(broken); string(b) != "{not json" {
 		t.Fatal("and not rewritten")
 	}
-	if _, err := exec.LookPath("python3"); err == nil {
-		cmd := exec.Command("python3", "-I", filepath.Join(home, ".local", "bin", "kmem"), "version")
-		cmd.Env = append(os.Environ(), "HOME="+home)
-		out, err := cmd.CombinedOutput()
-		if err != nil || !strings.HasPrefix(string(out), "kmem "+bundledKmemVersion(bundled)+" api 1") {
-			t.Fatalf("the installed bundled kmem runs: %s %v", out, err)
-		}
-	}
-	os.WriteFile(filepath.Join(home, ".local", "bin", "kmem"), []byte("#!/bin/sh\necho mine\n"), 0o755)
 	os.Remove(filepath.Join(home, ".local", "bin", "kmem-guard"))
-	if kmemSetupComplete(home) {
-		t.Fatal("a missing kmem-guard means setup is incomplete")
-	}
-	done2, err := setupKmem(home, bundled, now)
-	if err != nil || !strings.Contains(strings.Join(done2, "|"), "kept the existing") {
-		t.Fatalf("finishing setup keeps the installed kmem and adds what is missing: %v %v", done2, err)
-	}
-	if b, _ := os.ReadFile(filepath.Join(home, ".local", "bin", "kmem")); string(b) != "#!/bin/sh\necho mine\n" {
-		t.Fatal("an installed kmem is never replaced")
-	}
-	if !kmemSetupComplete(home) {
-		t.Fatal("and setup is complete afterwards")
+	if kmemSetupComplete(home) || kmemHooksMissing(home) {
+		t.Fatal("a missing kmem-guard: incomplete, and no hooks to offer for it")
 	}
 	link := filepath.Join(t.TempDir(), "settings-link.json")
 	os.Symlink(settings, link)
@@ -109,20 +127,23 @@ func TestKmemBundleAndSetup(t *testing.T) {
 	}
 }
 
-// personalPatterns: this machine's home folder, host name and the user part
-// of the git email, worked out at run time so the repo holds no personal data.
-func personalPatterns() []string {
-	var out []string
-	if h, err := os.UserHomeDir(); err == nil && h != "/" {
-		out = append(out, h)
+// TestKmemBinDetection: an installed kmem is found on PATH or in
+// ~/.local/bin; without either it is missing.
+func TestKmemBinDetection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	if p := kmemBin(); p != "" {
+		t.Fatalf("no kmem anywhere: %q", p)
 	}
-	if h, err := os.Hostname(); err == nil && h != "" {
-		out = append(out, h)
+	installFakeKmem(t, home, "kmem")
+	if p := kmemBin(); p != filepath.Join(home, ".local", "bin", "kmem") {
+		t.Fatalf("~/.local/bin/kmem (desktop launches may lack it on PATH): %q", p)
 	}
-	if b, err := exec.Command("git", "config", "user.email").Output(); err == nil {
-		if u, _, ok := strings.Cut(strings.TrimSpace(string(b)), "@"); ok && u != "" {
-			out = append(out, u)
-		}
+	onPath := t.TempDir()
+	os.WriteFile(filepath.Join(onPath, "kmem"), []byte("#!/bin/sh\n"), 0o755)
+	t.Setenv("PATH", onPath)
+	if p := kmemBin(); p != filepath.Join(onPath, "kmem") {
+		t.Fatalf("PATH first: %q", p)
 	}
-	return out
 }

@@ -7,36 +7,12 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
 )
 
 func TestKmemVerState(t *testing.T) {
-	cases := []struct {
-		inst, bund string
-		update     bool
-	}{
-		{"1.7.0", "1.8.0", true},
-		{"1.7.0", "1.7.0", false},
-		{"1.9.0", "1.8.0", false},
-		{"1.7.0", "", false},
-		{"", "1.8.0", false},
-		{"1.9.0", "1.10.0", true},
-	}
-	for _, c := range cases {
-		st := kmemVerState{installed: c.inst, bundled: c.bund, plainFile: true}
-		if st.update() != c.update {
-			t.Errorf("%s vs bundled %s: update %v", c.inst, c.bund, st.update())
-		}
-		if c.update && !strings.Contains(st.hint(), "restart Quill Desktop") {
-			t.Errorf("hint: %q", st.hint())
-		}
-		if !c.update && st.hint() != "" {
-			t.Errorf("no update, no hint: %q", st.hint())
-		}
-	}
-	if h := (kmemVerState{installed: "1.7.0", bundled: "1.8.0"}).hint(); !strings.Contains(h, "update your kmem yourself") {
-		t.Fatalf("a kmem Quill Desktop doesn't replace: %q", h)
+	if (kmemVerState{}).label() != "" || (kmemVerState{installed: "1.12.0"}).label() != "kmem 1.12.0" {
+		t.Fatal("label: the installed version only")
 	}
 }
 
@@ -71,21 +47,11 @@ func TestKmemVerLine(t *testing.T) {
 		if l == nil || l.tap.Visible() {
 			t.Fatal("hidden until the version is known")
 		}
-		h.d.setKmemVer(kmemVerState{installed: "1.7.0", bundled: "1.7.0", plainFile: true})
-		if !l.tap.Visible() || l.ver.Text != "kmem 1.7.0" || l.upd.Visible() {
-			t.Fatalf("plain version: %q update %v", l.ver.Text, l.upd.Visible())
+		h.d.setKmemVer(kmemVerState{installed: "1.7.0"})
+		if !l.tap.Visible() || l.ver.Text != "kmem 1.7.0" {
+			t.Fatalf("plain version: %q", l.ver.Text)
 		}
-		h.d.setKmemVer(kmemVerState{installed: "1.7.0", bundled: "1.8.0", plainFile: true})
-		if !l.upd.Visible() || l.upd.Color != colAccent || !strings.Contains(l.upd.Text, "update") {
-			t.Fatal("an update shows a coloured 'update'")
-		}
-		if !strings.Contains(h.d.folder.Text, "kmem 1.8.0 is ready") {
-			t.Fatalf("the hint line says what to do: %q", h.d.folder.Text)
-		}
-		test.Tap(l.tap)
-		if !strings.Contains(h.d.folder.Text, "restart Quill Desktop") {
-			t.Fatalf("tapping shows the hint again: %q", h.d.folder.Text)
-		}
+		h.d.flashHint(h.d.folder, "Enter sends · Shift+Enter new line")
 		// Both sit in the row under the message box, the version left of the hints.
 		h.w.Resize(fyne.NewSize(1600, 900))
 		row := h.d.statsRow
@@ -106,7 +72,7 @@ func TestKmemVerLine(t *testing.T) {
 			t.Fatal("a short hint leaves room for the version again")
 		}
 		h.d.app.Preferences().SetString(memoryModeKey, memoryModeClaude)
-		h.d.setKmemVer(kmemVerState{installed: "1.7.0", bundled: "1.8.0", plainFile: true})
+		h.d.setKmemVer(kmemVerState{installed: "1.7.0"})
 		if l.tap.Visible() {
 			t.Fatal("hidden when sessions use Claude's own memory")
 		}
@@ -115,7 +81,7 @@ func TestKmemVerLine(t *testing.T) {
 		if l.tap.Visible() {
 			t.Fatal("hidden when kmem is missing")
 		}
-		h.d.setKmemVer(kmemVerState{installed: "1.7.0", bundled: "1.8.0", plainFile: true})
+		h.d.setKmemVer(kmemVerState{installed: "1.7.0"})
 	})
 	if os.Getenv("DESK_SHOTS") != "" {
 		dir, _ := filepath.Abs(filepath.Join("..", "..", ".shots"))

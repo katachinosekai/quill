@@ -47,6 +47,7 @@ type welcomeChoices struct {
 	PlanFirst  bool
 	Features   map[string]int // feature question id → choice index
 	KmemMemory bool
+	NoKmem     bool     // kmem not installed: the memory choice stays as it is
 	Remote     string   // "" or "skip", or a vpnOption id
 	Typing     []string // the typing help picked (welcomeAutocorrect, welcomeAutoFormat)
 }
@@ -148,10 +149,15 @@ func (d *desk) applyWelcome(c welcomeChoices) []string {
 	}
 	d.markFeatureQuestionsAnswered() // new users are never asked them again
 	d.settingsChanged()
-	if c.KmemMemory {
+	switch {
+	case c.NoKmem:
+		// Without kmem sessions use Claude's auto memory; the saved
+		// choice stays, so an installed kmem is used once it is set up.
+		done = append(done, "Sessions use Claude's auto memory (kmem is not installed).")
+	case c.KmemMemory:
 		p.SetString(memoryModeKey, memoryModeKmem)
 		done = append(done, "Sessions use kmem memory.")
-	} else {
+	default:
 		p.SetString(memoryModeKey, memoryModeClaude)
 		done = append(done, "Sessions use Claude's auto memory.")
 	}
@@ -242,13 +248,16 @@ func (d *desk) showWelcome(after func()) {
 
 	mem := widget.NewRadioGroup([]string{welcomeKmem, welcomeAutoMem}, nil)
 	mem.SetSelected(welcomeAutoMem)
-	if d.kmemMemory() || d.app.Preferences().String(memoryModeKey) != memoryModeClaude && bundledKmemDir() != "" {
+	if d.kmemMemory() || d.app.Preferences().String(memoryModeKey) != memoryModeClaude && d.kmemAvailable() {
 		mem.SetSelected(welcomeKmem)
 	}
 	memNote := caption("")
 	memNote.Wrapping = fyne.TextWrapWord
-	if !d.kmemAvailable() {
-		memNote.SetText("kmem isn't set up yet; Setup offers it right after this.")
+	memLink := d.kmemAdvert() // one line, only without kmem and until dismissed
+	noKmem := !d.kmemAvailable()
+	if noKmem {
+		mem.Disable() // Claude's auto memory until kmem is installed
+		memNote.SetText("kmem isn't installed: sessions use Claude's auto memory.")
 	}
 
 	remoteNames := []string{welcomeHomeOnly}
@@ -306,7 +315,7 @@ func (d *desk) showWelcome(after func()) {
 		body.Add(o)
 	}
 	for _, o := range []fyne.CanvasObject{
-		memTitle, mem, memNote,
+		memTitle, mem, memNote, memLink,
 		widget.NewSeparator(),
 		container.NewBorder(nil, nil, nil, showRules, rulesTitle), rules, rulesNote,
 		widget.NewSeparator(),
@@ -328,6 +337,7 @@ func (d *desk) showWelcome(after func()) {
 				PlanFirst:  plan.Selected == welcomeAsk,
 				Features:   featureAnswers(featureRadios),
 				KmemMemory: mem.Selected == welcomeKmem,
+				NoKmem:     noKmem,
 				Remote:     remoteID(remote.Selected),
 				Typing:     append([]string{}, typing.Selected...),
 			})

@@ -16,7 +16,7 @@ Download from [Releases](https://github.com/katachinosekai/quill/releases/latest
 
 - **Fedora / Nobara (RPM):** `sudo dnf install ./quill-<version>-1.fc44.x86_64.rpm`
 - **Any Linux (AppImage):** `chmod +x Quill-<version>-x86_64.AppImage && ./Quill-<version>-x86_64.AppImage`
-- **Windows (zip):** unpack `quill-<version>-windows-amd64.zip` and run `quill.exe`; the zip includes kmem, and Setup offers Python 3 through winget when it's missing
+- **Windows (zip):** unpack `quill-<version>-windows-amd64.zip` and run `quill.exe`
 - **Android:** `quill-android-<version>.apk` (see [Quill for Android](#quill-for-android))
 
 Quill needs the Claude Code CLI (`claude`) installed and signed in. On a new install a short **Welcome** asks five things (online or local model, speech-to-text language, plan first or not, kmem or Claude's auto memory, default rules or none), then **Setup** checks what is missing and offers to install it. Quill never updates on its own: when a signed release is out, a quiet line under the header offers **Update / What's new / Later** (see Security).
@@ -47,7 +47,8 @@ Quill needs the Claude Code CLI (`claude`) installed and signed in. On a new ins
 <p align="center"><img src="docs/screenshots/plan-card.png" alt="A plan card with a recommended option, a yes/no question, checkboxes and a text field" width="70%"></p>
 
 **Memory (kmem)**
-- Shared memory for all your sessions through the bundled kmem: handoffs, tasks, shared rules, a recycle bin
+- Shared memory for all your sessions through kmem: handoffs, tasks, shared rules, a recycle bin
+- kmem is optional and not included with Quill Desktop; it is available to Patreon patrons. Quill Desktop uses it when it is installed (on PATH or in `~/.local/bin`); without it the kmem button and kmem features stay hidden and Settings → Setup shows where to get it
 - Optional default rules (recommended for beginners); yours are never replaced
 - A banner shows what only you decide: items in the recycle bin and audit problems
 - The **kmem** button opens the kmem box: your kmem panels as tabs on the left and a chat with the kmem assistant on the right (Ctrl+Shift+K). It can dock to the side or pop out as its own window; the old separate kmem window is gone.

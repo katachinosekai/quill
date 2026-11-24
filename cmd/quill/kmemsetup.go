@@ -19,34 +19,21 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func bundledKmemDir() string {
-	var dirs []string
-	if v := os.Getenv("QUILL_KMEM_DIR"); v != "" {
-		dirs = append(dirs, v)
-	}
-	if v := os.Getenv("APPDIR"); v != "" {
-		dirs = append(dirs, filepath.Join(v, "usr", "share", "quill", "kmem"))
-	}
-	if exe, err := os.Executable(); err == nil {
-		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "..", "..", "share", "quill", "kmem"), filepath.Join(filepath.Dir(exe), "..", "share", "quill", "kmem"),
-			filepath.Join(filepath.Dir(exe), "kmem")) // the Windows zip: quill\kmem\kmem
-	}
-	dirs = append(dirs, "/usr/share/quill/kmem")
-	for _, d := range dirs {
-		if st, err := os.Stat(filepath.Join(d, "kmem")); err == nil && !st.IsDir() {
-			return filepath.Clean(d)
-		}
-	}
-	return ""
-}
+// kmem is not part of Quill Desktop (user 2026-11-24): it is distributed to
+// Patreon patrons. Quill Desktop uses an installed kmem (kmemBin: PATH, else
+// ~/.local/bin/kmem) and hides the kmem features without one; Settings →
+// Setup, Settings → General → Memory (kmem) and the Welcome point to
+// kmemPatreonURL.
 
-func bundledKmemVersion(dir string) string {
-	b, err := os.ReadFile(filepath.Join(dir, "VERSION"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
-}
+// kmemPatreonURL is where patrons get kmem.
+// TODO(user): the real Patreon page for kmem.
+const kmemPatreonURL = "https://www.patreon.com/"
+
+// kmemNoneText: Settings → General → Memory (kmem) without kmem.
+const kmemNoneText = "kmem is not installed: Quill Desktop sessions use Claude Code's auto memory (MEMORY.md per project)."
+
+// kmemGetHint is the short "Get kmem" text shown when kmem is not installed.
+const kmemGetHint = "kmem is not installed. It gives sessions shared memory (handoffs, tasks, shared rules) and is available to Patreon patrons; Quill Desktop uses it once it is installed."
 
 func userKmemPath() string {
 	home, _ := os.UserHomeDir()
@@ -232,18 +219,6 @@ func mergeKmemHooks(settingsPath, home string, now time.Time) (bool, string, err
 	return true, backup, os.Rename(tmp, settingsPath)
 }
 
-func copyExec(src, dst string) error {
-	b, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	tmp := dst + ".quill-tmp"
-	if err := os.WriteFile(tmp, b, 0o755); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dst)
-}
-
 func kmemHooksPresent(home string) bool {
 	raw, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
 	if err != nil {
@@ -264,71 +239,74 @@ func kmemSetupComplete(home string) bool {
 	return kmemHooksPresent(home)
 }
 
-func setupKmem(home, bundled string, now time.Time) ([]string, error) {
-	bin := filepath.Join(home, ".local", "bin")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		return nil, err
-	}
-	var done []string
+// kmemGuardInstalled: kmem-guard sits next to kmem in ~/.local/bin, where the
+// hooks Quill Desktop adds point (kmemHooksFor).
+func kmemGuardInstalled(home string) bool {
 	for _, f := range []string{"kmem", "kmem-guard"} {
-		dst := filepath.Join(bin, f)
-		if _, err := os.Stat(dst); err == nil {
-			done = append(done, "kept the existing "+dst+" (Quill updates it only when it is an older kmem release)")
-			continue
+		if st, err := os.Stat(filepath.Join(home, ".local", "bin", f)); err != nil || st.IsDir() {
+			return false
 		}
-		if err := copyExec(filepath.Join(bundled, f), dst); err != nil {
-			return done, err
-		}
-		done = append(done, "installed "+dst)
+	}
+	return true
+}
+
+// kmemHooksMissing: an installed kmem in ~/.local/bin whose Claude Code
+// hooks Quill Desktop can still add.
+func kmemHooksMissing(home string) bool {
+	return kmemGuardInstalled(home) && !kmemHooksPresent(home)
+}
+
+// addKmemHooks adds the kmem hooks of an installed kmem to
+// ~/.claude/settings.json. Quill Desktop never installs kmem itself.
+func addKmemHooks(home string, now time.Time) ([]string, error) {
+	if !kmemGuardInstalled(home) {
+		return nil, errors.New("kmem and kmem-guard are not in ~/.local/bin; install kmem first")
 	}
 	changed, backup, err := mergeKmemHooks(filepath.Join(home, ".claude", "settings.json"), home, now)
 	if err != nil {
-		return done, err
+		return nil, err
 	}
-	if changed {
-		line := "added the kmem brief (SessionStart) and kmem-guard (PreToolUse) hooks to ~/.claude/settings.json"
-		if backup != "" {
-			line += "; backup " + tildePath(backup)
-		}
-		done = append(done, line)
-	} else {
-		done = append(done, "the kmem hooks were already in ~/.claude/settings.json")
+	if !changed {
+		return []string{"the kmem hooks were already in ~/.claude/settings.json"}, nil
 	}
-	return done, nil
+	line := "added the kmem brief (SessionStart) and kmem-guard (PreToolUse) hooks to ~/.claude/settings.json"
+	if backup != "" {
+		line += "; backup " + tildePath(backup)
+	}
+	return []string{line}, nil
+}
+
+// kmemStatus: what Settings → General → Memory (kmem) says, and whether it
+// offers to add the hooks.
+func kmemStatus(home, bin string) (text string, offerHooks bool) {
+	switch {
+	case bin == "":
+		return kmemNoneText, false
+	case kmemHooksMissing(home):
+		return "kmem is installed (" + tildePath(bin) + "), but its Claude Code hooks are missing: sessions don't get the kmem brief or the guards.", true
+	}
+	return "kmem is installed: " + tildePath(bin), false
 }
 
 func (d *desk) kmemSettings() fyne.CanvasObject {
 	status := widget.NewLabel("")
 	status.Wrapping = fyne.TextWrapWord
-	btn := widget.NewButton("Set up kmem...", nil)
+	advert := d.kmemAdvert()
+	btn := widget.NewButton("Add the kmem hooks...", nil)
 	btn.Importance = widget.LowImportance
-	btn.Hide()
 	refresh := func() {
-		bundled := bundledKmemDir()
-		bv := bundledKmemVersion(bundled)
-		home, _ := os.UserHomeDir()
-		if p := kmemBin(); p != "" && (bundled == "" || p != userKmemPath() || kmemSetupComplete(home)) {
-			text := "kmem is installed: " + tildePath(p)
-			if bv != "" {
-				text += " (Quill Desktop comes with kmem " + bv + " and updates an older kmem in ~/.local/bin to it when it starts)"
-			}
-			status.SetText(text)
-			btn.Hide()
-			return
+		bin := ""
+		if d.kmemAvailable() {
+			bin = kmemBin()
 		}
-		if bundled == "" {
-			status.SetText("kmem is not installed, and this build of Quill doesn't bundle it.")
-			btn.Hide()
-			return
-		}
-		status.SetText("kmem " + bv + " comes with Quill but isn't set up yet. kmem gives sessions shared memory: handoffs, tasks and rules.")
-		if kmemBin() != "" {
-			status.SetText("kmem setup is incomplete (kmem-guard or the Claude hooks are missing). Finish it to turn on the guards and the session brief.")
-			btn.SetText("Finish kmem setup...")
-		}
-		btn.Show()
+		text, offer := kmemStatus(homeDir(), bin)
+		status.SetText(text)
+		d.syncKmemAdverts()
+		btn.Hidden = !offer
+		btn.Refresh()
+		d.syncKmemButton()
 	}
-	btn.OnTapped = func() { d.kmemSetupDialog(refresh) }
+	btn.OnTapped = func() { d.kmemHooksDialog(refresh) }
 	refresh()
 	d.kmemBinSetBtn = widget.NewButtonWithIcon(binButtonText(d.kmemNeedsNow.Bin), theme.DeleteIcon(), d.showBinDialog)
 	d.kmemBinSetBtn.Importance = widget.LowImportance
@@ -336,26 +314,23 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 	if !d.kmemAvailable() {
 		d.kmemBinSetBtn.Disable()
 	}
-	return container.NewVBox(status, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.kmemAssistSetting(), d.kmemBadgeSetting(), widget.NewSeparator(), d.defaultRulesSettings(),
+	return container.NewVBox(status, advert, btn, d.memoryModeRadio(nil), widget.NewSeparator(), d.kmemAssistSetting(), d.kmemBadgeSetting(), widget.NewSeparator(), d.defaultRulesSettings(),
 		widget.NewSeparator(), caption("Facts and tasks sessions moved to kmem's recycle bin: review, restore, or delete them for good."), d.kmemBinSetBtn)
 }
 
-// kmemSetupDialog copies the bundled kmem and adds its hooks (after asking).
-func (d *desk) kmemSetupDialog(after func()) {
-	home, _ := os.UserHomeDir()
-	bundled := bundledKmemDir()
-	steps := widget.NewLabel("Quill will:\n" +
-		"• copy kmem and kmem-guard to ~/.local/bin\n" +
-		"• add two hooks to ~/.claude/settings.json (a backup is made first; your other hooks stay):\n" +
+// kmemHooksDialog adds the hooks of an installed kmem (after asking).
+func (d *desk) kmemHooksDialog(after func()) {
+	home := homeDir()
+	steps := widget.NewLabel("Quill will add two hooks to ~/.claude/settings.json (a backup is made first; your other hooks stay):\n" +
 		"    SessionStart: kmem brief\n" +
-		"    PreToolUse (Bash, Agent, Task, Write, Edit): kmem-guard\n" +
-		"kmem keeps its store in ~/.local/share/kmem and needs python3. Settings for paths and backups go in ~/.config/kmem/config.json (optional).")
+		"    PreToolUse (Bash, PowerShell, Agent, Task, Write, Edit): kmem-guard\n" +
+		"They run the kmem and kmem-guard in ~/.local/bin.")
 	steps.Wrapping = fyne.TextWrapWord
-	dlg := dialog.NewCustomConfirm("Set up kmem", "Set up", "Cancel", container.NewVScroll(steps), func(ok bool) {
+	dlg := dialog.NewCustomConfirm("kmem hooks", "Add", "Cancel", container.NewVScroll(steps), func(ok bool) {
 		if !ok {
 			return
 		}
-		done, err := setupKmem(home, bundled, time.Now())
+		done, err := addKmemHooks(home, time.Now())
 		msg := strings.Join(done, "\n")
 		if err != nil {
 			msg = strings.TrimSpace(msg + "\nStopped: " + err.Error())
@@ -364,9 +339,9 @@ func (d *desk) kmemSetupDialog(after func()) {
 		if after != nil {
 			after()
 		}
-		dialog.ShowInformation("kmem setup", msg, d.win)
+		dialog.ShowInformation("kmem hooks", msg, d.win)
 	}, d.win)
-	dlg.Resize(fyne.NewSize(560, 320))
+	dlg.Resize(fyne.NewSize(560, 240))
 	dlg.Show()
 }
 

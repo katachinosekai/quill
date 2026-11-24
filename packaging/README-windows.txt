@@ -7,8 +7,8 @@ it with your OK:
 - Claude Code (Anthropic's official installer runs in a PowerShell window)
 - your Claude sign-in
 - a device password, so Quill for Android and other PCs can connect
-- kmem (shared memory: handoffs, tasks, rules; it's in the kmem folder and
-  needs Python 3, which Setup can install with winget)
+- kmem, if you have it (shared memory: handoffs, tasks, rules; optional, see
+  Setup; it needs Python 3, which Setup can install with winget)
 - local open-weight models through Ollama or another server with an
   Anthropic-compatible API (optional)
 
