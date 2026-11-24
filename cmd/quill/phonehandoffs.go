@@ -117,6 +117,7 @@ type apiBlocker struct {
 	Repo  string   `json:"repo,omitempty"`
 	Paths []string `json:"paths,omitempty"`
 	Need  string   `json:"need,omitempty"`
+	Saved string   `json:"saved,omitempty"` // snapshot: when it was last saved
 	Text  string   `json:"text"`
 }
 
@@ -167,7 +168,7 @@ func (a *phoneAPI) topicFields(out *apiSession) {
 	if ew := s.endWait; ew != nil {
 		e := &apiEndWait{Why: endWhyName[ew.why], Checking: ew.checking, Asked: ew.asked, Blockers: []apiBlocker{}}
 		for _, b := range ew.blockers {
-			e.Blockers = append(e.Blockers, apiBlocker{Kind: b.Kind, ID: b.ID, Title: b.Title, Name: b.Name, PID: b.PID, What: b.What, Repo: b.Repo, Paths: b.Paths, Need: b.Need, Text: blockerText(b)})
+			e.Blockers = append(e.Blockers, apiBlocker{Kind: b.Kind, ID: b.ID, Title: b.Title, Name: b.Name, PID: b.PID, What: b.What, Repo: b.Repo, Paths: b.Paths, Need: b.Need, Saved: b.Saved, Text: blockerText(b)})
 		}
 		out.EndWait = e
 	}
@@ -243,6 +244,47 @@ type apiTopicTask struct {
 type apiTopicView struct {
 	apiTopic
 	Tasks []apiTopicTask `json:"tasks"` // the claimed tasks, with their checkpoints
+	// The topic snapshot (kmem 1.13.0 topic-snapshot; all left out without
+	// one): when and by whom it was saved, "old" past kmem's fixed 14 days,
+	// and its open questions waiting on the user.
+	SnapshotAt  int64              `json:"snapshotAt,omitempty"`
+	SnapshotBy  string             `json:"snapshotBy,omitempty"`
+	SnapshotOld bool               `json:"snapshotOld,omitempty"`
+	Questions   []apiTopicQuestion `json:"questions,omitempty"`
+}
+
+// apiTopicQuestion: an open question of a topic snapshot.
+type apiTopicQuestion struct {
+	QID         string   `json:"qid"`
+	Text        string   `json:"text"`
+	Options     []string `json:"options"`
+	Recommended string   `json:"recommended,omitempty"`
+	AskedMs     int64    `json:"askedMs,omitempty"`
+}
+
+// snapshotFields fills v's snapshot fields from s (nil: none).
+func snapshotFields(v *apiTopicView, s *topicSnapshot, sc func(string) string, now time.Time) {
+	if s == nil {
+		return
+	}
+	if t := s.savedAt(); !t.IsZero() {
+		v.SnapshotAt = t.UnixMilli()
+	}
+	v.SnapshotBy = sc(s.By)
+	v.SnapshotOld = s.isOld(now)
+	for _, q := range s.Questions {
+		text, _ := capText(sc(q.Text), kmemPhoneTitleMax)
+		rec, _ := capText(sc(q.Recommended), kmemPhoneTitleMax)
+		aq := apiTopicQuestion{QID: q.QID, Text: text, Options: []string{}, Recommended: rec}
+		for _, o := range q.Options {
+			o, _ = capText(sc(o), kmemPhoneTitleMax)
+			aq.Options = append(aq.Options, o)
+		}
+		if t, err := time.Parse(time.RFC3339, q.Asked); err == nil {
+			aq.AskedMs = t.UnixMilli()
+		}
+		v.Questions = append(v.Questions, aq)
+	}
 }
 
 const topicViewTasks = 50
@@ -272,6 +314,7 @@ func (a *phoneAPI) topicsView(w http.ResponseWriter, r *http.Request) {
 	a.ui(func() {
 		for _, t := range list {
 			v := apiTopicView{apiTopic: a.topicEntry(t), Tasks: []apiTopicTask{}}
+			snapshotFields(&v, data.snapshots[t.Slug], sc, data.read)
 			for _, task := range data.rows {
 				if task.Status != "claimed" || !contains(t.Scope, topLevel(task.Topic)) || len(v.Tasks) >= topicViewTasks {
 					continue
@@ -289,6 +332,9 @@ func (a *phoneAPI) topicsView(w http.ResponseWriter, r *http.Request) {
 	})
 	for _, h := range data.handoffs {
 		e := map[string]any{"name": sc(h.Name), "items": h.Items}
+		if h.ConvertedTo != "" {
+			e["convertedTo"] = sc(h.ConvertedTo)
+		}
 		if t, err := time.Parse(time.RFC3339, h.Saved); err == nil {
 			e["savedMs"] = t.UnixMilli()
 		}

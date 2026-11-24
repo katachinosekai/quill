@@ -46,7 +46,7 @@ const (
 
 // endBlocker is one entry of end-check's "blockers" (K4).
 type endBlocker struct {
-	Kind  string   `json:"kind"` // claim, lock, job, files, status
+	Kind  string   `json:"kind"` // claim, lock, job, files, status, snapshot (kmem 1.13.0)
 	ID    string   `json:"id"`
 	Title string   `json:"title"`
 	Name  string   `json:"name"`
@@ -55,6 +55,7 @@ type endBlocker struct {
 	Repo  string   `json:"repo"`
 	Paths []string `json:"paths"`
 	Need  string   `json:"need"`
+	Saved string   `json:"saved"` // snapshot: when it was last saved ("" never)
 }
 
 type endCheckResult struct {
@@ -194,6 +195,16 @@ func blockerText(b endBlocker) string {
 		if b.ID != "" {
 			what += " (current " + b.ID + ")"
 		}
+	case "snapshot":
+		what = "the topic snapshot"
+		if b.Name != "" {
+			what += " of " + b.Name
+		}
+		if t, err := time.Parse(time.RFC3339, b.Saved); err == nil {
+			what += " (not saved in this session; last saved " + ago(t) + ")"
+		} else {
+			what += " (never saved)"
+		}
 	default:
 		what = b.Kind
 	}
@@ -225,16 +236,45 @@ func endCheckMessage(why endWhy, name string, bs []endBlocker) string {
 	default:
 		head = "Quill is ending this session; it is stopped once its end-of-session check passes."
 	}
+	snap := ""
+	for _, b := range bs {
+		if b.Kind == "snapshot" {
+			snap = snapshotHow(name, b.Saved != "")
+			break
+		}
+	}
 	return fmt.Sprintf("%s `kmem --as %s end-check` lists:\n- %s\n"+
-		"Resolve each one: checkpoint or release the claims, commit the uncommitted files or write the repo name and the word \"uncommitted\" (or \"WIP\") in `%s/status`, and end each background job or write it there as \"pid N\" (e.g. \"job pid 1234\"), "+
-		"update `%s/status` (one fact, `--replaces`), and release your shared lock turn after its logs are read. "+
+		"Resolve each one: checkpoint or release the claims (%s), commit the uncommitted files or write the repo name and the word \"uncommitted\" (or \"WIP\") in `%s/status`, and end each background job or write it there as \"pid N\" (e.g. \"job pid 1234\"), "+
+		"update `%s/status` (one fact, `--replaces`), %sand release your shared lock turn after its logs are read. "+
 		"Don't start other work. Reply with one line when done; Quill runs the check again.",
-		head, name, blockerList(bs, "\n- "), name, name)
+		head, name, blockerList(bs, "\n- "), claimFirst, name, name, snap)
 }
 
-func checkpointMessage(name string) string {
-	return fmt.Sprintf("Checkpoint now: run `kmem task checkpoint` for every task you have claimed and update `%s/status` (one fact, `--replaces`). "+
-		"Then reply with one line and wait; Quill runs the end-of-session check as a report and this session goes on afterwards.", name)
+// claimFirst: a claim carried over from a session that is gone has to be
+// taken over before kmem accepts a checkpoint or release (kmem 1.10.2).
+const claimFirst = "a claim carried over from a session that is gone needs `kmem task claim ID` first, then the checkpoint or release"
+
+// snapshotHow: how to clear the snapshot blocker (kmem 1.13.0), as one
+// clause ending in ", ". unchanged: there is an earlier snapshot, so
+// --same can re-stamp it.
+func snapshotHow(name string, unchanged bool) string {
+	h := fmt.Sprintf("save this topic's snapshot with `kmem --as %s handoff save %s --state \"...\"` "+
+		"(add `--question \"...\" --option \"...\" --recommend N` for each question waiting on the user and `--job \"what | pid N | log\"` for each job still running)", name, name)
+	if unchanged {
+		h += fmt.Sprintf(", or `kmem --as %s handoff save %s --same` if nothing changed since the last snapshot", name, name)
+	}
+	return h + ", "
+}
+
+// checkpointMessage: /export "Checkpoint now". snapshot: kmem has the
+// topic-snapshot feature, so the topic snapshot is saved too (§3.8a).
+func checkpointMessage(name string, snapshot bool) string {
+	snap := ""
+	if snapshot {
+		snap = fmt.Sprintf(", save this topic's snapshot (`kmem --as %s handoff save %s --state \"...\"` with any open questions and running jobs, or `--same` if it is unchanged)", name, name)
+	}
+	return fmt.Sprintf("Checkpoint now: run `kmem task checkpoint` for every task you have claimed (%s) and update `%s/status` (one fact, `--replaces`)%s. "+
+		"Then reply with one line and wait; Quill runs the end-of-session check as a report and this session goes on afterwards.", claimFirst, name, snap)
 }
 
 // endTopic: End for a topic session: the check, then stop, mark ended, close
@@ -283,7 +323,7 @@ func (d *desk) checkpointNow(s *deskSession) {
 	}
 	s.endWait = ew
 	d.notify(s, "Asked this session to checkpoint its claims and update its status fact; the end-of-session check runs after its reply.")
-	d.sendTo(s, checkpointMessage(ew.name))
+	d.sendTo(s, checkpointMessage(ew.name, d.kmemFeatureCached(topicSnapshotFeature)))
 	if !s.running() {
 		s.endWait = nil
 	}

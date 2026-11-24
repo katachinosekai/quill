@@ -124,13 +124,19 @@ type kmemPanelData struct {
 	needs    kmemNeeds
 	rows     []topicTask       // tasks with their checkpoints
 	status   map[string]string // top-level topic -> status fact text
-	read     time.Time         // when it was read
+	// snapshots: top-level topic -> its topic snapshot (kmem 1.13.0
+	// topic-snapshot; nil map with older kmem).
+	snapshots map[string]*topicSnapshot
+	read      time.Time // when it was read
 }
 
 type kmemHandoffRow struct {
 	Name  string `json:"name"`
 	Items int    `json:"items"`
 	Saved string `json:"saved"`
+	// ConvertedTo: the topic this old handoff was converted into (kmem
+	// 1.13.0 handoff-convert), "" otherwise.
+	ConvertedTo string `json:"converted_to"`
 }
 
 // showKmemPanel: the kmem window replaced the kmem dialog (user 2026-11-22).
@@ -251,7 +257,27 @@ func (d *desk) readKmemPanelDataWith(withStatus bool, js func(any, ...string) bo
 			data.status[top] = statusText(out)
 		}
 	}
+	if d.kmemHasFeature(topicSnapshotFeature) {
+		data.snapshots = readSnapshots(js, data.handoffs, panelTopicNames(data))
+	}
 	return data, ok
+}
+
+// panelTopicNames: the top-level topics the Topics tab lists (kmem's topics
+// and the tasks' topics; never "handoff").
+func panelTopicNames(data *kmemPanelData) map[string]bool {
+	names := map[string]bool{}
+	for _, t := range data.topics {
+		if top := topLevel(t.Name); top != "handoff" {
+			names[top] = true
+		}
+	}
+	for _, t := range data.rows {
+		if t.Topic != "" {
+			names[topLevel(t.Topic)] = true
+		}
+	}
+	return names
 }
 
 // shown: the Overview is on screen (the window is open and the tab selected),
@@ -709,22 +735,15 @@ func statusText(out string) string {
 	return ""
 }
 
-// topicsRows builds the read-only Topics tab: per top-level kmem topic the
-// status fact, claimed tasks (checkpoint, owner), open tasks and a live
-// marker; old handoffs go under "History (read-only)" with Show only.
+// topicsRows builds the read-only Topics tab: per top-level kmem topic its
+// title (when kmem stores one), the status fact, the topic snapshot (kmem
+// 1.13.0), claimed tasks (checkpoint, owner), open tasks and a live marker;
+// old handoffs go under "History (read-only)" with Show only (a topic's
+// snapshot is shown with its topic instead).
 func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
 	d := p.d
-	names := map[string]bool{}
-	for _, t := range data.topics {
-		if top := topLevel(t.Name); top != "handoff" {
-			names[top] = true
-		}
-	}
-	for _, t := range data.rows {
-		if t.Topic != "" {
-			names[topLevel(t.Topic)] = true
-		}
-	}
+	names := panelTopicNames(data)
+	now := time.Now()
 	var order []string
 	for n := range names {
 		order = append(order, n)
@@ -755,7 +774,18 @@ func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
 			}
 		}
 		status := firstNonEmpty(data.status[name], "no status fact yet")
-		rows = append(rows, boldLabel(name+"  ·  "+live), wrapLabel("Status: "+status))
+		head := name
+		if t, ok := cachedTopic(name); ok && t.KmemTitle != "" && t.KmemTitle != name {
+			head = t.KmemTitle + " (" + name + ")"
+		}
+		rows = append(rows, boldLabel(head+"  ·  "+live), wrapLabel("Status: "+status))
+		if snap := data.snapshots[name]; snap != nil {
+			lines := snapshotLines(snap, now)
+			rows = append(rows, caption(lines[0]))
+			for _, l := range lines[1:] {
+				rows = append(rows, wrapLabel(l))
+			}
+		}
 		for _, t := range claimed {
 			line := fmt.Sprintf("Claimed [%s] %s (owner %s)", t.ID, t.Title, *t.Owner)
 			if t.Checkpoint != "" {
@@ -774,6 +804,9 @@ func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
 	var hist []fyne.CanvasObject
 	for _, h := range data.handoffs {
 		h := h
+		if data.snapshots[h.Name] != nil {
+			continue // shown under its topic
+		}
 		saved := h.Saved
 		if t, err := time.Parse(time.RFC3339, h.Saved); err == nil {
 			saved = ago(t)
@@ -781,7 +814,7 @@ func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
 		show := widget.NewButtonWithIcon("Show", theme.VisibilityIcon(), func() { p.showHandoff(h.Name) })
 		show.Importance = widget.LowImportance
 		hist = append(hist, container.NewBorder(nil, nil,
-			container.NewVBox(boldLabel(h.Name), caption(fmt.Sprintf("saved %s · %d items", saved, h.Items))), nil,
+			container.NewVBox(boldLabel(h.Name), caption(handoffMeta(saved, h))), nil,
 			container.NewHBox(layout.NewSpacer(), show)))
 	}
 	if len(hist) == 0 {
@@ -791,4 +824,14 @@ func (p *kmemPanel) topicsRows(data *kmemPanelData) []fyne.CanvasObject {
 	findOld.Importance = widget.LowImportance
 	acc := widget.NewAccordion(widget.NewAccordionItem("History (read-only)", container.NewVBox(hist...)))
 	return append(rows, container.NewHBox(findOld), acc)
+}
+
+// handoffMeta: the history row's caption ("saved 2d ago · 3 items", plus
+// the topic an old handoff was converted into).
+func handoffMeta(saved string, h kmemHandoffRow) string {
+	m := fmt.Sprintf("saved %s · %d items", saved, h.Items)
+	if h.ConvertedTo != "" {
+		m += " · converted to topic " + h.ConvertedTo
+	}
+	return m
 }

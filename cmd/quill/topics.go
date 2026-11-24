@@ -33,9 +33,12 @@ type topicInfo struct {
 	Title   string
 	Scope   []string // top-level kmem topics the briefing draws from
 	Labeled bool     // has a kmem label with a scope (shown first)
-	Status  string   // first line of the current TOPIC/status fact
-	Claimed int
-	Open    int
+	// KmemTitle: the title kmem stores (`kmem scope T --title`, feature
+	// topic-title); it wins over config labels and saved titles.
+	KmemTitle string
+	Status    string // first line of the current TOPIC/status fact
+	Claimed   int
+	Open      int
 }
 
 var topicCache struct {
@@ -189,26 +192,36 @@ func (d *desk) loadTopics() []topicInfo {
 const topicScopeFeature = "topic-scope"
 
 // applyKmemScopes reads each topic's stored scope (`kmem scope T --json`)
-// for display and the task counts. A topic with no stored scope keeps what
-// it had. Reports whether kmem's scopes were used. Not on the UI thread.
+// for display and the task counts, and with the topic-title feature (kmem
+// 1.13.0) its stored title. A topic with no stored scope keeps what it had.
+// Reports whether kmem's scopes were used. Not on the UI thread.
 func (d *desk) applyKmemScopes(list []topicInfo) bool {
 	if !d.kmemHasFeature(topicScopeFeature) {
 		return false
 	}
+	titles := d.kmemHasFeature(topicTitleFeature)
 	for i := range list {
 		t := &list[i]
 		// kmem 1.10.1: {"scope": {"topic": T, "topics": [T, ...]}, "api": 1};
-		// "topics" starts with T and is [T] with no stored scope.
+		// "topics" starts with T and is [T] with no stored scope. kmem
+		// 1.13.0 adds "title" (null when none).
 		var r struct {
 			Scope struct {
 				Topics []string `json:"topics"`
+				Title  string   `json:"title"`
 			} `json:"scope"`
 		}
-		if d.kmemJSON(&r, "scope", t.Slug) && len(r.Scope.Topics) > 0 {
+		if !d.kmemJSON(&r, "scope", t.Slug) {
+			continue
+		}
+		if len(r.Scope.Topics) > 0 {
 			if len(r.Scope.Topics) > 1 {
 				t.Labeled = true
 			}
 			t.Scope = r.Scope.Topics
+		}
+		if title := strings.TrimSpace(r.Scope.Title); titles && title != "" {
+			t.Title, t.KmemTitle = title, title
 		}
 	}
 	return true
@@ -252,7 +265,8 @@ func cachedTopic(slug string) (topicInfo, bool) {
 }
 
 // seedSavedTitles / applySavedTitles: the titles typed in "New topic" and
-// persisted in the org file. kmem's config title or label still wins.
+// persisted in the org file. kmem's stored title, config title or label
+// still wins.
 func seedSavedTopicTitles(m map[string]string) {
 	topicCache.mu.Lock()
 	topicCache.saved = map[string]string{}
@@ -267,7 +281,7 @@ func applySavedTitles(list []topicInfo, labels map[string]kmemSessionCfg) {
 	defer topicCache.mu.Unlock()
 	for i := range list {
 		c := labels[list[i].Slug]
-		if title, ok := topicCache.saved[list[i].Slug]; ok && c.Title == "" && c.As == "" {
+		if title, ok := topicCache.saved[list[i].Slug]; ok && c.Title == "" && c.As == "" && list[i].KmemTitle == "" {
 			list[i].Title = title
 		}
 	}

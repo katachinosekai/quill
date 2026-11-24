@@ -507,7 +507,7 @@ Topic mode (topic tabs, docs/design/topic-tabs.md) is on while hello's `topics.o
 ```
 
 - `agents` are the subagents Quill Desktop's strip shows (running ones, then recently finished, `doneMs` when done). `description` is the Agent call's full description (3-5 words, one line; `name` is the same cut to 80 characters); left out when the call gave none, then show `type`. It is additive; `agentTokens` sums their tokens ("3 subagents · 120k tok").
-- `endWait` exists only while the end-of-session check runs (kmem 1.10.0+, hello `topics.endCheck`). `why`: `end`, `rotate`, `quit` or `checkpoint`. `checking`: kmem is being asked now. `asked`: the session was sent the blockers and must resolve them. `blockers`: end-check's entries (`kind` claim, lock, job, files or status; `id`, `title`, `name`, `pid`, `what`, `repo`, `paths`, `need` as kmem gives them) plus `text`, the sentence Quill Desktop shows. Quill never resolves blockers itself; the phone only shows them. It changes like any session field (a `session` change arrives when it appears, changes or goes away).
+- `endWait` exists only while the end-of-session check runs (kmem 1.10.0+, hello `topics.endCheck`). `why`: `end`, `rotate`, `quit` or `checkpoint`. `checking`: kmem is being asked now. `asked`: the session was sent the blockers and must resolve them. `blockers`: end-check's entries (`kind` claim, lock, job, files, status or, with kmem 1.13.0, snapshot (the topic snapshot is not saved in this session; `saved` is when it was last saved, left out if never); `id`, `title`, `name`, `pid`, `what`, `repo`, `paths`, `need` as kmem gives them; show an unknown `kind` by its `text`) plus `text`, the sentence Quill Desktop shows. Quill never resolves blockers itself; the phone only shows them. It changes like any session field (a `session` change arrives when it appears, changes or goes away).
 
 ### POST /phone/sessions/new with openTopic
 
@@ -521,7 +521,20 @@ Errors: `422 bad_request` (both or neither field, `kmem`), `404 not_found` (unkn
 
 ### GET /phone/topics
 
-Read-only Topics view: `{"v": 1, "topics": [...], "history": [...], "readMs": ...}`. Each topic is a `topics[]` entry plus `tasks`: its claimed tasks `{id, prio, title, owner, claim, checkpoint}` (`claim` as in `/phone/kmem/tasks`; `checkpoint` may be empty). `history`: the old kmem handoffs `{name, items, savedMs}`, newest first (read only; no Delete). `503 kmem_unavailable` outside topic mode. Cached up to 10 s like `/phone/kmem/*`.
+Read-only Topics view: `{"v": 1, "topics": [...], "history": [...], "readMs": ...}`. Each topic is a `topics[]` entry plus `tasks`: its claimed tasks `{id, prio, title, owner, claim, checkpoint}` (`claim` as in `/phone/kmem/tasks`; `checkpoint` may be empty). `history`: the old kmem handoffs `{name, items, savedMs}`, newest first (read only; no Delete); `convertedTo` (kmem 1.13.0) names the topic an old handoff was converted into.
+
+Topic snapshot (kmem 1.13.0, feature `topic-snapshot`; every field is left out when the topic has no snapshot or kmem is older, so older phones are unaffected):
+
+```json
+{"slug": "alpha", "...": "...", "tasks": [],
+ "snapshotAt": 1795250000000, "snapshotBy": "alpha", "snapshotOld": true,
+ "questions": [{"qid": "q1", "text": "Which layout?", "options": ["List", "Grid"], "recommended": "Grid", "askedMs": 1795240000000}]}
+```
+
+- `snapshotAt`: when the topic snapshot was last saved (ms); `snapshotBy`: the kmem name that saved it.
+- `snapshotOld`: true when the snapshot is older than kmem's fixed 14 days; show it as an old snapshot.
+- `questions`: the snapshot's open questions waiting on the user, in kmem's order (answered ones are left out). `options` may be empty; `recommended` (one of the options) and `askedMs` may be missing. The phone only shows them: the session asks the user and records the answer (`kmem handoff answer`).
+- A topic's title is kmem's stored title when it has one (`kmem scope T --title`), as in `/phone/sessions` `topics[]`. `503 kmem_unavailable` outside topic mode. Cached up to 10 s like `/phone/kmem/*`.
 
 ### GET /phone/topics/search?q=...
 

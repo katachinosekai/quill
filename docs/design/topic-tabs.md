@@ -286,7 +286,8 @@ rotation, Quit and /clear:
 Amends §1.6 ("no handoffs for topic state"), §3.8 and K2/K4/K5. Status:
 **approved** with kmem-lock-audit's review changes (see "Final design" at
 the end of this section, which wins where it differs from the proposal).
-Ships in kmem 1.11.0 behind the feature `topic-snapshot`.
+Ships in kmem 1.13.0 behind the feature `topic-snapshot` (with `topic-title`
+and `handoff-convert`).
 
 Why: tasks, the status fact and topic facts carry the *work*, but a
 handoff also carried what the next session needs *right away* and that
@@ -322,8 +323,9 @@ hypothesis, job) and owned by the topic, not by a session name.
 3. **Stale parts drop out.** A question the user answered (a matching
    decision fact, or the coordinator removes it) and a job whose process
    ended are left out of the briefing; pointers to retired facts follow
-   `--replaces` as `handoff get` does now. Snapshots older than the policy
-   TTL show as "old snapshot" with a one-line summary only.
+   `--replaces` as `handoff get` does now. Snapshots older than a fixed 14
+   days (not a policy TTL) show as "old snapshot" with a one-line summary
+   only.
 4. **Conversion (K5) becomes a merge.** Existing handoffs are merged into
    their topic's snapshot (state lines that are tasks/facts still convert to
    those; the rest stays in the snapshot) instead of being retired as
@@ -341,7 +343,7 @@ hypothesis, job) and owned by the topic, not by a session name.
 
 **Final design (kmem-lock-audit review + user answers, 2026-11-23):**
 
-- kmem 1.11.0 (after 1.10.0), feature flag `topic-snapshot` in
+- kmem 1.13.0 (after 1.12.0), feature flag `topic-snapshot` in
   `version --json`. Quill Desktop shows unknown end-check blocker kinds
   generically (their `need` text), so 1.10.0-era Quill keeps working.
 - Storage: `handoff/<topic>` (the topic name is the handoff name); no
@@ -359,12 +361,40 @@ hypothesis, job) and owned by the topic, not by a session name.
   the snapshot's age: questions first and never cut (≤300 chars each; if
   they exceed the share, the rest becomes "+N more: kmem handoff get T"),
   then jobs/worktrees one line each, ≤2 hypotheses, ≤4 pointers as one-line
-  clips. Past the TTL: one summary line.
+  clips. Older than 14 days (fixed, `"old": true`): one summary line.
 - `kmem handoff save T --same` re-stamps an unchanged snapshot (no nagging).
 - Subagent briefs: no snapshot by default; only pointers/hypotheses when the
   task matches.
 - K5 merge: newest wins per line kind, all open questions kept, plus one
   history fact per old handoff name for traceability.
+
+**As built in Quill Desktop (t1f1abe, branch feat/topic-snapshot,
+2026-11-24; kmem 1.13.0):**
+
+- Gate: `kmem version --json` features `topic-snapshot` (snapshot reads,
+  Checkpoint now wording) and `topic-title` (kmem's stored title); older kmem
+  keeps today's behaviour.
+- End-check: blocker `{"kind": "snapshot", "name", "saved", "need"}` reads
+  "the topic snapshot of T (not saved in this session; last saved 3h ago)"
+  or "(never saved)" plus kmem's `need`. `endCheckMessage` adds, only when
+  that blocker is listed: save with `kmem --as T handoff save T --state "..."`
+  (`--question/--option/--recommend` per open question, `--job "what | pid N
+  | log"` per running job), or `--same` when an earlier snapshot exists and
+  nothing changed. The claim wording now says a claim carried over from a
+  gone session needs `kmem task claim ID` first (t359949). Checkpoint now
+  also asks for the snapshot. Unknown kinds stay generic (kind + `need`).
+- Topics tab (`kmempanel.go` `topicsRows`): per topic `kmem handoff get T
+  --json` "snapshot" (only for topics with a same-named, not converted
+  handoff): "Snapshot saved 3h ago by T · old (over 14 days)", then open
+  questions (options, recommended), jobs (pid, running / ended / no pid,
+  log), states, hypotheses. The snapshot handoff leaves "History"; converted
+  old handoffs show "converted to topic T". Header "Title (slug)" when kmem
+  stores a title (`kmem scope T --json` "title").
+- Phone: `GET /phone/topics` adds `snapshotAt`, `snapshotBy`, `snapshotOld`,
+  `questions[]` and history `convertedTo` (all omitted without a snapshot);
+  `endWait.blockers[]` adds `saved` (docs/phone-api.md).
+- The 14 days are kmem's fixed threshold (`"old"`); Quill also marks a
+  snapshot old by its time if kmem's flag is missing.
 
 ### 3.9 What changes in Quill Desktop's kmem code
 
