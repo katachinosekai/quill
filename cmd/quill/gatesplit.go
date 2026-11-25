@@ -28,9 +28,11 @@ import (
 //     release, done). task done/transfer/block, retire, trash, pin, import,
 //     … still need a plan.
 //   - Zomboid launch and `pkill|killall <projectzomboid>` (classNoPlan) when
-//     the installed kmem lists feature "pz-lock-closed": kmem-guard's pz-lock
-//     guard then denies them fail-closed unless this session holds the lock,
-//     so Quill leaves them to it. `pzlock acquire` stays gated.
+//     the installed kmem lists feature "pz-lock-holder": kmem-guard's pz-lock
+//     guard then denies them to every session but the lock holder, and when
+//     the lock file is missing or unreadable, so Quill leaves them to it.
+//     ("pz-lock-closed" alone is not enough: it only means fail-closed on a
+//     crash; kmem-lock-audit 2026-11-24, t53f242.) `pzlock acquire` stays gated.
 //
 // A no-plan call is not a read: it loses to a refused batch (gatebatch.go)
 // like any gated call, but since it is allowed it never refuses a batch
@@ -39,10 +41,12 @@ import (
 // prefGateSplit: the Security switch.
 const prefGateSplit = "gateSplit"
 
-// pzLockClosed: the kmem feature (`kmem features --json`, also in `kmem
+// pzLockHolder: the kmem feature (`kmem features --json`, also in `kmem
 // version --json`, which Quill already reads and caches: kmemclient.go)
-// kmem-lock-audit adds once its pz-lock guard is fail-closed.
-const pzLockClosed = "pz-lock-closed"
+// kmem lists only while its pz-lock guard denies a Zomboid launch or kill
+// to everyone except the lock holder (and denies on a missing lock file).
+// Not "pz-lock-closed", which only means fail-closed on a crash (t53f242).
+const pzLockHolder = "pz-lock-holder"
 
 // gateSplitExplain: the caption under the switch in Settings.
 const gateSplitExplain = "With Plan first on: more read-only commands (git rev-list, tag -l, ls-remote, worktree list, config --get, " +
@@ -65,7 +69,7 @@ const (
 const (
 	markSplit = "\x00split"    // the switch is on
 	markOwn   = "\x00own"      // {markOwn, NAME}: the session's own kmem name
-	markPZ    = "\x00pzclosed" // kmem-guard's pz-lock is fail-closed
+	markPZ    = "\x00pzholder" // kmem-guard's pz-lock checks the lock holder
 )
 
 type gateOpts struct {

@@ -350,7 +350,8 @@ func (a *phoneAPI) kmemWrite(w http.ResponseWriter, r *http.Request, path string
 		}
 		state = it.Head
 		summary = "Restore [" + id + "] (" + it.binMeta() + ") from the recycle bin: " + oneLine(it.Preview, 120)
-		cmds = [][]string{{"--as", kmemPhoneName, "trash", "restore", id}}
+		cmds = [][]string{append([]string{"--as", kmemPhoneName},
+			binRestoreArgs(*it, "the user confirmed Restore for ["+id+"] on their phone (Quill for Android)")...)}
 	}
 
 	if conf == nil { // prepare

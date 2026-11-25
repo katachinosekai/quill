@@ -66,6 +66,22 @@ func (it binItem) binReason() string {
 	return ""
 }
 
+// isProposal: a rejected task proposal (kmem 1.15: head "proposal, …").
+func (it binItem) isProposal() bool {
+	return strings.HasPrefix(it.Head, "proposal,") || it.Head == "proposal"
+}
+
+// binRestoreArgs: the kmem words (after `kmem` and any --as) restoring it.
+// A rejected proposal needs --by-user with the user's own action, recorded
+// by kmem (t3851ba); by is that action in words ("the user tapped Restore …").
+func binRestoreArgs(it binItem, by string) []string {
+	args := []string{"trash", "restore", it.ID}
+	if it.isProposal() {
+		args = append(args, "--by-user", by)
+	}
+	return args
+}
+
 var binIDRe = regexp.MustCompile(`^[a-z0-9]{3,16}$`)
 
 func validBinID(id string) bool { return binIDRe.MatchString(id) }

@@ -137,7 +137,7 @@ func TestGateSplitClassifier(t *testing.T) {
 		{`gh api --hostname evil.example repos/o/r`, G, nil},
 		{`git log $(rm -rf x)`, G, nil},
 		{`git rev-list HEAD > revs.txt`, G, nil},
-		// Zomboid: left to kmem-guard only when its pz-lock is fail-closed
+		// Zomboid: left to kmem-guard only when its pz-lock checks the holder
 		{`pz_launch`, G, nil},
 		{`pz_launch`, N, splitPZ},
 		{`~/games/pz/projectzomboid.sh -nosteam`, N, splitPZ},
@@ -290,9 +290,9 @@ func TestRefusedBatchRefusesBookkeeping(t *testing.T) {
 	})
 }
 
-// The pz-lock-closed feature (cached `kmem version --json` features) adds
-// the Zomboid marker; without it Quill's gate stays on Zomboid.
-func TestPZLockClosedFeature(t *testing.T) {
+// The pz-lock-holder feature (cached `kmem version --json` features) adds
+// the Zomboid marker (pz-lock-closed alone doesn't); without it Quill's gate stays on Zomboid.
+func TestPZLockHolderFeature(t *testing.T) {
 	stubKmemEnv(t, "")
 	h := newHarness(t)
 	s := gatedSession(t, h)
@@ -304,10 +304,18 @@ func TestPZLockClosedFeature(t *testing.T) {
 		s.planWait = false
 		v := &h.d.kmemVer
 		v.mu.Lock()
-		v.api, v.features, v.at = kmemAPI, []string{"sessions", pzLockClosed}, time.Now()
+		// "pz-lock-closed" alone (fail-closed on a crash) is not enough (t53f242).
+		v.api, v.features, v.at = kmemAPI, []string{"sessions", "pz-lock-closed"}, time.Now()
+		v.mu.Unlock()
+		if e := gateRequest(t, h, s, fmt.Sprintf(kill, 4, 4)); e.PermState != chat.PermPlanAsked {
+			t.Fatalf("pz-lock-closed only: still gated: %v", e.PermState)
+		}
+		s.planWait = false
+		v.mu.Lock()
+		v.api, v.features, v.at = kmemAPI, []string{"sessions", "pz-lock-closed", pzLockHolder}, time.Now()
 		v.mu.Unlock()
 		if e := gateRequest(t, h, s, fmt.Sprintf(kill, 2, 2)); e.PermState != chat.PermAutoAllowed {
-			t.Fatalf("pz-lock-closed: left to kmem-guard: %v", e.PermState)
+			t.Fatalf("pz-lock-holder: left to kmem-guard: %v", e.PermState)
 		}
 		h.d.app.Preferences().SetBool(prefGateSplit, false)
 		if e := gateRequest(t, h, s, fmt.Sprintf(kill, 3, 3)); e.PermState != chat.PermPlanAsked {

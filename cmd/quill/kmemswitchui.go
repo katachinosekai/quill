@@ -113,7 +113,7 @@ func (d *desk) fillKmemSwitch(v *kmemSwitchView, c kmemSwitchCheck, projects []m
 	objs = append(objs, widget.NewSeparator(), boldLabel("1. Import Claude Code's memory into kmem (one topic per project)"))
 	v.ticks, v.topics = nil, nil
 	if len(projects) == 0 {
-		objs = append(objs, caption("No project has notes in Claude Code's auto memory (" + tildePath(filepath.Join(transcript.DefaultRoot(), "*", "memory", "MEMORY.md")) + "): nothing to import."))
+		objs = append(objs, caption("No project has notes in Claude Code's auto memory ("+tildePath(filepath.Join(transcript.DefaultRoot(), "*", "memory", "MEMORY.md"))+"): nothing to import."))
 	}
 	for _, p := range projects {
 		name := tildePath(p.Cwd)

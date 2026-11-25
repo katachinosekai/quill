@@ -1142,7 +1142,7 @@ func (d *desk) readOnlyExtraFor(s *deskSession) [][]string {
 			extra = append(extra, []string{markOwn, k})
 		}
 	}
-	if split && d.kmemFeatureCached(pzLockClosed) {
+	if split && d.kmemFeatureCached(pzLockHolder) {
 		extra = append(extra, []string{markPZ})
 	}
 	return extra

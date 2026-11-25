@@ -135,7 +135,8 @@ func (b *binView) showBinItem(it binItem) {
 	var win dialog.Dialog
 	restore := widget.NewButtonWithIcon("Restore", theme.ContentUndoIcon(), func() {
 		go func() {
-			out, err := d.runKmem("kmem", "trash", "restore", it.ID)
+			args := binRestoreArgs(it, "the user clicked Restore for ["+it.ID+"] in Quill Desktop's recycle bin")
+			out, err := d.runKmem("kmem", args...)
 			d.do(func() {
 				if err != nil {
 					dialog.ShowError(fmt.Errorf("kmem: %s", oneLine(firstNonEmpty(strings.TrimSpace(out), err.Error()), 300)), b.parent)
