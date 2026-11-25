@@ -99,6 +99,7 @@ func (d *desk) runInstaller(title, what, script string, after func()) {
 func (d *desk) setupRows(refresh func()) []setupRow {
 	var rows []setupRow
 	win := runtime.GOOS == "windows"
+	useCodex := d.app.Preferences().Bool(prefNewCodex)
 
 	// Claude Code
 	claude := lookPath(firstNonEmpty(d.cfg.ClaudeBin, "claude"))
@@ -107,7 +108,7 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 			claude = d.cfg.ClaudeBin
 		}
 	}
-	r := setupRow{title: "Claude Code"}
+	r := setupRow{title: "Claude Code", optional: useCodex}
 	if claude != "" {
 		r.ok, r.state = true, "installed: "+tildePath(claude)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -120,7 +121,7 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 		if win {
 			script = claudeInstallWindows
 		}
-		r.state, r.action = "not installed: Quill runs every session through it", "Install..."
+		r.state, r.action = "not installed: used for Claude and Ollama sessions", "Install..."
 		r.do = func() {
 			d.runInstaller("Install Claude Code", "Quill will run Anthropic's official installer for Claude Code.", script, refresh)
 		}
@@ -128,7 +129,7 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 	rows = append(rows, r)
 
 	// Sign-in
-	r = setupRow{title: "Claude account"}
+	r = setupRow{title: "Claude account", optional: useCodex || isLocal(d.app.Preferences().String("newModel"))}
 	switch {
 	case claude == "":
 		r.state = "install Claude Code first"
@@ -142,16 +143,43 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 	}
 	rows = append(rows, r)
 
+	codexPath, codexErr := codexBinary()
+	r = setupRow{title: "Codex", optional: !useCodex}
+	if codexErr != nil {
+		r.state = "not installed; use an existing Codex installation or install the Codex CLI"
+	} else {
+		r.ok, r.state = true, "installed: "+tildePath(codexPath)
+	}
+	rows = append(rows, r)
+	r = setupRow{title: "ChatGPT account for Codex", optional: !useCodex}
+	status := d.codexAuth
+	switch {
+	case codexErr != nil:
+		r.state = "install Codex first"
+	case status.ready && (status.snapshot.Account != nil || !status.snapshot.RequiresOpenAIAuth):
+		r.ok, r.state = true, "uses the existing Codex configuration"
+	case !status.ready:
+		r.state, r.action, r.do = "status unavailable", "Check sign-in", d.refreshCodexAccount
+	default:
+		r.state, r.action, r.do = "not signed in", "Sign in…", d.signInChatGPT
+	}
+	rows = append(rows, r)
+
 	// kmem: not part of Quill Desktop; patrons get it (kmemsetup.go).
 	r = setupRow{title: "kmem (shared memory)", optional: true}
 	home := homeDir()
 	kb := firstNonEmpty(kmemBin(), "kmem")
 	switch {
+	case !d.kmemAvailable() && kmemBin() != "" && !d.kmemOff:
+		r.state = "installed but incompatible; supported versions: " + supportedKmemSeries
 	case !d.kmemAvailable():
 		r.state, r.action = kmemGetHint, "Get kmem..."
 		r.do = d.openKmemPatreon
 	case win && windowsPython() == "":
 		r.state = "installed, but needs Python 3 (see the Python row)"
+	case d.kmemSwitchWanted():
+		r.state, r.action = "detected; preview the recommended Quill and kmem setup and shared import", "Review setup…"
+		r.do = d.showKmemSwitch
 	case kmemHooksMissing(home):
 		r.state, r.action = "installed ("+tildePath(kb)+"), but its Claude Code hooks are missing: sessions don't get the kmem brief or the guards", "Add hooks..."
 		r.do = func() { d.kmemHooksDialog(refresh) }

@@ -96,8 +96,8 @@ func menuLabels(items []*fyne.MenuItem) []string {
 func TestChipsMenu(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
-		if h.d.chipsBtn == nil || h.d.chipsBtn.Text != "Chips" {
-			t.Fatal("one Chips button under the message box")
+		if h.d.chipsBtn == nil || h.d.chipsBtn.Text != activityChipsLabel {
+			t.Fatal("one Activity chips button under the message box")
 		}
 		var stale []string
 		deepWalk(h.d.bottomBox, func(o fyne.CanvasObject) {
@@ -109,7 +109,7 @@ func TestChipsMenu(t *testing.T) {
 			t.Fatalf("old chip buttons still in the bar: %v", stale)
 		}
 		got := strings.Join(menuLabels(h.d.chipItems()), " | ")
-		if got != "Show chips | Open chips | Collapse chips | New chips start collapsed" {
+		if got != "Show activity chips | Open activity chips | Collapse activity chips | New activity chips start collapsed" {
 			t.Fatalf("Chips menu: %s", got)
 		}
 		was := h.d.hideChips

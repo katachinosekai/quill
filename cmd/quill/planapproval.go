@@ -292,8 +292,12 @@ func (v *chatView) approvalRadio(owner *deskSession, plan *chat.Item, a *approva
 func (v *chatView) approvalSend(owner *deskSession, plan *chat.Item, a *approvalOpts, qs []planQ, ans map[int]planAnswer, active bool) []fyne.CanvasObject {
 	pick := v.approvalPick(plan, a)
 	stop := pick == dontRunPick || pick >= 0 && a.Stop[pick]
-	enabled := active && pick != -1 && (stop || v.d.canAnswer(owner))
-	send := glowButton("Send answers", theme.MailSendIcon(), colIdle, enabled, v.guarded(func() {
+	enabled := active && pick != -1 && (stop || v.d.canApprovePlan(owner))
+	label := "Send answers"
+	if owner != nil && owner.codex && pick >= 0 && !stop {
+		label = "Approve plan & send answers"
+	}
+	send := glowButton(label, theme.MailSendIcon(), colIdle, enabled, v.guarded(func() {
 		v.sendKeeping(plan, func() { v.d.answerPlanApproval(owner, plan, a, v.approvalPick(plan, a), qs, ans, "") })
 	}))
 	var out []fyne.CanvasObject
@@ -319,8 +323,20 @@ func approvalKind(a *approvalOpts, qs []planQ) string {
 	return k + "|send"
 }
 
+const codexPlanApprovalCaption = "Approval covers the steps on this card. Codex will ask separately when it needs a tool permission."
+
+func planApproveLabel(owner *deskSession) string {
+	if owner != nil && owner.codex {
+		return "Approve plan"
+	}
+	return "Approve plan & run all"
+}
+
 // approvalCaption: the card's note on what the go-ahead does.
-func approvalCaption(a *approvalOpts) string {
+func approvalCaption(owner *deskSession, a *approvalOpts) string {
+	if owner != nil && owner.codex {
+		return codexPlanApprovalCaption
+	}
 	goOpt := "Yes"
 	for i, o := range a.Options {
 		if !a.Stop[i] {

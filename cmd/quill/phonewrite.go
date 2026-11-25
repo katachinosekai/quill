@@ -182,10 +182,10 @@ func (a *phoneAPI) send(s *deskSession, text string) (map[string]any, *apiErr) {
 	if s.takeover || s.loading || s.terminal != nil && !s.running() {
 		return nil, &apiErr{http.StatusConflict, "blocked", "the session is loading, being taken over or open in a terminal"}
 	}
-	if d.usagePaused && !strings.HasPrefix(text, "/") {
+	if !s.codex && d.usagePaused && !strings.HasPrefix(text, "/") {
 		text = pausedNote + text
 	}
-	if s.pickPending || s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
+	if s.shouldQueue() {
 		d.enqueue(s, text)
 		return map[string]any{"queued": true, "queue": a.queueJSON(s)}, nil
 	}
@@ -348,7 +348,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		if !ok {
 			return nil, badReq("this message has no choices")
 		}
-		if it != openChoiceItem(s.conv) {
+		if it != openSessionChoiceItem(s) {
 			return nil, stale("the choices are no longer open")
 		}
 		if *in.Index < 0 || *in.Index >= len(opts) {
@@ -367,7 +367,7 @@ func (a *phoneAPI) answer(s *deskSession, in writeBody) (map[string]any, *apiErr
 		return nil, badReq("unknown action " + in.Action)
 	}
 	t := a.track(s)
-	return map[string]any{"item": a.item(s, it, t.irev[it.Seq], openChoiceItem(s.conv))}, nil
+	return map[string]any{"item": a.item(s, it, t.irev[it.Seq], openSessionChoiceItem(s))}, nil
 }
 
 func (a *phoneAPI) queueAction(s *deskSession, op string, in writeBody) (map[string]any, *apiErr) {

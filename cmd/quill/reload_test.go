@@ -380,3 +380,57 @@ func TestReloadCLIReports(t *testing.T) {
 		t.Fatalf("no new build, same program: %d %q", code, out.String())
 	}
 }
+
+func TestCodexReloadRestoresVisibleHistoryAndQueue(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		h.d.open(editsID)
+		ordinary := h.d.current
+		ordinary.conv.AddUser("Claude conversation")
+		codex := h.d.createSession(h.proj, "default", "default")
+		codex.codex = true
+		codex.conv.AddUser("Codex conversation")
+		codex.conv.AddPlan()
+		codex.queue = []string{"Queued follow-up"}
+		h.d.input.SetText("Unsent draft")
+
+		st := h.d.handoverState()
+		if err := h.d.saveCodexChats(&st); err != nil {
+			t.Fatal(err)
+		}
+		if len(st.CodexChats) != 1 || len(st.CodexChats[codex.id]) == 0 {
+			t.Fatal("reload state should include the Codex conversation")
+		}
+		data, err := json.Marshal(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored restoreState
+		if err := json.Unmarshal(data, &restored); err != nil {
+			t.Fatal(err)
+		}
+
+		h.d.open(editsID)
+		h.d.input.SetText("")
+		delete(h.d.sessions, codex.id)
+		h.d.restoreSessions(&restored)
+		fresh := h.d.sessions[codex.id]
+		if fresh == nil || !fresh.loaded || len(fresh.conv.Items) != 2 ||
+			fresh.conv.Items[0].Text != "Codex conversation" {
+			t.Fatalf("the Codex conversation did not survive reload: %+v", fresh)
+		}
+
+		var handed handedSession
+		handed.savePending(codex)
+		handed.restorePending(fresh)
+		if len(fresh.conv.PendingPermissions()) != 1 {
+			t.Fatal("reconnecting the process should retain the plan card exactly once")
+		}
+		h.d.applyRestore(&restored)
+		if h.d.current != fresh || h.d.input.Text != "Unsent draft" ||
+			len(fresh.queue) != 1 || fresh.queue[0] != "Queued follow-up" ||
+			len(fresh.conv.PendingPermissions()) != 0 || len(fresh.conv.Items) != 2 {
+			t.Fatalf("reload without a running process did not retain the conversation, draft, and queue: %+v", fresh)
+		}
+	})
+}

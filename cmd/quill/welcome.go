@@ -25,6 +25,7 @@ const (
 	prefWelcomeSeen    = "welcomeSeen"
 	prefSTTOff         = "sttOff"
 	welcomeOnline      = "Online: Claude (needs a Claude sign-in)"
+	welcomeCodex       = "Online: Codex (uses your Codex configuration)"
 	welcomeLocal       = "Local: an open-weight model through Ollama, on this PC"
 	welcomeRules       = "Default rules (recommended for beginners)"
 	welcomeNoRules     = "No rules (advanced: write your own, or none)"
@@ -41,6 +42,7 @@ const (
 // welcomeChoices is what the user picked; applyWelcome turns it into settings.
 type welcomeChoices struct {
 	Local      bool
+	Codex      bool
 	LocalModel string
 	Lang       string // "" = speech to text off
 	Rules      bool
@@ -106,7 +108,10 @@ func systemLang() string {
 func (d *desk) applyWelcome(c welcomeChoices) []string {
 	p := d.app.Preferences()
 	var done []string
-	if c.Local {
+	p.SetBool(prefNewCodex, c.Codex)
+	if c.Codex {
+		done = append(done, "New sessions use Codex with your existing configuration.")
+	} else if c.Local {
 		p.SetString("newModel", c.LocalModel)
 		done = append(done, "New sessions use the local model "+strings.TrimPrefix(c.LocalModel, "ollama:")+".")
 	} else {
@@ -203,9 +208,11 @@ func (d *desk) welcomeMemoryNext(c welcomeChoices) bool {
 
 // showWelcome asks the questions; after runs when it closes.
 func (d *desk) showWelcome(after func()) {
-	model := widget.NewRadioGroup([]string{welcomeOnline, welcomeLocal}, nil)
+	model := widget.NewRadioGroup([]string{welcomeOnline, welcomeCodex, welcomeLocal}, nil)
 	model.SetSelected(welcomeOnline)
-	if isLocal(d.app.Preferences().String("newModel")) {
+	if d.app.Preferences().Bool(prefNewCodex) {
+		model.SetSelected(welcomeCodex)
+	} else if isLocal(d.app.Preferences().String("newModel")) {
 		model.SetSelected(welcomeLocal)
 	}
 	gb := memoryGB()
@@ -354,7 +361,7 @@ func (d *desk) showWelcome(after func()) {
 			d.app.Preferences().SetBool(prefWelcomeSeen, true)
 		} else {
 			c := welcomeChoices{
-				Local: model.Selected == welcomeLocal, LocalModel: local,
+				Local: model.Selected == welcomeLocal, LocalModel: local, Codex: model.Selected == welcomeCodex,
 				Lang:       byName[voice.Selected],
 				Rules:      rules.Selected == welcomeRules && !rules.Disabled(),
 				PlanFirst:  plan.Selected == welcomeAsk,
@@ -416,6 +423,11 @@ func (d *desk) newSessionModelSetting() fyne.CanvasObject {
 	d.newSessSel = sel
 	d.syncNewSessionSetting()
 	sel.OnChanged = func(v string) {
+		if v == optNewCodex {
+			d.app.Preferences().SetBool(prefNewCodex, true)
+			return
+		}
+		d.app.Preferences().SetBool(prefNewCodex, false)
 		if v == optNewOnline {
 			if isLocal(d.app.Preferences().String("newModel")) {
 				d.app.Preferences().SetString("newModel", "default")
@@ -437,6 +449,8 @@ func (d *desk) newSessionModelSetting() fyne.CanvasObject {
 
 const (
 	optNewOnline = "Online: Claude"
+	optNewCodex  = "Online: Codex"
+	prefNewCodex = "newSessionCodex"
 	prefNewMode  = "newMode"
 )
 
@@ -462,13 +476,15 @@ func (d *desk) syncNewSessionSetting() {
 	if sel == nil {
 		return
 	}
-	opts := []string{optNewOnline}
+	opts := []string{optNewOnline, optNewCodex}
 	for _, m := range d.localModelList() {
 		opts = append(opts, "Local: "+strings.TrimPrefix(m, "ollama:"))
 	}
 	cur := d.app.Preferences().StringWithFallback("newModel", "default")
 	want := optNewOnline
-	if isLocal(cur) {
+	if d.app.Preferences().Bool(prefNewCodex) {
+		want = optNewCodex
+	} else if isLocal(cur) {
 		want = "Local: " + strings.TrimPrefix(cur, "ollama:")
 		if !contains(opts, want) {
 			opts = append(opts, want)

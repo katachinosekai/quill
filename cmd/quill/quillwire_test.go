@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/katachinosekai/quill/internal/chat"
 )
 
 func undoButtons(o fyne.CanvasObject) []*widget.Button {
@@ -64,8 +67,9 @@ func TestQuillBadgeDotAndStatusFollowRole(t *testing.T) {
 			t.Fatal("the Quill button's badge counts the issue")
 		}
 		d.openAssistBox(boxQuill)
-		if !strings.HasPrefix(d.box().status.Text, "Ready") { // the main chat's indicator (t9a3a6a)
-			t.Fatalf("status line: %q", d.box().status.Text)
+		d.quillChat.view.setStatus(s)
+		if !strings.HasPrefix(d.quillChat.view.live.Text, "Ready") { // the main chat's indicator (t9a3a6a)
+			t.Fatalf("status line: %q", d.quillChat.view.live.Text)
 		}
 		if d.assistBubble(roleQuill).box.Visible() {
 			t.Fatal("seen once the box is open")
@@ -209,4 +213,95 @@ func TestQuillBoxShots(t *testing.T) {
 	})
 	time.Sleep(300 * time.Millisecond)
 	h.ui(func() { shot(t, h.w, dir, "quill-change-card.png") })
+}
+
+func TestQuillOperatorFollowsAndJumpsToLatest(t *testing.T) {
+	for _, role := range []string{roleQuill, roleCodexQuill} {
+		t.Run(role, func(t *testing.T) {
+			h := newDeskHarness(t, false)
+			h.ui(func() {
+				d := h.d
+				d.animate = false
+				if role == roleCodexQuill {
+					d.codexAssistant(codexQuillRole)
+				}
+				a := d.assistByRole(role)
+				session := d.addSessionWithBackend(h.proj, "default", "default", false, role == roleCodexQuill)
+				d.markHiddenAs(session, role)
+				a.s = session
+				for range 35 {
+					session.conv.AddUser("A message from earlier in the operator chat.")
+				}
+				d.openAssistBox(role)
+				view := d.hostFor(role).view()
+				d.syncVisibleChatFollow()
+				if !view.pinned() || view.jump.Visible() {
+					t.Fatal("the open operator should start at the latest message")
+				}
+
+				item := session.conv.AddNotice("Replying")
+				item.Kind, item.Streaming = chat.Assistant, true
+				for _, text := range []string{"Replying", strings.Repeat("The assistant's reply has several lines.\n", 35)} {
+					item.Text = text
+					d.chatFor(session, []*chat.Item{item})
+				}
+				late := canvas.NewRectangle(colCard)
+				late.SetMinSize(fyne.NewSize(1, 500))
+				view.box.Add(late)
+				d.syncVisibleChatFollow()
+				if !view.pinned() || view.jump.Visible() {
+					t.Fatal("the operator follow guard should recover when streaming content grows after layout")
+				}
+
+				view.scroll.Offset = fyne.NewPos(0, 0)
+				view.scroll.OnScrolled(view.scroll.Offset)
+				d.chatFor(session, []*chat.Item{session.conv.AddUser("Another new message")})
+				if view.follow || !view.jump.Visible() {
+					t.Fatalf("history mode after scrolling: follow=%v arrow=%v offset=%v lastY=%v viewport=%v", view.follow, view.jump.Visible(), view.scroll.Offset, view.lastY, view.scroll.Size())
+				}
+				d.closeAssistBox()
+				d.openAssistBox(role)
+				d.syncVisibleChatFollow()
+				if view.scroll.Offset.Y != 0 || !view.jump.Visible() || view.follow {
+					t.Fatalf("reopening should preserve history: follow=%v arrow=%v offset=%v lastY=%v viewport=%v", view.follow, view.jump.Visible(), view.scroll.Offset, view.lastY, view.scroll.Size())
+				}
+				var tap *jumpTap
+				deepWalk(view.jump, func(o fyne.CanvasObject) {
+					if button, ok := o.(*jumpTap); ok {
+						tap = button
+					}
+				})
+				if tap == nil {
+					t.Fatal("the visible arrow should have a tap target")
+				}
+				tap.Tapped(nil)
+				if !view.follow || !view.pinned() || view.jump.Visible() {
+					t.Fatal("the arrow should jump to the bottom and resume following")
+				}
+			})
+		})
+	}
+}
+
+func TestPortraitComposerUsesSidebarActionButtons(t *testing.T) {
+	h := newDeskHarness(t, false)
+	h.ui(func() {
+		d := h.d
+		for _, split := range []int{1, 2} {
+			d.setSplit(split)
+			for _, mode := range []string{layoutVertical, layoutHorizontal} {
+				d.setLayoutMode(mode)
+				wantToolbar := mode == layoutHorizontal
+				for _, o := range []fyne.CanvasObject{d.settingsBtn, d.quillBtnBox, d.kmemBtnBox} {
+					if o.Visible() != wantToolbar {
+						t.Fatalf("split %d, %s: incorrect composer toolbar visibility for %T", split, mode, o)
+					}
+				}
+				if !wantToolbar && (d.sideOff || len(d.settingsSlot.Objects) != 1 ||
+					!d.assistButtonFor(boxQuill).side.Visible() || !d.assistButtonFor(boxKmem).side.Visible()) {
+					t.Fatalf("split %d: portrait actions should be accessible from the sidebar", split)
+				}
+			}
+		}
+	})
 }

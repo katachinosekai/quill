@@ -5,9 +5,9 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.28
+Version:        0.1.29
 Release:        1%{?dist}
-Summary:        Desktop app for Claude Code sessions
+Summary:        Desktop app for Claude Code and Codex sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)
 URL:            https://github.com/katachinosekai/quill
 Source0:        %{name}-%{version}.tar.gz
@@ -33,10 +33,10 @@ BuildRequires:  wayland-devel
 BuildRequires:  libxkbcommon-devel
 
 %description
-Quill is a desktop app for Claude Code sessions. It runs the claude CLI in
-the background and gives each session a chat window, a session sidebar,
+Quill is a desktop app for Claude Code and Codex sessions. It runs the
+installed agent CLI in the background and gives each session a chat window, a session sidebar,
 approvals, live updates and built-in offline speech to text. Requires the
-claude CLI to be installed separately.
+selected agent CLI to be installed separately.
 
 %prep
 %autosetup
@@ -61,7 +61,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.katachinose
 
 %files
 %license LICENSE NOTICE THIRD_PARTY_LICENSES.txt
-%doc README.md
+%doc README.md CHANGELOG.md
 %{_bindir}/quill
 %{_libexecdir}/quill/
 %{_datadir}/applications/io.github.katachinosekai.quill.desktop

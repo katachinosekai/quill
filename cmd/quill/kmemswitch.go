@@ -88,8 +88,11 @@ func kmemJSONOut(out string, v any) error {
 // version and its import feature, python3 and kmem's core rules.
 func (d *desk) kmemSwitchDetect(home string) kmemSwitchCheck {
 	var c kmemSwitchCheck
-	if d.kmemAvailable() {
-		c.Bin = firstNonEmpty(kmemBin(), "kmem")
+	if !d.kmemOff {
+		c.Bin = kmemBin()
+		if d.kmemRun != nil {
+			c.Bin = firstNonEmpty(c.Bin, "kmem")
+		}
 	}
 	if c.Bin == "" {
 		c.Problems = append(c.Problems, "kmem is not installed (not on PATH or in ~/.local/bin). Install kmem first; it is available to Patreon patrons.")
@@ -114,6 +117,10 @@ func (d *desk) kmemSwitchDetect(home string) kmemSwitchCheck {
 		return c
 	}
 	c.Version = ver.Version
+	if d.kmemRun == nil && !supportedKmemVersion(ver.API, ver.Version) {
+		c.Problems = append(c.Problems, fmt.Sprintf("kmem %s is incompatible with this Quill build. Supported versions: %s.", ver.Version, supportedKmemSeries))
+		return c
+	}
 	features := ver.Features
 	if out, err := d.runKmemRaw("kmem", "features", "--json"); err == nil {
 		var obj struct {

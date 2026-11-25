@@ -20,6 +20,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/codex"
 	"github.com/katachinosekai/quill/internal/protocol"
 )
 
@@ -491,7 +492,7 @@ func (v *chatView) stick() {
 	}
 }
 
-func (v *chatView) followGuard(ctx context.Context) {
+func (d *desk) followGuard(ctx context.Context) {
 	t := time.NewTicker(700 * time.Millisecond)
 	defer t.Stop()
 	for {
@@ -499,11 +500,26 @@ func (v *chatView) followGuard(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			v.d.do(func() {
-				if v.follow && !v.d.hidden {
-					v.stick()
-				}
-			})
+			d.do(d.syncVisibleChatFollow)
+		}
+	}
+}
+
+func (d *desk) syncVisibleChatFollow() {
+	if d.hidden {
+		return
+	}
+	if d.chat != nil {
+		d.chat.stick()
+	}
+	switch role := d.assistBoxRole(); role {
+	case boxQuill, roleCodexQuill:
+		host := d.hostFor(role)
+		if host.view != nil {
+			if view := host.view(); view != nil {
+				view.stick()
+				view.syncJump()
+			}
 		}
 	}
 }
@@ -586,7 +602,7 @@ func (v *chatView) syncJump() {
 	if v.jump == nil {
 		return
 	}
-	show := !v.follow && v.s != nil
+	show := v.s != nil && (!v.follow || !v.atBottom())
 	if show == v.jump.Visible() {
 		return
 	}
@@ -1126,7 +1142,7 @@ func toolInputText(it *chat.Item) string {
 	}
 	var m map[string]any
 	if json.Unmarshal(it.Input, &m) == nil {
-		if cmd, ok := m["command"].(string); ok && it.ToolName == "Bash" {
+		if cmd, ok := m["command"].(string); ok && activityChipLabel(it.ToolName) == "Command" {
 			return "$ " + cmd
 		}
 	}
@@ -1225,6 +1241,9 @@ func (v *chatView) diffView(it *chat.Item, iv *itemView) fyne.CanvasObject {
 
 func (v *chatView) renderQuestions(it *chat.Item) fyne.CanvasObject {
 	if it.PermState == chat.PermPending {
+		if v.s != nil && v.s.pendingRevision != nil {
+			return v.buildQuestions(it)
+		}
 		if c, ok := v.qcards[it]; ok {
 			return c
 		}
@@ -1243,7 +1262,11 @@ func (v *chatView) buildQuestions(it *chat.Item) fyne.CanvasObject {
 	owner := v.s
 	qs := protocol.ParseQuestions(it.Input)
 	var parts []fyne.CanvasObject
-	head := widget.NewLabel("Claude is asking")
+	title := "Question"
+	if owner != nil {
+		title = owner.engineName() + " is asking"
+	}
+	head := widget.NewLabel(title)
 	head.Alignment = v.align()
 	head.TextStyle = fyne.TextStyle{Bold: true}
 	parts = append(parts, head)
@@ -1349,31 +1372,47 @@ func (v *chatView) renderPermission(it *chat.Item) fyne.CanvasObject {
 	if it.ToolName == "AskUserQuestion" {
 		return v.renderQuestions(it)
 	}
-	title := widget.NewLabel("Allow " + it.ToolName + "?")
+	native := codexCommandPermission(it)
+	label := "Allow " + it.ToolName + "?"
+	if native {
+		label = nativeApprovalLabel(it)
+	}
+	if it.ToolName == codex.SettingsApproval {
+		label = "Apply the requested Quill setting change?"
+	}
+	title := widget.NewLabel(label)
 	title.Alignment = v.align()
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	parts := []fyne.CanvasObject{title}
-	if it.Request != nil && it.Request.DecisionReason != "" {
-		r := widget.NewLabel(it.Request.DecisionReason)
-		r.Wrapping = fyne.TextWrapWord
-		r.Alignment = v.align()
-		parts = append(parts, r)
+	var details fyne.CanvasObject
+	if native {
+		preview, detail := v.nativeApprovalBody(it)
+		parts = append(parts, preview...)
+		details = detail
+	} else {
+		if it.Request != nil && it.Request.DecisionReason != "" {
+			parts = append(parts, v.approvalPreview(it.Request.DecisionReason))
+		}
+		if it.Summary != "" {
+			parts = append(parts, v.approvalPreview(it.Summary))
+		}
+		parts = append(parts, permDetail(v, it)...)
 	}
-	if it.Summary != "" {
-		s := widget.NewLabel(it.Summary)
-		s.Wrapping = fyne.TextWrapWord
-		s.Alignment = v.align()
-		parts = append(parts, s)
-	}
-	parts = append(parts, permDetail(v, it)...)
 	if it.PermState == chat.PermPending {
 		ok := v.d.canAnswer(v.s)
 		allow := glowButton("Allow", theme.ConfirmIcon(), colIdle, ok, v.guarded(func() { v.d.answer(owner, it, protocol.Allow) }))
 		always := glowButton("Allow always (this session)", nil, colAccent, ok, v.guarded(func() { v.d.answer(owner, it, protocol.AllowAlways) }))
 		deny := glowButton("Deny", theme.CancelIcon(), colError, ok, v.guarded(func() { v.d.answer(owner, it, protocol.Deny) }))
-		parts = append(parts, v.buttonRow(allow, always, deny))
+		if it.ToolName == codex.SettingsApproval || native && !nativeSessionApprovalAvailable(it) {
+			parts = append(parts, v.buttonRow(allow, deny))
+		} else {
+			parts = append(parts, v.buttonRow(allow, always, deny))
+		}
 	} else {
 		parts = append(parts, v.muted(permStateText(it.PermState), fontBody))
+	}
+	if details != nil {
+		parts = append(parts, details)
 	}
 	border := colAccent
 	if it.PermState != chat.PermPending {
@@ -1481,6 +1520,12 @@ func permDetail(v *chatView, it *chat.Item) []fyne.CanvasObject {
 	}
 	if len(it.Diff) > 0 {
 		return []fyne.CanvasObject{v.diffView(it, &itemView{})}
+	}
+	if it.ToolName == codex.SettingsApproval {
+		var formatted bytes.Buffer
+		if json.Indent(&formatted, it.Input, "", "  ") == nil {
+			return []fyne.CanvasObject{v.monoFold(formatted.String(), it, &itemView{})}
+		}
 	}
 	in := toolInputText(it)
 	if in == "" {
@@ -1673,17 +1718,26 @@ func (v *chatView) stepChip(it *chat.Item) fyne.CanvasObject {
 	m := canvas.NewText(mark, col)
 	m.TextStyle.Bold = true
 	m.TextSize = fontBody
-	name := it.ToolName
-	if name == "" {
-		name = "Tool"
-	}
-	n := mutedText(name, fontBody)
+	n := mutedText(activityChipLabel(it.ToolName), fontBody)
 	bgr := canvas.NewRectangle(colCard)
 	bgr.CornerRadius = 8
 	chip := container.NewStack(bgr, container.New(layout.NewCustomPaddedLayout(2, 2, 7, 7), container.NewHBox(m, n)))
 	return newTapRow(chip, func() {
 		v.toggleStep(it)
 	})
+}
+
+func activityChipLabel(tool string) string {
+	switch tool {
+	case "Bash", "PowerShell", "Codex command":
+		return "Command"
+	case "Codex file changes":
+		return "File changes"
+	case "":
+		return "Tool"
+	default:
+		return tool
+	}
 }
 
 type flowLayout struct {
@@ -1792,20 +1846,23 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 	title.Alignment = v.align()
 	title.Wrapping = fyne.TextWrapWord
 	title.TextStyle = fyne.TextStyle{Bold: true}
+	owner := v.s
 	msg := widget.NewLabel("Claude's plan is above. Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done.")
+	if owner != nil && owner.codex {
+		msg.SetText(codexPlanApprovalCaption)
+	}
 	msg.Wrapping = fyne.TextWrapWord
 	msg.Alignment = v.align()
 	msg.SizeName = theme.SizeNameCaptionText
 	parts := []fyne.CanvasObject{msg, title} // the warning comes before the question
 	border := colAccent
-	owner := v.s
 	state := planActive
 	if owner != nil {
 		state = planState(owner.conv, it)
 	}
 	if it.PermState == chat.PermPending && state == planActive {
 		no := glowButton("Don't run", theme.CancelIcon(), colError, true, v.guarded(func() { v.d.answerPlan(owner, it, false) }))
-		approve := glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() { v.d.answerPlan(owner, it, true) }))
+		approve := glowButton(planApproveLabel(owner), theme.ConfirmIcon(), colIdle, v.d.canApprovePlan(owner), v.guarded(func() { v.d.answerPlan(owner, it, true) }))
 		var qs []planQ
 		var appr *approvalOpts
 		kind := "pending"
@@ -1817,7 +1874,11 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 		case appr != nil:
 			// The approval question's own options (or picks, with a
 			// "Don't run") answer the plan (planapproval.go); other questions share the card and one Send.
-			msg.SetText("Claude's plan is above. " + approvalCaption(appr))
+			if owner.codex {
+				msg.SetText(approvalCaption(owner, appr))
+			} else {
+				msg.SetText("Claude's plan is above. " + approvalCaption(owner, appr))
+			}
 			// The title is the approval question: its buttons go right under
 			// it, the other questions after them.
 			var ans map[int]planAnswer
@@ -1835,13 +1896,13 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 			// a control for each, all answers go with Approve.
 			ans := v.planAnswers(it, qs)
 			parts = append(parts, v.planQuestionForm(qs, ans))
-			run := glowButton("Approve plan & send answers", theme.ConfirmIcon(), colIdle, v.d.canAnswer(owner), v.guarded(func() { v.d.answerPlanAnswers(owner, it, qs, ans) }))
+			run := glowButton("Approve plan & send answers", theme.ConfirmIcon(), colIdle, v.d.canApprovePlan(owner), v.guarded(func() { v.d.answerPlanAnswers(owner, it, qs, ans) }))
 			parts = append(parts, v.buttonRow(run, no))
 		default:
 			parts = append(parts, v.buttonRow(approve, no))
 		}
 		v.noteButtons(it.Seq, kind)
-	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.conv.Busy && !owner.inTurn && !replied(owner, it) {
+	} else if it.PermState == chat.PermAllowed && owner != nil && !owner.codex && !owner.conv.Busy && !owner.inTurn && !replied(owner, it) {
 		// Not while a turn is under way: Busy drops between a turn's steps,
 		// and this button flipped in and out under the pointer (tb704f5).
 		resend := glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, v.guarded(func() { v.d.answerPlan(owner, it, true) }))
@@ -1855,18 +1916,14 @@ func (v *chatView) renderPlan(it *chat.Item) fyne.CanvasObject {
 				parts = append(parts, v.approvalRadio(owner, it, appr, false))
 			} else {
 				parts = append(parts, v.buttonRow(
-					glowButton("Approve plan & run all", theme.ConfirmIcon(), colIdle, false, nil),
+					glowButton(planApproveLabel(owner), theme.ConfirmIcon(), colIdle, false, nil),
 					glowButton("Don't run", theme.CancelIcon(), colError, false, nil)))
 			}
 		}
-		parts = append(parts, v.muted(planStatus(it, state), fontBody))
+		parts = append(parts, v.muted(planStatus(owner, it, state), fontBody))
 		border = color.NRGBA{0x44, 0x44, 0x40, 0xff}
 	}
-	r := canvas.NewRectangle(colCard)
-	r.CornerRadius = 10
-	r.StrokeColor = border
-	r.StrokeWidth = 1.5
-	return v.fadeIn(it.Seq, container.NewVBox(padTop(4), container.NewStack(r, container.NewPadded(container.NewVBox(parts...))), padTop(4)))
+	return v.fadeIn(it.Seq, v.planCardFrame(parts, border))
 }
 
 type fitCenter struct{ natural float32 }
@@ -2257,7 +2314,7 @@ func numberedChoiceQs(text string) (string, []numChoiceQ) {
 // questions, or has a plan card after it, shows none.
 func (v *chatView) choiceGate(it *chat.Item) (ok, latest bool) {
 	s := v.s
-	if keptPlan(s.conv, it.Text) != nil {
+	if codexQuestionSupersedes(s, it) || keptPlan(s.conv, it.Text) != nil {
 		return false, false // repeats the unanswered plan card's questions
 	}
 	latest = true
@@ -2404,8 +2461,95 @@ func (v *chatView) choiceCard(it *chat.Item) (string, fyne.CanvasObject) {
 	return body, v.fadeIn(it.Seq, questionCard(parts, latest))
 }
 
+func codexQuestionSupersedes(s *deskSession, choice *chat.Item) bool {
+	if s == nil || !s.codex {
+		return false
+	}
+	found := false
+	for _, it := range s.conv.Items {
+		switch {
+		case it == choice:
+			found = true
+		case it.Kind == chat.User && !notFromUser(it.Text):
+			if found {
+				return false
+			}
+		case found && it.Kind == chat.Permission && isQuestion(it) && it.PermState != chat.PermCancelled:
+			if sameNativeQuestion(choice.Text, it.Input) {
+				return true
+			}
+		}
+	}
+	if found {
+		for _, it := range s.conv.PendingPermissions() {
+			if it.Kind == chat.Permission && isQuestion(it) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sameNativeQuestion(text string, input json.RawMessage) bool {
+	normalize := func(text string) string {
+		return strings.ToLower(strings.Join(strings.Fields(strings.Trim(mdNoise.Replace(text), " ?.:*_-")), " "))
+	}
+	text, _ = chat.SplitSources(text)
+	lines, _ := chat.JoinOptionLineSpans(text)
+	for _, line := range lines {
+		title, opts, ok := parseChoices(line)
+		if !ok {
+			continue
+		}
+		if lead := numLead.FindString(title); lead != "" {
+			title = strings.TrimPrefix(title, lead)
+		}
+		for _, question := range protocol.ParseQuestions(input) {
+			prompt := normalize(question.Question)
+			if prompt == "" {
+				continue
+			}
+			if normalize(title) == prompt {
+				return true
+			}
+			prefix, _, hasOptions := strings.Cut(title, ":")
+			if !hasOptions || normalize(prefix) != prompt || len(opts) != len(question.Options) {
+				continue
+			}
+			same := true
+			for i, option := range opts {
+				same = same && normalize(option) == normalize(question.Options[i].Label)
+			}
+			if same {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func codexChoiceBeforeQuestion(s *deskSession, question *chat.Item) []*chat.Item {
+	if !s.codex || question.Kind != chat.Permission || !isQuestion(question) {
+		return nil
+	}
+	var replies []*chat.Item
+	for i := len(s.conv.Items) - 1; i >= 0; i-- {
+		it := s.conv.Items[i]
+		if it.Kind == chat.User && !notFromUser(it.Text) {
+			break
+		}
+		if it.Kind == chat.Assistant && !it.Streaming && asksNewQuestion(it.Text) {
+			replies = append(replies, it)
+		}
+	}
+	return replies
+}
+
 func (d *desk) pickChoice(s *deskSession, it *chat.Item, option string) {
-	if s != nil && s.remote != nil {
+	if s == nil || codexQuestionSupersedes(s, it) {
+		return
+	}
+	if s.remote != nil {
 		d.remoteChoice(s, it, option)
 		return
 	}

@@ -53,6 +53,15 @@ func (d *desk) fetchCommands() {
 }
 
 func (d *desk) commandsFor(s *deskSession) []protocol.Command {
+	if s != nil && s.codex {
+		var available []protocol.Command
+		for _, cmd := range localCommands {
+			if supportsCodexCommand(cmd.Name) {
+				available = append(available, cmd)
+			}
+		}
+		return available
+	}
 	list := d.cmdList
 	if s != nil && s.proc != nil {
 		if c := s.proc.Commands(); len(c) > 0 {

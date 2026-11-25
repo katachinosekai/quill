@@ -132,7 +132,7 @@ func (d *desk) escape(s *deskSession) bool {
 			return true
 		}
 	}
-	if s != nil && s.running() && (s.conv.Busy || s.proc.Busy()) {
+	if s != nil && s.running() && (s.conv.Busy || s.proc.Busy() || hasPendingPlan(s)) {
 		d.interrupt(s)
 		return true
 	}

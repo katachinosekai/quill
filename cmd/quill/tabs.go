@@ -175,7 +175,8 @@ func (d *desk) buildTabs() fyne.CanvasObject {
 	d.tabBar = container.New(layout.NewCustomPaddedLayout(4, 4, 8, 8), d.strip.box)
 	d.tabCenter = container.NewStack(d.tabBar)
 	d.applyTabCentering()
-	newTab := widget.NewButtonWithIcon("", theme.ContentAddIcon(), d.newSessionDialog)
+	var newTab *widget.Button
+	newTab = widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() { d.showNewSessionMenu(newTab) })
 	newTab.Importance = widget.LowImportance
 	d.strip.plus = newTab
 	d.strip.setChips(nil)
@@ -562,6 +563,16 @@ func (d *desk) tabMenu(id string, at fyne.Position) {
 // loses them: its title is the old name until it ends.
 func (d *desk) tabMenuItems(id string) []*fyne.MenuItem {
 	items := d.sessionMenuItems(id)
+	if s := d.session(id); s != nil && s.remote == nil {
+		backend := fyne.NewMenuItem("Tab backend", nil)
+		backend.ChildMenu = fyne.NewMenu("Tab backend", d.backendItems(s, func() {
+			d.updateChrome()
+			if pane := d.paneFor(s); pane != nil {
+				d.syncPaneControls(pane)
+			}
+		})...)
+		items = append([]*fyne.MenuItem{backend}, items...)
+	}
 	_, old := d.mergeTarget(id)
 	if d.topicOf(id) == "" && !old {
 		return items

@@ -53,7 +53,9 @@ const backendRemote = "Remote"
 // not on the button: a wider button pushes Voice out of the row.
 func setBackendButton(b *widget.Button, s *deskSession) bool {
 	text, imp := backendOnline, widget.MediumImportance
-	if isLocal(s.model) {
+	if s.codex {
+		text = "ChatGPT"
+	} else if isLocal(s.model) {
 		text, imp = backendLocal, widget.WarningImportance
 	}
 	if b.Text != text || b.Importance != imp {
@@ -207,6 +209,20 @@ func (d *desk) localModelList() []string {
 }
 
 func (d *desk) modelOptions(s *deskSession) []string {
+	if s.codex {
+		opts := []string{"default"}
+		if catalog := d.codexCatalogs[s.cwd]; catalog != nil {
+			for _, model := range catalog.Models {
+				if model.Model != "" && !model.Hidden && !contains(opts, model.Model) {
+					opts = append(opts, model.Model)
+				}
+			}
+		}
+		if s.model != "" && !contains(opts, s.model) {
+			opts = append(opts, s.model)
+		}
+		return opts
+	}
 	opts := claudeModels
 	if isLocal(s.model) {
 		opts = d.localModelList()
@@ -218,6 +234,9 @@ func (d *desk) modelOptions(s *deskSession) []string {
 }
 
 func modeOptions(s *deskSession) []string {
+	if s.codex {
+		return []string{"default"}
+	}
 	if isLocal(s.model) {
 		return localModes
 	}
@@ -478,6 +497,18 @@ func relayoutTree(o fyne.CanvasObject) {
 // turns Claude Code's Remote Control on or off for the session (control it
 // from claude.ai or the Claude app; it works with either backend).
 func (d *desk) backendItems(s *deskSession, after func()) []*fyne.MenuItem {
+	if s.codex {
+		current := fyne.NewMenuItem("ChatGPT", nil)
+		current.Checked = true
+		current.Disabled = true
+		claude := fyne.NewMenuItem("Claude Code", func() { d.selectTabAgent(s, false) })
+		local := fyne.NewMenuItem("Local (Ollama on this PC)", func() {
+			d.refreshLocalModels()
+			d.selectTabAgentWithModel(s, false, d.defaultLocal())
+		})
+		return []*fyne.MenuItem{current, claude, local}
+	}
+	newCodex := fyne.NewMenuItem("ChatGPT", func() { d.selectTabAgent(s, true) })
 	pick := func(backend string) *fyne.MenuItem {
 		label := backend + " (Claude models)"
 		if backend == backendLocal {
@@ -495,7 +526,7 @@ func (d *desk) backendItems(s *deskSession, after func()) []*fyne.MenuItem {
 		after()
 	})
 	remote.Checked = s.rcOn
-	return []*fyne.MenuItem{pick(backendOnline), pick(backendLocal), fyne.NewMenuItemSeparator(), remote}
+	return []*fyne.MenuItem{pick(backendOnline), newCodex, pick(backendLocal), fyne.NewMenuItemSeparator(), remote}
 }
 
 func (d *desk) showBackendMenu(s *deskSession, b *widget.Button, after func()) {

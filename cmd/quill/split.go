@@ -22,26 +22,27 @@ const (
 )
 
 type pane struct {
-	slot    *fyne.Container
-	auto    *autoChip
-	d       *desk
-	view    *chatView
-	title   *widget.Label
-	reload  *widget.Button // Reload for Other PCs sessions (remotereload.go)
-	outline *canvas.Rectangle
-	dropHL  *canvas.Rectangle
-	root    fyne.CanvasObject
-	input   *sendEntry
-	lastID  string
-	picker  *fyne.Container
-	choices *fyne.Container
-	model   *widget.Select
-	mode    *widget.Select
-	backend *widget.Button
-	stop    *widget.Button
-	mic     *widget.Button
-	stats   *canvas.Text
-	quiet   bool
+	reasoning *reasoningControl
+	slot      *fyne.Container
+	auto      *autoChip
+	d         *desk
+	view      *chatView
+	title     *widget.Label
+	reload    *widget.Button // Reload for Other PCs sessions (remotereload.go)
+	outline   *canvas.Rectangle
+	dropHL    *canvas.Rectangle
+	root      fyne.CanvasObject
+	input     *sendEntry
+	lastID    string
+	picker    *fyne.Container
+	choices   *fyne.Container
+	model     *widget.Select
+	mode      *widget.Select
+	backend   *widget.Button
+	stop      *widget.Button
+	mic       *widget.Button
+	stats     *canvas.Text
+	quiet     bool
 
 	pending []*chat.Item
 	timer   *time.Timer
@@ -171,8 +172,8 @@ func (d *desk) newPane() *pane {
 	})
 	sendBtn.Importance = widget.HighImportance
 	p.stop = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
-		if p.view.s != nil {
-			d.interrupt(p.view.s)
+		if s := d.messageSession(p.input, p.view.s); s != nil {
+			d.interrupt(s)
 		}
 	})
 	p.stop.Importance = widget.DangerImportance
@@ -183,33 +184,32 @@ func (d *desk) newPane() *pane {
 	})
 	p.mic.Importance = widget.LowImportance
 	p.model = widget.NewSelect(modelChoices, func(v string) {
-		if !p.quiet && p.view.s != nil {
-			d.setModel(p.view.s, v)
+		if s := d.messageSession(p.input, p.view.s); !p.quiet && s != nil {
+			d.setModel(s, v)
+			if s.codex {
+				d.syncPaneControls(p)
+			}
 		}
 	})
 	p.mode = widget.NewSelect(modeChoices, func(v string) {
-		if !p.quiet && p.view.s != nil {
-			d.setMode(p.view.s, v)
+		if s := d.messageSession(p.input, p.view.s); !p.quiet && s != nil {
+			d.setMode(s, v)
+			if s.codex {
+				d.syncPaneControls(p)
+			}
 		}
 	})
 	p.backend = widget.NewButton(backendOnline, func() {
-		if p.view.s != nil {
-			d.focusPane(p)
-			d.showBackendMenu(p.view.s, p.backend, func() { d.syncPaneControls(p) })
-		}
-	})
-	openAll := widget.NewButtonWithIcon("", theme.MenuDropDownIcon(), func() {
 		d.focusPane(p)
-		d.setAllChips(true)
+		d.showMessageBackend(p.input, p.view.s, p.backend, func() { d.syncPaneControls(p) })
 	})
-	openAll.Importance = widget.MediumImportance
-	closeAll := widget.NewButtonWithIcon("", theme.MenuDropUpIcon(), func() {
+	chips := menuButton(activityChipsLabel, theme.MenuDropUpIcon(), func() []*fyne.MenuItem {
 		d.focusPane(p)
-		d.setAllChips(false)
+		return d.chipItems()
 	})
-	closeAll.Importance = widget.MediumImportance
 	p.auto = newAutoChip(func() { d.setAutoApprove(p.view.s, false) })
-	controls := container.NewBorder(nil, nil, container.NewHBox(p.backend, boxed(p.model), boxed(p.mode), p.auto), container.NewHBox(openAll, closeAll))
+	p.reasoning = d.newReasoningControl()
+	controls := container.NewBorder(nil, nil, container.NewHBox(p.backend, boxed(p.model), boxed(p.mode), p.reasoning.root, p.auto), chips)
 	cue := d.newCue(p.input, sendBtn)
 	side := container.NewVBox(p.stop, layout.NewSpacer(), p.mic, cue.send)
 	card := bg(colInput, 10, container.NewBorder(nil, container.NewThemeOverride(controls, compactTheme{}), cue.chip, side, p.input))
@@ -240,11 +240,17 @@ func (d *desk) newPane() *pane {
 const emptyPaneText = "Drag and drop a session"
 
 func (d *desk) sendFromPane(p *pane, text string) {
-	if p.view.s == nil || strings.TrimSpace(text) == "" {
+	if d.saveQueueEdit(p.view.s, p.input, text) {
+		return
+	}
+	if p.view.s == nil || strings.TrimSpace(text) == "" || pendingRevisionMatches(p.view.s, text) {
 		return
 	}
 	d.focusPane(p)
 	d.send(text)
+	if p.view.s.pendingRevision != nil {
+		return
+	}
 	if p.view.s != nil && strings.TrimSpace(p.input.Text) == strings.TrimSpace(text) {
 		p.input.SetText("")
 	}
@@ -765,18 +771,30 @@ func (d *desk) sendNowFromPane(p *pane, text string) {
 		return
 	}
 	d.focusPane(p)
+	if d.saveQueueEdit(p.view.s, p.input, text) || d.reviseApproval(p.view.s, p.input, text) {
+		return
+	}
 	d.sendNow(text)
 	p.input.SetText("")
 }
 
 func (d *desk) syncPaneControls(p *pane) {
-	s := p.view.s
+	s := d.messageSession(p.input, p.view.s)
+	d.syncReasoningControl(p.reasoning, s)
+	role := d.targeted(p.input)
+	if role == "" {
+		updateEngineHint(p.input, s)
+	}
 	p.quiet = true
 	defer func() { p.quiet = false }()
 	if s == nil {
 		p.model.Disable()
 		p.mode.Disable()
 		p.backend.Disable()
+		if role != "" {
+			p.backend.Enable()
+			p.backend.SetText("Agent")
+		}
 		p.stop.Disable()
 		p.mic.Disable()
 		setText(p.stats, "")
@@ -788,11 +806,12 @@ func (d *desk) syncPaneControls(p *pane) {
 	p.mode.Enable()
 	p.backend.Enable()
 	p.mic.Enable()
+	setCodexControls(s, p.model, p.mode)
 	if d.syncAutoChip(p.auto, s) && d.mainPane != nil {
 		relayoutTree(d.mainPane)
 	}
 	setOptions(p.model, d.modelOptions(s))
-	setOptions(p.mode, modeOptions(s))
+	setOptions(p.mode, d.composerModeOptions(s))
 	if setBackendButton(p.backend, s) && d.mainPane != nil {
 		relayoutTree(d.mainPane)
 	}
@@ -802,7 +821,7 @@ func (d *desk) syncPaneControls(p *pane) {
 	if p.mode.Selected != s.mode {
 		p.mode.SetSelected(s.mode)
 	}
-	if s.running() && (s.conv.Busy || s.proc.Busy()) {
+	if s.running() && (s.conv.Busy || s.proc.Busy() || hasPendingPlan(s)) {
 		p.stop.Enable()
 	} else {
 		p.stop.Disable()

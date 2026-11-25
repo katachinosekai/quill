@@ -327,7 +327,8 @@ func TestPhoneOpenTopicQuillStarting(t *testing.T) {
 	var out map[string]any
 	var fail *apiErr
 	h.ui(func() {
-		// Direct: the probe is asynchronous, so no session exists yet.
+		h.d.startAgent(h.d.quillAssist())
+		// The explicit Start probes asynchronously, so no session exists yet.
 		out, fail = (&phoneAPI{d: h.d}).openTopicWrite(writeBody{OpenTopic: &apiOpenTopic{Topic: quillOpName}})
 		if s := h.d.quillAssist().s; s != nil {
 			t.Log("operator already has a session; the starting flag is then", out["starting"])

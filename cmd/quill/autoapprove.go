@@ -230,7 +230,7 @@ func (d *desk) autoOffForEnd(id string) {
 // when the card's checkbox (or the phone's keepApproving) asked for it.
 // sendTo turns it off again if the message can't be sent (autoStartFailed).
 func (d *desk) keepApproving(s *deskSession, msg string) string {
-	if !d.keepNext || !d.planFirst || s == nil || s.remote != nil {
+	if !d.keepNext || !d.planFirst || s == nil || s.codex || s.remote != nil {
 		return msg
 	}
 	starting, prev := !s.autoApprove, s.autoNote
@@ -305,7 +305,7 @@ func (d *desk) autoApproveItem(s *deskSession) *fyne.MenuItem {
 // it doesn't apply (plan-first off, a remote session, already on, an
 // inactive card).
 func (v *chatView) keepCheck(owner *deskSession, plan *chat.Item, active bool) fyne.CanvasObject {
-	if !active || owner == nil || owner.remote != nil || owner.autoApprove || !v.d.planFirst {
+	if !active || owner == nil || owner.codex || owner.remote != nil || owner.autoApprove || !v.d.planFirst {
 		return nil
 	}
 	c := widget.NewCheck(autoApproveCheck, func(on bool) {

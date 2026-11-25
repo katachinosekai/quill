@@ -21,7 +21,8 @@ import (
 func (d *desk) attachQuillBox() {
 	d.quillChat = d.attachAssistBox(quillRole, "Quill operator", "Message the Quill operator")
 	c := d.quillChat
-	c.mirrors = newPlanMirrors(func() float32 { return c.root.Size().Height })
+	c.mirrors = newPlanMirrors(func() float32 { return c.mirrors.host.root.Size().Height })
+	c.mirrors.host = c
 	c.top.Add(c.mirrors.wrap)
 	d.syncPlanMirrors()
 	d.setSettingsCard(d.quillSettingsCard)

@@ -23,6 +23,9 @@ func (d *desk) enqueue(s *deskSession, text string) {
 }
 
 func (d *desk) clearInputFor(s *deskSession, text string) {
+	if s.qedit != nil {
+		return
+	}
 	if p := d.paneFor(s); p != nil && d.split() {
 		if strings.TrimSpace(p.input.Text) == strings.TrimSpace(text) {
 			p.input.SetText("")
@@ -34,11 +37,22 @@ func (d *desk) clearInputFor(s *deskSession, text string) {
 	}
 }
 
-// sendOrQueue sends text to s, or queues it (sent when the turn ends, as
-// the main message box does) while s is mid-turn: a message written into a
-// running turn left Quill's turn state behind the process (t653485).
+func (s *deskSession) steerCodexMessage() bool {
+	return s.canSteer(true) && (s.conv.Busy || s.proc.Busy())
+}
+
+func (s *deskSession) shouldQueue() bool {
+	return s.queueBlocked() || s.remote == nil && s.running() && (s.conv.Busy || s.proc.Busy()) &&
+		!s.canSteer(false) && !s.steerCodexMessage()
+}
+
+func (s *deskSession) queueBlocked() bool {
+	return s.remote == nil && (s.agentHandoff != nil || s.pendingRevision != nil || s.pickPending || s.compacting || s.codexUpgrading)
+}
+
+// sendOrQueue uses the same turn delivery rules as the main message box.
 func (d *desk) sendOrQueue(s *deskSession, text string) {
-	if s.remote == nil && (s.compacting || s.running() && (s.conv.Busy || s.proc.Busy())) {
+	if s.shouldQueue() {
 		s.queue = append(s.queue, text)
 		d.syncQueue(s)
 		return
@@ -47,13 +61,16 @@ func (d *desk) sendOrQueue(s *deskSession, text string) {
 }
 
 func (d *desk) flushQueue(s *deskSession) {
-	if len(s.queue) == 0 || !s.running() || d.usagePaused {
+	if len(s.queue) == 0 || s.qedit != nil || !s.running() || s.stopping || s.loading || s.takeover || s.shouldQueue() || d.usagePaused && !s.codex {
 		return
 	}
-	text := strings.Join(s.queue, "\n\n")
-	s.queue = nil
-	d.syncQueue(s)
-	d.sendTo(s, text)
+	if s.codex && livePlan(s.conv) != nil {
+		return // queued messages predate the card and cannot answer it
+	}
+	if d.deliverTurn(s, strings.Join(s.queue, "\n\n"), s.steerCodexMessage()) {
+		s.queue = nil
+		d.syncQueue(s)
+	}
 }
 
 func (d *desk) viewFor(s *deskSession) *chatView {
@@ -73,13 +90,13 @@ func (d *desk) syncQueue(s *deskSession) {
 	for _, p := range d.panes {
 		views = append(views, p.view)
 	}
+	if v := d.viewFor(s); v != nil && !slices.Contains(views, v) {
+		d.drawQueue(v, s)
+	}
 	for _, v := range views {
 		if v != nil && v.s == s {
 			d.drawQueue(v, s)
 		}
-	}
-	if v := d.viewFor(s); v != nil && v.s != s {
-		d.drawQueue(v, s)
 	}
 }
 
@@ -101,7 +118,7 @@ func (d *desk) drawQueue(v *chatView, s *deskSession) {
 		return m
 	}
 	if len(s.queue) > 0 {
-		rows = append(rows, head("Queued, sent when Claude finishes · ↑ in an empty box edits the last one"))
+		rows = append(rows, head("Queued, sent when "+s.engineName()+" finishes · ↑ in an empty box edits the last one"))
 	}
 	if s.qedit != nil {
 		rows = append(rows, head(fmt.Sprintf("Editing queued message %d · Enter saves it in place · ↓ or Esc puts it back unchanged", s.qedit.idx+1)))
@@ -190,6 +207,19 @@ func queueRowExtra() float32 {
 	return 16 + 3*btn + 4*theme.Padding() + 2*theme.InnerPadding() + 2*8
 }
 
+func (d *desk) queueInputFor(s *deskSession) *sendEntry {
+	if s != nil && d.main.role != "" && d.targetSession(d.main.role) == s {
+		return d.main.in
+	}
+	if a := d.assistOf(s); a != nil {
+		if a.role.id == roleQuill && d.quillChat != nil {
+			return d.quillChat.input
+		}
+		return a.input
+	}
+	return d.inputFor(s)
+}
+
 func (d *desk) inputFor(s *deskSession) *sendEntry {
 	if p := d.paneFor(s); p != nil && d.split() {
 		return p.input
@@ -201,6 +231,7 @@ type queueEdit struct {
 	idx   int
 	text  string
 	draft string
+	in    *sendEntry
 }
 
 func (d *desk) boxDraft(s *deskSession, in *sendEntry) string {
@@ -214,7 +245,7 @@ func (d *desk) boxDraft(s *deskSession, in *sendEntry) string {
 }
 
 func (d *desk) idleForQueue(s *deskSession) bool {
-	return s.running() && !s.conv.Busy && !s.proc.Busy() && !s.compacting
+	return s.running() && !s.conv.Busy && !s.proc.Busy() && !s.compacting && s.agentHandoff == nil
 }
 
 func (s *deskSession) editRemoved(i int) {
@@ -280,28 +311,46 @@ func (d *desk) sendQueuedNow(s *deskSession, i int) {
 	if i < 0 || i >= len(s.queue) {
 		return
 	}
-	if s.compacting || s.takeover || s.loading || s.terminal != nil && !s.running() {
+	steer := s.codex && s.running() && (s.conv.Busy || s.proc.Busy())
+	if s.queueBlocked() || s.takeover || s.loading || s.stopping ||
+		s.terminal != nil && !s.running() || steer && !s.canSteer(true) {
 		d.notify(s, "This session can't take a message right now; it stays queued.")
 		return
 	}
-	text := s.queue[i]
-	s.queue = append(s.queue[:i], s.queue[i+1:]...)
-	s.editRemoved(i)
+	if d.deliverTurn(s, s.queue[i], steer) {
+		s.queue = append(s.queue[:i], s.queue[i+1:]...)
+		s.editRemoved(i)
+		d.syncQueue(s)
+	}
+}
+
+func (d *desk) finishQueueEdit(s *deskSession, text string) {
+	q := s.qedit
+	s.qedit = nil
+	idx := min(q.idx, len(s.queue))
+	s.queue = slices.Insert(s.queue, idx, text)
+	if q.in != nil {
+		q.in.SetText(q.draft)
+	}
 	d.syncQueue(s)
-	d.sendTo(s, text)
+}
+
+func (d *desk) saveQueueEdit(s *deskSession, in *sendEntry, text string) bool {
+	if s == nil || s.qedit == nil || s.qedit.in != in {
+		return false
+	}
+	if strings.TrimSpace(text) != "" {
+		d.finishQueueEdit(s, text)
+	}
+	return true
 }
 
 func (d *desk) cancelQueueEdit(s *deskSession) bool {
 	if s == nil || s.qedit == nil {
 		return false
 	}
-	q := s.qedit
-	s.qedit = nil
-	idx := min(q.idx, len(s.queue))
-	s.queue = append(append(append([]string{}, s.queue[:idx]...), q.text), s.queue[idx:]...)
-	d.inputFor(s).SetText(q.draft)
-	d.syncQueue(s)
-	if d.idleForQueue(s) {
+	d.finishQueueEdit(s, s.qedit.text)
+	if !isHiddenSession(s) && d.idleForQueue(s) {
 		d.flushQueue(s)
 	}
 	return true
@@ -311,19 +360,29 @@ func (d *desk) editQueued(s *deskSession, i int) {
 	if i < 0 || i >= len(s.queue) {
 		return
 	}
-	if s.qedit != nil {
-		d.cancelQueueEdit(s)
+	in := d.queueInputFor(s)
+	if in == nil {
+		return
+	}
+	if q := s.qedit; q != nil {
+		if q.idx <= i {
+			i++
+		}
+		d.finishQueueEdit(s, q.text)
 	}
 	text := s.queue[i]
-	draft := d.inputFor(s).Text
-	s.queue = append(s.queue[:i], s.queue[i+1:]...)
-	s.qedit = &queueEdit{idx: i, text: text, draft: draft}
-	in := d.inputFor(s)
+	s.queue = slices.Delete(s.queue, i, i+1)
+	s.qedit = &queueEdit{idx: i, text: text, draft: in.Text, in: in}
+	in.hist = nil
 	in.SetText(text)
-	in.CursorRow = strings.Count(text, "\n")
-	in.CursorColumn = len([]rune(text[strings.LastIndex(text, "\n")+1:]))
-	in.Refresh()
-	d.win.Canvas().Focus(in)
+	in.SetCursorTextOffset(len([]rune(text)))
+	w := d.win
+	if role := hiddenRole(s); role == roleKmem || role == roleCodexKmem {
+		if kmem := d.kmemWin; kmem != nil && kmem.win != nil && !kmem.closed {
+			w = kmem.win
+		}
+	}
+	w.Canvas().Focus(in)
 	d.syncQueue(s)
 }
 
@@ -400,7 +459,7 @@ func (d *desk) historyKey(e *sendEntry, s *deskSession, k *fyne.KeyEvent) bool {
 		}
 		return true
 	}
-	if e.CursorRow > 0 {
+	if e.CursorRow > 0 || s.qedit != nil {
 		return false // move up a line
 	}
 	if strings.TrimSpace(e.Text) != "" {

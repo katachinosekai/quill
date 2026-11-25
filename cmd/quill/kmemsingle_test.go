@@ -23,25 +23,14 @@ func TestKmemCheckinMessagesRunningAssistant(t *testing.T) {
 	})
 }
 
-// Check-in with none running: it starts one and the message follows the resume prompt.
-func TestKmemCheckinStartsWhenNoneRuns(t *testing.T) {
+func TestKmemCheckinWaitsForStart(t *testing.T) {
 	h, k, _ := assistSetup(t)
 	h.ui(func() {
-		if runningHidden(h.d) != 0 {
-			t.Fatal("none running")
+		if got := h.d.kmemAssistDeliver("Monday check-in"); got != startAgentFirst {
+			t.Fatalf("unexpected result from an idle agent: %q", got)
 		}
-		h.d.kmemAssistDeliver("Monday check-in")
-	})
-	h.eventually("started with the message", func() bool {
-		a := h.d.assist()
-		return a.s != nil && a.s.running() && a.state == asLive && lastUser(a.s) == "Monday check-in"
-	})
-	h.ui(func() {
-		if runningHidden(h.d) != 1 || resumeCalls(k) != 1 {
-			t.Fatal("exactly one start")
-		}
-		if h.d.assist().pending != nil {
-			t.Fatal("queue flushed")
+		if runningHidden(h.d) != 0 || h.d.assist().s != nil || len(h.d.assist().pending) != 0 || resumeCalls(k) != 0 {
+			t.Fatal("the check-in started a session or queued a prompt")
 		}
 	})
 }

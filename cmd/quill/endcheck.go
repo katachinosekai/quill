@@ -84,7 +84,7 @@ type endWait struct {
 // the check; the kmem assistant keeps its handoff save). UI thread.
 func (d *desk) endCheckFor(s *deskSession) bool {
 	op := hiddenRole(s) == roleQuill // topic quill, even before it has facts
-	return s != nil && s.remote == nil && (!isHiddenSession(s) || op) && s.running() &&
+	return s != nil && !s.codex && s.remote == nil && (!isHiddenSession(s) || op) && s.running() &&
 		(op || d.topicOf(s.id) != "") && d.kmemAvailable() && d.kmemFeatureCached(endCheckFeature)
 }
 

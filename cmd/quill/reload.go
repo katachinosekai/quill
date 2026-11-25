@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -46,6 +47,8 @@ type restoreState struct {
 	Paused   *pauseState         `json:"paused,omitempty"`
 	KmemWin  bool                `json:"kmemWin,omitempty"` // the kmem window was open: reopen it
 	Build    string              `json:"build,omitempty"`   // a new build a tray restart kept pending: offer it again
+
+	CodexChats map[string]json.RawMessage `json:"codexChats,omitempty"`
 }
 
 type pauseState struct {
@@ -145,20 +148,22 @@ func (d *desk) binaryChanged(path string) {
 }
 
 type handedSession struct {
-	ID     string          `json:"id"`
-	Cwd    string          `json:"cwd"`
-	Model  string          `json:"model"`
-	Mode   string          `json:"mode"`
-	Title  string          `json:"title"`
-	RCOn   bool            `json:"rcOn"`
-	RCURL  string          `json:"rcUrl"`
-	Handle session.Handoff `json:"handle"`
-	Asks   []pendingAsk    `json:"asks"`
-	Plan   bool            `json:"plan"`
-	Wait   bool            `json:"planWait"`
-	RunAll bool            `json:"runAll"`
-	Gate   *handedGate     `json:"gate,omitempty"` // the approved plan's scope (planscope.go)
-	Sugg   string          `json:"suggestion,omitempty"`
+	ID           string          `json:"id"`
+	Cwd          string          `json:"cwd"`
+	Model        string          `json:"model"`
+	Mode         string          `json:"mode"`
+	Title        string          `json:"title"`
+	RCOn         bool            `json:"rcOn"`
+	RCURL        string          `json:"rcUrl"`
+	Handle       session.Handoff `json:"handle"`
+	Asks         []pendingAsk    `json:"asks"`
+	Plan         bool            `json:"plan"`
+	CodexWaiting bool            `json:"codexWaiting,omitempty"`
+	CodexWorkers bool            `json:"codexWorkers,omitempty"`
+	Wait         bool            `json:"planWait"`
+	RunAll       bool            `json:"runAll"`
+	Gate         *handedGate     `json:"gate,omitempty"` // the approved plan's scope (planscope.go)
+	Sugg         string          `json:"suggestion,omitempty"`
 	// AutoOff: auto-approve was on; it isn't kept, but Claude is told it is
 	// off with the next message (autoapprove.go).
 	AutoOff bool   `json:"autoOff,omitempty"`
@@ -245,12 +250,32 @@ func (d *desk) trySwap() {
 				continue
 			}
 			m.hs.Handle = h
-			st.Handed = append(st.Handed, m.hs)
 			handed = append(handed, m)
 		}
 		time.Sleep(prefsSettle)
-		b, _ := json.Marshal(st)
-		path, err := writePrivate("quill-restore-*.json", b)
+		var captureErr error
+		d.doWait(func() {
+			for i := range handed {
+				m := &handed[i]
+				if m.s.codex {
+					m.hs.Asks, m.hs.Plan = nil, false
+					m.hs.savePending(m.s)
+				}
+				st.Handed = append(st.Handed, m.hs)
+			}
+			captureErr = d.saveCodexChats(&st)
+			st.Queues = nil
+			d.saveQueues(&st)
+		})
+		err := captureErr
+		var path string
+		if err == nil {
+			var b []byte
+			b, err = json.Marshal(st)
+			if err == nil {
+				path, err = writePrivate("quill-restore-*.json", b)
+			}
+		}
 		if err == nil {
 			env := append(os.Environ(), restoreEnv+"="+path)
 			// Device-lock tokens: memory only, in a pipe (pclock.go).
@@ -272,7 +297,7 @@ func (d *desk) trySwap() {
 			for _, m := range handed {
 				d.reattach(m.s, m.hs)
 			}
-			if restart {
+			if restart && captureErr == nil {
 				// No handover: a clean restart resumes the sessions (trayrestart.go).
 				d.restartAsked = false
 				d.restartFallback(err)
@@ -327,8 +352,13 @@ func (d *desk) handoverState() restoreState {
 }
 
 func (d *desk) reattach(s *deskSession, hs handedSession) bool {
+	var p *session.Process
 	p, err := session.Attach(hs.Handle, func(ev *protocol.Event) {
-		d.do(func() { d.handleEvent(s, ev) })
+		d.do(func() {
+			if s.proc == p {
+				d.handleEvent(s, ev)
+			}
+		})
 	})
 	if err != nil {
 		return false
@@ -336,6 +366,8 @@ func (d *desk) reattach(s *deskSession, hs handedSession) bool {
 	d.adopt(s, p)
 	s.rcOn, s.rcURL = hs.RCOn, hs.RCURL
 	s.conv.Busy = hs.Handle.Busy
+	s.codexWaiting = s.codex && hs.Handle.Busy && hs.CodexWaiting
+	s.codexWorkers = s.codex && hs.CodexWorkers
 	hs.restorePending(s)
 	if hs.Restarted {
 		path := ""
@@ -358,6 +390,7 @@ func (d *desk) reclaimRC(s *deskSession) {
 
 func (hs *handedSession) savePending(s *deskSession) {
 	hs.Wait, hs.RunAll, hs.Sugg = s.planWait, s.runAll, s.conv.Suggestion
+	hs.CodexWaiting, hs.CodexWorkers = s.codexWaiting, s.codexWorkers
 	hs.AutoOff = s.autoApprove || s.autoNote != ""
 	hs.Gate = saveGate(s)
 	for _, it := range s.conv.PendingPermissions() {
@@ -419,9 +452,7 @@ func (d *desk) restoreQueues(st *restoreState) {
 		}
 		s.queue = append(append([]string(nil), q...), s.queue...)
 		d.syncQueue(s)
-		if s.running() && !s.conv.Busy {
-			d.flushQueue(s)
-		}
+		d.flushQueue(s)
 	}
 }
 
@@ -443,8 +474,26 @@ func takeRestore() *restoreState {
 	return &st
 }
 
+func (d *desk) saveCodexChats(st *restoreState) error {
+	for id, s := range d.sessions {
+		if !s.codex || s.remote != nil || s.conv == nil || len(s.conv.Items) == 0 {
+			continue
+		}
+		raw, err := s.conv.MarshalLive()
+		if err != nil {
+			return fmt.Errorf("carry Codex chat history: %w", err)
+		}
+		if st.CodexChats == nil {
+			st.CodexChats = make(map[string]json.RawMessage)
+		}
+		st.CodexChats[id] = raw
+	}
+	return nil
+}
+
 func (d *desk) applyRestore(st *restoreState) {
 	d.restoreSessions(st)
+	reattached := make(map[string]bool)
 	if p := st.Paused; p != nil {
 		d.usagePaused, d.pauseUntil, d.pausedIDs = true, time.Unix(p.Until, 0), p.IDs
 		d.showPauseBanner(p.Text)
@@ -456,11 +505,12 @@ func (d *desk) applyRestore(st *restoreState) {
 			s = &deskSession{id: hs.ID, cwd: hs.Cwd, title: hs.Title, model: hs.Model, mode: hs.Mode, conv: chat.New(), loaded: true, persisted: true, created: time.Now()}
 			d.sessions[hs.ID] = s
 		}
+		s.codex = s.codex || len(hs.Handle.Opts.BridgeArgs) > 0
 		s.model, s.mode = hs.Model, hs.Mode
 		if hs.Hidden {
 			d.markHiddenAs(s, hs.Role) // before reattach: no tab, no Remote Control
 		}
-		if info, ok := d.infos[hs.ID]; ok {
+		if info, ok := d.infos[hs.ID]; ok && (!s.codex || len(st.CodexChats[hs.ID]) == 0) {
 			if conv, err := transcript.Load(info.Path); err == nil && conv != nil {
 				s.conv, s.loaded, s.loadedMod = conv, true, info.ModTime
 				d.noteWindow(s)
@@ -471,10 +521,34 @@ func (d *desk) applyRestore(st *restoreState) {
 		}
 		if !d.reattach(s, hs) {
 			st.Running = append(st.Running, hs.ID)
+		} else {
+			reattached[hs.ID] = true
+			d.refreshLegacyCodexBridge(s)
+		}
+	}
+	for id := range st.CodexChats {
+		if s := d.sessions[id]; s != nil && !reattached[id] {
+			s.conv.CancelPending()
+			s.conv.CancelPlans()
+			s.conv.Busy, s.conv.Thinking = false, false
+			for _, it := range s.conv.Items {
+				it.Streaming = false
+			}
 		}
 	}
 	for _, id := range st.Running {
 		if s := d.session(id); s != nil && !s.running() && s.terminal == nil {
+			if s.codex && hiddenRole(s) == roleCodexQuill {
+				a := d.codexAssistant(codexQuillRole)
+				if a.s == s {
+					d.startAgent(a)
+					if q := st.Queues[id]; a.s != s && len(q) > 0 {
+						st.Queues[a.s.id] = q
+						delete(st.Queues, id)
+					}
+				}
+				continue
+			}
 			if err := d.ensureProcess(s); err != nil {
 				d.notify(s, "Could not resume after the update: "+err.Error())
 			}
@@ -555,6 +629,9 @@ func (d *desk) swapBlockers() []string {
 	if d.signingIn != nil {
 		why = append(why, "signing in to Claude is in progress")
 	}
+	if d.codexAuth.busy {
+		why = append(why, "a ChatGPT sign-in change is in progress")
+	}
 	// Never swap while the user is typing, not even for `quill --reload`
 	// (user 2026-11-21: a forced reload mid-prompt moved the draft), unless
 	// they press "Reload now".
@@ -562,6 +639,24 @@ func (d *desk) swapBlockers() []string {
 		why = append(why, "you typed in the last 15 seconds")
 	}
 	var taken []string
+	for _, s := range d.sessions {
+		if s.agentHandoff != nil {
+			why = append(why, "an agent switch is saving a kmem handoff")
+			break
+		}
+	}
+	for _, s := range d.sessions {
+		if s.pendingRevision != nil {
+			why = append(why, "an approval is being interrupted")
+			break
+		}
+	}
+	for _, s := range d.sessions {
+		if s.codexUpgrading {
+			why = append(why, "the Codex bridge is starting")
+			break
+		}
+	}
 	for _, s := range d.sessions {
 		if s.takeover {
 			taken = append(taken, strconv.Quote(firstNonEmpty(s.title, s.id)))

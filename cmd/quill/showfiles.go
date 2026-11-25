@@ -8,7 +8,9 @@ import (
 	"github.com/katachinosekai/quill/internal/chat"
 )
 
-const quillPromptHint = "You are running inside Quill, a desktop app for Claude Code sessions. Quill shows files in its chat: to show the user a file, image or link, write its absolute path or URL in your reply (or use SendUserFile). Do not open viewers or the browser with xdg-open, kde-open, gio open or similar."
+const screenshotReplyHint = "Stack screenshots vertically, one image per row, in reading order. For a wide screen, show the full view when it helps provide context, then put close-ups of the relevant areas beneath it. Use short captions when comparing screenshots."
+
+const quillPromptHint = "You are running inside Quill, a desktop app for Claude Code sessions. Quill shows files in its chat: to show the user a file, image or link, write its absolute path or URL in your reply (or use SendUserFile). Do not open viewers or the browser with xdg-open, kde-open, gio open or similar. " + screenshotReplyHint
 
 const openerNotice = "Shown here instead of opening a window:"
 

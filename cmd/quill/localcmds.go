@@ -70,12 +70,25 @@ func deviceCommandBlocked(text string) bool {
 	return deviceBlocked[name] || name == "rename" && strings.TrimSpace(arg) == ""
 }
 
+func supportsCodexCommand(name string) bool {
+	return name == "rename" || name == "export" || name == "diff" || name == "exit" || name == "quit"
+}
+
 func (d *desk) runLocalCommandFor(s *deskSession, text string) bool {
 	if !strings.HasPrefix(text, "/") {
 		return false
 	}
 	name, arg, _ := strings.Cut(strings.TrimPrefix(text, "/"), " ")
 	arg = strings.TrimSpace(arg)
+	if s != nil && s.codex && !supportsCodexCommand(name) {
+		for _, cmd := range localCommands {
+			if name == cmd.Name {
+				d.notify(s, "/"+name+" is unavailable in Quill’s Codex sessions.")
+				return true
+			}
+		}
+		return false
+	}
 	note := func(msg string) {
 		if s != nil {
 			d.chatFor(s, []*chat.Item{s.conv.AddNotice(msg)})

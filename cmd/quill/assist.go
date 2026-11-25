@@ -12,12 +12,10 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-
-	"github.com/katachinosekai/quill/internal/chat"
 )
 
 // Role-generic assistant lifecycle and badge (docs/design/quill-operator.md §7,
-// Phase 1 sub B). An assistant is an always-running hidden Claude session that
+// Phase 1 sub B). An assistant is a hidden session that
 // holds one kmem name (and so one kmem handoff), started with Quill Desktop and
 // stopped with a save. Everything that differs per assistant is an assistRole:
 // its kmem name, label, working folder, model setting, start and stop texts,
@@ -103,16 +101,17 @@ type assistant struct {
 	pending     []string // messages waiting for the assistant to run
 
 	// The kmem role's chat side, built once and shown again on every reopen.
-	chat     fyne.CanvasObject
-	view     *chatView
-	input    *sendEntry
-	inRow    fyne.CanvasObject // the input row (hidden in the box overlay: the main message box messages it)
-	stateLbl *widget.Label
-	modelLbl *widget.Label
-	note     *widget.Label
-	restart  *widget.Button
-	reboot   *widget.Button // Restart on the changed model setting
-	stopBtn  *widget.Button
+	chat      fyne.CanvasObject
+	view      *chatView
+	input     *sendEntry
+	reasoning *reasoningControl
+	inRow     fyne.CanvasObject // the input row (hidden in the box overlay: the main message box messages it)
+	stateLbl  *widget.Label
+	modelLbl  *widget.Label
+	note      *widget.Label
+	restart   *widget.Button
+	reboot    *widget.Button // Restart on the changed model setting
+	stopBtn   *widget.Button
 }
 
 // kmemAssist is the kmem role's assistant under its old name.
@@ -190,6 +189,7 @@ func (d *desk) assistIs(a *assistant, s *deskSession) bool {
 // The UI hooks, dispatched by role.
 
 func (d *desk) assistReason(a *assistant, reason string) {
+	defer d.syncAgentStart()
 	a.reason, a.button = reason, ""
 	if a.role.reason != nil {
 		a.role.reason(d, a, reason, "", nil)
@@ -197,6 +197,7 @@ func (d *desk) assistReason(a *assistant, reason string) {
 }
 
 func (d *desk) assistReasonWith(a *assistant, reason, button string, tap func()) {
+	defer d.syncAgentStart()
 	a.reason, a.button = reason, button
 	if a.role.reason != nil {
 		a.role.reason(d, a, reason, button, tap)
@@ -213,6 +214,8 @@ func (d *desk) assistAttach(a *assistant) {
 }
 
 func (d *desk) assistRefresh(a *assistant) {
+	defer d.syncAgentStart()
+	defer d.syncMainOperatorControls()
 	d.updateAssistBadge(a) // a question or plan may have come or been answered
 	if a.role.refresh != nil {
 		a.role.refresh(d, a)
@@ -233,8 +236,8 @@ func (d *desk) assistStoppedReason(a *assistant) {
 
 // assistDeliver hands text (the Monday check-in, say) to the assistant: a
 // message to the running one (queued if it is mid-turn, as user messages are);
-// a new assistant starts only when none runs, and gets the message after its
-// resume prompt. Returns what happened, for the log.
+// a message can also queue after the user has started the assistant.
+// Returns what happened, for the log.
 func (d *desk) assistDeliver(a *assistant, text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -245,18 +248,12 @@ func (d *desk) assistDeliver(a *assistant, text string) string {
 		d.assistRefresh(a)
 		return "sent to the running assistant"
 	}
-	if o := d.assistOwner(a); o != nil && o.running() && !o.stopping {
-		d.sendTo(o, text) // live in a tab: it is the one session under this name
-		return "sent to the live tab"
-	}
-	a.pending = append(a.pending, text)
 	switch a.state {
-	case asProbing, asSaving, asStopping, asStarting:
-		return "queued until the assistant is up" // flushed by the start (or restarted after the stop)
+	case asProbing, asStarting:
+		a.pending = append(a.pending, text)
+		return "queued until the assistant is up"
 	}
-	a.userStopped = false
-	d.assistProbe(a)
-	return "starting the assistant"
+	return startAgentFirst
 }
 
 // assistFlush sends the queued messages to the running assistant.
@@ -264,7 +261,7 @@ func (d *desk) assistFlush(a *assistant, s *deskSession) {
 	p := a.pending
 	a.pending = nil
 	for _, t := range p {
-		d.sendTo(s, t)
+		d.sendOrQueue(s, t)
 	}
 }
 
@@ -295,32 +292,17 @@ func (d *desk) assistWaitStopped(a *assistant, o *deskSession) {
 // signature changed since it was seen; the assistant's question or plan is
 // sticky and badges until answered.
 
-// assistWait: the assistant waits for the user: a plan to approve or a
-// question (a permission or a reply to its question), with a signature that
-// changes with each new one. UI thread.
+// assistWait gives the badge a stable signature for its current request.
 func (d *desk) assistWait(a *assistant) (kind, sig string) {
-	s := a.s
-	if s == nil || s.conv == nil || !s.running() {
-		return "", ""
+	request := d.assistantRequest(a)
+	return request.kind, request.sig
+}
+
+func (d *desk) assistantRequest(a *assistant) assistRequest {
+	if a == nil || !d.assistRunning(a) || a.s.conv == nil {
+		return assistRequest{}
 	}
-	c := s.conv
-	for _, it := range c.PendingPermissions() {
-		if it.Kind == chat.Plan {
-			return "plan", fmt.Sprint(it.Seq, it.RequestID)
-		}
-	}
-	if p := c.PendingPermissions(); len(p) > 0 {
-		return "question", fmt.Sprint(p[0].Seq, p[0].RequestID)
-	}
-	if !c.Busy && (c.AsksApproval() || c.AwaitsReply()) {
-		for i := len(c.Items) - 1; i >= 0; i-- {
-			if it := c.Items[i]; it.Kind == chat.Assistant && strings.TrimSpace(it.Text) != "" {
-				return "question", fmt.Sprint(it.Seq, it.UUID)
-			}
-		}
-		return "question", "text"
-	}
-	return "", ""
+	return actionableAssistRequest(a.s.conv, a.s.inTurn)
 }
 
 // assistNeeds: everything that needs the user from this assistant: its
@@ -329,6 +311,11 @@ func (d *desk) assistNeeds(a *assistant) []badgeItem {
 	var items []badgeItem
 	if k, sig := d.assistWait(a); k != "" {
 		items = append(items, badgeItem{Key: "assist:" + k, Sig: sig, Sticky: true})
+	}
+	if other := d.assistByRole(assistCompanion(a.role.id)); other != nil {
+		if k, sig := d.assistWait(other); k != "" {
+			items = append(items, badgeItem{Key: "assist:" + other.role.id + ":" + k, Sig: sig, Sticky: true})
+		}
 	}
 	if a.role.items != nil {
 		items = append(items, a.role.items(d)...)
@@ -356,7 +343,10 @@ func (d *desk) saveSeen(pref string, m map[string]seenRec) {
 // are dropped, so an item that comes back is new again; only once the role's
 // sources have answered.
 func (d *desk) updateAssistBadge(a *assistant) {
-	if a.role.bubble == nil {
+	if role := operatorButtonRole(a.role.id); role != a.role.id {
+		a = d.assistByRole(role)
+	}
+	if a == nil || a.role.bubble == nil {
 		return
 	}
 	b := a.role.bubble(d)
@@ -442,7 +432,9 @@ func (st assistState) String() string {
 // whether kmem-lock-audit is live in a tab (then the window offers to move it
 // here and nothing starts).
 func (d *desk) assistBoot(a *assistant) {
-	if a.state != asClosed || a.userStopped || !a.role.bootOK(d) {
+	if a.state != asClosed || a.userStopped || !a.role.bootOK(d) ||
+		a.role.id == roleQuill && d.app.Preferences().Bool("quillAgentCodex") ||
+		a.role.id == roleKmem && d.app.Preferences().Bool("kmemAgentCodex") {
 		return
 	}
 	d.assistProbe(a)
@@ -472,7 +464,7 @@ func (d *desk) assistProbe(a *assistant) {
 		return
 	}
 	if o := d.assistOwner(a); o != nil {
-		if !isHiddenSession(o) {
+		if hiddenRole(o) != a.role.hidden {
 			d.assistElsewhere(a, o)
 			return
 		}
@@ -533,7 +525,7 @@ func (d *desk) assistOwner(a *assistant) *deskSession {
 // assistStart is STARTING: a fresh hidden session resumes from the handoff.
 func (d *desk) assistStart(a *assistant, model, prompt string, saved time.Time) {
 	if o := d.assistOwner(a); o != nil {
-		if isHiddenSession(o) && o.running() && !o.stopping {
+		if hiddenRole(o) == a.role.hidden && o.running() && !o.stopping {
 			d.assistAdopt(a, o)
 			return
 		}
@@ -541,7 +533,7 @@ func (d *desk) assistStart(a *assistant, model, prompt string, saved time.Time) 
 			d.assistWaitStopped(a, o)
 			return
 		}
-		if !isHiddenSession(o) {
+		if hiddenRole(o) != a.role.hidden {
 			d.assistElsewhere(a, o)
 			return
 		}
@@ -566,7 +558,10 @@ func (d *desk) assistStart(a *assistant, model, prompt string, saved time.Time) 
 	s := d.addSession(dir, model, "default", false)
 	d.markHiddenAs(s, a.role.hidden)
 	s.title = a.role.name
-	d.org.Kmem[s.id] = a.role.name
+	linked := a.role.id != roleQuill || d.kmemMemory()
+	if linked {
+		d.org.Kmem[s.id] = a.role.name
+	}
 	d.saveOrg()
 	a.s, a.state = s, asStarting
 	a.lastSave = saved
@@ -574,7 +569,12 @@ func (d *desk) assistStart(a *assistant, model, prompt string, saved time.Time) 
 	if note != "" {
 		d.notify(s, note)
 	}
-	d.sendResume(s, a.role.name, prompt+"\n\n"+a.role.startNote)
+	prompt += "\n\n" + a.role.startNote
+	if linked {
+		d.sendResume(s, a.role.name, prompt)
+	} else {
+		d.sendTo(s, prompt)
+	}
 	a.state = asLive
 	d.assistFlush(a, s)
 	d.assistRefresh(a)
@@ -916,14 +916,11 @@ func (d *desk) assistStopped(a *assistant, s *deskSession) {
 		d.assistProbe(a) // on the new model setting
 		return
 	}
-	if len(a.pending) > 0 && !quit { // a check-in arrived while it stopped
-		a.userStopped = false
-		d.assistProbe(a)
-		return
-	}
+	a.pending = nil
 	if a.w != nil && !quit {
 		d.assistStoppedReason(a)
 	}
+	d.syncAgentStart()
 }
 
 // assistRunning: the assistant's process runs (the button's dot).

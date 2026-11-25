@@ -159,7 +159,7 @@ func buildSettingsRegistry() []settingDef {
 			get:  func(d *desk) string { return d.animateSpeed() },
 			set:  func(d *desk, v string) { d.app.Preferences().SetString(prefAnimateSpeed, v) },
 			show: speedName},
-		{id: "collapseChips", label: "New tool chips start collapsed", section: gen, kind: settingBool,
+		{id: "collapseChips", label: collapseActivityChipsLabel, section: gen, kind: settingBool,
 			get: func(d *desk) string { return boolStr(d.collapseChips) },
 			set: func(d *desk, v string) {
 				if d.chat == nil {
@@ -852,13 +852,18 @@ func (d *desk) settingsWriter(r settingsReq, chain []int) (*deskSession, string)
 		return nil, notOperatorMsg + " (the session token isn't valid for this Quill Desktop)"
 	}
 	s := d.sessions[r.Session]
-	if s == nil || hiddenRole(s) != roleQuill {
+	if s == nil || (hiddenRole(s) != roleQuill && hiddenRole(s) != roleCodexQuill) {
 		return nil, notOperatorMsg
 	}
 	if s.proc == nil {
 		return nil, "the Quill operator isn't running"
 	}
 	ok := peerUnder
+	if hiddenRole(s) == roleCodexQuill && peerCredsSupported {
+		ok = func(chain []int, s *deskSession) bool {
+			return len(chain) > 1 && chain[1] == s.proc.PID()
+		}
+	}
 	if f := d.settingsHooks().peerOK; f != nil {
 		ok = f
 	}

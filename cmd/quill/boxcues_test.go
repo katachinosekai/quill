@@ -50,9 +50,9 @@ func TestBoxCuesDimOverlayOnly(t *testing.T) {
 		if shownPieces(d) == 0 || !d.dimShown() {
 			t.Fatal("open over the chat: dimmed")
 		}
-		pc := dimmedAt(d, centerOf(d.tabRow))
-		if pc == nil || dimmedAt(d, centerOf(d.toolbarBox)) == nil {
-			t.Fatal("the tab row and the toolbar are dimmed")
+		pc := dimmedAt(d, centerOf(d.toolbarBox))
+		if pc == nil {
+			t.Fatal("the exposed toolbar is dimmed")
 		}
 		if c := pc.rect.FillColor.(color.NRGBA); c.R != 0 || c.A < 70 || c.A > 85 {
 			t.Fatalf("black at ~30 %%: %v", c)
@@ -81,15 +81,15 @@ func TestBoxCuesDimOverlayOnly(t *testing.T) {
 		if o == f {
 			o = d.panes[1]
 		}
-		if dimmedAt(d, centerOf(f.input)) != nil || dimmedAt(d, centerOf(o.input)) == nil || dimmedAt(d, centerOf(o.title)) == nil {
+		if dimmedAt(d, centerOf(f.input)) != nil || dimmedAt(d, centerOf(o.input)) == nil {
 			t.Fatal("split: the focused pane's message box only is left un-dimmed")
 		}
 		d.closeAssistBox()
 	})
 }
 
-// The frame, send button and name chip in the assistant's colour, only
-// while the message box messages it.
+// The frame and send button use the active assistant's colour, with a
+// chip for kmem and the highlighted operator button for Quill.
 func TestBoxCuesChipAndAccent(t *testing.T) {
 	h := newHarness(t)
 	testBoxView(h, boxKmem, "kmem assistant")
@@ -100,18 +100,18 @@ func TestBoxCuesChipAndAccent(t *testing.T) {
 			t.Fatal("no cues on the tab's message box")
 		}
 		d.openAssistBox(boxQuill)
-		if !c.chip.Visible() || c.chipText.Text != "Quill operator ▸" || c.frame.StrokeColor != colAccent || c.frame.StrokeWidth != cueFrame {
-			t.Fatalf("Quill: chip and frame: %q", c.chipText.Text)
+		if c.chip.Visible() || c.frame.StrokeColor != colAccent || c.frame.StrokeWidth != cueFrame {
+			t.Fatal("Quill uses the accent without a duplicate name chip")
 		}
 		if th, ok := c.send.Theme.(accentTheme); !ok || th.c != colAccent {
 			t.Fatal("Quill: the send button in its colour")
 		}
 		d.input.SetText("typing")
-		if !c.chip.Visible() {
-			t.Fatal("the chip stays while typing")
+		if c.chip.Visible() {
+			t.Fatal("typing must not bring back the duplicate Quill name")
 		}
 		d.openAssistBox(boxKmem)
-		if c.chipText.Text != "kmem assistant ▸" || c.frame.StrokeColor != colKmemAccent || c.send.Theme.(accentTheme).c != colKmemAccent {
+		if !c.chip.Visible() || c.chipText.Text != "kmem assistant ▸" || c.frame.StrokeColor != colKmemAccent || c.send.Theme.(accentTheme).c != colKmemAccent {
 			t.Fatal("kmem: its own colour and name")
 		}
 		d.setAssistDock(boxKmem, true)
@@ -130,7 +130,7 @@ func TestBoxCuesChipAndAccent(t *testing.T) {
 		d.setSplit(2)
 		d.openAssistBox(boxQuill)
 		for _, p := range d.panes {
-			if on := p == d.focused; p.input.cue.chip.Visible() != on || (p.input.cue.frame.StrokeWidth != 0) != on {
+			if on := p == d.focused; p.input.cue.chip.Visible() || (p.input.cue.frame.StrokeWidth != 0) != on {
 				t.Fatalf("split: cues on the focused pane's message box only (pane focused=%v)", on)
 			}
 		}
@@ -170,28 +170,23 @@ func TestBoxCuesClickDimCloses(t *testing.T) {
 	})
 }
 
-// A click on a dimmed tab closes the box and switches to that tab, as before
-// the dimming.
-func TestBoxCuesClickDimTabSwitches(t *testing.T) {
+func TestBoxCuesDimFollowsWindowResize(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
 		d := h.d
-		d.open(smokeID)
-		d.open(editsID)
 		d.openAssistBox(boxQuill)
-		d.layoutDim()
-		chip := d.tabChips[smokeID]
-		if chip == nil || d.current == nil || d.current.id != editsID {
-			t.Fatal("two tabs, the edits one current")
-		}
-		at := centerOf(chip)
-		pc := dimmedAt(d, at)
-		if pc == nil || d.tabChipAt(at) != chip {
-			t.Fatal("the tab is dimmed and found under the click")
-		}
-		pc.Tapped(&fyne.PointEvent{AbsolutePosition: at})
-		if d.assistBoxRole() != "" || d.current == nil || d.current.id != smokeID || shownPieces(d) != 0 {
-			t.Fatal("the click closes the box and switches to the tab")
+		for _, size := range []fyne.Size{fyne.NewSize(1400, 950), fyne.NewSize(900, 660), fyne.NewSize(1280, 780)} {
+			d.win.Resize(size)
+			d.layoutRoot()
+			d.layoutDim()
+			origin, bounds := absRect(d.mainRoot)
+			right := fyne.NewPos(origin.X+bounds.Width-1, origin.Y+bounds.Height/2)
+			if d.box().dim.root.Size() != bounds || dimmedAt(d, right) == nil {
+				t.Fatalf("the mask should cover the resized area %v", bounds)
+			}
+			if dimmedAt(d, centerOf(d.box().card)) != nil || dimmedAt(d, centerOf(d.input)) != nil {
+				t.Fatalf("the panel and composer should remain bright at %v", bounds)
+			}
 		}
 	})
 }

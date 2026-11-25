@@ -14,6 +14,33 @@ import (
 // liveKmemOwner: the live session (tab, running, or the kmem window's) that
 // holds the kmem name, other than self; nil if none. `kmem sessions --live`
 // is not consulted: this kmem has no such command.
+func (d *desk) kmemTopicFor(s *deskSession) string {
+	if name := d.org.Kmem[s.id]; !s.codex && name != "" {
+		return name
+	}
+	switch hiddenRole(s) {
+	case roleQuill, roleCodexQuill:
+		return quillOpName
+	case roleKmem, roleCodexKmem:
+		return kmemWinOperator
+	}
+	return d.org.Kmem[s.id]
+}
+
+// A stopped operator can still have an attached chat. Only its running
+// process owns the topic when another engine is ready to start.
+func (d *desk) runningKmemOwner(name string, self *deskSession) *deskSession {
+	if name == "" {
+		return nil
+	}
+	for _, s := range d.sessions {
+		if s != self && (s.running() || s.terminal != nil) && d.kmemTopicFor(s) == name {
+			return s
+		}
+	}
+	return nil
+}
+
 func (d *desk) liveKmemOwner(name string, self *deskSession) *deskSession {
 	if name == "" {
 		return nil

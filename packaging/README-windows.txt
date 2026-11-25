@@ -6,6 +6,7 @@ it with your OK:
 
 - Claude Code (Anthropic's official installer runs in a PowerShell window)
 - your Claude sign-in
+- Codex CLI and its existing sign-in, for Codex sessions
 - a device password, so Quill for Android and other PCs can connect
 - kmem, if you have it (shared memory: handoffs, tasks, rules; optional, see
   Setup; it needs Python 3, which Setup can install with winget)

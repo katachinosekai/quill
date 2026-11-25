@@ -444,3 +444,78 @@ func TestAgentStripShellJob(t *testing.T) {
 		}
 	})
 }
+
+func TestPortraitSessionSubagentsAndActiveOperator(t *testing.T) {
+	h := newDeskHarness(t, false)
+	h.ui(func() {
+		d := h.d
+		claude := d.addSession(h.proj, "default", "default", false)
+		codex := d.addSessionWithBackend(h.proj, "default", "default", true, true)
+		d.open(claude.id)
+		feed(t, h, claude, `{"type":"system","subtype":"task_started","task_id":"claude-worker","description":"Claude worker","task_type":"local_agent"}`)
+		feed(t, h, codex, `{"type":"system","subtype":"task_progress","task_id":"codex-worker","description":"Codex worker","task_type":"local_agent"}`)
+		d.setLayoutMode(layoutVertical)
+		d.rebuildRows()
+
+		parents := func(id string) []sideRow {
+			t.Helper()
+			for i, row := range d.rows {
+				if row.id == id {
+					var out []sideRow
+					for _, child := range d.rows[i+1:] {
+						if child.agentSession != id {
+							break
+						}
+						out = append(out, child)
+					}
+					return out
+				}
+			}
+			t.Fatalf("no parent row for %s", id)
+			return nil
+		}
+		if len(parents(claude.id)) != 0 || len(parents(codex.id)) != 0 {
+			t.Fatal("subagent rows start collapsed")
+		}
+		var toggle *widget.Button
+		for _, item := range d.sideItems {
+			if row, ok := item.row(); ok && row.id == claude.id && item.agentToggle.Visible() {
+				toggle = item.agentToggle
+				break
+			}
+		}
+		if toggle == nil {
+			t.Fatal("the active Portrait parent should have a visible expansion control")
+		}
+		test.Tap(toggle)
+		if rows := parents(claude.id); len(rows) != 1 || rows[0].agent.Name != "Claude worker" || len(parents(codex.id)) != 0 {
+			t.Fatalf("expanding one session should show only its own worker: %+v", rows)
+		}
+		d.toggleSidebarAgents(codex.id)
+		feed(t, h, codex, `{"type":"system","subtype":"task_notification","task_id":"codex-worker","status":"completed"}`)
+		d.syncSidebarAgents()
+		if rows := parents(codex.id); len(rows) != 1 || rows[0].agent.Status != "completed" {
+			t.Fatalf("completed workers should remain under the correct parent: %+v", rows)
+		}
+		d.setLayoutMode(layoutHorizontal)
+		if len(parents(claude.id)) != 0 || len(parents(codex.id)) != 0 {
+			t.Fatal("Landscape should use the strip")
+		}
+
+		a := d.codexAssistant(codexQuillRole)
+		op := d.addSessionWithBackend(h.proj, "default", "default", false, true)
+		d.markHiddenAs(op, roleCodexQuill)
+		a.s = op
+		feed(t, h, op, `{"type":"system","subtype":"task_progress","task_id":"operator-worker","description":"Operator worker","task_type":"local_agent"}`)
+		d.openAssistBox(roleCodexQuill)
+		d.agentStrip.sync()
+		if got := stripTexts(d.agentStrip); len(got) != 1 || !strings.Contains(got[0], "Operator worker") {
+			t.Fatalf("the active operator should own the strip: %v", got)
+		}
+		d.closeAssistBox()
+		d.agentStrip.sync()
+		if got := stripTexts(d.agentStrip); len(got) != 1 || !strings.Contains(got[0], "Claude worker") {
+			t.Fatalf("closing the operator should restore the tab strip: %v", got)
+		}
+	})
+}

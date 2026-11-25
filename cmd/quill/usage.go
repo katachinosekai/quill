@@ -3,16 +3,19 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/quill/internal/codex"
 	"github.com/katachinosekai/quill/internal/protocol"
 	"github.com/katachinosekai/quill/internal/transcript"
 )
@@ -25,18 +28,28 @@ const (
 )
 
 type usagePanel struct {
-	d       *desk
-	root    *fyne.Container
-	five    *widget.ProgressBar
-	fiveTxt *canvas.Text
-	week    *widget.ProgressBar
-	weekTxt *canvas.Text
-	asOf    *canvas.Text
-	sess    *widget.Label
-	today   *widget.Label
+	d                 *desk
+	root              *fyne.Container
+	five              *widget.ProgressBar
+	fiveTxt           *canvas.Text
+	week              *widget.ProgressBar
+	weekTxt           *canvas.Text
+	asOf              *canvas.Text
+	sess              *widget.Label
+	today             *widget.Label
+	provider          *widget.Label
+	cloudPlan, totals *fyne.Container
 
-	strip    []*stripItem
-	stripRow *fyne.Container
+	strip                                         []*stripItem
+	stripRow, stripClaude, stripCodex, stripOther *fyne.Container
+	stripText                                     *widget.Label
+	codexSession                                  *stripItem
+	codexSessionRow                               fyne.CanvasObject
+	stripDetails                                  *widget.Button
+	codexStripWindows, codexPanelWindows          *fyne.Container
+	codexWindows                                  []planUsageWindow
+	detailsCodex                                  bool
+	details                                       string
 }
 
 func usageText(s string) *canvas.Text {
@@ -58,20 +71,23 @@ func newUsagePanel(d *desk) *usagePanel {
 		l.SizeName = theme.SizeNameCaptionText
 		return l
 	}
-	u.sess, u.today = label(), label()
+	u.sess, u.today, u.provider = label(), label(), label()
 	head := func(s string) fyne.CanvasObject {
 		t := canvas.NewText(s, colText)
 		t.TextStyle.Bold = true
 		t.TextSize = fontBody
 		return t
 	}
-	body := container.NewVBox(
-		head("Plan usage"),
+	u.cloudPlan = container.NewVBox(
+		head("Claude plan usage"),
 		usageText("5-hour session"), u.five, u.fiveTxt,
 		usageText("Weekly"), u.week, u.weekTxt, u.asOf,
-		padTop(8), head("This session"), u.sess,
-		padTop(8), head("All sessions"), u.today,
 	)
+	u.totals = container.NewVBox(padTop(8), head("Claude Code history"), u.today)
+	u.provider.Hide()
+	u.codexPanelWindows = container.NewVBox()
+	u.codexPanelWindows.Hide()
+	body := container.NewVBox(u.cloudPlan, u.provider, u.codexPanelWindows, padTop(8), head("This session"), u.sess, u.totals)
 	r := canvas.NewRectangle(colCard)
 	r.CornerRadius = 12
 	u.root = container.NewStack(r, container.NewPadded(container.NewPadded(body)))
@@ -155,22 +171,23 @@ func resetText(unix int64) string {
 
 func (u *usagePanel) update() {
 	d := u.d
-	setWin := func(bar *widget.ProgressBar, txt *canvas.Text, name string) {
-		w, ok := d.rate.Window(name)
-		if !ok {
-			if bar.Value != 0 {
-				bar.SetValue(0)
-			}
-			setText(txt, "no data yet (updates after a reply)")
-			return
-		}
-		if bar.Value != w.Utilization {
-			bar.SetValue(w.Utilization)
-		}
-		setText(txt, fmt.Sprintf("%d%% used · %s", int(w.Utilization*100+0.5), resetText(w.ResetsAt)))
+	s := d.current
+	if operator := d.targetSession(d.main.role); operator != nil {
+		s = operator
 	}
-	setWin(u.five, u.fiveTxt, "five_hour")
-	setWin(u.week, u.weekTxt, "seven_day")
+	if s != nil && (s.codex || isLocal(s.model)) {
+		u.updateAgentUsage(s)
+		d.syncRowCaptions()
+		return
+	}
+	u.detailsCodex = false
+	u.cloudPlan.Show()
+	u.provider.Hide()
+	u.codexPanelWindows.Hide()
+	u.totals.Show()
+	u.showUsageStrip(false, false, "")
+	setUsageWindow(u.five, u.fiveTxt, claudeUsageWindow(d.rate, "five_hour"), false)
+	setUsageWindow(u.week, u.weekTxt, claudeUsageWindow(d.rate, "seven_day"), false)
 	asOf := ""
 	if !d.rateAt.IsZero() {
 		asOf = "as of " + ago(d.rateAt)
@@ -178,15 +195,11 @@ func (u *usagePanel) update() {
 	setText(u.asOf, asOf)
 
 	sess := "No session open"
-	if s := d.current; s != nil {
-		info := d.infos[s.id]
-		sess = tok(info.Usage.Total()) + " tokens"
-		c := s.conv.Stats
-		if c.ContextUsed > 0 {
-			sess += "  ·  context " + kfmt(c.ContextUsed)
-			if c.ContextMax > 0 {
-				sess += fmt.Sprintf(" (%d%%)", c.ContextUsed*100/c.ContextMax)
-			}
+	if s != nil {
+		usage := d.infos[s.id].Usage
+		sess = claudeTokenSummary(usage)
+		if context := usageContext(s.conv.Stats.ContextUsed, s.conv.Stats.ContextMax); context != "" {
+			sess += "  ·  " + context
 		}
 	}
 	setLabel(u.sess, sess)
@@ -209,7 +222,9 @@ func (u *usagePanel) update() {
 		}
 	}
 	setLabel(u.today, "Today "+tok(today.Total())+"  ·  7 days "+tok(week.Total()))
-	short := strings.Replace(strings.Replace(sess, "  ·  context ", " · ctx ", 1), " tokens", " tok", 1)
+	u.details = strings.Join([]string{firstNonEmpty(d.acct.Plan(), "Claude Code"), u.fiveTxt.Text, u.weekTxt.Text,
+		"Usage credits: " + creditsText(d.rate), sess, u.today.Text}, "\n")
+	short := compactUsageSummary(sess)
 	u.syncStrip(short, "Today "+tok(today.Total())+" · 7d "+tok(week.Total()))
 	d.syncRowCaptions()
 }
@@ -219,58 +234,71 @@ type stripItem struct {
 	value *canvas.Text
 }
 
-func (u *usagePanel) buildStrip() fyne.CanvasObject {
-	item := func(title string, withBar bool) (fyne.CanvasObject, *stripItem) {
-		it := &stripItem{value: usageText("")}
-		head := canvas.NewText(title, colMuted)
-		head.TextSize = fontMeta
-		head.TextStyle.Bold = true
-		parts := []fyne.CanvasObject{container.NewCenter(head)}
-		if withBar {
-			it.bar = widget.NewProgressBar()
-			it.bar.TextFormatter = func() string { return "" }
-			parts = append(parts, container.NewCenter(container.NewGridWrap(fyne.NewSize(56, 8), it.bar)))
-		}
-		parts = append(parts, container.NewCenter(it.value))
-		return container.NewHBox(parts...), it
+func usageStripItem(title string, withBar bool) (fyne.CanvasObject, *stripItem) {
+	it := &stripItem{value: usageText("")}
+	head := canvas.NewText(title, colMuted)
+	head.TextSize = fontMeta
+	head.TextStyle.Bold = true
+	parts := []fyne.CanvasObject{container.NewCenter(head)}
+	if withBar {
+		it.bar = widget.NewProgressBar()
+		it.bar.TextFormatter = func() string { return "" }
+		parts = append(parts, container.NewCenter(container.NewGridWrap(fyne.NewSize(56, 8), it.bar)))
 	}
-	five, fiveIt := item("5-hour session", true)
-	sess, sessIt := item("This session", false)
-	all, allIt := item("All sessions", false)
-	credits, creditsIt := item("Usage credits", false)
-	week, weekIt := item("Weekly", true)
+	parts = append(parts, container.NewCenter(it.value))
+	return container.NewHBox(parts...), it
+}
+
+func (u *usagePanel) buildStrip() fyne.CanvasObject {
+	five, fiveIt := usageStripItem("5-hour session", true)
+	sess, sessIt := usageStripItem("This session", false)
+	all, allIt := usageStripItem("All sessions", false)
+	credits, creditsIt := usageStripItem("Usage credits", false)
+	week, weekIt := usageStripItem("Weekly", true)
 	u.strip = []*stripItem{fiveIt, sessIt, allIt, creditsIt, weekIt}
-	sep := func() fyne.CanvasObject { return container.NewCenter(mutedText("│", fontMeta)) }
-	gap := func() fyne.CanvasObject { return padLeft(10) }
-	row := container.NewHBox(five, gap(), sep(), gap(), sess, gap(), sep(), gap(), all, gap(), sep(), gap(), credits, gap(), sep(), gap(), week)
-	u.stripRow = container.New(layout.NewCustomPaddedLayout(2, 4, 0, 0), container.New(&clipLayout{}, container.NewCenter(row)))
+	row := container.NewHBox(usageStripParts(five, sess, all, credits, week)...)
+	u.stripClaude = container.New(&clipLayout{}, container.NewCenter(row))
+	u.stripText = widget.NewLabel("")
+	u.stripText.Truncation = fyne.TextTruncateEllipsis
+	u.stripOther = container.NewStack(u.stripText)
+	u.stripOther.Hide()
+	u.codexSessionRow, u.codexSession = usageStripItem("This session", false)
+	u.codexStripWindows = container.NewHBox(u.codexSessionRow)
+	u.stripCodex = container.New(&clipLayout{}, container.NewCenter(u.codexStripWindows))
+	u.stripCodex.Hide()
+	u.stripDetails = widget.NewButton("Usage details", u.showUsageDetails)
+	u.stripDetails.Importance = widget.LowImportance
+	u.stripRow = container.New(layout.NewCustomPaddedLayout(2, 4, 0, 0),
+		container.NewBorder(nil, nil, nil, u.stripDetails, container.NewStack(u.stripClaude, u.stripCodex, u.stripOther)))
 	return u.stripRow
+}
+
+func usageStripParts(items ...fyne.CanvasObject) []fyne.CanvasObject {
+	var parts []fyne.CanvasObject
+	for i, item := range items {
+		if i > 0 {
+			parts = append(parts, padLeft(10), container.NewCenter(mutedText("│", fontMeta)), padLeft(10))
+		}
+		parts = append(parts, item)
+	}
+	return parts
+}
+
+func compactUsageSummary(text string) string {
+	line, _, _ := strings.Cut(text, "\n")
+	line = strings.Replace(line, "  ·  context ", " · ctx ", 1)
+	return strings.Replace(line, " tokens", " tok", 1)
 }
 
 func (u *usagePanel) syncStrip(sess, all string) {
 	if len(u.strip) != 5 {
 		return
 	}
-	win := func(it *stripItem, name string) {
-		w, ok := u.d.rate.Window(name)
-		if !ok {
-			setText(it.value, "no data yet")
-			return
-		}
-		if it.bar.Value != w.Utilization {
-			it.bar.SetValue(w.Utilization)
-		}
-		txt := fmt.Sprintf("%d%%", int(w.Utilization*100+0.5))
-		if r := resetText(w.ResetsAt); r != "" {
-			txt += " · " + r
-		}
-		setText(it.value, txt)
-	}
-	win(u.strip[0], "five_hour")
+	setUsageWindow(u.strip[0].bar, u.strip[0].value, claudeUsageWindow(u.d.rate, "five_hour"), true)
 	setText(u.strip[1].value, sess)
 	setText(u.strip[2].value, all)
 	setText(u.strip[3].value, creditsText(u.d.rate))
-	win(u.strip[4], "seven_day")
+	setUsageWindow(u.strip[4].bar, u.strip[4].value, claudeUsageWindow(u.d.rate, "seven_day"), true)
 	if u.stripRow != nil && u.stripRow.Visible() {
 		u.stripRow.Refresh()
 	}
@@ -346,4 +374,256 @@ func (d *desk) sizePanel() fyne.CanvasObject {
 	r := canvas.NewRectangle(colCard)
 	r.CornerRadius = 12
 	return container.NewStack(r, container.New(layout.NewCustomPaddedLayout(2, 2, 6, 6), body))
+}
+
+func usageContext(used, max int) string {
+	if used <= 0 && max <= 0 {
+		return ""
+	}
+	if max <= 0 {
+		return "context " + kfmt(used)
+	}
+	if used <= 0 {
+		return "context window " + kfmt(max)
+	}
+	return fmt.Sprintf("context %s / %s (%d%%)", kfmt(used), kfmt(max), used*100/max)
+}
+
+func claudeTokenSummary(t transcript.Tokens) string {
+	if t.Total() == 0 {
+		return "No token data yet"
+	}
+	return tok(t.Total()) + " tokens\n" + tok(t.In) + " input · " + tok(t.Out) + " output · " +
+		tok(t.CacheRead) + " cached read · " + tok(t.CacheWrite) + " cached write"
+}
+
+func codexTokenSummary(usage *protocol.CodexUsage) string {
+	if usage == nil || usage.Total.Total == 0 {
+		return "No token data yet"
+	}
+	t := usage.Total
+	input := max(0, t.Input-t.CachedInput-t.CacheWriteInput)
+	detail := tok(t.Total) + " tokens\n" + tok(input) + " input · " + tok(t.Output) + " output · " +
+		tok(t.CachedInput) + " cached read"
+	if t.CacheWriteInput > 0 {
+		detail += " · " + tok(t.CacheWriteInput) + " cached write"
+	}
+	return detail
+}
+
+func (u *usagePanel) updateAgentUsage(s *deskSession) {
+	d := u.d
+	provider, limits := "Local model", ""
+	var windows []planUsageWindow
+	info := d.infos[s.id].Usage
+	short, detail := "No token data yet", claudeTokenSummary(info)
+	if info.Total() > 0 {
+		short = tok(info.Total()) + " tokens"
+	}
+	if s.codex {
+		provider = "Codex"
+		detail = codexTokenSummary(s.conv.Stats.CodexUsage)
+		acct := d.codexAuth.snapshot.Account
+		switch {
+		case !d.codexAuth.ready:
+			limits = "Account status unavailable"
+		case acct == nil && !d.codexAuth.snapshot.RequiresOpenAIAuth:
+			limits = "Codex provider does not require a ChatGPT sign-in"
+		case acct == nil:
+			limits = "ChatGPT signed out"
+		case acct.Type != "chatgpt":
+			limits = "ChatGPT plan limits unavailable for this sign-in method"
+		default:
+			provider = "ChatGPT " + planLabel(acct.PlanType) + " · Codex"
+			if acct.PlanType == "" {
+				provider = "ChatGPT · Codex"
+			}
+			windows, limits = codexUsageWindows(d.codexAuth.snapshot.Limits)
+		}
+	}
+	used, max := s.conv.Stats.ContextUsed, s.conv.Stats.ContextMax
+	if max <= 0 && isLocal(s.model) {
+		max = d.localWindows[s.model]
+	}
+	context := usageContext(used, max)
+	if context != "" {
+		short += " · " + context
+		detail += "  ·  " + context
+	}
+	model := firstNonEmpty(s.conv.Stats.Model, s.model)
+	if !s.codex && model != "" && model != "default" {
+		detail += "\n" + model
+	}
+	u.detailsCodex = s.codex
+	u.updateCodexWindows(windows)
+	u.cloudPlan.Hide()
+	u.totals.Hide()
+	u.provider.Show()
+	heading := provider
+	if limits != "" {
+		heading += "\n" + limits
+	}
+	setLabel(u.provider, heading)
+	if s.codex && u.codexSession != nil {
+		text := compactUsageSummary(detail)
+		if u.codexSession.value.Text != text {
+			setText(u.codexSession.value, text)
+			u.codexStripWindows.Refresh()
+		}
+	}
+	setLabel(u.sess, detail)
+	u.details = heading + "\n\n" + detail
+	u.showUsageStrip(true, s.codex, provider+" · "+short)
+}
+
+type planUsageWindow struct {
+	label       string
+	utilization float64
+	reset       string
+	reported    bool
+}
+
+func claudeUsageWindow(rate *protocol.RateLimit, name string) planUsageWindow {
+	w, ok := rate.Window(name)
+	return planUsageWindow{utilization: w.Utilization, reset: resetText(w.ResetsAt), reported: ok}
+}
+
+func setUsageWindow(bar *widget.ProgressBar, label *canvas.Text, w planUsageWindow, compact bool) {
+	value := "no data yet"
+	if w.reported {
+		value = fmt.Sprintf("%d%%", int(w.utilization*100+0.5))
+		if !compact {
+			value += " used"
+		}
+		if w.reset != "" {
+			value += " · " + w.reset
+		}
+	} else if !compact {
+		value += " (updates after a reply)"
+	}
+	fill := min(max(w.utilization, 0), 1)
+	if bar.Value != fill {
+		bar.SetValue(fill)
+	}
+	setText(label, value)
+}
+
+func usageWindowRows(windows []planUsageWindow, compact bool) []fyne.CanvasObject {
+	var rows []fyne.CanvasObject
+	for _, w := range windows {
+		if compact {
+			row, item := usageStripItem(w.label, true)
+			setUsageWindow(item.bar, item.value, w, true)
+			rows = append(rows, row)
+		} else {
+			bar, value := widget.NewProgressBar(), usageText("")
+			setUsageWindow(bar, value, w, false)
+			rows = append(rows, container.NewVBox(usageText(w.label), bar, value))
+		}
+	}
+	return rows
+}
+
+func (u *usagePanel) updateCodexWindows(windows []planUsageWindow) {
+	if !slices.Equal(u.codexWindows, windows) {
+		u.codexWindows = windows
+		u.codexPanelWindows.Objects = usageWindowRows(windows, false)
+		u.codexPanelWindows.Refresh()
+		if u.codexStripWindows != nil {
+			rows := usageWindowRows(windows, true)
+			items := []fyne.CanvasObject{u.codexSessionRow}
+			if len(rows) > 0 {
+				items = append([]fyne.CanvasObject{rows[0], u.codexSessionRow}, rows[1:]...)
+			}
+			u.codexStripWindows.Objects = usageStripParts(items...)
+			u.codexStripWindows.Refresh()
+		}
+	}
+	setShown(u.codexPanelWindows, len(windows) > 0)
+}
+
+func codexUsageWindows(limits map[string]codex.AccountLimit) ([]planUsageWindow, string) {
+	keys := make([]string, 0, len(limits))
+	for key := range limits {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	var windows []planUsageWindow
+	var details []string
+	for _, key := range keys {
+		limit := limits[key]
+		label := firstNonEmpty(firstNonEmpty(limit.LimitName, limit.LimitID), firstNonEmpty(key, "Codex"))
+		for i, window := range []*codex.LimitWindow{limit.Primary, limit.Secondary} {
+			if window == nil {
+				continue
+			}
+			var title string
+			switch window.WindowDurationMins {
+			case 300:
+				title = "5-hour session"
+			case 10080:
+				title = "Weekly"
+			case 0:
+				title = []string{"Primary", "Secondary"}[i]
+			default:
+				duration := time.Duration(window.WindowDurationMins) * time.Minute
+				title = strings.TrimSuffix(duration.String(), "0s")
+				if window.WindowDurationMins%60 == 0 {
+					title = strings.TrimSuffix(title, "0m")
+				}
+			}
+			if len(limits) > 1 {
+				title = label + " · " + title
+			}
+			windows = append(windows, planUsageWindow{title, window.UsedPercent / 100, resetText(window.ResetsAt), true})
+		}
+		if c := limit.Credits; c != nil {
+			switch {
+			case c.Unlimited:
+				details = append(details, label+" credits · unlimited")
+			case c.Balance != "":
+				details = append(details, label+" credits · "+c.Balance)
+			case c.HasCredits:
+				details = append(details, label+" credits · available")
+			default:
+				details = append(details, label+" credits · none")
+			}
+		}
+	}
+	if len(windows) == 0 {
+		windows = []planUsageWindow{{label: "5-hour session"}, {label: "Weekly"}}
+	}
+	return windows, strings.Join(details, "\n")
+}
+
+func (u *usagePanel) showUsageStrip(other, codex bool, text string) {
+	if u.stripOther == nil {
+		return
+	}
+	setLabel(u.stripText, text)
+	setShown(u.stripClaude, !other)
+	setShown(u.stripCodex, codex)
+	setShown(u.stripOther, other && !codex)
+	setShown(u.stripDetails, true)
+}
+
+func (u *usagePanel) showUsageDetails() {
+	dlg := dialog.NewCustom("Usage details", "Close", container.NewVScroll(u.usageDetailsContent()), u.d.win)
+	dlg.Resize(fyne.NewSize(440, 300))
+	dlg.Show()
+}
+
+func (u *usagePanel) usageDetailsContent() fyne.CanvasObject {
+	text := widget.NewLabel(u.details)
+	text.Wrapping = fyne.TextWrapWord
+	if !u.detailsCodex {
+		return text
+	}
+	heading, detail, _ := strings.Cut(u.details, "\n\n")
+	text.SetText("This session\n" + detail)
+	plan := widget.NewLabel(heading)
+	plan.Wrapping = fyne.TextWrapWord
+	rows := []fyne.CanvasObject{plan}
+	rows = append(rows, usageWindowRows(u.codexWindows, false)...)
+	return container.NewVBox(append(rows, text)...)
 }

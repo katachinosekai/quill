@@ -26,8 +26,10 @@ type hiddenRoleDef struct {
 }
 
 var hiddenRoles = map[string]hiddenRoleDef{
-	roleKmem:  {title: "kmem assistant", owner: "live in the kmem window", phone: (*desk).kmemPhoneEvent},
-	roleQuill: {title: "Quill operator", owner: "live in the Quill operator", phone: (*desk).quillPhoneEvent},
+	roleKmem:       {title: "kmem assistant", owner: "live in the kmem window", phone: (*desk).kmemPhoneEvent},
+	roleCodexQuill: {title: "Quill operator", owner: "live in the Quill window"},
+	roleCodexKmem:  {title: "kmem assistant", owner: "live in the kmem window"},
+	roleQuill:      {title: "Quill operator", owner: "live in the Quill operator", phone: (*desk).quillPhoneEvent},
 }
 
 // hiddenRoleOr: role, or "kmem" for a hidden entry stored without one.
@@ -173,7 +175,7 @@ func (d *desk) hostFor(role string) hiddenHost {
 
 // hostRoles: kmem first, then the other roles in a fixed order.
 func hostRoles() []string {
-	return []string{roleKmem, roleQuill}
+	return []string{roleKmem, roleQuill, roleCodexQuill, roleCodexKmem}
 }
 
 // hostSession: role's host session, nil-safe.

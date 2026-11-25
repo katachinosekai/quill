@@ -4,6 +4,12 @@ import (
 	"strings"
 	"testing"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
+
 	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
 )
@@ -138,6 +144,65 @@ func TestNoPlanCardAfterFailedTurn(t *testing.T) {
 		}
 		if end([]string{"1. Edit x.\n2. Build."}, &protocol.Event{Type: "result", Subtype: "success"}) != 1 {
 			t.Fatal("a written plan still gets the card")
+		}
+	})
+}
+
+type planCardTestTheme struct {
+	deskTheme
+	textSize float32
+}
+
+func (t planCardTestTheme) Size(name fyne.ThemeSizeName) float32 {
+	if name == theme.SizeNameText {
+		return t.textSize
+	}
+	return t.deskTheme.Size(name)
+}
+
+func TestPlanCardBorderFitsTextAndControls(t *testing.T) {
+	h := newDeskHarness(t, false)
+	h.ui(func() {
+		h.d.center = true
+		newCard := func(text string, size float32) (*fyne.Container, *widget.Button) {
+			label := widget.NewLabel(text)
+			label.Wrapping = fyne.TextWrapWord
+			control := widget.NewButton("Approve", nil)
+			textContent := container.NewThemeOverride(label, planCardTestTheme{textSize: size})
+			card := h.d.chat.planApprovalFrame([]fyne.CanvasObject{textContent, h.d.chat.buttonRow(control)}, true)
+			return card.(*fyne.Container), control
+		}
+		resize := func(card *fyne.Container, width float32) *canvas.Rectangle {
+			card.Resize(fyne.NewSize(width, 400))
+			return card.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Rectangle)
+		}
+		const wide = 920
+		const narrow = 240
+		const title = "Run the app and verify the result?"
+		short, _ := newCard("Run?", 14)
+		normal, _ := newCard(title, 14)
+		larger, _ := newCard(title, 25)
+		shortWidth := resize(short, wide).Size().Width
+		normalWidth := resize(normal, wide).Size().Width
+		largeFrame := resize(larger, wide)
+		largeWidth := largeFrame.Size().Width
+		if !(shortWidth < normalWidth && normalWidth < largeWidth && largeWidth < wide) {
+			t.Fatalf("border widths should follow the content and text size, got %v, %v, %v", shortWidth, normalWidth, largeWidth)
+		}
+		frame := larger.Objects[1].(*fyne.Container).Objects[0]
+		if frame.Position().X != (wide-largeWidth)/2 {
+			t.Fatalf("border should remain centered, got x=%v", frame.Position().X)
+		}
+
+		long, button := newCard(strings.Repeat("Verify that the app uses the available width. ", 5), 25)
+		wideHeight := resize(long, wide).Size().Height
+		narrowFrame := resize(long, narrow)
+		if narrowFrame.Size().Width != narrow || narrowFrame.Size().Height <= wideHeight {
+			t.Fatalf("narrow card should wrap within %v, got %v", narrow, narrowFrame.Size())
+		}
+		inset := theme.Padding()
+		if button.Position().X+button.Size().Width > narrow-2*inset {
+			t.Fatalf("button extends beyond the inside of the border: %v + %v", button.Position().X, button.Size().Width)
 		}
 	})
 }

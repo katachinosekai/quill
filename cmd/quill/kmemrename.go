@@ -211,6 +211,15 @@ func (d *desk) resumeNamedFromCLI(name string) {
 		return
 	}
 	d.showWindow()
+	if isCodexAssistant(name) || d.org.CodexTopics[name] != "" {
+		d.resumeHandoffNamed(name)
+		return
+	}
+	if name == quillOpName && d.app.Preferences().Bool("quillAgentCodex") {
+		d.openQuillCodex()
+		d.startAgent(d.codexAssistant(codexQuillRole))
+		return
+	}
 	if !d.kmemAvailable() {
 		d.cliNotice("quill --resume " + name + ": kmem is not available, so Quill Desktop cannot open a kmem session.")
 		return

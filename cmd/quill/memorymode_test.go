@@ -149,6 +149,9 @@ func TestPinnedSection(t *testing.T) {
 }
 
 func TestTopicHintTexts(t *testing.T) {
+	if !strings.Contains(sessionPrompt(false, false, false), screenshotReplyHint) {
+		t.Fatal("Claude startup needs the shared screenshot guidance without the memory module")
+	}
 	topic := topicHints{topic: "alpha", endCheck: true}
 	m := topicMemoryHint(topic)
 	for _, k := range []string{"`kmem brief`", "`kmem context --topic alpha`", "kmem --as alpha", "kmem task checkpoint", "`alpha/status`", "--replaces", "end-of-session check", "MEMORY.md"} {
@@ -160,7 +163,7 @@ func TestTopicHintTexts(t *testing.T) {
 		t.Error("no end-check feature: the hint must not mention the check")
 	}
 	c := topicCoordinatorHint("alpha")
-	for _, k := range []string{"`kmem context \"<task>\" --topic alpha`", "stable part first", "checkpoint your task", "Only you write `alpha/status`"} {
+	for _, k := range []string{"`kmem context \"<task>\" --topic alpha`", "stable part first", "checkpoint your task\"), running in the background.", "Only you write `alpha/status`."} {
 		if !strings.Contains(c, k) {
 			t.Errorf("topic coordinator hint lacks %q", k)
 		}

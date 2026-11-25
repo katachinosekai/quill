@@ -200,10 +200,13 @@ func keepNumbers(lines []string) string {
 var numLeadMD = regexp.MustCompile(`^(\s*)(\d+)([.)])\s+`)
 
 // planStatus: the small caption an inactive plan shows under its controls.
-func planStatus(plan *chat.Item, state string) string {
+func planStatus(owner *deskSession, plan *chat.Item, state string) string {
 	text := "Not run"
 	switch plan.PermState {
 	case chat.PermAllowed:
+		if owner != nil && owner.codex {
+			return "Plan approved"
+		}
 		text = "Approved: running the whole plan"
 	case chat.PermCancelled, chat.PermPending:
 		text = "No longer needed"
@@ -270,7 +273,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	apprControl := func(question string) {
 		var parts []fyne.CanvasObject
 		if active {
-			c := approvalCaption(appr)
+			c := approvalCaption(owner, appr)
 			if len(qs) > 0 {
 				c += " Unanswered questions are sent as \"no answer\"."
 			}
@@ -280,7 +283,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			parts = append(parts, msgText(v.markdownBlocks(keepNumbers(strings.Split(strings.TrimRight(question, "\n "), "\n")))))
 		}
 		parts = append(parts, v.fadeIn(plan.Seq, v.centered(v.approvalRadio(owner, plan, appr, active))))
-		box.Add(questionCard(parts, active))
+		box.Add(v.planApprovalFrame(parts, active))
 	}
 	prose := func(from, to int) {
 		var keep []string
@@ -333,9 +336,9 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 		at = q.end
 	}
 	prose(at, len(lines))
-	status := func() { box.Add(v.muted(planStatus(plan, state), fontBody)) }
+	status := func() { box.Add(v.muted(planStatus(owner, plan, state), fontBody)) }
 	resend := func() {
-		if plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
+		if !owner.codex && plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
 			box.Add(v.fadeIn(plan.Seq, v.buttonRow(glowButton("Resend approval", theme.MailSendIcon(), colIdle, true, v.guarded(func() { v.d.answerPlan(owner, plan, true) })))))
 			v.noteButtons(plan.Seq, "resend")
 		}
@@ -351,7 +354,7 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 			v.noteButtons(plan.Seq, approvalKind(appr, qs))
 		} else {
 			status()
-			if plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
+			if !owner.codex && plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
 				resend()
 			} else {
 				v.noteButtons(plan.Seq, "none")
@@ -362,10 +365,16 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	label := "Approve plan & send answers"
 	text := "Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done. Unanswered questions are sent as \"no answer\"."
 	if len(qs) == 0 {
-		label = "Approve plan & run all"
+		label = planApproveLabel(owner)
 		text = "Approving runs this plan: every command and change, including its background jobs and subagents, is approved until the plan is done."
 	}
-	run := glowButton(label, theme.ConfirmIcon(), colIdle, active && v.d.canAnswer(owner), v.guarded(func() {
+	if owner.codex {
+		text = codexPlanApprovalCaption
+		if len(qs) > 0 {
+			text += " Unanswered questions are sent as \"no answer\"."
+		}
+	}
+	run := glowButton(label, theme.ConfirmIcon(), colIdle, active && v.d.canApprovePlan(owner), v.guarded(func() {
 		if len(qs) == 0 {
 			v.d.answerPlan(owner, plan, true)
 			return
@@ -374,16 +383,16 @@ func (v *chatView) renderPlanReply(reply *chat.Item) fyne.CanvasObject {
 	}))
 	no := glowButton("Don't run", theme.CancelIcon(), colError, active, v.guarded(func() { v.d.answerPlan(owner, plan, false) }))
 	if active {
-		box.Add(questionCard([]fyne.CanvasObject{caption(text), v.fadeIn(plan.Seq, v.buttonRow(run, no))}, true))
+		box.Add(v.planApprovalFrame([]fyne.CanvasObject{caption(text), v.fadeIn(plan.Seq, v.buttonRow(run, no))}, true))
 	} else {
-		box.Add(questionCard([]fyne.CanvasObject{v.fadeIn(plan.Seq, v.buttonRow(run, no))}, false))
+		box.Add(v.planApprovalFrame([]fyne.CanvasObject{v.fadeIn(plan.Seq, v.buttonRow(run, no))}, false))
 	}
 	if active {
 		v.noteButtons(plan.Seq, "pending")
 		return box
 	}
 	status()
-	if plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
+	if !owner.codex && plan.PermState == chat.PermAllowed && !owner.conv.Busy && !owner.inTurn && !replied(owner, plan) {
 		resend()
 	} else {
 		v.noteButtons(plan.Seq, "none")

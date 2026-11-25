@@ -10,28 +10,31 @@ import (
 )
 
 type sessMeta struct {
-	Cwd         string          `json:"cwd"`
-	Model       string          `json:"model"`
-	Mode        string          `json:"mode"`
-	Persisted   bool            `json:"persisted"`
-	KmemNew     bool            `json:"kmemNew,omitempty"`
-	KmemPick    bool            `json:"kmemPick,omitempty"`
-	RotateAsk   int             `json:"rotateAsk,omitempty"`
-	RotateTried int             `json:"rotateTried,omitempty"`
-	LastClaude  string          `json:"lastClaude,omitempty"`
-	RestoreMode string          `json:"restoreMode,omitempty"`
-	RetryCmd    string          `json:"retryCmd,omitempty"`
-	RetryRules  []protocol.Rule `json:"retryRules,omitempty"`
-	RetryDest   string          `json:"retryDest,omitempty"`
-	CompactFrom string          `json:"compactFrom,omitempty"`
-	KmemSave    *savedKmem      `json:"kmemSave,omitempty"`
-	RotateNo    bool            `json:"rotateNo,omitempty"`
-	Chrome      string          `json:"chrome,omitempty"`
-	AddDirs     []string        `json:"addDirs,omitempty"`
-	Hidden      bool            `json:"hidden,omitempty"` // a hidden session (hidden.go)
-	Role        string          `json:"role,omitempty"`   // its hidden role; "" = kmem (older files)
-	ResumeAt    string          `json:"resumeAt,omitempty"`
-	ForkOf      string          `json:"forkOf,omitempty"`
+	CodexEffort       string          `json:"codexEffort,omitempty"`
+	CodexDefaultModel string          `json:"codexDefaultModel,omitempty"`
+	Codex             bool            `json:"codex,omitempty"`
+	Cwd               string          `json:"cwd"`
+	Model             string          `json:"model"`
+	Mode              string          `json:"mode"`
+	Persisted         bool            `json:"persisted"`
+	KmemNew           bool            `json:"kmemNew,omitempty"`
+	KmemPick          bool            `json:"kmemPick,omitempty"`
+	RotateAsk         int             `json:"rotateAsk,omitempty"`
+	RotateTried       int             `json:"rotateTried,omitempty"`
+	LastClaude        string          `json:"lastClaude,omitempty"`
+	RestoreMode       string          `json:"restoreMode,omitempty"`
+	RetryCmd          string          `json:"retryCmd,omitempty"`
+	RetryRules        []protocol.Rule `json:"retryRules,omitempty"`
+	RetryDest         string          `json:"retryDest,omitempty"`
+	CompactFrom       string          `json:"compactFrom,omitempty"`
+	KmemSave          *savedKmem      `json:"kmemSave,omitempty"`
+	RotateNo          bool            `json:"rotateNo,omitempty"`
+	Chrome            string          `json:"chrome,omitempty"`
+	AddDirs           []string        `json:"addDirs,omitempty"`
+	Hidden            bool            `json:"hidden,omitempty"` // a hidden session (hidden.go)
+	Role              string          `json:"role,omitempty"`   // its hidden role; "" = kmem (older files)
+	ResumeAt          string          `json:"resumeAt,omitempty"`
+	ForkOf            string          `json:"forkOf,omitempty"`
 }
 
 type savedKmem struct {
@@ -46,7 +49,7 @@ func (d *desk) saveSessions(st *restoreState) {
 		if s.remote != nil {
 			continue
 		}
-		m := sessMeta{Cwd: s.cwd, Model: s.model, Mode: s.mode, Persisted: s.persisted, KmemNew: s.kmemNew, KmemPick: s.pickPending,
+		m := sessMeta{Codex: s.codex, CodexEffort: s.codexEffort, CodexDefaultModel: s.codexDefaultModel, Cwd: s.cwd, Model: s.model, Mode: s.mode, Persisted: s.persisted, KmemNew: s.kmemNew, KmemPick: s.pickPending,
 			RotateAsk: s.rotateAsk, RotateTried: s.rotateTried, LastClaude: s.lastClaude, RestoreMode: s.restoreMode,
 			RetryCmd: s.retryCmd, RetryRules: s.retryRules, RetryDest: s.retryDest, CompactFrom: s.compactFrom, RotateNo: s.rotateNo,
 			Chrome: s.chrome, AddDirs: s.addDirs, ResumeAt: s.resumeAt, ForkOf: s.forkOf}
@@ -80,12 +83,20 @@ func (d *desk) restoreSessions(st *restoreState) {
 	for id, m := range st.Meta {
 		s := d.session(id)
 		if s == nil {
-			if m.Persisted || m.Cwd == "" {
+			if (m.Persisted && !m.Codex) || m.Cwd == "" {
 				continue
 			}
 			s = &deskSession{id: id, cwd: m.Cwd, conv: chat.New(), loaded: true, created: time.Now()}
 			d.sessions[id] = s
 			d.created[id] = true
+		}
+		s.codex = s.codex || m.Codex
+		s.codexEffort, s.codexDefaultModel = m.CodexEffort, m.CodexDefaultModel
+		if s.codex && len(st.CodexChats[id]) > 0 {
+			if live, err := chat.RestoreLive(st.CodexChats[id]); err == nil {
+				s.conv, s.loaded = live, true
+				d.noteWindow(s)
+			}
 		}
 		if m.Model != "" {
 			s.model = m.Model

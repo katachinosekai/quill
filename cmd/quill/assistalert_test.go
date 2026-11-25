@@ -7,6 +7,7 @@ import (
 
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/katachinosekai/quill/internal/chat"
 	"github.com/katachinosekai/quill/internal/protocol"
 )
 
@@ -39,7 +40,7 @@ func TestAssistApprovalAlert(t *testing.T) {
 		bt := h.d.box().btns[role]
 		h.d.syncAssistButtons()
 		on := h.d.assistAlerting(role)
-		amber := bt.btn.Importance == widget.WarningImportance && bt.dot.Visible() && bt.dot.FillColor == colWaiting &&
+		amber := bt.btn.Importance == widget.WarningImportance && bt.side.Importance == widget.WarningImportance && bt.dot.Visible() && bt.dot.FillColor == colWaiting &&
 			bt.bubble.box.Visible() && bt.bubble.dot.FillColor == colWaiting
 		if on != amber {
 			t.Fatalf("%s: alerting %v but the button shows %v (importance %v, dot %v, bubble %v)", role, on, amber,
@@ -137,4 +138,42 @@ func TestAssistApprovalAlert(t *testing.T) {
 			t.Fatal("the plan was answered: the kmem button clears")
 		}
 	})
+}
+
+func TestActionableAssistantRequestFiltersPlanHistory(t *testing.T) {
+	c := chat.New()
+	c.AddUser("Please check this.")
+	reply := c.AddNotice("Can I run steps 1–2? Yes (recommended) or no?")
+	reply.Kind = chat.Assistant
+	plan := c.AddPlan()
+	if request := actionableAssistRequest(c, false); !request.alert || request.kind != "plan" {
+		t.Fatalf("the live plan should alert: %+v", request)
+	}
+	plan.PermState = chat.PermAllowed
+	if request := actionableAssistRequest(c, false); request.kind != "" {
+		t.Fatalf("an answered plan and its original question should clear: %+v", request)
+	}
+
+	stale := c.AddPlan()
+	c.AddUser("Move on from that request.")
+	if stale.PermState != chat.PermPending || actionableAssistRequest(c, false).kind != "" {
+		t.Fatal("a pending card in history should not show an alert")
+	}
+	current := c.AddPlan()
+	if request := actionableAssistRequest(c, false); !request.alert || request.kind != "plan" {
+		t.Fatalf("a new current plan should alert: %+v", request)
+	}
+	current.PermState = chat.PermDenied
+	if request := actionableAssistRequest(c, false); request.kind != "" {
+		t.Fatalf("rejecting the current plan should clear it: %+v", request)
+	}
+
+	reply = c.AddNotice("Can I build the app now?")
+	reply.Kind = chat.Assistant
+	if request := actionableAssistRequest(c, false); !request.alert || request.kind != "question" {
+		t.Fatalf("a current written approval question should alert: %+v", request)
+	}
+	if request := actionableAssistRequest(c, true); request.kind != "" {
+		t.Fatalf("streaming turns should not alert for a written question yet: %+v", request)
+	}
 }

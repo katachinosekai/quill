@@ -1,8 +1,8 @@
 # Quill
 
-A desktop app for Claude Code sessions on Linux and Windows. Unofficial; not affiliated with Anthropic.
+A desktop app for Claude Code and Codex sessions on Linux and Windows. Independent of Anthropic and OpenAI.
 
-Quill drives the `claude` CLI you already have installed (headless, stream-json), so it uses your own login, plan, settings, memory and hooks. It never asks for an API key.
+Quill drives the agent CLI you already have installed. It uses that CLI's existing login and configuration, and opens sessions in a shared desktop interface.
 
 <p align="center">
   <img src="docs/screenshots/landscape.png" alt="Quill Desktop in Landscape layout: session tabs across the top, a formatted reply, the message box" width="49%">
@@ -20,6 +20,10 @@ Download from [Releases](https://github.com/katachinosekai/quill/releases/latest
 - **Android:** `quill-android-<version>.apk` (see [Quill for Android](#quill-for-android))
 
 Quill needs the Claude Code CLI (`claude`) installed and signed in. On a new install a short **Welcome** asks five things (online or local model, speech-to-text language, plan first or not, kmem or Claude's auto memory, default rules or none), then **Setup** checks what is missing and offers to install it. Quill never updates on its own: when a signed release is out, a quiet line under the header offers **Update / What's new / Later** (see Security).
+
+## Codex sessions
+
+Install and sign in to the Codex CLI, then select Codex when opening a session. Quill uses the CLI's existing sign-in and configuration. The composer shows the selected model's modes and reasoning levels when available. You can review native approvals, plan cards, and subagent activity in the same desktop UI.
 
 ## Features
 

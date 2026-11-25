@@ -90,6 +90,7 @@ func openAssist(h *harness, w *kmemWindow) *deskSession {
 	h.ui(func() {
 		h.d.kmemWin = w
 		h.d.kmemAssistOpen(w)
+		h.d.startAgent(h.d.assist())
 	})
 	var s *deskSession
 	h.eventually("the assistant runs", func() bool {
@@ -312,7 +313,7 @@ func TestKmemAssistOpenHideAndStop(t *testing.T) {
 				break
 			}
 		}
-		if !strings.HasPrefix(first, "RESUME "+kmemAssistName) || !strings.Contains(first, `"kmem issue:"`) || !strings.Contains(first, "always-running") || s.resumeAs != kmemAssistName {
+		if !strings.HasPrefix(first, "RESUME "+kmemAssistName) || !strings.Contains(first, `"kmem issue:"`) || !strings.Contains(first, "The user started you") || s.resumeAs != kmemAssistName {
 			t.Fatalf("the resume prompt with resumeNext: %q (as %q)", first, s.resumeAs)
 		}
 		if !hasNotice(s, "The last session ended without saving") {
@@ -384,7 +385,7 @@ func TestKmemAssistOpenHideAndStop(t *testing.T) {
 		if !hasNotice(s, "Saved kmem handoff “kmem-lock-audit”") {
 			t.Fatal("the save is reported")
 		}
-		if !strings.Contains(rec.reason, "is stopped") || rec.button != "Start assistant" || h.d.kmemAssistRunning() {
+		if !strings.Contains(rec.reason, "is stopped") || h.d.kmemAssistRunning() {
 			t.Fatalf("the window says it is stopped: %q", rec.reason)
 		}
 		// Closing and reopening doesn't start it again; Start assistant does.
@@ -392,14 +393,14 @@ func TestKmemAssistOpenHideAndStop(t *testing.T) {
 		h.d.kmemAssistClose(w)
 		h.d.kmemWin = w
 		h.d.kmemAssistOpen(w)
-		if h.d.assist().state != asClosed || rec.button != "Start assistant" {
+		if h.d.assist().state != asClosed || !strings.Contains(rec.reason, "is stopped") {
 			t.Fatal("stays stopped after Stop assistant")
 		}
 		h.d.kmemAssistBoot()
 		if h.d.assist().state != asClosed {
 			t.Fatal("boot doesn't undo the user's stop")
 		}
-		rec.tap()
+		h.d.startAgent(h.d.assist())
 	})
 	h.eventually("Start assistant starts a fresh session", func() bool {
 		a := h.d.assist()
@@ -521,6 +522,7 @@ func TestKmemAssistPanelsOnly(t *testing.T) {
 	h.ui(func() {
 		h.d.app.Preferences().SetString(prefKmemAssistModel, kmemAssistOff)
 		h.d.kmemAssistOpen(w)
+		h.d.startAgent(h.d.assist())
 		if rec.reason != kmemAssistOffReason || h.d.assist().s != nil || rec.prefill != nil || h.d.kmemAssistChatOn() {
 			t.Fatalf("Off: panels only: %q", rec.reason)
 		}
@@ -528,6 +530,7 @@ func TestKmemAssistPanelsOnly(t *testing.T) {
 		h.d.app.Preferences().SetString(prefKmemAssistModel, "")
 		kmemAssistSignedIn = func(*desk) bool { return false }
 		h.d.kmemAssistOpen(w)
+		h.d.startAgent(h.d.assist())
 		if !strings.Contains(rec.reason, "not signed in") || rec.button != "Sign in" {
 			t.Fatalf("not signed in: %q", rec.reason)
 		}
@@ -542,12 +545,16 @@ func TestKmemAssistPanelsOnly(t *testing.T) {
 		toolProbeCache = map[string]toolProbe{}
 		toolProbeMu.Unlock()
 	})
-	h.ui(func() { h.d.kmemAssistOpen(w) })
+	h.ui(func() {
+		h.d.kmemAssistOpen(w)
+		h.d.startAgent(h.d.assist())
+	})
 	h.eventually("a local model without tools", func() bool { return strings.Contains(rec.reason, "can't use tools") })
 	h.ui(func() {
 		h.d.kmemAssistClose(w)
 		h.d.kmemOff = true
 		h.d.kmemAssistOpen(w)
+		h.d.startAgent(h.d.assist())
 		if !strings.Contains(rec.reason, "kmem is not available") || h.d.assist().s != nil {
 			t.Fatal("no kmem: no assistant")
 		}
@@ -575,6 +582,7 @@ func TestKmemAssistElsewhereMovesIn(t *testing.T) {
 	h.ui(func() {
 		h.d.kmemWin = w
 		h.d.kmemAssistOpen(w)
+		h.d.startAgent(h.d.assist())
 		if h.d.assist().state != asElsewhere || rec.button != "Move it here" || !strings.Contains(rec.reason, "is live in the tab") || runningHidden(h.d) != 0 {
 			t.Fatalf("ELSEWHERE, nothing started: %q", rec.reason)
 		}
@@ -725,6 +733,7 @@ func TestKmemAssistBootSkips(t *testing.T) {
 		w := &kmemWindow{}
 		h.d.kmemWin = w
 		h.d.kmemAssistOpen(w)
+		h.d.startAgent(h.d.assist())
 		if rec.button != "Move it here" {
 			t.Fatalf("the window keeps its offer: %q", rec.reason)
 		}
@@ -808,7 +817,7 @@ func TestKmemAssistSaveCountdownAndExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.eventually("stopped with Start assistant", func() bool {
-		return h.d.assist().state == asClosed && !s.running() && rec.button == "Start assistant"
+		return h.d.assist().state == asClosed && !s.running() && strings.Contains(rec.reason, "is stopped")
 	})
 }
 

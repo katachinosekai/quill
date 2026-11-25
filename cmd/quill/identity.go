@@ -25,6 +25,9 @@ func (d *desk) afterUI(t time.Duration, f func()) {
 }
 
 func (d *desk) ensureKmem(id string) string {
+	if d.isCodexSession(id) {
+		return ""
+	}
 	if k := d.org.Kmem[id]; k != "" {
 		return k
 	}
@@ -70,6 +73,10 @@ func (d *desk) closeSessionTabs(ids []string) {
 func (d *desk) closeSessionTab(id string) {
 	s := d.sessions[id]
 	if s != nil && s.remote != nil {
+		d.closeTab(id)
+		return
+	}
+	if s != nil && s.codex {
 		d.closeTab(id)
 		return
 	}
@@ -130,7 +137,7 @@ func (d *desk) cancelPendingEnd(s *deskSession) {
 func (d *desk) endWithSave(id, place string) {
 	d.autoOffForEnd(id) // at once, not at process exit (autoapprove.go)
 	s := d.sessions[id]
-	if s != nil && s.running() && !trivialSession(s) && d.endCheckFor(s) {
+	if s != nil && !s.codex && s.running() && !trivialSession(s) && d.endCheckFor(s) {
 		d.endTopic(id, place)
 		return
 	}
@@ -186,7 +193,7 @@ func (d *desk) markEnded(id string) {
 func (d *desk) offerResume(id string) bool {
 	name := d.org.Kmem[id]
 	s := d.sessions[id]
-	if !d.org.Ended[id] || name == "" || !d.kmemAvailable() || s == nil || s.running() {
+	if !d.org.Ended[id] || name == "" || !d.kmemAvailable() || s == nil || s.codex || s.running() {
 		return false
 	}
 	title, _, _ := d.rowText(id)

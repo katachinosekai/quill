@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/widget"
 )
 
 // The main message box while the assistant box is open over the chat
@@ -37,6 +38,9 @@ func targetLabel(role string) string {
 	if role == boxKmem {
 		return "Message the kmem assistant"
 	}
+	if isCodexAssistant(role) {
+		return "Message " + roleDef(role).title
+	}
 	return "Message the " + roleDef(role).title
 }
 
@@ -68,6 +72,9 @@ func (d *desk) syncMainTarget() {
 	want := ""
 	if d.assistOverlayOpen() {
 		want = d.abox.role
+		if w := d.kmemWin; want == boxKmem && w != nil && w.codexShown {
+			want = roleCodexKmem
+		}
 	}
 	in, key := d.mainEntry()
 	if want == d.main.role && (want == "" || d.main.in == in) {
@@ -76,15 +83,25 @@ func (d *desk) syncMainTarget() {
 	}
 	// Give the entry back first.
 	if old := d.main; old.role != "" && old.in != nil && d.strip != nil {
+		if s := d.targetSession(old.role); s != nil && s.qedit != nil && s.qedit.in == old.in {
+			d.finishQueueEdit(s, s.qedit.text)
+		}
 		d.strip.keepBox(assistDraftKey(old.role), old.in)
 		d.strip.fillBox(tabDraftKey(old.key), old.in)
-		setHint(old.in, "Message Claude", d.tabSuggestion(d.entrySession(old.in)), false)
+		s := d.entrySession(old.in)
+		setHint(old.in, s.messageHint(), d.tabSuggestion(s), false)
 		if old.in == d.input && d.strip != nil {
 			d.strip.lastCur = old.key
 		}
 	}
 	d.main = mainTarget{}
 	if want != "" && in != nil && d.strip != nil {
+		if s := d.targetSession(want); s != nil && s.qedit != nil && s.qedit.in != in {
+			d.finishQueueEdit(s, s.qedit.text)
+		}
+		if s := d.entrySession(in); s != nil && s.qedit != nil && s.qedit.in == in {
+			d.finishQueueEdit(s, s.qedit.text)
+		}
 		d.strip.keepBox(tabDraftKey(key), in)
 		d.strip.fillBox(assistDraftKey(want), in)
 		d.main = mainTarget{role: want, in: in, key: key}
@@ -94,6 +111,12 @@ func (d *desk) syncMainTarget() {
 		}
 	}
 	d.syncBoxInputs()
+	if d.backendBtn != nil {
+		d.updateChrome()
+		for _, p := range d.panes {
+			d.syncPaneControls(p)
+		}
+	}
 }
 
 // syncBoxInputs: an assistant's own message box shows unless the main one
@@ -112,7 +135,7 @@ func (d *desk) syncBoxInputs() {
 	}
 	if d.targetLbl != nil {
 		if d.main.role != "" && d.main.in == d.input {
-			setLabel(d.targetLbl, "To the "+roleDef(d.main.role).title+" · Esc closes the box and gives this box back to the tab")
+			setLabel(d.targetLbl, strings.Replace(targetLabel(d.main.role), "Message", "To", 1)+" · Esc closes the box and gives this box back to the tab")
 			d.targetLbl.Show()
 		} else {
 			d.targetLbl.Hide()
@@ -233,7 +256,10 @@ func (d *desk) sendTargeted(in *sendEntry, text string, now bool) bool {
 		return true
 	}
 	a := d.assistByRole(role)
-	if a == nil {
+	if a == nil || d.saveQueueEdit(a.s, in, text) || pendingRevisionMatches(a.s, text) {
+		return true
+	}
+	if now && d.reviseApproval(a.s, in, text) || !now && d.reviseTypedApproval(a.s, in, text) {
 		return true
 	}
 	if now {
@@ -241,7 +267,9 @@ func (d *desk) sendTargeted(in *sendEntry, text string, now bool) bool {
 			d.interrupt(s)
 		}
 	}
-	d.assistDeliver(a, text)
+	if d.assistDeliver(a, text) == startAgentFirst {
+		return true
+	}
 	in.SetText("")
 	in.setSuggestion(d.targetSuggestion(role))
 	d.strip.keepDraft(assistDraftKey(role), "")
@@ -252,4 +280,84 @@ func (d *desk) sendTargeted(in *sendEntry, text string, now bool) bool {
 	}
 	d.assistRefresh(a)
 	return true
+}
+
+func (d *desk) messageSession(in *sendEntry, tab *deskSession) *deskSession {
+	if role := d.targeted(in); role != "" {
+		return d.targetSession(role)
+	}
+	return tab
+}
+
+func operatorButtonRole(role string) string {
+	switch role {
+	case roleCodexQuill:
+		return boxQuill
+	case roleCodexKmem:
+		return boxKmem
+	}
+	return role
+}
+
+func (d *desk) showMessageBackend(in *sendEntry, tab *deskSession, b *widget.Button, after func()) {
+	role := d.targeted(in)
+	if role == "" {
+		d.showBackendMenu(tab, b, after)
+		return
+	}
+	menuAbove(b, d.operatorAgentItems(role))
+}
+
+func (d *desk) operatorAgentItems(role string) []*fyne.MenuItem {
+	current := claudeAgent
+	if isCodexAssistant(role) {
+		current = codexAgent
+	}
+	return pickItems([]string{claudeAgent, codexAgent}, current, func(v string) {
+		codex := v == codexAgent
+		if role == roleKmem || role == roleCodexKmem {
+			if w := d.kmemWin; w != nil {
+				w.chooseAgent(codex)
+			}
+		} else {
+			d.chooseQuillAgent(codex)
+		}
+	})
+}
+
+func (d *desk) syncMainOperatorControls() {
+	role := d.targeted(d.input)
+	if role == "" || d.backendBtn == nil {
+		return
+	}
+	d.backendBtn.SetText("Agent")
+	d.backendBtn.Enable()
+	d.input.Enable()
+	d.sendBtn.Enable()
+	d.modelBtn.Disable()
+	d.modeBtn.Disable()
+	d.stopBtn.Disable()
+	d.syncAutoChip(d.autoBtn, nil)
+	s := d.targetSession(role)
+	d.syncReasoningControl(d.reasoning, s)
+	if s == nil {
+		setText(d.stats, "")
+		return
+	}
+	setText(d.stats, statsLine(s))
+	suppress := d.suppress
+	d.suppress = true
+	setOptions(d.modelSel, d.modelOptions(s))
+	setOptions(d.modeSel, d.composerModeOptions(s))
+	d.modelSel.SetSelected(s.model)
+	d.modeSel.SetSelected(s.mode)
+	d.suppress = suppress
+	d.syncBarButtons(s)
+	if s.codex && s.codexComposerAvailable() || !s.codex && s.running() {
+		d.modelBtn.Enable()
+		d.modeBtn.Enable()
+	}
+	if s.running() && (s.conv.Busy || s.proc.Busy() || hasPendingPlan(s)) {
+		d.stopBtn.Enable()
+	}
 }

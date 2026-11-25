@@ -15,6 +15,9 @@ import (
 )
 
 func (d *desk) handoffOwner(name string, self *deskSession) *deskSession {
+	if owner := d.runningKmemOwner(name, self); owner != nil {
+		return owner
+	}
 	for id, k := range d.org.Kmem {
 		if k != name || id == self.id {
 			continue
@@ -24,7 +27,7 @@ func (d *desk) handoffOwner(name string, self *deskSession) *deskSession {
 		for _, t := range d.tabs {
 			open = open || t == id
 		}
-		if open || s != nil && (s.running() || d.hostHolds(s)) {
+		if open || s != nil && isHiddenSession(s) && !s.codex && d.hostHolds(s) {
 			return d.session(id)
 		}
 	}

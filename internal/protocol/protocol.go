@@ -121,6 +121,17 @@ type ControlResponseBody struct {
 	Error     string          `json:"error,omitempty"`
 }
 
+// ResultContinuing marks a Codex result followed by another input already accepted by the bridge.
+const ResultContinuing = "quill_continuing"
+
+const (
+	CodexParentTurnStarted = "codex_parent_turn_started"
+	CodexAgentWaitStarted  = "codex_agent_wait_started"
+	CodexAgentWaitEnded    = "codex_agent_wait_ended"
+	CodexWorkersStarted    = "codex_workers_started"
+	CodexWorkersEnded      = "codex_workers_ended"
+)
+
 type Event struct {
 	Type            string                `json:"type"`
 	Subtype         string                `json:"subtype,omitempty"`
@@ -148,6 +159,8 @@ type Event struct {
 	RateLimit       *RateLimit            `json:"rate_limit_info,omitempty"`
 	TerminalReason  string                `json:"terminal_reason,omitempty"`
 	TotalCostUSD    float64               `json:"total_cost_usd,omitempty"`
+	CodexTurn       *CodexTurnSettings    `json:"codex_turn,omitempty"`
+	CodexUsage      *CodexUsage           `json:"codex_usage,omitempty"`
 	NumTurns        int                   `json:"num_turns,omitempty"`
 	DurationMS      int                   `json:"duration_ms,omitempty"`
 	Usage           *Usage                `json:"usage,omitempty"`
@@ -231,13 +244,46 @@ func line(v any) []byte {
 	return append(b, '\n')
 }
 
+const CodexSteerNow = "quill_codex_steer_now"
+
 func UserMessage(text string) []byte {
-	return line(map[string]any{
+	return userMessage(text, "")
+}
+
+func SteerMessage(text string) []byte {
+	return userMessage(text, CodexSteerNow)
+}
+
+type CodexTurnSettings struct {
+	Model, Mode, Effort, ModeInstructions string
+}
+
+func CodexUserMessage(text string, steer bool, settings CodexTurnSettings) []byte {
+	subtype := ""
+	if steer {
+		subtype = CodexSteerNow
+	}
+	return userMessageWithSettings(text, subtype, &settings)
+}
+
+func userMessage(text, subtype string) []byte {
+	return userMessageWithSettings(text, subtype, nil)
+}
+
+func userMessageWithSettings(text, subtype string, settings *CodexTurnSettings) []byte {
+	message := map[string]any{
 		"type":               "user",
 		"message":            map[string]any{"role": "user", "content": text},
 		"parent_tool_use_id": nil,
 		"session_id":         "",
-	})
+	}
+	if subtype != "" {
+		message["subtype"] = subtype
+	}
+	if settings != nil {
+		message["codex_turn"] = settings
+	}
+	return line(message)
 }
 
 func ControlRequestLine(id string, req map[string]any) []byte {

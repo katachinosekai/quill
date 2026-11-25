@@ -78,7 +78,6 @@ type assistBoxView struct {
 	inputFn func() fyne.Focusable    // instead of input when it is built later (kmem: after the chat attaches)
 	popOut  func()                   // a Pop out button in the header (kmem: the box as its own window)
 	escape  func() bool              // Escape inside the box, before it closes (a popup, a selection); true = handled
-	status  func() statusInfo        // the header's status line (refreshed every second while open)
 	shown   func(on bool)            // the box opened (true) or closed / switched away (false)
 	inRow   func() fyne.CanvasObject // its own message box row: hidden over the chat (mainbox.go)
 }
@@ -103,9 +102,9 @@ type assistBox struct {
 	outline *canvas.Rectangle
 	headRow *fyne.Container
 	title   *widget.Label
-	status  *widget.Label
-	stPulse pulseVeil // the still-working pulse over status (status.go)
 	note    *widget.Label
+	agent   *widget.Select
+	start   *widget.Button
 	dockBtn *widget.Button
 	popBtn  *widget.Button
 	closeX  *widget.Button
@@ -152,10 +151,6 @@ func (d *desk) box() *assistBox {
 	b.dim = &dimLayer{root: container.NewWithoutLayout()}
 	b.ghostL = container.NewWithoutLayout(b.dim.root, b.ghost)
 	b.title = boldLabel("")
-	b.status = caption("")
-	b.status.Truncation = fyne.TextTruncateEllipsis
-	b.stPulse.tint = func(f float64) color.RGBA { return veilOver(colInput, f) }
-	b.stPulse.veil = canvas.NewRectangle(b.stPulse.color(0))
 	b.note = caption("")
 	b.note.Hide()
 	b.dockBtn = widget.NewButtonWithIcon("Dock", theme.ViewRestoreIcon(), func() {
@@ -184,8 +179,14 @@ func (d *desk) box() *assistBox {
 	})
 	b.popBtn.Importance = widget.LowImportance
 	b.popBtn.Hide()
-	b.headRow = container.NewBorder(nil, nil, nil, container.NewHBox(b.popBtn, b.dockBtn, b.closeX), b.title)
-	head := container.NewVBox(b.headRow, container.NewStack(b.status, b.stPulse.veil), b.note, widget.NewSeparator())
+	b.agent = widget.NewSelect([]string{claudeAgent, codexAgent}, func(engine string) {
+		d.chooseQuillAgent(engine == codexAgent)
+	})
+	b.agent.Hide()
+	b.start = widget.NewButton("Start", func() { d.startAgent(d.assistByRole(b.role)) })
+	b.start.Hide()
+	b.headRow = container.NewBorder(nil, nil, nil, container.NewHBox(b.start, b.popBtn, b.dockBtn, b.closeX), b.title)
+	head := container.NewVBox(b.headRow, b.note, widget.NewSeparator())
 	b.body = container.NewStack()
 	bgRect := canvas.NewRectangle(colInput)
 	bgRect.CornerRadius = 12
@@ -267,8 +268,12 @@ func (d *desk) viewOf(role string) *assistBoxView {
 // toggleAssistBox: the button and the shortcut: open role, or close it when
 // it is the one shown.
 func (d *desk) toggleAssistBox(role string) {
-	if d.assistBoxRole() == role {
+	if current := d.assistBoxRole(); current == role || role == boxQuill && current == roleCodexQuill {
 		d.closeAssistBox()
+		return
+	}
+	if role == boxQuill && d.app.Preferences().Bool("quillAgentCodex") {
+		d.openQuillCodex()
 		return
 	}
 	d.openAssistBox(role)
@@ -303,6 +308,7 @@ func (d *desk) openAssistBox(role string) {
 	prev, wasDocked := b.role, b.docked
 	from, fromOK := d.boxRect()
 	if prev != "" {
+		d.cancelQueueEdit(d.assistantBoxSession(prev))
 		if v := d.viewOf(prev); v.shown != nil {
 			v.shown(false)
 		}
@@ -346,6 +352,7 @@ func (d *desk) closeAssistBox() {
 	}
 	from, _ := d.boxRect()
 	to, _ := d.buttonRect(role)
+	d.cancelQueueEdit(d.assistantBoxSession(role))
 	if v := d.viewOf(role); v.shown != nil {
 		v.shown(false)
 	}
@@ -380,6 +387,14 @@ func (d *desk) showBoxContent(role string) {
 	b := d.box()
 	v := d.viewOf(role)
 	setLabel(b.title, v.title)
+	if role == boxQuill || role == roleCodexQuill {
+		d.attachPlanMirrors(role)
+		b.agent.Selected = claudeAgent
+		if role == roleCodexQuill {
+			b.agent.Selected = codexAgent
+		}
+		b.agent.Refresh()
+	}
 	if v.popOut != nil {
 		b.popBtn.Show()
 	} else {
@@ -401,7 +416,7 @@ func (d *desk) focusBox() {
 	if b.role == "" || d.win == nil {
 		return
 	}
-	if in := d.main.in; in != nil && d.main.role == b.role {
+	if in := d.main.in; in != nil && d.main.role != "" {
 		d.win.Canvas().Focus(in) // the overlay's message box is the main one
 	} else if in := d.viewOf(b.role).focusable(); in != nil {
 		d.win.Canvas().Focus(in)
@@ -467,20 +482,42 @@ func (d *desk) assistBoxEscape() bool {
 	if v := d.viewOf(b.role); v.escape != nil && v.escape() {
 		return true
 	}
+	s := d.assistantBoxSession(b.role)
+	if d.cancelQueueEdit(s) {
+		return true
+	}
+	if s != nil && len(s.conv.PendingPermissions()) > 0 {
+		d.interrupt(s)
+		return true
+	}
 	d.closeAssistBox()
 	return true
+}
+
+func (d *desk) assistantBoxSession(role string) *deskSession {
+	if role == boxKmem && d.kmemWin != nil && d.kmemWin.codexShown {
+		role = roleCodexKmem
+	}
+	return d.targetSession(role)
 }
 
 // The remembered dock state and the panel width.
 
 func (d *desk) assistDockWanted(role string) bool {
+	if role == roleCodexQuill {
+		role = boxQuill
+	}
 	return d.app.Preferences().Bool(prefAssistDock + role)
 }
 
 // setAssistDock docks or undocks role (remembered per assistant); the open
 // box moves (animated) when it shows role.
 func (d *desk) setAssistDock(role string, on bool) {
-	d.app.Preferences().SetBool(prefAssistDock+role, on)
+	key := role
+	if key == roleCodexQuill {
+		key = boxQuill
+	}
+	d.app.Preferences().SetBool(prefAssistDock+key, on)
 	b := d.box()
 	if b.role != role {
 		return
@@ -565,17 +602,11 @@ func (d *desk) layoutArea() {
 }
 
 func (d *desk) refreshBoxHeader() {
+	d.syncAgentStart()
 	b := d.abox
 	if b == nil || b.role == "" {
 		return
 	}
-	v := d.viewOf(b.role)
-	var st statusInfo
-	if v.status != nil {
-		st = v.status()
-	}
-	setLabel(b.status, st.text)
-	b.stPulse.set(d, st.pulse)
 	if b.docked {
 		b.dockBtn.SetText("Undock")
 	} else {
@@ -611,7 +642,7 @@ func (l *assistRootLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	d := l.d
 	b := d.box()
 	b.rootW = size.Width
-	main, panel, handle, ghostL := objs[0], objs[1], objs[2], objs[3]
+	main, panel, handle, overlay, ghostL := objs[0], objs[1], objs[2], objs[3], objs[4]
 	pw := d.dockWidth(size.Width)
 	if b.role != "" && d.assistDockWanted(b.role) && (pw > 0) != b.docked {
 		// The window was resized across the fit: overlay <-> panel.
@@ -622,13 +653,17 @@ func (l *assistRootLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 		} else {
 			b.layer.Objects = []fyne.CanvasObject{b.card}
 		}
-		defer d.layoutArea()
 		defer d.refreshBoxHeader()
 		defer d.syncMainTarget()
 	}
+	overlay.Move(fyne.NewPos(0, 0))
+	overlay.Resize(size)
 	ghostL.Move(fyne.NewPos(0, 0))
 	ghostL.Resize(size)
-	defer d.queueDim()
+	defer func() {
+		d.layoutOverlay()
+		d.queueDim()
+	}()
 	if !b.docked || pw <= 0 {
 		main.Move(fyne.NewPos(0, 0))
 		main.Resize(size)
@@ -646,8 +681,8 @@ func (l *assistRootLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	panel.Resize(fyne.NewSize(pw, size.Height))
 	panel.Show()
 	for _, o := range b.panel.Objects {
-		o.Move(fyne.NewPos(0, boxInset))
-		o.Resize(fyne.NewSize(pw-boxInset, size.Height-2*boxInset))
+		o.Move(fyne.NewPos(0, 0))
+		o.Resize(fyne.NewSize(pw-boxInset, max(0, size.Height-boxInset)))
 	}
 }
 
@@ -660,14 +695,19 @@ func (l *boxAreaLayout) MinSize(objs []fyne.CanvasObject) fyne.Size { return obj
 func (l *boxAreaLayout) Layout(objs []fyne.CanvasObject, size fyne.Size) {
 	objs[0].Move(fyne.NewPos(0, 0))
 	objs[0].Resize(size)
-	objs[1].Move(fyne.NewPos(0, 0))
-	objs[1].Resize(size)
-	pos, sz := l.d.overlayRect(size)
-	for _, o := range l.d.box().layer.Objects {
-		o.Move(pos)
-		o.Resize(sz)
-	}
+	l.d.layoutOverlay()
 	l.d.queueDim()
+}
+
+func (d *desk) layoutOverlay() {
+	b := d.abox
+	if b == nil || b.area == nil || d.usageBox == nil || len(b.layer.Objects) == 0 {
+		return
+	}
+	pos, size := d.overlayRect(b.area.Size())
+	origin := d.usageBox.Position().Add(b.area.Position())
+	b.card.Move(fyne.NewPos(origin.X+pos.X, 0))
+	b.card.Resize(fyne.NewSize(size.Width, max(0, origin.Y+pos.Y+size.Height)))
 }
 
 // overlayRect: the box's rect in the chat history area: the history with a
@@ -853,6 +893,9 @@ func (d *desk) boxRect() (rectF, bool) {
 }
 
 func (d *desk) buttonRect(role string) (rectF, bool) {
+	if role == roleCodexQuill {
+		role = boxQuill
+	}
 	bt := d.box().btns[role]
 	if bt == nil {
 		return rectF{}, false
@@ -861,8 +904,8 @@ func (d *desk) buttonRect(role string) (rectF, bool) {
 		if o == nil || !o.Visible() || o.Size().IsZero() {
 			continue
 		}
-		if d.layoutMode() == layoutVertical && o == bt.btn && bt.side != nil && bt.side.Visible() && !d.sideOff {
-			continue // portrait: grow from the sidebar's button
+		if d.layoutMode() == layoutVertical && (o == bt.btn || d.sideOff) {
+			continue // portrait only has the sidebar's button
 		}
 		if r, ok := d.layerRect(o); ok {
 			return r, true
@@ -986,11 +1029,20 @@ func (d *desk) syncAssistButtons() {
 	b.pulse = !b.pulse
 	for role, bt := range b.btns {
 		st := d.assistDotState(role)
+		if role == boxQuill && (d.app.Preferences().Bool("quillAgentCodex") || b.role == roleCodexQuill) {
+			st = d.assistDotState(roleCodexQuill)
+		}
+		if role == boxKmem && d.kmemWin != nil && d.kmemWin.codexShown {
+			st = d.assistDotState(roleCodexKmem)
+		}
 		if st > 0 {
 			need = true
 		}
+		alert := d.assistAlerting(role) || d.mirrorAlerting(role)
 		c := color.Color(colIdle)
-		if st == 2 {
+		if alert {
+			c = colWaiting
+		} else if st == 2 {
 			c = colRunning
 			if b.pulse {
 				c = fade(colRunning, 0.45)
@@ -1000,7 +1052,7 @@ func (d *desk) syncAssistButtons() {
 			if dot == nil {
 				continue
 			}
-			if st == 0 {
+			if st == 0 && !alert {
 				dot.Hide()
 				continue
 			}
@@ -1010,19 +1062,9 @@ func (d *desk) syncAssistButtons() {
 				dot.Refresh()
 			}
 		}
-		d.syncAssistAlert(bt) // approval waiting: amber over the dot (assistalert.go)
+		d.syncAssistAlert(bt, alert)
 		if bt.sideBub != nil && bt.bubble != nil {
 			mirrorBubble(bt.bubble, bt.sideBub)
-		}
-		if bt.btn != nil && bt.side != nil {
-			imp := widget.LowImportance
-			if b.role == role {
-				imp = widget.HighImportance
-			}
-			if bt.side.Importance != imp {
-				bt.side.Importance = imp
-				bt.side.Refresh()
-			}
 		}
 	}
 	d.refreshBoxHeader()
@@ -1222,6 +1264,9 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 	c.input.onEscape = d.assistBoxEscape
 	c.input.onFocus = d.syncBoxOutline
 	c.input.onSendNow = func(t string) {
+		if d.saveQueueEdit(a.s, c.input, t) || d.reviseApproval(a.s, c.input, t) {
+			return
+		}
 		if s := a.s; s != nil && s.running() {
 			d.interrupt(s)
 		}
@@ -1239,7 +1284,28 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 		}
 	})
 	stop.Importance = widget.DangerImportance
-	in := bg(colBackground, 10, container.NewBorder(nil, nil, nil, container.NewVBox(stop, layout.NewSpacer(), send), c.input))
+	var controls fyne.CanvasObject
+	if r.id == roleQuill || isCodexAssistant(r.id) {
+		agent := menuButton("Agent", nil, func() []*fyne.MenuItem { return d.operatorAgentItems(r.id) })
+		controls = agent
+		if isCodexAssistant(r.id) {
+			model := menuButton("Model", nil, func() []*fyne.MenuItem {
+				if a.s != nil && a.s.codexComposerAvailable() {
+					return d.codexModelItems(a.s)
+				}
+				return nil
+			})
+			mode := menuButton("Mode", nil, func() []*fyne.MenuItem {
+				if a.s != nil && a.s.codexComposerAvailable() {
+					return d.modeItems(a.s)
+				}
+				return nil
+			})
+			a.reasoning = d.newReasoningControl()
+			controls = container.NewHBox(agent, model, mode, a.reasoning.root)
+		}
+	}
+	in := bg(colBackground, 10, container.NewBorder(nil, controls, nil, container.NewVBox(stop, layout.NewSpacer(), send), c.input))
 	c.inRow = in
 	c.reasonLbl = widget.NewLabel("")
 	c.reasonLbl.Wrapping = fyne.TextWrapWord
@@ -1265,8 +1331,7 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 			}
 			return false
 		},
-		status: func() statusInfo { return d.assistIndicator(a) },
-		inRow:  func() fyne.CanvasObject { return c.inRow },
+		inRow: func() fyne.CanvasObject { return c.inRow },
 		shown: func(on bool) {
 			if !on {
 				return
@@ -1274,6 +1339,9 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 			if a.s != nil && c.view.s != a.s {
 				c.view.show(a.s)
 			}
+			d.syncReasoningControl(a.reasoning, a.s)
+			c.view.stickSoon()
+			c.view.syncJump()
 			d.markAssistSeen(a, false)
 		},
 	}
@@ -1287,13 +1355,20 @@ func (d *desk) attachAssistBox(r *assistRole, title, placeholder string) *assist
 	return c
 }
 
-// assistBoxSend sends the box's message to the role's session (queued and
-// started when it isn't running); never to the current tab.
+// assistBoxSend sends the box's message to the role's started session.
 func (d *desk) assistBoxSend(c *assistChat, text string) {
-	if strings.TrimSpace(text) == "" {
+	if d.saveQueueEdit(c.a.s, c.input, text) {
 		return
 	}
-	d.assistDeliver(c.a, text)
+	if strings.TrimSpace(text) == "" || pendingRevisionMatches(c.a.s, text) {
+		return
+	}
+	if isCodexAssistant(c.a.role.id) && d.reviseApproval(c.a.s, c.input, text) {
+		return
+	}
+	if d.assistDeliver(c.a, text) == startAgentFirst {
+		return
+	}
 	c.input.SetText("")
 	if s := c.a.s; s != nil && c.view.s != s {
 		c.view.show(s)
@@ -1348,19 +1423,28 @@ func (d *desk) registerKmemBox() {
 		title:   "kmem assistant",
 		content: content,
 		inputFn: func() fyne.Focusable {
+			if w := d.kmemWin; w != nil && w.codexShown {
+				return d.codexAssistant(codexKmemRole).input
+			}
 			if a := d.assist(); a.input != nil && d.kmemAssistChatOn() {
 				return a.input
 			}
 			return nil
 		},
 		escape: func() bool {
+			if w := d.kmemWin; w != nil && w.codexShown {
+				view := d.codexAssistant(codexKmemRole).view
+				if view.sel != nil && view.sel.has {
+					view.sel.clear()
+					return true
+				}
+			}
 			if w := d.kmemWin; w != nil && w.view != nil && w.view.sel != nil && w.view.sel.has {
 				w.view.sel.clear()
 				return true
 			}
 			return false
 		},
-		status: func() statusInfo { return d.assistIndicator(d.assist()) },
 		popOut: d.popOutKmem,
 		inRow: func() fyne.CanvasObject {
 			if a := d.assist(); a.inRow != nil {
@@ -1406,7 +1490,7 @@ func (d *desk) registerKmemBox() {
 		},
 		shown: func() bool {
 			w := d.kmemWin
-			return d.assistBoxShowing(boxKmem) || w != nil && w.win != nil && !w.closed && w.s != nil
+			return w != nil && !w.codexShown && (d.assistBoxShowing(boxKmem) || w.win != nil && !w.closed && w.s != nil)
 		},
 		open: d.showKmem,
 	})

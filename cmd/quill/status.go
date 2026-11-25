@@ -116,6 +116,9 @@ func liveStatus(s *deskSession, now time.Time) statusInfo {
 		st.text, st.active = "Waiting for your answer above", true
 	case busy:
 		st.text, st.active, waiting = busyText(c), true, false
+		if s.codexWaiting {
+			st.text = "Waiting for subagents"
+		}
 	case s.restarting:
 		st.text, st.active = "Starting…", true
 	case interrupted(c):
@@ -190,6 +193,11 @@ func (v *chatView) setStatus(s *deskSession) {
 	now := statusNow()
 	s.trackTurn(now)
 	st := liveStatus(s, now)
+	if v.d != nil {
+		if a := v.d.assistOf(s); a != nil && operatorButtonRole(a.role.id) == boxQuill {
+			st = v.d.assistIndicator(a)
+		}
+	}
 	imp := widget.LowImportance
 	if st.active {
 		imp = widget.MediumImportance

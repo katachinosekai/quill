@@ -26,6 +26,7 @@ import (
 
 	"github.com/katachinosekai/quill/internal/account"
 	"github.com/katachinosekai/quill/internal/chat"
+	"github.com/katachinosekai/quill/internal/codex"
 	"github.com/katachinosekai/quill/internal/live"
 	"github.com/katachinosekai/quill/internal/protocol"
 	"github.com/katachinosekai/quill/internal/session"
@@ -71,6 +72,15 @@ func (s status) String() string {
 }
 
 type deskSession struct {
+	codexEffort, codexDefaultModel string
+	pendingRevision                *approvalRevision
+	codexWaiting, codexWorkers     bool
+	claudeCoordination             string
+	claudeCoordinationSet          bool
+	codexUpgrading                 bool
+
+	codex          bool
+	agentHandoff   *agentHandoff
 	id             string
 	cwd            string
 	title          string
@@ -171,7 +181,7 @@ func (s *deskSession) status() status {
 	if s.terminal != nil && !s.running() {
 		return stTerminal
 	}
-	restarting := s.restarting || s.compacting || s.kmemSave != nil || s.endWait != nil
+	restarting := s.restarting || s.compacting || s.agentHandoff != nil || s.kmemSave != nil || s.endWait != nil
 	if !s.running() {
 		if s.failed != "" {
 			return stError
@@ -199,19 +209,23 @@ func (s *deskSession) status() status {
 
 type config struct {
 	ProjectsRoot string
+	CodexRoot    string
 	SessionsDir  string
 	ClaudeBin    string
 }
 
 type sideRow struct {
-	header string
-	id     string
-	parent string
-	key    string
-	depth  int
-	count  int
-	open   bool
-	ext    *extSession // a live session outside Quill Desktop: read-only row
+	header       string
+	id           string
+	parent       string
+	key          string
+	depth        int
+	count        int
+	open         bool
+	ext          *extSession // a live session outside Quill Desktop: read-only row
+	hasAgents    bool
+	agentSession string
+	agent        chat.AgentUse
 }
 
 type desk struct {
@@ -296,111 +310,117 @@ type desk struct {
 	current       *deskSession
 	ownPIDs       sync.Map
 
+	codexQuillChat *assistChat
+
 	// The "Switch to kmem" dialog when open (kmemswitchui.go), and the
 	// refresh of Settings → General → Memory (kmem).
 	kmemSwitchUI        *kmemSwitchView
 	kmemSettingsRefresh func()
 
-	rows          []sideRow
-	rowCaps       map[string]string
-	list          *widget.List
-	search        *widget.Entry
-	chat          *chatView
-	title         *widget.Label
-	subtitle      *canvas.Text
-	note          *widget.Label
-	rcStatus      *canvas.Text
-	reloadBtn     *widget.Button // Reload for Other PCs sessions (remotereload.go)
-	usage         *usagePanel
-	rate          *protocol.RateLimit
-	rateAt        time.Time
-	input         *sendEntry
-	modelSel      *widget.Select
-	newSessSel    *widget.Select // Settings → New sessions
-	newModeSel    *widget.Select // Settings → New sessions mode
-	modeSel       *widget.Select
-	folder        *canvas.Text
-	stats         *canvas.Text
-	stopBtn       *widget.Button
-	sendBtn       *widget.Button
-	acctBtn       *widget.Button
-	acct          account.Status
-	acctErr       string
-	signingIn     context.CancelFunc
-	glowBoxes     map[*canvas.Rectangle]glow
-	pulsing       atomic.Int32
-	keeper        *keeperClient
-	single        *chatView
-	panes         []*pane
-	focused       *pane
-	chatHost      *fyne.Container
-	mainRoot      *fyne.Container // the main area with the docked assistant panel (assistbox.go)
-	abox          *assistBox      // the assistant box (assistbox.go)
-	keepBox       bool            // a tab switch keeps the overlay open (the operator's move-in)
-	main          mainTarget      // the main message box messages the overlay's assistant (mainbox.go)
-	targetLbl     *widget.Label   // above the main message box: who it messages, when not the tab
-	tipLayer      *fyne.Container // top layer of the window content for tooltips (agentstrip.go)
-	chatDropHL    *canvas.Rectangle
-	viewBtn       *widget.Button
-	viewBox       *fyne.Container
-	groups        []bookGroup
-	tabs          []string
-	tabBar        *fyne.Container
-	bookBar       *fyne.Container
-	tabSig        string
-	tabChips      map[string]*tabChip
-	strip         *tabStrip
-	autoChk       *widget.Check
-	autoSyncing   bool
-	preAuto       string
-	listTheme     *container.ThemeOverride
-	usageBox      *fyne.Container
-	resizeFreeze  float32
-	resizeTimer   *time.Timer
-	lastRootSize  fyne.Size
-	tabDrag       string
-	tabDragX      float32
-	tabCenter     *fyne.Container
-	bookCenter    *fyne.Container
-	bookSig       string
-	bookRow       fyne.CanvasObject
-	tabRow        fyne.CanvasObject
-	settingsBox   *fyne.Container
-	setGeneral    *fyne.Container
-	setSessions   *fyne.Container
-	policyUI      *policyRow
-	kmemPanelNow  *kmemPanel
-	remotes       map[string]*remoteLink
-	settingsDlg   dialog.Dialog
-	autoBtn       *autoChip // "Auto-approve on" by the message box (autoapprove.go)
-	keepNext      bool      // the approval being sent turns auto-approve on (autoapprove.go)
-	phoneSync     *phoneSync
-	buildChk      *widget.Check // Settings → General "Ask before building", kept in line by settingsChanged
-	coordChk      *widget.Check // Settings → General "Coordinate with subagents"
-	featureDlg    dialog.Dialog // the open feature questions dialog (featureask.go)
-	phoneFileBtn  *widget.Button
-	phoneFileOff  *widget.Button
-	settingsSlot  *fyne.Container
-	settingsBtn   *widget.Button
-	kmemBtn       *widget.Button
-	layoutBtn     *widget.Button
-	viewMenu      *widget.PopUpMenu
-	viewItems     []*fyne.MenuItem
-	sideDirty     bool
-	shares        map[string]float32
-	bottomBox     *fyne.Container
-	keptView      string
-	keptHidden    bool
-	lightboxClose func()
-	swapTo        string
-	swapping      bool
-	restore       *restoreState
-	cmdList       []protocol.Command
-	agentList     []protocol.Agent
-	pending       []*chat.Item
-	pendingSeen   map[*chat.Item]bool
-	pendingChrome bool
-	pendingFor    *deskSession
+	rows              []sideRow
+	openSidebarAgents map[string]bool
+	rowCaps           map[string]string
+	list              *widget.List
+	search            *widget.Entry
+	chat              *chatView
+	title             *widget.Label
+	subtitle          *canvas.Text
+	note              *widget.Label
+	rcStatus          *canvas.Text
+	reloadBtn         *widget.Button // Reload for Other PCs sessions (remotereload.go)
+	usage             *usagePanel
+	rate              *protocol.RateLimit
+	rateAt            time.Time
+	input             *sendEntry
+	modelSel          *widget.Select
+	newSessSel        *widget.Select // Settings → New sessions
+	newModeSel        *widget.Select // Settings → New sessions mode
+	modeSel           *widget.Select
+	folder            *canvas.Text
+	stats             *canvas.Text
+	stopBtn           *widget.Button
+	sendBtn           *widget.Button
+	acctBtn           *widget.Button
+	acct              account.Status
+	acctErr           string
+	signingIn         context.CancelFunc
+	codexAuth         codexAuthState
+	codexCatalogs     map[string]*composerCatalog
+	reasoning         *reasoningControl
+	glowBoxes         map[*canvas.Rectangle]glow
+	pulsing           atomic.Int32
+	keeper            *keeperClient
+	single            *chatView
+	panes             []*pane
+	focused           *pane
+	chatHost          *fyne.Container
+	mainRoot          *fyne.Container // the main area with the docked assistant panel (assistbox.go)
+	abox              *assistBox      // the assistant box (assistbox.go)
+	keepBox           bool            // a tab switch keeps the overlay open (the operator's move-in)
+	main              mainTarget      // the main message box messages the overlay's assistant (mainbox.go)
+	targetLbl         *widget.Label   // above the main message box: who it messages, when not the tab
+	tipLayer          *fyne.Container // top layer of the window content for tooltips (agentstrip.go)
+	chatDropHL        *canvas.Rectangle
+	viewBtn           *widget.Button
+	viewBox           *fyne.Container
+	groups            []bookGroup
+	tabs              []string
+	tabBar            *fyne.Container
+	bookBar           *fyne.Container
+	tabSig            string
+	tabChips          map[string]*tabChip
+	strip             *tabStrip
+	autoChk           *widget.Check
+	autoSyncing       bool
+	preAuto           string
+	listTheme         *container.ThemeOverride
+	usageBox          *fyne.Container
+	resizeFreeze      float32
+	resizeTimer       *time.Timer
+	lastRootSize      fyne.Size
+	tabDrag           string
+	tabDragX          float32
+	tabCenter         *fyne.Container
+	bookCenter        *fyne.Container
+	bookSig           string
+	bookRow           fyne.CanvasObject
+	tabRow            fyne.CanvasObject
+	settingsBox       *fyne.Container
+	setGeneral        *fyne.Container
+	setSessions       *fyne.Container
+	policyUI          *policyRow
+	kmemPanelNow      *kmemPanel
+	remotes           map[string]*remoteLink
+	settingsDlg       dialog.Dialog
+	autoBtn           *autoChip // "Auto-approve on" by the message box (autoapprove.go)
+	keepNext          bool      // the approval being sent turns auto-approve on (autoapprove.go)
+	phoneSync         *phoneSync
+	buildChk          *widget.Check // Settings → General "Ask before building", kept in line by settingsChanged
+	coordChk          *widget.Check // Settings → General "Coordinate with subagents"
+	featureDlg        dialog.Dialog // the open feature questions dialog (featureask.go)
+	phoneFileBtn      *widget.Button
+	phoneFileOff      *widget.Button
+	settingsSlot      *fyne.Container
+	settingsBtn       *widget.Button
+	kmemBtn           *widget.Button
+	layoutBtn         *widget.Button
+	viewMenu          *widget.PopUpMenu
+	viewItems         []*fyne.MenuItem
+	sideDirty         bool
+	shares            map[string]float32
+	bottomBox         *fyne.Container
+	keptView          string
+	keptHidden        bool
+	lightboxClose     func()
+	swapTo            string
+	swapping          bool
+	restore           *restoreState
+	cmdList           []protocol.Command
+	agentList         []protocol.Agent
+	pending           []*chat.Item
+	pendingSeen       map[*chat.Item]bool
+	pendingChrome     bool
+	pendingFor        *deskSession
 	// The kmem window's per-frame chat batch (queueWinUI).
 	winPending    []*chat.Item
 	winPendingFor *deskSession
@@ -519,7 +539,8 @@ func (d *desk) isAuto(id string) bool {
 }
 
 func (d *desk) buildSidebar() fyne.CanvasObject {
-	newBtn := widget.NewButtonWithIcon("New session", theme.ContentAddIcon(), d.newSessionDialog)
+	var newBtn *widget.Button
+	newBtn = widget.NewButtonWithIcon("New session", theme.ContentAddIcon(), func() { d.showNewSessionMenu(newBtn) })
 	newBtn.Importance = widget.HighImportance
 	d.search = widget.NewEntry()
 	d.search.SetPlaceHolder("Search sessions")
@@ -615,7 +636,7 @@ func (d *desk) buildSidebar() fyne.CanvasObject {
 	speedSel.Selected = speedName(d.animateSpeed())
 	speedRow := container.NewHBox(widget.NewLabel("Text animation speed"), speedSel)
 	motionRows := d.boxSettings()
-	chipChk := widget.NewCheck("New tool chips start collapsed", d.setCollapseChips)
+	chipChk := widget.NewCheck(collapseActivityChipsLabel, d.setCollapseChips)
 	chipChk.Checked = d.collapseChips
 	rulesBtn := widget.NewButtonWithIcon("Format Rules...", theme.SettingsIcon(), d.rulesDialog)
 	rulesBtn.Importance = widget.LowImportance
@@ -681,7 +702,15 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			caption := canvas.NewText("", colMuted)
 			caption.TextSize = fontDense
 			head := container.NewBorder(nil, nil, nil, container.NewCenter(caption), title)
-			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(14, 14, statusMark(stNone)))), nil,
+			var item *sideItem
+			disclosure := widget.NewButtonWithIcon("", theme.MenuExpandIcon(), func() {
+				if row, ok := item.row(); ok && row.hasAgents {
+					d.toggleSidebarAgents(row.id)
+				}
+			})
+			disclosure.Importance = widget.LowImportance
+			disclosure.Hide()
+			row := container.NewBorder(nil, nil, container.NewHBox(sindent, container.NewCenter(sized(14, 14, statusMark(stNone)))), disclosure,
 				container.New(&tightVBox{}, head, container.NewPadded(meta)))
 			glow := canvas.NewRectangle(color.Transparent)
 			glow.CornerRadius = 8
@@ -691,7 +720,9 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			focus.StrokeWidth = 2.5
 			focus.StrokeColor = colText
 			focus.Hide()
-			return d.newSideItem(rows, container.NewStack(glow, folder, row, focus))
+			item = d.newSideItem(rows, container.NewStack(glow, folder, row, focus))
+			item.agentToggle = disclosure
+			return item
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			if id >= len(*rows) {
@@ -704,6 +735,14 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			folder := st.Objects[1].(*fyne.Container)
 			row := st.Objects[2].(*fyne.Container)
 			r := (*rows)[id]
+			if r.hasAgents {
+				icon := theme.MenuExpandIcon()
+				if r.open {
+					icon = theme.MenuDropDownIcon()
+				}
+				item.agentToggle.SetIcon(icon)
+			}
+			setShown(item.agentToggle, r.hasAgents)
 			focus := st.Objects[3].(*canvas.Rectangle)
 			if r.header == "" && d.current != nil && d.current.id == r.id {
 				focus.Show()
@@ -748,6 +787,23 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 			caption := head.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
 			meta := col.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
 			mark := left.Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*fyne.Container)
+			if r.agentSession != "" {
+				title.SetText(agentName(r.agent))
+				state := stRunning
+				if !r.agent.Running() {
+					state = stIdle
+					if r.agent.Status == "failed" || r.agent.Status == "error" {
+						state = stError
+					}
+				}
+				meta.Text = firstNonEmpty(r.agent.Status, "running")
+				meta.Refresh()
+				setText(caption, "")
+				setStatusMark(mark, state)
+				d.setGlow(glow, nil, 0)
+				row.Refresh()
+				return
+			}
 			if r.ext != nil { // read-only: running outside Quill Desktop
 				title.SetText(r.ext.Name)
 				meta.Text = "running elsewhere · tap to take over"
@@ -792,6 +848,10 @@ func (d *desk) newSessionList(rows *[]sideRow) *widget.List {
 		if r.header != "" {
 			list.Unselect(id)
 			d.toggleFolder(r.key)
+			return
+		}
+		if r.agentSession != "" {
+			list.Unselect(id) // an agent row opens its menu through its own tap
 			return
 		}
 		if r.ext != nil {
@@ -1014,6 +1074,10 @@ func (d *desk) rebuildRows() {
 			}
 		}
 	}
+	d.drawSidebarRows(d.withSidebarAgents(rows))
+}
+
+func (d *desk) drawSidebarRows(rows []sideRow) {
 	d.rows = rows
 	d.suppress = true
 	d.list.UnselectAll()
@@ -1097,7 +1161,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.rcStatus = mutedText("", fontMeta)
 	d.rcStatus.Hide()
 	d.autoBtn = newAutoChip(func() { d.setAutoApprove(d.current, false) })
-	d.acctBtn = widget.NewButtonWithIcon("Account", theme.AccountIcon(), d.accountMenu)
+	d.acctBtn = widget.NewButtonWithIcon("Manage sign-ins", theme.AccountIcon(), d.accountMenu)
 	d.reloadBtn = d.newRemoteReloadButton("Reload", func() *deskSession { return d.current })
 	d.headPad = canvas.NewRectangle(color.Transparent)
 	header := container.NewBorder(nil, nil, container.NewHBox(d.headPad, container.NewCenter(d.layoutButtons()), padLeft(12)), container.NewHBox(container.NewCenter(d.reloadBtn), container.NewCenter(d.rcStatus), container.NewCenter(d.phoneButton()), container.NewCenter(d.acctBtn)),
@@ -1126,8 +1190,10 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	d.input.OnChanged = func(t string) {
 		d.lastTyped = time.Now()
 		d.noteActivity(d.current)
-		if d.targeted(d.input) == "" {
+		if d.targeted(d.input) == "" && (d.current == nil || d.current.qedit == nil) {
 			d.cmds.update(t)
+		} else {
+			d.cmds.hide()
 		}
 	}
 	d.input.onSendNow = func(t string) {
@@ -1155,25 +1221,23 @@ func (d *desk) buildMain() fyne.CanvasObject {
 		d.input.Alignment = fyne.TextAlignCenter
 	}
 	d.modelSel = widget.NewSelect(modelChoices, func(v string) {
-		if d.suppress || d.current == nil {
-			return
+		if s := d.messageSession(d.input, d.current); !d.suppress && s != nil {
+			d.setModel(s, v)
 		}
-		d.setModel(d.current, v)
 	})
 	d.modeSel = widget.NewSelect(modeChoices, func(v string) {
-		if d.suppress || d.current == nil {
-			return
+		if s := d.messageSession(d.input, d.current); !d.suppress && s != nil {
+			d.setMode(s, v)
 		}
-		d.setMode(d.current, v)
 	})
 	d.backendBtn = widget.NewButton(backendOnline, func() {
-		d.showBackendMenu(d.current, d.backendBtn, d.updateChrome)
+		d.showMessageBackend(d.input, d.current, d.backendBtn, d.updateChrome)
 	})
 	d.folder = mutedText("⏎ send · Ctrl+⏎ stop & send · Shift+⏎ new line · Ctrl+T new session · Ctrl+1-9 tabs · / commands · Ctrl+Shift+O Quill · Ctrl+Shift+K kmem", fontMeta)
 	d.stats = mutedText("", fontMeta)
 	d.stopBtn = widget.NewButtonWithIcon("", theme.MediaStopIcon(), func() {
-		if d.current != nil {
-			d.interrupt(d.current)
+		if s := d.messageSession(d.input, d.current); s != nil {
+			d.interrupt(s)
 		}
 	})
 	d.stopBtn.Importance = widget.DangerImportance
@@ -1184,20 +1248,21 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	})
 	d.sendBtn.Importance = widget.HighImportance
 	d.stt = newSpeech(d)
-	d.chipsBtn = menuButton("Chips", theme.MenuDropUpIcon(), d.chipItems)
+	d.chipsBtn = menuButton(activityChipsLabel, theme.MenuDropUpIcon(), d.chipItems)
 	d.modelBtn = menuButton("", nil, func() []*fyne.MenuItem {
-		if d.current == nil {
-			return nil
+		if s := d.messageSession(d.input, d.current); s != nil {
+			return d.modelItems(s)
 		}
-		return d.modelItems(d.current)
+		return nil
 	})
 	d.modeBtn = menuButton("", nil, func() []*fyne.MenuItem {
-		if d.current == nil {
-			return nil
+		if s := d.messageSession(d.input, d.current); s != nil {
+			return d.modeItems(s)
 		}
-		return d.modeItems(d.current)
+		return nil
 	})
-	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.autoBtn), d.chipsBtn)
+	d.reasoning = d.newReasoningControl()
+	controls := container.NewBorder(nil, nil, container.NewHBox(d.backendBtn, d.modelBtn, d.modeBtn, d.reasoning.root, d.autoBtn), d.chipsBtn)
 	d.targetLbl = caption("")
 	d.targetLbl.Truncation = fyne.TextTruncateEllipsis
 	d.targetLbl.Hide()
@@ -1222,18 +1287,22 @@ func (d *desk) buildMain() fyne.CanvasObject {
 	// The assistant box covers the chat history only (all panes' in split
 	// view); docked, it sits right of the main area (assistbox.go).
 	box := d.box()
-	box.area = container.New(&boxAreaLayout{d}, d.chatHost, box.layer)
+	box.area = container.New(&boxAreaLayout{d}, d.chatHost)
 	d.usageBox = container.New(usageLayout{d}, box.area, d.usage.root, spare)
 	d.mainPane = container.New(glideBorder{}, headerBox, bottom, d.usageBox)
-	d.mainRoot = container.New(&assistRootLayout{d}, d.mainPane, box.panel, box.handle, box.ghostL)
+	d.mainRoot = container.New(&assistRootLayout{d}, d.mainPane, box.panel, box.handle, box.layer, box.ghostL)
 	d.updateChrome()
 	return d.mainRoot
 }
 
 func (d *desk) updateChrome() {
 	d.keepView()
+	defer d.syncMainOperatorControls()
 	defer d.syncQuillMoveBanner()
 	defer d.syncPlanMirrors()
+	if d.usage != nil {
+		defer d.usage.update()
+	}
 	if d.note != nil {
 		noteWas := d.note.Visible()
 		defer func() {
@@ -1244,8 +1313,12 @@ func (d *desk) updateChrome() {
 		}()
 	}
 	s := d.current
+	d.syncReasoningControl(d.reasoning, d.messageSession(d.input, s))
 	d.suppress = true
 	defer func() { d.suppress = false }()
+	if d.main.in != d.input || d.main.role == "" {
+		updateEngineHint(d.input, s)
+	}
 	if syncRemoteReload(d.reloadBtn, s) && d.headerBox != nil {
 		d.headerBox.Refresh()
 	}
@@ -1273,7 +1346,9 @@ func (d *desk) updateChrome() {
 	if st != stNone {
 		sub += "  ·  " + st.String()
 	}
-	if m := session.LocalModel(s.model); m != "" {
+	if s.codex {
+		sub += "  ·  Codex"
+	} else if m := session.LocalModel(s.model); m != "" {
 		sub += "  ·  Local: " + m
 	}
 	if d.subtitle.Text != sub {
@@ -1323,6 +1398,10 @@ func (d *desk) updateChrome() {
 			d.headerBox.Refresh()
 		}
 	}
+	if s.codex {
+		d.rcStatus.Hide()
+		setCodexControls(s, d.modelSel, d.modeSel)
+	}
 	if s.loading {
 		d.sendBtn.Disable()
 	}
@@ -1332,7 +1411,7 @@ func (d *desk) updateChrome() {
 		d.suggest(d.input, d.shownSuggestion(s))
 	}
 	setOptions(d.modelSel, d.modelOptions(s))
-	setOptions(d.modeSel, modeOptions(s))
+	setOptions(d.modeSel, d.composerModeOptions(s))
 	if setBackendButton(d.backendBtn, s) && d.mainPane != nil {
 		relayoutTree(d.mainPane)
 	}
@@ -1362,9 +1441,6 @@ func (d *desk) updateChrome() {
 	}
 	if d.syncAutoChip(d.autoBtn, s) && d.mainPane != nil {
 		relayoutTree(d.mainPane)
-	}
-	if d.usage != nil {
-		d.usage.update()
 	}
 	if d.chat != nil && (d.stt == nil || d.stt.state == sttIdle) {
 		d.chat.setStatus(d.current)
@@ -1413,7 +1489,7 @@ func (d *desk) session(id string) *deskSession {
 	if !ok {
 		return nil
 	}
-	s := &deskSession{id: id, cwd: info.Cwd, title: info.Title, persisted: true, model: "default", mode: "default", conv: chat.New()}
+	s := &deskSession{codex: info.Entrypoint == codex.Entrypoint, id: id, cwd: info.Cwd, title: info.Title, persisted: true, model: "default", mode: "default", conv: chat.New()}
 	if p, ok := d.terms[id]; ok {
 		pp := p
 		s.terminal = &pp
@@ -1520,20 +1596,36 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-func (d *desk) newSessionDialog() {
+func (d *desk) newSessionCwd() string {
 	home, _ := os.UserHomeDir()
 	cwd := home
 	if d.current != nil && d.current.cwd != "" {
 		cwd = d.current.cwd
 	}
+	return cwd
+}
+
+func (d *desk) newSessionDialog() {
+	if d.app.Preferences().Bool(prefNewCodex) {
+		d.newCodexSessionIn(d.newSessionCwd())
+		return
+	}
+	d.newClaudeSession()
+}
+
+func (d *desk) newClaudeSession() {
 	prefs := d.app.Preferences()
-	s := d.createSession(cwd, prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback(prefNewMode, "auto"))
+	s := d.createSession(d.newSessionCwd(), prefs.StringWithFallback("newModel", "default"), prefs.StringWithFallback(prefNewMode, "auto"))
 	name := d.nextSessionName()
 	d.org.Titles[s.id] = name
 	d.saveOrg()
 	d.updateChrome()
 	d.syncTabs()
-	if d.kmemAvailable() {
+	d.promptNewSessionName(s, name)
+}
+
+func (d *desk) promptNewSessionName(s *deskSession, name string) {
+	if d.kmemMemory() {
 		s.pickPending = true
 		d.chat.rebuild()
 		return
@@ -1557,6 +1649,10 @@ func (d *desk) createSession(cwd, model, mode string) *deskSession {
 }
 
 func (d *desk) addSession(cwd, model, mode string, show bool) *deskSession {
+	return d.addSessionWithBackend(cwd, model, mode, show, false)
+}
+
+func (d *desk) addSessionWithBackend(cwd, model, mode string, show, useCodex bool) *deskSession {
 	id := session.NewUUID()
 	d.created[id] = true
 	ids := append(d.app.Preferences().StringList("createdSessions"), id)
@@ -1567,7 +1663,7 @@ func (d *desk) addSession(cwd, model, mode string, show bool) *deskSession {
 	if isLocal(model) && !contains(localModes, mode) {
 		mode = "default"
 	}
-	s := &deskSession{id: id, cwd: cwd, model: model, mode: mode, conv: chat.New(), loaded: true, created: time.Now()}
+	s := &deskSession{codex: useCodex, id: id, cwd: cwd, model: model, mode: mode, conv: chat.New(), loaded: true, created: time.Now()}
 	d.sessions[id] = s
 	if !show {
 		d.rebuildRows()
@@ -1583,45 +1679,81 @@ func (d *desk) addSession(cwd, model, mode string, show bool) *deskSession {
 }
 
 func (d *desk) canAnswer(s *deskSession) bool {
-	return s != nil && s.running()
+	return s != nil && s.running() && s.pendingRevision == nil
 }
 
 func (d *desk) ensureProcess(s *deskSession) error {
 	if s.remote != nil {
 		return errors.New("this session runs on " + s.remote.link.conf.Name)
 	}
-	if s.running() {
+	replacingBridge := s.running()
+	if replacingBridge && (s.agentHandoff != nil || !d.codexBridgeNeedsRefresh(s)) {
 		return nil
 	}
 	if s.terminal != nil {
 		return fmt.Errorf("this session is open in a terminal")
 	}
+	if name := d.kmemTopicFor(s); name != "" && d.kmemAvailable() {
+		if owner := d.runningKmemOwner(name, s); owner != nil {
+			return fmt.Errorf("kmem topic %q is already in use by another %s session", name, owner.engineName())
+		}
+		if _, external := d.topicExternal(name); external {
+			return fmt.Errorf("kmem topic %q is already in use outside Quill Desktop", name)
+		}
+	}
 	if err := d.checkOllama(s.model); err != nil {
 		s.failed = err.Error()
 		return err
 	}
-	opts := d.processOptions(s)
-	d.warnInsecureOllama(s)
+	var opts session.Options
+	if s.codex {
+		var err error
+		opts, err = d.codexProcessOptions(s)
+		if err != nil {
+			s.failed = err.Error()
+			return err
+		}
+	} else {
+		opts = d.processOptions(s)
+		d.warnInsecureOllama(s)
+	}
+	if replacingBridge {
+		d.unkeepSession(s.id)
+		s.stopping = true
+		if err := s.proc.Stop(time.Second); err != nil && !s.proc.Exited() {
+			s.stopping = false
+			return err
+		}
+	}
 	s.failed = ""
 	s.stopping = false
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
+	var p *session.Process
 	p, err := session.Start(opts, func(ev *protocol.Event) {
-		d.do(func() { d.handleEvent(s, ev) })
+		d.do(func() {
+			if s.proc == p {
+				d.handleEvent(s, ev)
+			}
+		})
 	})
 	if err != nil {
 		s.failed = err.Error()
 		return err
 	}
 	s.conv.ClearBackground()
+	s.claudeCoordinationSet = false
 	s.resumeAt = ""
+	s.codexUpgrading = replacingBridge && s.codex
 	d.adopt(s, p)
-	d.autoRemote(s)
+	if !s.codex {
+		d.autoRemote(s)
+	}
 	return nil
 }
 
 // processOptions: how ensureProcess starts s's Claude process.
 func (d *desk) processOptions(s *deskSession) session.Options {
-	kmemMem := d.kmemMemory() || isHiddenSession(s)
+	kmemMem := d.kmemMemory() || hiddenRole(s) == roleKmem && d.kmemAvailable()
 	opts := session.Options{Binary: d.cfg.ClaudeBin, Cwd: s.cwd, Model: s.model, Mode: s.mode, Chrome: s.chrome, AddDirs: d.sessionDirs(s), ResumeAt: s.resumeAt, Prompt: d.sessionPromptFor(s, kmemMem),
 		Env: append(append(d.localEnv(s.model), checkpointEnv), sessionMemoryEnv(kmemMem)...)}
 	if s.persisted {
@@ -1653,19 +1785,58 @@ func (d *desk) adopt(s *deskSession, p *session.Process) {
 }
 
 func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
+	if s.codex && ev.Type == "system" && ev.Subtype == "init" {
+		s.codexDefaultModel = ev.Model
+	}
+	bridgeReady := s.codexUpgrading && ev.Type == "system" && ev.Subtype == "init"
+	if bridgeReady {
+		s.codexUpgrading = false
+	}
+	waitStarted := s.codex && ev.Type == "system" && ev.Subtype == protocol.CodexAgentWaitStarted
+	if s.codex {
+		switch {
+		case waitStarted:
+			s.codexWaiting = true
+		case ev.Type == "system" && ev.Subtype == protocol.CodexWorkersStarted:
+			s.codexWorkers = true
+		case ev.Type == "system" && ev.Subtype == protocol.CodexWorkersEnded:
+			s.codexWorkers = false
+		case ev.Type == "result" && ev.Subtype != protocol.ResultContinuing || ev.Type == "system" && ev.Subtype == protocol.CodexAgentWaitEnded:
+			s.codexWaiting = false
+		case ev.Type == "system" && ev.Subtype == protocol.CodexParentTurnStarted:
+			s.inTurn, s.codexWaiting = true, false
+		}
+	}
+	finishedCodexPlan := s.codex && d.planFirst && ev.Type == "result" &&
+		!turnFailed(ev) && !strings.HasPrefix(ev.TerminalReason, "aborted") &&
+		s.pendingRevision == nil && s.agentHandoff == nil && !codexNativeApprovalPending(s)
 	items := s.conv.Apply(ev)
+	if ev.Type == "result" && ev.Subtype == protocol.ResultContinuing {
+		s.conv.Busy = true
+	}
 	s.noteActivity(statusNow())
 	d.syncTargetSuggestion(s) // the main message box messages this assistant (mainbox.go)
 	if ev.Type == "system" && ev.Subtype == "init" && ev.SessionID != "" && ev.SessionID != s.id {
 		s.conv.AddNotice("Claude reported a different session id: " + ev.SessionID)
 	}
-	items = append(items, d.planGate(s, ev, items)...)
+	if !s.codex {
+		items = append(items, d.planGate(s, ev, items)...)
+	} else if finishedCodexPlan {
+		items = append(items, addCodexPlanCard(s)...)
+	}
 	if ev.Type == "result" || ev.Type == "assistant" {
 		d.noteWindow(s)
 	}
 	if ev.Type == "result" {
-		d.kmemAfterTurn(s)
-		d.checkAutoHandoff(s)
+		if !s.codex && s.agentHandoff == nil {
+			d.kmemAfterTurn(s)
+			d.checkAutoHandoff(s)
+		} else if s.codex {
+			s.inTurn = s.conv.Busy
+		}
+		if ev.Subtype != protocol.ResultContinuing {
+			d.agentHandoffResult(s, ev)
+		}
 		if s.clearAfterTurn {
 			d.clearNow(s)
 		}
@@ -1673,6 +1844,11 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	}
 	d.checkLimitMessage(s, items)
 	d.attention(s, ev, items)
+	if ev.Type == "control_request" || ev.Type == "control_cancel_request" || ev.Type == "result" {
+		for _, it := range items {
+			items = append(items, codexChoiceBeforeQuestion(s, it)...)
+		}
+	}
 	switch ev.Type {
 	case "control_request", "control_cancel_request", "result":
 		d.keepSession(s)
@@ -1689,7 +1865,18 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 	if ev.Type == "rate_limit_event" {
 		d.setRateLimit(ev.RateLimit)
 	}
-	urgent := ev.Type == "result" || ev.Type == "control_request" || ev.Type == "prompt_suggestion" || ev.Type == "system" && ev.Subtype == "init"
+	if s.codex && ev.Type == "codex_token_usage" {
+		d.noteWindow(s)
+		if d.current == s || d.targetSession(d.targeted(d.input)) == s {
+			d.updateChrome()
+		}
+		if pane := d.paneFor(s); pane != nil {
+			d.syncPaneControls(pane)
+		}
+	}
+	codexStatus := s.codex && ev.Type == "system" && (waitStarted || ev.Subtype == protocol.CodexAgentWaitEnded ||
+		ev.Subtype == protocol.CodexParentTurnStarted)
+	urgent := codexStatus || ev.Type == "result" || ev.Type == "control_request" || ev.Type == "prompt_suggestion" || ev.Type == "system" && ev.Subtype == "init"
 	if urgent {
 		if d.current == s {
 			d.flushUI()
@@ -1704,8 +1891,19 @@ func (d *desk) handleEvent(s *deskSession, ev *protocol.Event) {
 		d.assistEvent(s)
 		d.syncPlanMirrors() // another session's plan card came or was answered (planmirror.go)
 	}
-	if ev.Type == "result" {
+	if bridgeReady || waitStarted || s.codex && ev.Type == "control_cancel_request" {
 		d.flushQueue(s)
+	}
+	if bridgeReady {
+		d.loadComposerCatalog(s, false)
+		d.refreshComposerFor(s)
+		d.trySwap()
+	}
+	if ev.Type == "result" && ev.Subtype != protocol.ResultContinuing {
+		if !d.finishApprovalInterrupt(s) {
+			d.refreshLegacyCodexBridge(s)
+			d.flushQueue(s)
+		}
 		d.trySwap()
 	}
 }
@@ -1796,7 +1994,13 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 		return
 	}
 	d.unkeepSession(s.id)
+	if h := s.agentHandoff; h != nil && !s.stopping && h.phase != handoffVerifying {
+		d.failAgentHandoff(s, h, errors.New("the source agent stopped"))
+	}
 	s.restarting = false
+	if r := s.pendingRevision; r != nil && r.proc == p {
+		d.failApprovalRevision(s, r)
+	}
 	defer func() {
 		if isHiddenSession(s) {
 			d.assistantsExited(s)
@@ -1810,7 +2014,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 			items = append(items, it)
 		}
 	}
-	s.conv.Busy = false
+	s.conv.Busy, s.codexWaiting, s.codexWorkers, s.codexUpgrading = false, false, false, false
 	s.inTurn, s.planWait = false, false
 	s.agentGrants, s.agentCalls, s.agentIDs = nil, nil, nil // the process and its subagents are gone
 	s.planWork, s.planAgents, s.turnCovered, s.autoTurn = nil, nil, false, false
@@ -1822,7 +2026,7 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 	}
 	s.rcOn, s.rcURL, s.rcName = false, "", ""
 	if err != nil && !s.stopping {
-		msg := "Claude process exited: " + err.Error()
+		msg := s.engineName() + " process exited: " + err.Error()
 		if tail := strings.TrimSpace(p.Stderr()); tail != "" {
 			msg += "\n" + lastLines(tail, 6)
 		}
@@ -1851,8 +2055,11 @@ func lastLines(s string, n int) string {
 func (d *desk) send(text string) {
 	d.cmds.hide()
 	s := d.current
+	if d.saveQueueEdit(s, d.inputFor(s), text) {
+		return
+	}
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" || pendingRevisionMatches(s, text) {
 		return
 	}
 	if s != nil && s.remote != nil {
@@ -1884,22 +2091,13 @@ func (d *desk) send(text string) {
 		d.takeOver(s, t, text)
 		return
 	}
-	if d.usagePaused && !strings.HasPrefix(text, "/") {
+	if d.reviseTypedApproval(s, d.inputFor(s), text) {
+		return
+	}
+	if !s.codex && d.usagePaused && !strings.HasPrefix(text, "/") {
 		text = pausedNote + text
 	}
-	if s.qedit != nil {
-		idx, draft := s.qedit.idx, s.qedit.draft
-		s.qedit = nil
-		if s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
-			idx = min(idx, len(s.queue))
-			s.queue = append(append(append([]string{}, s.queue[:idx]...), text), s.queue[idx:]...)
-			d.inputFor(s).SetText(draft)
-			d.syncQueue(s)
-			return
-		}
-		defer d.inputFor(s).SetText(draft)
-	}
-	if s.pickPending || s.compacting || s.running() && (s.conv.Busy || s.proc.Busy()) {
+	if s.shouldQueue() {
 		d.enqueue(s, text)
 		return
 	}
@@ -1969,7 +2167,7 @@ func (d *desk) takeOverThen(s *deskSession, t live.Process, text string, after f
 			if text == "" {
 				err := d.ensureProcess(s)
 				if err != nil {
-					d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start claude: " + err.Error())})
+					d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start " + s.engineName() + ": " + err.Error())})
 				}
 				d.updateChrome()
 				if after != nil {
@@ -1986,19 +2184,35 @@ func (d *desk) takeOverThen(s *deskSession, t live.Process, text string, after f
 }
 
 func (d *desk) sendTo(s *deskSession, text string) {
+	if s.agentHandoff != nil || s.pendingRevision != nil || s.codexUpgrading {
+		d.enqueue(s, text)
+		return
+	}
+	d.deliverTurn(s, text, s.steerCodexMessage())
+}
+
+func (d *desk) sendTurn(s *deskSession, text string) bool {
+	return d.deliverTurn(s, text, false)
+}
+
+func (d *desk) deliverTurn(s *deskSession, text string, steer bool) bool {
 	typed := text
 	cardGo := s.cardGo // the plan card's own Approve (answerPlanMsg)
 	s.cardGo = false
 	defer d.autoStartFailed(s) // auto-approve this message turned on, if it never went out
 	if s.remote != nil {
 		d.remoteWrite(s, "send", map[string]string{"text": text})
-		return
+		return true
 	}
 	s.coldStamp = time.Time{}
 	if err := d.ensureProcess(s); err != nil {
-		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start claude: " + err.Error())})
+		d.chatFor(s, []*chat.Item{s.conv.AddError("Could not start " + s.engineName() + ": " + err.Error())})
 		d.updateChrome()
-		return
+		return false
+	}
+	if s.codexUpgrading {
+		d.enqueue(s, text)
+		return true
 	}
 	if s.kmemNew {
 		s.kmemNew = false
@@ -2010,7 +2224,7 @@ func (d *desk) sendTo(s *deskSession, text string) {
 		text = forkIntro(s.forkOf, d.org.Kmem[s.id]) + text
 		s.forkOf = ""
 	}
-	if d.planFirst {
+	if !s.codex && d.planFirst {
 		// "Approved." is the card's own text: it keeps the plan going when the
 		// card sent it, or when a plan or approval question waits for it; typed
 		// with nothing pending it is an ordinary message (user 2026-11-23).
@@ -2036,7 +2250,15 @@ func (d *desk) sendTo(s *deskSession, text string) {
 	// The auto-approve-off note goes to Claude with the message, not into
 	// its bubble, and stays pending until a send succeeds.
 	note := autoNoteFor(s, text)
-	if s.resumeNext == "" {
+	guide, coordinationChanged := d.coordinationUpdate(s)
+	if coordinationChanged {
+		update := guide
+		if update == "" {
+			update = "Coordinate with subagents is off for new work. Continue already approved worker tasks."
+		}
+		note += "\n\n[Quill session setting update] " + update
+	}
+	if !s.codex && s.resumeNext == "" {
 		s.resumeNext = d.firstTurnKmemName(s, text)
 	}
 	if s.resumeNext != "" || !isRetry(text) {
@@ -2046,16 +2268,34 @@ func (d *desk) sendTo(s *deskSession, text string) {
 	s.inTurn = true
 	s.autoPeer = false  // the user's message: auto-approve covers the turn again
 	defer d.keepGate(s) // the message may have ended or started the plan's approval
+	send := s.proc.Send
+	if steer {
+		send = s.proc.Steer
+	}
+	var err error
+	if s.codex && s.codexComposerAvailable() {
+		err = s.proc.SendCodex(text+note, steer, d.codexTurnSettings(s))
+	} else {
+		err = send(text + note)
+	}
+	if err != nil && s.codex && cardGo {
+		s.inTurn = false
+		d.chatFor(s, []*chat.Item{s.conv.AddError("Send failed: " + err.Error())})
+		return false
+	}
 	it := s.conv.AddUser(text)
 	d.refreshChoiceCards(s, it)
 	if s.title == "" {
 		s.title = oneLine(text, 60)
 	}
-	if err := s.proc.Send(text + note); err != nil {
+	if err != nil {
 		d.chatFor(s, []*chat.Item{it, s.conv.AddError("Send failed: " + err.Error())})
-		return
+		return false
 	}
 	s.autoStarting = false
+	if coordinationChanged {
+		s.claudeCoordination, s.claudeCoordinationSet = guide, true
+	}
 	if note != "" {
 		s.autoNote = ""
 	}
@@ -2063,12 +2303,17 @@ func (d *desk) sendTo(s *deskSession, text string) {
 	if d.current == s && strings.TrimSpace(d.input.Text) == text {
 		d.input.SetText("")
 	}
-	d.chatFor(s, []*chat.Item{it})
+	items := []*chat.Item{it}
+	if s.codex && !cardGo && !notFromUser(typed) {
+		items = append(s.conv.CancelPlans(), it)
+	}
+	d.chatFor(s, items)
 	if d.current == s {
 		d.chat.scrollBottom()
 	}
 	d.updateChrome()
 	d.rebuildRows()
+	return true
 }
 
 func oneLine(s string, n int) string {
@@ -2093,6 +2338,13 @@ func (d *desk) chatFor(s *deskSession, items []*chat.Item) {
 func (d *desk) sendNow(text string) {
 	s := d.current
 	if s == nil {
+		return
+	}
+	if s.agentHandoff != nil {
+		d.send(text)
+		return
+	}
+	if d.saveQueueEdit(s, d.input, text) || d.reviseApproval(s, d.input, text) {
 		return
 	}
 	if len(s.queue) > 0 {
@@ -2134,16 +2386,27 @@ func (d *desk) sendNow(text string) {
 // leaves the session's running background subagents and tasks alone (the
 // interrupt carries spare_background_tasks, see protocol.Interrupt).
 func (d *desk) interrupt(s *deskSession) {
-	if s != nil && s.remote != nil {
+	if s == nil {
+		return
+	}
+	if s.remote != nil {
 		d.remoteWrite(s, "interrupt", map[string]any{})
 		return
 	}
-	if s != nil {
-		revokePlan(s) // Stop ends the approval and its grants (planscope.go)
-		d.keepGate(s)
+	if r := s.pendingRevision; r != nil {
+		r.text, r.input = "", nil
+		return
 	}
+	hadPrompt := len(s.conv.PendingPermissions()) > 0
+	d.dismissApprovalProposal(s)
 	p := s.proc
-	if p == nil || p.Exited() {
+	if p == nil || p.Exited() || !s.conv.Busy && !p.Busy() && len(s.conv.PendingPermissions()) == 0 {
+		return
+	}
+	if hadPrompt {
+		r := &approvalRevision{proc: p}
+		s.pendingRevision = r
+		d.requestApprovalInterrupt(s, r)
 		return
 	}
 	go func() {
@@ -2177,7 +2440,11 @@ func (d *desk) answer(s *deskSession, it *chat.Item, dec protocol.Decision) {
 	if s = d.cardOwner(s, it); s == nil {
 		return
 	}
-	if it.PermState != chat.PermPending || !s.running() {
+	if it.PermState != chat.PermPending || !d.canAnswer(s) {
+		return
+	}
+	if dec == protocol.AllowAlways && !nativeSessionApprovalAvailable(it) {
+		d.notify(s, "This request does not offer permission for the rest of the session.")
 		return
 	}
 	if err := s.proc.Respond(it.RequestID, dec, it.Request); err != nil {
@@ -2195,12 +2462,16 @@ func (d *desk) answer(s *deskSession, it *chat.Item, dec protocol.Decision) {
 	default:
 		it.PermState = chat.PermDenied
 	}
+	d.chatFor(s, append([]*chat.Item{it}, codexChoiceBeforeQuestion(s, it)...))
 	if d.current == s {
-		d.chat.update([]*chat.Item{it})
 		d.updateChrome()
 	}
+	d.assistEvent(s)
 	d.refreshSidebar()
 	d.keepSession(s)
+	if s.codex {
+		d.flushQueue(s)
+	}
 }
 
 func isQuestion(it *chat.Item) bool {
@@ -2215,7 +2486,7 @@ func (d *desk) answerQuestions(s *deskSession, it *chat.Item, answers map[string
 	if s = d.cardOwner(s, it); s == nil {
 		return
 	}
-	if it.PermState != chat.PermPending || !s.running() {
+	if it.PermState != chat.PermPending || !d.canAnswer(s) {
 		return
 	}
 	if err := s.proc.Answer(it.RequestID, it.Request, answers); err != nil {
@@ -2231,15 +2502,32 @@ func (d *desk) answerQuestions(s *deskSession, it *chat.Item, answers map[string
 	}
 	it.Text = strings.Join(lines, "\n")
 	it.PermState = chat.PermAllowed
+	d.chatFor(s, append([]*chat.Item{it}, codexChoiceBeforeQuestion(s, it)...))
 	if d.current == s {
-		d.chat.update([]*chat.Item{it})
 		d.updateChrome()
 	}
+	d.assistEvent(s)
 	d.refreshSidebar()
 	d.keepSession(s)
+	if s.codex {
+		d.flushQueue(s)
+	}
 }
 
 func (d *desk) setModel(s *deskSession, model string) {
+	if s.codex {
+		if !s.codexComposerAvailable() || !contains(d.modelOptions(s), model) {
+			return
+		}
+		s.model = model
+		if !contains(d.codexEfforts(s), s.codexEffort) {
+			s.codexEffort = ""
+		}
+		if !contains(d.composerModeOptions(s), s.mode) {
+			s.mode = "default"
+		}
+		return
+	}
 	switchBackend := (session.LocalModel(s.model) == "") != (session.LocalModel(model) == "")
 	if switchBackend && s.running() && s.conv.Busy {
 		d.notify(s, "Wait for the current turn to finish before switching between Claude and a local model.")
@@ -2271,6 +2559,12 @@ func (d *desk) setModel(s *deskSession, model string) {
 }
 
 func (d *desk) setMode(s *deskSession, mode string) {
+	if s.codex {
+		if s.codexComposerAvailable() && contains(d.composerModeOptions(s), mode) {
+			s.mode = mode
+		}
+		return
+	}
 	s.mode = mode
 	if !s.running() {
 		return
@@ -2295,7 +2589,7 @@ func (d *desk) notify(s *deskSession, msg string) {
 }
 
 func (d *desk) autoRemote(s *deskSession) {
-	if isHiddenSession(s) {
+	if s.codex || isHiddenSession(s) {
 		return // the kmem window's assistant never gets Remote Control
 	}
 	if !d.autoRC || s.proc == nil || isLocal(s.model) && !d.rcForLocal() {
@@ -2321,6 +2615,9 @@ func (d *desk) autoRemote(s *deskSession) {
 }
 
 func (d *desk) setRemoteControl(s *deskSession, on bool) {
+	if s.codex {
+		return
+	}
 	if on && isLocal(s.model) && !d.rcForLocal() {
 		s.rcOn = false
 		d.notify(s, "Remote Control is off for local sessions. Turn on “Remote Control for local sessions” in settings to use it here.")
@@ -2443,15 +2740,16 @@ func (d *desk) watch(ctx context.Context) {
 	}
 	d.do(d.pruneStaleTabs)
 	d.do(d.reopenLastTab)
-	d.do(d.assistantsBoot) // the always-running assistants (kmem, Quill operator), after a reload's restore adopts their sessions
+	d.do(d.assistantsBoot)
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
 	go d.usageLoop(ctx)
 	go d.watchUpdates(ctx)
 	go d.watchKmemNeeds(ctx)
 	go watchMemoryLimit(ctx)
-	go d.chat.followGuard(ctx)
+	go d.followGuard(ctx)
 	go d.fetchCommands()
+	d.do(d.refreshCodexAccount)
 	d.refreshAccount()
 	d.do(func() { d.reconcileKmemNames(true, nil) }) // kmem handoffs renamed while Quill Desktop was closed
 	t := time.NewTicker(5 * time.Second)
@@ -2465,6 +2763,7 @@ func (d *desk) watch(ctx context.Context) {
 			d.refresh()
 			d.do(func() { d.unloadIdle(time.Now()) })
 			if n++; n%12 == 0 {
+				d.do(d.refreshCodexAccount)
 				d.refreshAccount()
 				d.do(func() { d.reconcileKmemNames(false, nil) })
 			}
@@ -2584,65 +2883,6 @@ func (d *desk) refreshAccount() {
 		}
 		d.updateAccount()
 	})
-}
-
-func (d *desk) updateAccount() {
-	if d.acctBtn == nil {
-		return
-	}
-	switch {
-	case d.signingIn != nil:
-		d.acctBtn.SetText("Signing in...")
-		d.acctBtn.Importance = widget.MediumImportance
-	case d.acct.LoggedIn:
-		label := d.acct.Email
-		if label == "" {
-			label = "Signed in"
-		}
-		if plan := d.acct.Plan(); plan != "" {
-			label += "  ·  " + plan
-		}
-		d.acctBtn.SetText(label)
-		d.acctBtn.Importance = widget.LowImportance
-	default:
-		d.acctBtn.SetText("Sign in")
-		d.acctBtn.Importance = widget.HighImportance
-	}
-	d.acctBtn.Refresh()
-}
-
-func (d *desk) accountMenu() {
-	if d.signingIn != nil {
-		d.showMenu(fyne.NewMenuItem("Cancel sign-in", func() { d.signingIn() }))
-		return
-	}
-	if !d.acct.LoggedIn {
-		d.signIn()
-		return
-	}
-	info := d.acct.Email
-	if d.acct.OrgName != "" {
-		info += " (" + d.acct.OrgName + ")"
-	}
-	head := fyne.NewMenuItem(info, nil)
-	head.Disabled = true
-	d.showMenu(head,
-		fyne.NewMenuItem("Refresh status", func() { go d.refreshAccount() }),
-		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Sign out", func() {
-			dialog.ShowConfirm("Sign out?", "Sign out of Claude Code on this computer? Terminal sessions use the same login.", func(ok bool) {
-				if !ok {
-					return
-				}
-				go func() {
-					err := account.Logout(d.cfg.ClaudeBin)
-					if err != nil {
-						d.do(func() { dialog.ShowError(err, d.win) })
-					}
-					d.refreshAccount()
-				}()
-			}, d.win)
-		}))
 }
 
 func (d *desk) showMenu(items ...*fyne.MenuItem) {
@@ -2780,46 +3020,72 @@ func (d *desk) setCollapseChips(on bool) {
 	if d.collapseChips == on {
 		return
 	}
-	if d.chat.stepOpen == nil {
-		d.chat.stepOpen = map[*chat.Item]bool{}
-	}
-	for _, s := range d.sessions {
-		for _, it := range s.conv.Items {
-			if _, ok := d.chat.stepOpen[it]; !ok && it.Kind == chat.Tool {
-				d.chat.stepOpen[it] = !d.collapseChips
+	for _, v := range d.allViews() {
+		if v == d.chat {
+			for _, s := range d.sessions {
+				if !isHiddenSession(s) {
+					v.keepChipDefaults(s)
+				}
 			}
+		}
+		v.keepChipDefaults(v.s)
+		for s := range v.cache {
+			v.keepChipDefaults(s)
 		}
 	}
 	d.collapseChips = on
 	d.app.Preferences().SetBool("collapseChips", on)
 }
 
-func (d *desk) setAllChips(open bool) {
-	if d.hideChips == open {
-		d.hideChips = !open
-		d.app.Preferences().SetBool("hideChips", d.hideChips)
-		for _, v := range d.allViews() {
-			v.cache = map[*deskSession]*sessView{}
-			v.order = nil
-			if vs := v.s; vs != nil && v != d.chat {
-				v.s = nil
-				v.show(vs)
-			}
-		}
-	}
-	s := d.current
+func (v *chatView) keepChipDefaults(s *deskSession) {
 	if s == nil {
 		return
 	}
-	if d.chat.stepOpen == nil {
-		d.chat.stepOpen = map[*chat.Item]bool{}
-	}
 	for _, it := range s.conv.Items {
-		if it.Kind == chat.Tool {
-			d.chat.stepOpen[it] = open
+		if _, ok := v.stepOpen[it]; !ok && it.Kind == chat.Tool {
+			if v.stepOpen == nil {
+				v.stepOpen = map[*chat.Item]bool{}
+			}
+			v.stepOpen[it] = !v.d.collapseChips
 		}
 	}
-	d.chat.show(s)
+}
+
+func (d *desk) setAllChips(open bool) {
+	views := []*chatView{d.chat}
+	role := d.assistBoxRole()
+	if role == boxKmem && d.kmemWin != nil && d.kmemWin.codexShown {
+		role = roleCodexKmem
+	}
+	if v := d.hostView(d.targetSession(role)); v != nil && v != d.chat {
+		if d.assistBoxDocked() {
+			views = append(views, v)
+		} else {
+			views = []*chatView{v}
+		}
+	}
+	for _, v := range views {
+		if v == nil || v.s == nil {
+			continue
+		}
+		if v.stepOpen == nil {
+			v.stepOpen = map[*chat.Item]bool{}
+		}
+		for _, it := range v.s.conv.Items {
+			if it.Kind == chat.Tool {
+				v.stepOpen[it] = open
+			}
+		}
+	}
+	if d.hideChips == open {
+		d.setShowChips(open)
+		return
+	}
+	for _, v := range views {
+		if v != nil && v.s != nil {
+			v.show(v.s)
+		}
+	}
 }
 
 func (d *desk) setCenter(on bool) {
@@ -2884,7 +3150,7 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 				it = x
 			}
 		}
-		if it == nil || it.PermState != chat.PermPending || s.proc == nil || isQuestion(it) {
+		if it == nil || it.PermState != chat.PermPending || !d.canAnswer(s) || isQuestion(it) {
 			return nil
 		}
 		if s.retryCmd != "" && blockedCommand(it) == s.retryCmd {
@@ -3064,6 +3330,10 @@ func (d *desk) planGateEvent(s *deskSession, ev *protocol.Event, items []*chat.I
 		// An approval question asked earlier in the turn, before the blocked
 		// call, still waits: the blocked call doesn't clear it, so the user's
 		// pick of its Yes still approves (td0cabd, user 2026-11-24).
+		if s.pendingRevision != nil || strings.HasPrefix(ev.TerminalReason, "aborted") {
+			s.planWait = false
+			return nil
+		}
 		asks := d.planFirst && s.conv.AsksApproval()
 		if s.planWait && !asks && s.conv.AsksQuestion() {
 			s.planWait = turnAskedApproval(s.conv)
@@ -3426,7 +3696,11 @@ func (d *desk) answerPlanAnswers(s *deskSession, it *chat.Item, qs []planQ, ans 
 
 // answerPlanMsg approves (sending msg) or turns the plan down.
 func (d *desk) answerPlanMsg(s *deskSession, it *chat.Item, ok bool, msg string) {
-	if s = d.cardOwner(s, it); s == nil || planSuperseded(s, it) {
+	if s = d.cardOwner(s, it); s == nil || s.pendingRevision != nil || planSuperseded(s, it) {
+		return
+	}
+	if s.codex {
+		d.answerCodexPlan(s, it, ok, msg)
 		return
 	}
 	if ok && it.PermState == chat.PermAllowed && !s.conv.Busy && !replied(s, it) {

@@ -51,6 +51,14 @@ func sessionFiles(root, id, transcriptPath string) ([]string, error) {
 
 func (d *desk) askDelete(id string) {
 	title, _, _ := d.rowText(id)
+	if d.isCodexSession(id) {
+		dialog.ShowConfirm("Remove from Quill?", fmt.Sprintf("Remove Quill’s local history for “%s” and stop it if it is running? The Codex thread stays in Codex.", title), func(ok bool) {
+			if ok {
+				d.deleteSession(id)
+			}
+		}, d.win)
+		return
+	}
 	if d.app.Preferences().Bool("skipDeleteWarning") {
 		d.deleteSession(id)
 		return
@@ -78,7 +86,11 @@ func (d *desk) deleteSession(id string) {
 	if info, ok := d.infos[id]; ok {
 		path = info.Path
 	}
-	files, err := sessionFiles(d.cfg.ProjectsRoot, id, path)
+	root := d.cfg.ProjectsRoot
+	if d.isCodexSession(id) {
+		root, path = d.cfg.CodexRoot, d.codexTranscript(id)
+	}
+	files, err := sessionFiles(root, id, path)
 	if err != nil {
 		dialog.ShowError(err, d.win)
 		return

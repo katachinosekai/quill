@@ -42,21 +42,34 @@ func pickItems(opts []string, current string, pick func(string)) []*fyne.MenuIte
 }
 
 func (d *desk) modelItems(s *deskSession) []*fyne.MenuItem {
+	if s.codex {
+		return d.codexModelItems(s)
+	}
 	return pickItems(d.modelOptions(s), s.model, func(v string) { d.modelSel.SetSelected(v) })
 }
 
 func (d *desk) modeItems(s *deskSession) []*fyne.MenuItem {
+	if s.codex {
+		d.loadComposerCatalog(s, false)
+		return pickItems(d.composerModeOptions(s), s.mode, func(v string) {
+			d.setMode(s, v)
+			d.refreshComposerFor(s)
+		})
+	}
 	return pickItems(modeOptions(s), s.mode, func(v string) { d.modeSel.SetSelected(v) })
 }
 
+const activityChipsLabel = "Activity chips"
+const collapseActivityChipsLabel = "New activity chips start collapsed"
+
 func (d *desk) chipItems() []*fyne.MenuItem {
-	show := fyne.NewMenuItem("Show chips", func() { d.setShowChips(d.hideChips) })
+	show := fyne.NewMenuItem("Show activity chips", func() { d.setShowChips(d.hideChips) })
 	show.Checked = !d.hideChips
-	open := fyne.NewMenuItem("Open chips", func() { d.setAllChips(true) })
+	open := fyne.NewMenuItem("Open activity chips", func() { d.setAllChips(true) })
 	open.Icon = theme.MenuDropDownIcon()
-	collapse := fyne.NewMenuItem("Collapse chips", func() { d.setAllChips(false) })
+	collapse := fyne.NewMenuItem("Collapse activity chips", func() { d.setAllChips(false) })
 	collapse.Icon = theme.MenuDropUpIcon()
-	startCollapsed := fyne.NewMenuItem("New chips start collapsed", func() { d.setCollapseChips(!d.collapseChips) })
+	startCollapsed := fyne.NewMenuItem(collapseActivityChipsLabel, func() { d.setCollapseChips(!d.collapseChips) })
 	startCollapsed.Checked = d.collapseChips
 	return []*fyne.MenuItem{show, open, collapse, fyne.NewMenuItemSeparator(), startCollapsed}
 }

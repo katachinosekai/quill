@@ -22,22 +22,26 @@ import (
 )
 
 type Options struct {
-	Binary    string
-	Cwd       string
-	Resume    string
-	SessionID string
-	Model     string
-	Mode      string
-	ExtraArgs []string
-	Env       []string
-	Chrome    string
-	AddDirs   []string
-	ResumeAt  string
-	Prompt    string
-	Name      string // --name: the session's display name, which other sessions see as its peer name
+	BridgeArgs []string
+	Binary     string
+	Cwd        string
+	Resume     string
+	SessionID  string
+	Model      string
+	Mode       string
+	ExtraArgs  []string
+	Env        []string
+	Chrome     string
+	AddDirs    []string
+	ResumeAt   string
+	Prompt     string
+	Name       string // --name: the session's display name, which other sessions see as its peer name
 }
 
 func (o Options) Args() []string {
+	if len(o.BridgeArgs) > 0 {
+		return o.BridgeArgs
+	}
 	args := []string{
 		"-p",
 		"--input-format", "stream-json",
@@ -248,7 +252,7 @@ func Start(opts Options, onEvent func(*protocol.Event)) (*Process, error) {
 		inW.Close()
 		return nil, err
 	}
-	errFile, err := os.CreateTemp("", "quill-claude-*.log")
+	errFile, err := os.CreateTemp("", "quill-session-*.log")
 	if err != nil {
 		inR.Close()
 		inW.Close()
@@ -280,7 +284,8 @@ func Start(opts Options, onEvent func(*protocol.Event)) (*Process, error) {
 	}
 	p.run(nil)
 	if err := p.write(protocol.Initialize(p.nextID("init"))); err != nil {
-		return p, err
+		_ = p.stdin.Close()
+		return nil, err
 	}
 	return p, nil
 }
@@ -471,8 +476,12 @@ func (p *Process) handleLine(line []byte) {
 		if ev.Request != nil && ev.Request.Subtype != "can_use_tool" {
 			_ = p.write(protocol.ControlErrorLine(ev.RequestID, "unsupported by Quill: "+ev.Request.Subtype))
 		}
+	case "system":
+		if ev.Subtype == protocol.CodexParentTurnStarted {
+			p.busy.Store(true)
+		}
 	case "result":
-		p.busy.Store(false)
+		p.busy.Store(ev.Subtype == protocol.ResultContinuing)
 	}
 	if p.onEvent != nil {
 		p.onEvent(ev)
@@ -542,10 +551,25 @@ func (p *Process) Stderr() string {
 }
 
 func (p *Process) Send(text string) error {
-	if err := p.write(protocol.UserMessage(text)); err != nil {
+	return p.send(protocol.UserMessage(text))
+}
+
+func (p *Process) Steer(text string) error {
+	return p.send(protocol.SteerMessage(text))
+}
+
+func (p *Process) SendCodex(text string, steer bool, settings protocol.CodexTurnSettings) error {
+	return p.send(protocol.CodexUserMessage(text, steer, settings))
+}
+
+func (p *Process) send(line []byte) error {
+	wasBusy := p.busy.Swap(true)
+	if err := p.write(line); err != nil {
+		if !wasBusy {
+			p.busy.Store(false)
+		}
 		return err
 	}
-	p.busy.Store(true)
 	return nil
 }
 

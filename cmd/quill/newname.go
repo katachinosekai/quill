@@ -47,7 +47,7 @@ func (d *desk) askNewName(s *deskSession, fallback string) {
 	bgr.StrokeWidth = 1
 	rows := []fyne.CanvasObject{head, sized(300, 0, e), hint}
 	var kmemSel *widget.Select
-	if d.kmemAvailable() {
+	if !s.codex && d.kmemAvailable() {
 		kmemSel = d.kmemSelect(nil)
 		kh := canvas.NewText("Memory", colMuted)
 		kh.TextSize = fontMeta

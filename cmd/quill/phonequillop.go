@@ -39,7 +39,7 @@ var quillOpOps = []string{"send", "answer", "interrupt", "queue/delete", "queue/
 // it may show the Quill button (older versions ignore the entry and hide it).
 func (d *desk) phoneActions() []string {
 	out := slices.Clone(menuActions)
-	if d.quillOpOn() {
+	if d.phoneQuillOperatorOn() {
 		out = append(out, "quillOperator")
 	}
 	return out
@@ -52,7 +52,7 @@ func (d *desk) quillOpActions(a *assistant) []string {
 	running := s != nil && s.running() && !s.stopping
 	live := a.state == asLive || a.state == asStarting
 	out := []string{}
-	if (a.state == asClosed || a.state == asPanels) && !running && d.quillOpOn() {
+	if (a.state == asClosed || a.state == asPanels) && !running && d.phoneQuillOperatorOn() {
 		out = append(out, "start")
 	}
 	if live && s != nil && !s.running() || d.assistModelChanged(a) {
@@ -224,7 +224,7 @@ func (a *phoneAPI) quillRoute(w http.ResponseWriter, r *http.Request, path strin
 // here); otherwise it wrote the 503.
 func (a *phoneAPI) quillOn(w http.ResponseWriter) bool {
 	on := false
-	a.ui(func() { on = a.d.quillOpOn() })
+	a.ui(func() { on = a.d.phoneQuillOperatorOn() })
 	if !on {
 		folders.WriteError(w, http.StatusServiceUnavailable, "quill_unavailable", "the Quill operator is off, or kmem memory is off or kmem is not installed on Quill Desktop")
 	}
@@ -306,3 +306,7 @@ func (a *phoneAPI) quillOpDo(op string, in writeBody) (map[string]any, *apiErr) 
 	}
 	return a.assistSessionWrite(as, "Quill operator", op, in, offered)
 }
+
+// The phone operator workflow depends on a shared topic. The desktop
+// operator can also run on its own.
+func (d *desk) phoneQuillOperatorOn() bool { return d.kmemMemory() && d.quillOpOn() }

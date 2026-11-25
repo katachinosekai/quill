@@ -305,12 +305,17 @@ func (d *desk) compactInto(ns *deskSession, oldID, path, title string, conv *cha
 }
 
 func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
-	id := old.id
 	if isHiddenSession(old) {
 		return d.replaceHidden(old, title)
 	}
-	place := d.placement(id)
 	ns := d.addSession(old.cwd, old.model, old.mode, false)
+	d.replaceTabSession(old, ns, title)
+	return ns
+}
+
+func (d *desk) replaceTabSession(old, ns *deskSession, title string) {
+	id := old.id
+	place := d.placement(id)
 	d.org.Titles[ns.id] = title
 	if strings.HasPrefix(place, folderPrefix) || place == placeAuto {
 		d.putPlace(ns.id, place)
@@ -349,7 +354,6 @@ func (d *desk) replaceWith(old *deskSession, title string) *deskSession {
 		d.syncTabs()
 		d.refreshSidebar()
 	}
-	return ns
 }
 
 // replaceHidden: context rotation of the kmem window's assistant. The new

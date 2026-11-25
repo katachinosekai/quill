@@ -52,6 +52,8 @@ type sideOrg struct {
 	// Desktop never writes kmem's config, so a title in any language, which
 	// slugs to "topic-N", lives here).
 	TopicTitles map[string]string `json:"topicTitles,omitempty"`
+	// CodexTopics maps a kmem topic to its working folder for a fresh session.
+	CodexTopics map[string]string `json:"codexTopics,omitempty"`
 	// Dormant: topic slugs hidden from the "Open a topic" list until opened
 	// (Quill Desktop only; kmem never knows).
 	Dormant []string `json:"dormant,omitempty"`
@@ -219,6 +221,12 @@ func (d *desk) sessionMenuItems(id string) []*fyne.MenuItem {
 	if s := d.sessions[id]; s == nil || !s.running() {
 		items = append(items, fyne.NewMenuItem("Start", func() { d.resumeSession(id) }))
 	}
+	if d.isCodexSession(id) {
+		return append(items,
+			fyne.NewMenuItem("End session", func() { d.closeTab(id); d.endWithSave(id, d.endPlace()) }),
+			fyne.NewMenuItem("Remove from Quill...", func() { d.askDelete(id) }),
+		)
+	}
 	items = append(items, d.sessionToolsItem(id))
 	if s := d.sessions[id]; s != nil && s.conv != nil {
 		items = append(items, d.taskItems(s)...)
@@ -316,7 +324,7 @@ func (d *desk) resumeSession(id string) {
 		return
 	}
 	if err := d.ensureProcess(s); err != nil {
-		d.notify(s, "Could not start claude: "+err.Error())
+		d.notify(s, "Could not start "+s.engineName()+": "+err.Error())
 	}
 	d.updateChrome()
 	d.refreshSidebar()
@@ -358,12 +366,13 @@ func (d *desk) dropOn(id string, target sideRow) {
 
 type sideItem struct {
 	widget.BaseWidget
-	d       *desk
-	rows    *[]sideRow
-	idx     int
-	content fyne.CanvasObject
-	hl      *canvas.Rectangle
-	drag    bool
+	d           *desk
+	rows        *[]sideRow
+	idx         int
+	content     fyne.CanvasObject
+	hl          *canvas.Rectangle
+	drag        bool
+	agentToggle *widget.Button
 }
 
 func (d *desk) newSideItem(rows *[]sideRow, content fyne.CanvasObject) *sideItem {
@@ -392,13 +401,17 @@ func (it *sideItem) row() (sideRow, bool) {
 	return (*it.rows)[it.idx], true
 }
 
-func (it *sideItem) Tapped(*fyne.PointEvent) {
+func (it *sideItem) Tapped(e *fyne.PointEvent) {
 	r, ok := it.row()
 	if !ok {
 		return
 	}
 	if r.header != "" {
 		it.d.toggleFolder(r.key)
+		return
+	}
+	if r.agentSession != "" {
+		it.showAgentMenu(r, e.AbsolutePosition)
 		return
 	}
 	it.d.list.Select(it.idx)
@@ -411,6 +424,10 @@ func (it *sideItem) TappedSecondary(e *fyne.PointEvent) {
 	}
 	if r.header != "" {
 		it.d.folderMenu(r, e.AbsolutePosition)
+		return
+	}
+	if r.agentSession != "" {
+		it.showAgentMenu(r, e.AbsolutePosition)
 		return
 	}
 	if r.ext != nil {

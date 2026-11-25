@@ -57,6 +57,10 @@ func (d *desk) setLayoutMode(mode string) {
 
 func (d *desk) applyLayoutMode() {
 	mode := d.layoutMode()
+	landscape := mode == layoutHorizontal
+	for _, button := range []fyne.CanvasObject{d.settingsBtn, d.quillBtnBox, d.kmemBtnBox} {
+		setShown(button, landscape)
+	}
 	if mode == layoutVertical {
 		d.layoutBtn.SetText(labelPortrait)
 	} else {
@@ -88,6 +92,8 @@ func (d *desk) applyLayoutMode() {
 	if d.headerBox != nil {
 		d.headerBox.Refresh()
 	}
+	d.placeToolbar()
+	d.syncSidebarAgents()
 	if d.usageBox != nil {
 		relayout(d.usageBox)
 	}

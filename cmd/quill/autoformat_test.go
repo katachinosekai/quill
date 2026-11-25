@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -94,11 +95,16 @@ func TestSettingsCoverWelcome(t *testing.T) {
 		if sel == nil || len(sel.Options) < 2 {
 			t.Fatal("New sessions: online and local models")
 		}
-		sel.SetSelected(sel.Options[1])
+		sel.SetSelected("Local: " + strings.TrimPrefix(h.d.localModelList()[0], "ollama:"))
 		if !isLocal(p.String("newModel")) {
 			t.Fatalf("picking a local model sets newModel: %q", p.String("newModel"))
 		}
-		sel.SetSelected("Online: Claude")
+		prior := p.String("newModel")
+		sel.SetSelected(optNewCodex)
+		if !p.Bool(prefNewCodex) || p.String("newModel") != prior {
+			t.Fatal("selecting Codex should preserve the saved local model")
+		}
+		sel.SetSelected(optNewOnline)
 		if p.String("newModel") != "default" {
 			t.Fatalf("online sets newModel back: %q", p.String("newModel"))
 		}

@@ -41,8 +41,13 @@ func TestQuillOperatorStartsHidden(t *testing.T) {
 		}
 	})
 	tabs := len(h.d.tabs)
-	h.ui(h.d.assistantsBoot) // as at launch (desk.go watch)
-	a, s := bootQuill(h)     // adopts what the launch started
+	h.ui(func() {
+		h.d.assistantsBoot()
+		if h.d.quillAssist().s != nil || h.d.assist().s != nil {
+			t.Fatal("launch must wait for the user to start an operator")
+		}
+	})
+	a, s := bootQuill(h)
 	h.ui(func() {
 		if hiddenRole(s) != roleQuill || !h.d.org.Hidden[s.id] || h.d.org.HiddenRoles[s.id] != roleQuill {
 			t.Fatal("a hidden session of role quill")
@@ -81,7 +86,7 @@ func TestQuillOperatorHintNeedsSourceFolder(t *testing.T) {
 	if n := len([]rune(quillOperatorHintFor("/home/user/Projects/quill"))); n > 1000 {
 		t.Fatalf("operator hint too long: %d", n)
 	}
-	for _, want := range []string{"kmem --as quill", "`quill settings`", "set ID VALUE --why", "`undo [N]`", "never edit preference files", "Security settings", "`quill issue:` tasks (topic quill)", "Quill Desktop and Quill Android"} {
+	for _, want := range []string{"`quill settings`", "set ID VALUE --why", "`undo [N]`", "never edit preference files", "Security settings", "Quill Desktop and Quill Android"} {
 		if !strings.Contains(quillOperatorHint, want) {
 			t.Fatalf("hint names %q", want)
 		}
@@ -95,6 +100,14 @@ func TestQuillOperatorHintNeedsSourceFolder(t *testing.T) {
 		if !strings.Contains(p, quillOperatorHint) || !strings.Contains(p, quillNoSourceHint) || strings.Contains(p, "Developer:") {
 			t.Fatal("settings only without a source folder")
 		}
+		if !strings.Contains(p, "kmem --as quill") || !strings.Contains(p, "`quill issue:` tasks") {
+			t.Fatal("an attached module adds the Quill topic instructions")
+		}
+		h.d.kmemOff = true
+		if standalone := h.d.sessionPromptFor(s, false); strings.Contains(standalone, "kmem --as quill") || !h.d.quillOpOn() {
+			t.Fatal("the standalone Quill operator stays available without kmem instructions")
+		}
+		h.d.kmemOff = false
 		if strings.Contains(p, topicCoordinatorHint("quill")) || strings.Contains(p, kmemAssistantHint) {
 			t.Fatal("no coordinator hint and never the kmem assistant's")
 		}

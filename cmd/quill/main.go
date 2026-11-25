@@ -32,6 +32,9 @@ func audioIdentity() {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "codex-bridge" {
+		os.Exit(runCodexBridge(os.Args[2:]))
+	}
 	// First: a live reload's device-lock state (pclock_handover_unix.go). Only
 	// the window process uses it; any other path drops it (devices lock).
 	handedUnlocks = takeUnlocks()
@@ -42,7 +45,7 @@ func main() {
 	heapFlag := flag.Bool("heap", false, "write a heap profile of the running Quill into $XDG_RUNTIME_DIR/quill-heap-<pid>.pprof")
 	resumeAll := flag.Bool("resume-all", false, "ask the running Quill Desktop to reopen the kmem topics that were live when it last quit, as fresh sessions (before topic tabs: resume every ended kmem session in Inactive, or Archive with the argument archive, from its handoff)")
 	resumeOne := flag.String("resume", "", "ask the running Quill to open the session with this kmem name, or start one from its handoff")
-	kmemMessage := flag.String("kmem-message", "", "deliver this message (the Monday check-in) to Quill Desktop's running kmem assistant; starts it only when none runs")
+	kmemMessage := flag.String("kmem-message", "", "deliver this message (the Monday check-in) to Quill Desktop's running kmem assistant")
 	kmemWindow := flag.Bool("kmem-window", false, "ask the running Quill Desktop to open its kmem window (the Monday check-in uses it)")
 	hideTopic := flag.String("hide-topic", "", "ask the running Quill Desktop to hide these kmem topics (SLUG[,SLUG...]) under Dormant in its \"Open a topic\" card until they are opened")
 	showTopic := flag.String("show-topic", "", "ask the running Quill Desktop to show these hidden kmem topics (SLUG[,SLUG...]) in its \"Open a topic\" card again")
@@ -154,6 +157,7 @@ func runWindowWith(claudeBin, sock string) int {
 	w := a.NewWindow("Quill")
 	d := newDesk(a, w, config{
 		ProjectsRoot: transcript.DefaultRoot(),
+		CodexRoot:    codexRoot(),
 		SessionsDir:  live.DefaultDir(),
 		ClaudeBin:    claudeBin,
 	})

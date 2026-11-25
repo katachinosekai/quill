@@ -60,7 +60,7 @@ func TestStatusScreenshots(t *testing.T) {
 	h.ui(func() { s.conv.Items[len(s.conv.Items)-1].Streaming = false; s.conv.Busy = false })
 
 	w := &kmemWindow{}
-	h.ui(func() { h.d.kmemWin = w; h.d.kmemAssistOpen(w) })
+	h.ui(func() { h.d.kmemWin = w; h.d.kmemAssistOpen(w); h.d.startAgent(h.d.assist()) })
 	h.eventually("the kmem chat", func() bool {
 		return rec.chat != nil && h.d.assist().view != nil && h.d.assist().view.live.Text == "Ready"
 	})

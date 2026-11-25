@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -135,7 +136,7 @@ func (d *desk) kmemAvailable() bool {
 	if d.kmemRun != nil {
 		return true
 	}
-	return kmemBin() != ""
+	return kmemBin() != "" && d.kmemAPILevel() == kmemAPI
 }
 
 func (d *desk) runKmem(prog string, args ...string) (string, error) {
@@ -150,13 +151,21 @@ func (d *desk) runKmemRaw(prog string, args ...string) (string, error) {
 	if d.kmemRun != nil {
 		return d.kmemRun(prog, args...)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), kmemTimeout)
-	defer cancel()
+	timeout := kmemTimeout
 	if prog == "kmem" {
-		if p := kmemBin(); p != "" {
-			prog, args = kmemCommand(runtime.GOOS, windowsPython(), p, args...)
+		bin := kmemBin()
+		if bin == "" || d.kmemOff {
+			return "", fmt.Errorf("kmem is unavailable")
 		}
+		if slices.Equal(args, []string{"version", "--json"}) {
+			timeout = 3 * time.Second
+		} else if d.kmemAPILevel() != kmemAPI {
+			return "", fmt.Errorf("installed kmem is incompatible; supported versions: %s", supportedKmemSeries)
+		}
+		prog, args = kmemCommand(runtime.GOOS, windowsPython(), bin, args...)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, prog, args...)
 	if home, err := os.UserHomeDir(); err == nil {
 		cmd.Dir = home
@@ -416,6 +425,12 @@ func kmemReleaseAllowed(s *deskSession, r *protocol.ControlRequest) bool {
 func (d *desk) kmemSaveAllowed(s *deskSession, r *protocol.ControlRequest) bool {
 	if s.endWait != nil {
 		return d.endCheckAllowed(s, r)
+	}
+	if h := s.agentHandoff; h != nil && h.phase == handoffSaving && !s.codex {
+		return readOnlyRequest(r, [][]string{
+			{"kmem", "handoff", "save", h.name},
+			{"kmem", "--as", h.name, "handoff", "save", h.name},
+		})
 	}
 	if s.kmemSave == nil {
 		return false

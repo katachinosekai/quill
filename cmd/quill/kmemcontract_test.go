@@ -62,3 +62,19 @@ func TestKmemContract(t *testing.T) {
 		}
 	}
 }
+
+func TestKmemModuleCompatibility(t *testing.T) {
+	for _, tt := range []struct {
+		api     int
+		version string
+		want    bool
+	}{
+		{1, "1.15.1", true}, {1, "1.15.2", true}, {1, "1.15.0", false},
+		{1, "1.14.9", false}, {1, "1.16.0", false}, {2, "1.15.2", false},
+		{1, "1.15.1-beta", false}, {1, "", false},
+	} {
+		if got := supportedKmemVersion(tt.api, tt.version); got != tt.want {
+			t.Errorf("API %d, version %q: %t, want %t", tt.api, tt.version, got, tt.want)
+		}
+	}
+}

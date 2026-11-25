@@ -186,6 +186,9 @@ func (p *kmemPanel) prefill() func(string) {
 	if p.w == nil {
 		return nil
 	}
+	if p.w.codexShown {
+		return p.w.prefillCodex
+	}
 	return p.w.prefill
 }
 
@@ -485,6 +488,18 @@ func (p *kmemPanel) resumeHandoff(name string) {
 // session.
 func (d *desk) resumeHandoffNamed(name string) *deskSession {
 	d.setDormant(name, false)
+	switch name {
+	case roleCodexQuill:
+		d.openQuillCodex()
+		a := d.codexAssistant(codexQuillRole)
+		d.startAgent(a)
+		return a.s
+	case roleCodexKmem:
+		d.openKmemCodex()
+		a := d.codexAssistant(codexKmemRole)
+		d.startAgent(a)
+		return a.s
+	}
 	if name == kmemWinOperator {
 		d.showKmem()
 		if s := d.kmemWin.session(); s != nil {
@@ -498,6 +513,9 @@ func (d *desk) resumeHandoffNamed(name string) *deskSession {
 	if owner := d.handoffOwner(name, &deskSession{}); owner != nil {
 		d.open(owner.id)
 		return owner
+	}
+	if dir := d.org.CodexTopics[name]; dir != "" {
+		return d.openCodexTopic(topicInfo{Slug: name, Title: topicTitle(name)}, dir)
 	}
 	for id, k := range d.org.Kmem {
 		if k == name && d.sessions[id] != nil {

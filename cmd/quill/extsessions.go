@@ -122,6 +122,9 @@ func (d *desk) externalLive() map[string][]extSession {
 			continue
 		}
 		slug := topicForName(e.Name)
+		if e.Name == quillOpName || e.Name == kmemWinOperator {
+			slug = e.Name
+		}
 		if slug == "" || slug == "kmem" {
 			continue
 		}

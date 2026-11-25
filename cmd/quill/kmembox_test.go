@@ -49,8 +49,9 @@ func TestKmemBoxContentHasRailAndChat(t *testing.T) {
 				t.Fatalf("tab %q missing: %s", want, names)
 			}
 		}
-		if len(w.split.Trailing.(*fyne.Container).Objects) != 1 {
-			t.Fatal("the chat side exists")
+		if w.agent == nil || w.agent.Selected != claudeAgent || len(w.chatSlot.Objects) != 1 ||
+			w.chatSlot.Objects[0] != w.right || len(w.right.Objects) != 1 {
+			t.Fatal("the chat side opens with the Claude Code chat and an agent selector")
 		}
 		if h.d.kmemBoxContent() != obj {
 			t.Fatal("asking again returns the same content")

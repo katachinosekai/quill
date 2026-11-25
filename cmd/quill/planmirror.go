@@ -60,6 +60,7 @@ type planMirrors struct {
 	scroll  *container.Scroll
 	wrap    *fyne.Container // the scroll at its capped height (what c.top holds)
 	list    []*planMirror
+	host    *assistChat
 	sig     string
 	waiting int            // mirrors waiting for the user, as last badged
 	boxH    func() float32 // the box content's height (the cap's fraction)
@@ -124,7 +125,7 @@ func (d *desk) waitingMirrors() int {
 // mirrorAlerting: role is the Quill button and a mirrored card waits while
 // the Quill box isn't showing (amber, as the operator's own approvals).
 func (d *desk) mirrorAlerting(role string) bool {
-	return role == roleQuill && !d.assistBoxShowing(roleQuill) && d.waitingMirrors() > 0
+	return role == roleQuill && !d.assistBoxShowing(roleQuill) && !d.assistBoxShowing(roleCodexQuill) && d.waitingMirrors() > 0
 }
 
 // armMirrorHide starts x's auto-hide once it is inactive (once per
@@ -255,6 +256,26 @@ func (d *desk) syncPlanMirrors() {
 }
 
 // drawPlanMirrors rebuilds the strip from m.list.
+func (d *desk) attachPlanMirrors(role string) {
+	if d.quillChat == nil || d.quillChat.mirrors == nil {
+		return
+	}
+	host := d.quillChat
+	if role == roleCodexQuill {
+		host = d.codexQuillChat
+	}
+	m := d.quillChat.mirrors
+	if host == nil || host == m.host {
+		return
+	}
+	previous := m.host
+	previous.top.Remove(m.wrap)
+	previous.syncTop()
+	m.host = host
+	host.top.Add(m.wrap)
+	host.syncTop()
+}
+
 func (d *desk) drawPlanMirrors() {
 	m := d.quillChat.mirrors
 	var objs []fyne.CanvasObject
@@ -271,10 +292,8 @@ func (d *desk) drawPlanMirrors() {
 		m.wrap.Show()
 		m.wrap.Refresh()
 	}
-	d.quillChat.syncTop()
-	if p := d.quillChat.root; p != nil {
-		p.Refresh()
-	}
+	m.host.syncTop()
+	m.host.root.Refresh()
 }
 
 // planMirrorCard: one mirrored card: "Plan card from <name>", the card as

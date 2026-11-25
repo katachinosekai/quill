@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -78,23 +79,23 @@ func boxHasLabel(o fyne.CanvasObject, text string) bool {
 	return found
 }
 
-func TestAssistBoxOverlayCoversHistoryOnly(t *testing.T) {
+func TestAssistBoxOverlayReachesWindowTop(t *testing.T) {
 	h := newHarness(t)
 	h.ui(func() {
 		d := h.d
 		d.openAssistBox(boxQuill)
 		cp, cs := absRect(d.box().card)
 		hp, hs := absRect(d.chatHost)
-		tp, ts := absRect(d.tabRow)
+		rp, _ := absRect(d.mainRoot)
 		ip, _ := absRect(d.bottomBox)
 		if cs.Width < hs.Width-2*boxInset-1 || cs.Height < hs.Height-2*boxInset-1 {
 			t.Fatalf("the box fills the history: %v vs %v", cs, hs)
 		}
-		if cp.X < hp.X || cp.Y < hp.Y || cp.Y+cs.Height > hp.Y+hs.Height {
+		if cp.X < hp.X || cp.Y != rp.Y || cp.Y+cs.Height > hp.Y+hs.Height {
 			t.Fatalf("inside the history: %v %v / %v %v", cp, cs, hp, hs)
 		}
-		if cp.Y < tp.Y+ts.Height || cp.Y+cs.Height > ip.Y {
-			t.Fatalf("the tab row and the main message box stay visible: box %v+%v tabs %v+%v input %v", cp, cs, tp, ts, ip)
+		if cp.Y+cs.Height > ip.Y {
+			t.Fatalf("the main message box stays visible: box %v+%v input %v", cp, cs, ip)
 		}
 	})
 }
@@ -154,8 +155,9 @@ func TestAssistBoxOwnMessageBox(t *testing.T) {
 			t.Fatal("the main message box keeps its draft and tab")
 		}
 		d.setAssistDock(boxQuill, false)
-		if d.box().status.Text == "" {
-			t.Fatal("the header shows the status")
+		c.view.setStatus(s)
+		if c.view.live.Text == "" {
+			t.Fatal("the footer shows the status")
 		}
 	})
 	h.eventually("the reply", func() bool { return !s.conv.Busy && !s.inTurn })
@@ -416,4 +418,84 @@ func TestAssistBoxShots(t *testing.T) {
 		h.d.openAssistBox(boxQuill)
 	})
 	h.ui(func() { shot(t, h.w, dir, "split.png") })
+}
+
+func TestAssistBoxClickSwitch(t *testing.T) {
+	for _, quillRoleID := range []string{boxQuill, roleCodexQuill} {
+		t.Run(quillRoleID, func(t *testing.T) {
+			h := newHarness(t)
+			d := h.d
+			d.kmemOff = false
+			codex := quillRoleID == roleCodexQuill
+			if codex {
+				self, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("QUILL_CODEX_BIN", self)
+				t.Setenv("QUILL_HANDOFF_FAKE", "1")
+				t.Setenv("QUILL_TEST_OPERATOR_KMEM_BRIEF", "1")
+				d.cfg.CodexRoot = t.TempDir()
+			}
+			prefs := d.app.Preferences()
+			var quill, kmem *assistant
+			h.ui(func() {
+				prefs.SetBool("quillAgentCodex", codex)
+				prefs.SetBool("kmemAgentCodex", codex)
+				quill, kmem = d.quillAssist(), d.assist()
+				if codex {
+					quill, kmem = d.codexAssistant(codexQuillRole), d.codexAssistant(codexKmemRole)
+				}
+				for _, a := range []*assistant{quill, kmem} {
+					s := d.addSessionWithBackend(h.proj, "default", "default", false, codex)
+					d.markHiddenAs(s, a.role.hidden)
+					if err := d.ensureProcess(s); err != nil {
+						t.Fatal(err)
+					}
+					a.s, a.state = s, asLive
+					d.sendTo(s, "Ready to switch")
+				}
+			})
+			h.eventually("both operators finish their first turn", func() bool {
+				return quill.s.running() && !quill.s.conv.Busy && kmem.s.running() && !kmem.s.conv.Busy
+			})
+			h.ui(func() {
+				quillSession, kmemSession := quill.s, kmem.s
+				quillProcess, kmemProcess := quill.s.proc, kmem.s.proc
+				tap := func(button *widget.Button, want string, docked bool) {
+					t.Helper()
+					test.TapCanvas(h.w.Canvas(), centerOf(button))
+					if got := d.assistBoxRole(); got != want || d.assistBoxDocked() != docked {
+						t.Fatalf("clicked %s: got %q docked=%v, want %q docked=%v",
+							button.Text, got, d.assistBoxDocked(), want, docked)
+					}
+					if want == boxKmem && d.kmemWin.codexShown != codex {
+						t.Fatal("the kmem box should show its preferred engine")
+					}
+					if quill.s != quillSession || kmem.s != kmemSession || quill.s.proc != quillProcess ||
+						kmem.s.proc != kmemProcess || !quill.s.running() || !kmem.s.running() {
+						t.Fatal("switching or closing the box changed a running assistant session")
+					}
+				}
+				qb, kb := d.box().btns[boxQuill], d.box().btns[boxKmem]
+				for _, placement := range [][2]bool{{false, false}, {true, true}, {false, true}, {true, false}} {
+					quillDocked, kmemDocked := placement[0], placement[1]
+					prefs.SetBool(prefAssistDock+boxQuill, quillDocked)
+					prefs.SetBool(prefAssistDock+boxKmem, kmemDocked)
+					tap(qb.btn, quillRoleID, quillDocked)
+					tap(kb.btn, boxKmem, kmemDocked)
+					tap(qb.btn, quillRoleID, quillDocked)
+					tap(qb.btn, "", false)
+					tap(kb.btn, boxKmem, kmemDocked)
+					tap(kb.btn, "", false)
+				}
+				prefs.SetBool(prefAssistDock+boxQuill, false)
+				d.setLayoutMode(layoutVertical)
+				tap(qb.side, quillRoleID, false)
+				tap(kb.side, boxKmem, false)
+				tap(qb.side, quillRoleID, false)
+				tap(qb.side, "", false)
+			})
+		})
+	}
 }

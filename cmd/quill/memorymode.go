@@ -61,7 +61,7 @@ const buildGateHint = "Don't build (compile, package, release or rebuild dist/) 
 // planApprovalHint: how Quill Desktop's approvals read and what one covers
 // (planscope.go), told once at session start instead of in every approval
 // (user 2026-11-23). Added with plan-first (Settings → General).
-const planApprovalHint = "Quill Desktop approvals are short: \"Approved.\" may be followed by \"Choice: <option>.\", \"Answers: 2 → <option>; 3 → \\\"<text>\\\".\" (your question numbers, the picked option only) and \"Also: <changes from the user>\"; \"Not approved.\" means the plan is not to run. An approval pre-approves every tool call for that request (plan approval scope, kmem fact f3a1828). Background commands and subagents you start for it stay approved until they finish, and so do the plan's remaining steps in the turn their completion notice starts, unless the user writes something else meanwhile: end your turn instead of waiting for them. While your question to the user is unanswered, reply to task notifications with one status line and don't repeat the question. If the user gives no answer, ask again later; never assume the recommended option." + " " + planSpecHint
+const planApprovalHint = "Quill Desktop approvals are short: \"Approved.\" may be followed by \"Choice: <option>.\", \"Answers: 2 → <option>; 3 → \\\"<text>\\\".\" (your question numbers, the picked option only) and \"Also: <changes from the user>\"; \"Not approved.\" means the plan is not to run. Quill's plan gate covers the tool calls within the approved request (kmem fact f3a1828). Honor any separate native permission prompts. Background commands and subagents you start for it stay approved until they finish, and so do the plan's remaining steps in the turn their completion notice starts, unless the user writes something else meanwhile: end your turn instead of waiting for them. While your question to the user is unanswered, reply to task notifications with one status line and don't repeat the question. If the user gives no answer, ask again later; never assume the recommended option." + " " + planSpecHint
 
 // planSpecHint: plan format spec v1 (docs/plan-format.md, user 2026-11-23):
 // what a plan looks like so the plan-first gate and the plan card read it,
@@ -82,7 +82,7 @@ func (d *desk) buildGateOn() bool {
 // models rarely run subagents well. Subagents never see Quill Desktop's
 // appended prompt, so they don't re-delegate. Settings → General
 // "Coordinate with subagents" (prefCoordinator, on by default) turns it off.
-const coordinatorHint = "You coordinate; subagents do the feature work. Stay free to answer the user at once. For each feature, fix or improvement the user asks for, design the split, then give the design and implementation to a subagent (one per feature, each in its own git worktree and branch, with the kmem briefing when kmem is on), running in the background. Relay every question you or a subagent has to the user as numbered plan card questions, and pass the answers back. Review, merge and test each result yourself. Long-running work (test suites, merges, builds, release steps) goes to background subagents too. Use Sonnet for such mechanical jobs. Use a subagent when a task is independent and takes more than a few minutes; do small changes, or ones that depend on details from the conversation, directly. Small lookups and answers you do directly too."
+const coordinatorHint = "You coordinate; subagents do the feature work. Stay free to answer the user at once. For each feature, fix or improvement the user asks for, design the split, then give the design and implementation to a subagent (one per feature, each in its own git worktree and branch, with the kmem briefing when kmem is on), running in the background. Relay every question you or a subagent has to the user as numbered plan card questions, and pass the answers back. Review and integrate each result. If Plan first requires approval, include the workers and their steps on the same plan card. Pass the user's follow-ups to affected workers and ask for approval if they expand the plan. Long-running work (test suites, merges, builds, release steps) goes to background subagents too. Use Sonnet for such mechanical jobs. Use a subagent when a task is independent and takes more than a few minutes; do small changes, or ones that depend on details from the conversation, directly. Small lookups and answers you do directly too."
 
 const prefCoordinator = "coordinator"
 
@@ -113,7 +113,38 @@ func topicMemoryHint(t topicHints) string {
 
 // topicCoordinatorHint: coordinatorHint with the subagent briefing of §3.10.
 func topicCoordinatorHint(topic string) string {
-	return strings.Replace(coordinatorHint, "with the kmem briefing when kmem is on)", "briefed with `kmem context \"<task>\" --topic "+topic+"`, stable part first, ending \"checkpoint your task\"). Only you write `"+topic+"/status`", 1)
+	return strings.Replace(coordinatorHint, "with the kmem briefing when kmem is on", "briefed with `kmem context \"<task>\" --topic "+topic+"`, stable part first, ending \"checkpoint your task\"", 1) + " Only you write `" + topic + "/status`."
+}
+
+// coordinationUpdate conveys the current setting to a retained Claude
+// process on user input without restarting its workers.
+func (d *desk) coordinationUpdate(s *deskSession) (string, bool) {
+	if s.codex || hiddenRole(s) == roleKmem || isLocal(s.model) {
+		return "", false
+	}
+	want := ""
+	if d.coordinatorOn(s.model) && (hiddenRole(s) != roleQuill || d.quillSource() != "") {
+		want = coordinatorHint
+		if d.kmemMemory() {
+			if hiddenRole(s) == roleQuill {
+				want = topicCoordinatorHint(quillOpName)
+			} else if d.kmemFeatureCached("topic-context") {
+				if topic := d.topicOf(s.id); topic != "" {
+					want = topicCoordinatorHint(topic)
+				}
+			}
+		}
+	}
+	prompt := s.proc.Options().Prompt
+	if s.claudeCoordinationSet {
+		if s.claudeCoordination == want {
+			return "", false
+		}
+	} else if want != "" && strings.Contains(prompt, want) ||
+		want == "" && !strings.Contains(prompt, "You coordinate; subagents do the feature work.") {
+		return "", false
+	}
+	return want, true
 }
 
 func sessionPromptWith(kmem, buildGate, coordinator bool, t topicHints) string {

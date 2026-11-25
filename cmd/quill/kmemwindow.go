@@ -50,7 +50,7 @@ func (d *desk) kmemBoxContent() fyne.CanvasObject {
 		w.panel = d.newKmemPanel(w)
 		w.panel.tabs.SetTabLocation(container.TabLocationLeading)
 		w.right = container.NewStack()
-		w.split = container.NewHSplit(w.panel.tabs, w.right)
+		w.split = container.NewHSplit(w.panel.tabs, w.agentChat())
 		off := d.app.Preferences().FloatWithFallback("kmemWinSplit", kmemWinDefaultSplit)
 		if off < 0.1 || off > 0.9 {
 			off = kmemWinDefaultSplit
@@ -58,6 +58,9 @@ func (d *desk) kmemBoxContent() fyne.CanvasObject {
 		w.split.Offset = off
 		d.kmemWin = w
 		w.setChatReason(kmemChatOffReason)
+		if d.app.Preferences().Bool("kmemAgentCodex") {
+			w.showAgent(true)
+		}
 		w.panel.reload()
 	}
 	return w.split
@@ -103,6 +106,7 @@ func (w *kmemWindow) close() {
 	if w == nil || w.closed {
 		return
 	}
+	w.d.cancelQueueEdit(w.selectedAgent().s)
 	w.closed = true
 	d := w.d
 	prefs := d.app.Preferences()
@@ -209,8 +213,16 @@ func (w *kmemWindow) escape() {
 		dialog.DismissOverlay(top)
 		return
 	}
-	if v := w.view; v != nil && v.sel != nil && v.sel.has {
+	a := w.selectedAgent()
+	if v := a.view; v != nil && v.sel != nil && v.sel.has {
 		v.sel.clear()
+		return
+	}
+	if w.d.cancelQueueEdit(a.s) {
+		return
+	}
+	if a.s != nil && len(a.s.conv.PendingPermissions()) > 0 {
+		w.d.interrupt(a.s)
 		return
 	}
 	w.close()

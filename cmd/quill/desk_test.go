@@ -34,6 +34,18 @@ const (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("QUILL_HANDOFF_FAKE") == "1" && len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "codex-bridge":
+			os.Exit(runCodexBridge(os.Args[2:]))
+		case "features":
+			fmt.Println("multi_agent_v2 stable false")
+			os.Exit(0)
+		case "app-server":
+			runHandoffTestServer()
+			os.Exit(0)
+		}
+	}
 	if os.Getenv("CLAUDE_DESK_FAKE") == "1" {
 		fakeclaude.Run()
 		os.Exit(0)
@@ -72,7 +84,16 @@ func runIsolated(m *testing.M) int {
 	}
 	os.Setenv("HOME", home)
 	if runtime.GOOS != "windows" {
-		script := "#!/bin/sh\necho \"kmem $*\" >> '" + calls + "'\nexit 1\n"
+		script := "#!/bin/sh\n" +
+			"if [ \"$QUILL_TEST_OPERATOR_KMEM_BRIEF\" = 1 ] && [ \"$#\" = 1 ] && [ \"$1\" = brief ]; then\n" +
+			"  echo 'fixture operator brief'\n  exit 0\nfi\n" +
+			"if [ \"$QUILL_TEST_OPERATOR_KMEM_BRIEF\" = 1 ]; then\n" +
+			"  case \"$1 $2\" in\n" +
+			"    'rules --json') echo '{\"rules\":{\"rules\":[{\"text\":\"K6. Fixture coordinator rule\",\"part\":\"core\"}]}}'; exit 0 ;;\n" +
+			"    'context --topic') echo 'fixture topic context'; exit 0 ;;\n" +
+			"    'handoff get') [ \"$3\" = quill ] && echo 'fixture saved operator handoff'; exit 0 ;;\n" +
+			"  esac\nfi\n" +
+			"echo \"kmem $*\" >> '" + calls + "'\nexit 1\n"
 		os.WriteFile(filepath.Join(bin, "kmem"), []byte(script), 0o755)
 		os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
@@ -117,6 +138,11 @@ func procStart(t *testing.T, pid int) string {
 }
 
 func newHarness(t *testing.T) *harness {
+	return newDeskHarness(t, true)
+}
+
+func newDeskHarness(t *testing.T, withTerminalFixture bool) *harness {
+	t.Helper()
 	root := t.TempDir()
 	proj := filepath.Join(root, "proj")
 	ws := filepath.Join(root, "ws")
@@ -138,24 +164,28 @@ func newHarness(t *testing.T) *harness {
 			t.Fatal(err)
 		}
 	}
-	copyFixture("edits.jsonl", "/home/user/proj", proj, editsID)
-	copyFixture("real-smoke.jsonl", "/tmp/ws", ws, smokeID)
 	sessions := filepath.Join(root, "sessions")
 	os.MkdirAll(sessions, 0o755)
-	term := exec.Command("sleep", "120")
-	if err := term.Start(); err != nil {
-		t.Fatal(err)
+	var terminalPID int
+	if withTerminalFixture {
+		copyFixture("edits.jsonl", "/home/user/proj", proj, editsID)
+		copyFixture("real-smoke.jsonl", "/tmp/ws", ws, smokeID)
+		term := exec.Command("sleep", "120")
+		if err := term.Start(); err != nil {
+			t.Fatal(err)
+		}
+		go term.Wait()
+		t.Cleanup(func() { term.Process.Kill() })
+		terminalPID = term.Process.Pid
+		live := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":%q,"procStart":%q,"kind":"interactive","entrypoint":"cli"}`, terminalPID, smokeID, ws, procStart(t, terminalPID))
+		os.WriteFile(filepath.Join(sessions, "1.json"), []byte(live), 0o600)
 	}
-	go term.Wait()
-	t.Cleanup(func() { term.Process.Kill() })
-	live := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":%q,"procStart":%q,"kind":"interactive","entrypoint":"cli"}`, term.Process.Pid, smokeID, ws, procStart(t, term.Process.Pid))
-	os.WriteFile(filepath.Join(sessions, "1.json"), []byte(live), 0o600)
 
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, proj: proj, argsOut: filepath.Join(root, "args"), termPID: term.Process.Pid}
+	h := &harness{t: t, proj: proj, argsOut: filepath.Join(root, "args"), termPID: terminalPID}
 	t.Setenv("CLAUDE_DESK_FAKE", "1")
 	t.Setenv("FAKE_ARGS_OUT", h.argsOut)
 	uiMu.Lock()

@@ -131,7 +131,7 @@ func (d *desk) kmemAssistRestart(a *kmemAssist) {
 }
 
 // kmemAssistStartNote follows the resume prompt on every start.
-const kmemAssistStartNote = "Quill Desktop started you as its always-running kmem assistant. After the brief and your handoff, list the open tasks titled \"kmem issue:\" (topic kmem) and propose a plan for each. " +
+const kmemAssistStartNote = "The user started you as the kmem assistant in Quill Desktop. After the brief and your handoff, list the open tasks titled \"kmem issue:\" (topic kmem) and propose a plan for each. " +
 	"Reclaim the tasks you transferred to kmem-lock-audit when you last stopped."
 
 // kmemAssistStopMessage asks the assistant to stop, settle its claims (rule
@@ -152,8 +152,7 @@ func waitText() string {
 }
 
 // kmemAssistOpen: the kmem window w opened (kmemWindowOpenHook). A running
-// assistant shows its chat again; otherwise it starts (unless the user
-// stopped it).
+// assistant shows its chat again. An idle assistant waits for Start.
 func (d *desk) kmemAssistOpen(w *kmemWindow) {
 	a := d.assist()
 	a.w = w
@@ -179,17 +178,12 @@ func (d *desk) kmemAssistOpen(w *kmemWindow) {
 		d.assistStoppedReason(a)
 		return
 	}
-	d.assistProbe(a)
+	d.assistReason(a, "Select an agent, then press Start.")
 }
 
 // kmemWinStopped: the window's line after Stop assistant.
 func kmemWinStopped(d *desk, a *assistant) {
-	d.assistReasonWith(a, "kmem-lock-audit is stopped; its handoff keeps its work for the next start.", "Start assistant", func() {
-		if a.state == asClosed || a.state == asPanels {
-			a.userStopped = false
-			d.assistProbe(a)
-		}
-	})
+	d.assistReason(a, "kmem-lock-audit is stopped; its handoff keeps its work for the next start.")
 }
 
 // kmemAssistReason shows one line instead of the chat (no assistant).
@@ -243,6 +237,7 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 	a.view = newChatViewWith(d, func() float32 { return chatMaxWidth }, func() float32 { return 0 })
 	title := boldLabel(kmemAssistName + " · kmem assistant")
 	a.stateLbl = widget.NewLabel("")
+	a.stateLbl.Hide() // The live status is shown above the composer.
 	a.modelLbl = caption("")
 	a.note = caption("")
 	a.note.Hide()
@@ -267,6 +262,12 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 		container.NewBorder(nil, nil, nil, container.NewHBox(a.restart, a.reboot, save, a.stopBtn), a.modelLbl),
 		widget.NewSeparator())
 	a.input = newSendEntry(d.kmemAssistSend)
+	a.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(a.input, a.s, k) }
+	a.input.onSendNow = func(text string) {
+		if !d.saveQueueEdit(a.s, a.input, text) && !d.reviseApproval(a.s, a.input, text) {
+			d.kmemAssistSend(text)
+		}
+	}
 	a.input.hint = "Ask kmem-lock-audit..."
 	a.input.SetPlaceHolder(a.input.hint)
 	a.input.SetMinRowsVisible(2)
@@ -278,7 +279,8 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 			d.interrupt(s)
 		}
 	})
-	a.inRow = container.NewBorder(nil, nil, nil, container.NewVBox(send, stop), a.input)
+	agent := menuButton("Agent", nil, func() []*fyne.MenuItem { return d.operatorAgentItems(roleKmem) })
+	a.inRow = container.NewBorder(nil, agent, nil, container.NewVBox(send, stop), a.input)
 	bottom := container.NewVBox(a.note, a.inRow)
 	d.syncBoxInputs()
 	return container.NewBorder(head, bottom, nil, nil, a.view.root)
@@ -397,13 +399,17 @@ func (d *desk) kmemAssistPrefill(text string) {
 func (d *desk) kmemAssistSend(text string) {
 	a := d.assist()
 	s := a.s
-	if s == nil || strings.TrimSpace(text) == "" || a.state != asLive && a.state != asStarting {
+	if d.saveQueueEdit(s, a.input, text) {
+		return
+	}
+	if s == nil || strings.TrimSpace(text) == "" || pendingRevisionMatches(s, text) ||
+		a.state != asLive && a.state != asStarting {
 		return
 	}
 	if a.input != nil {
 		a.input.SetText("")
 	}
-	d.sendTo(s, text)
+	d.sendOrQueue(s, text)
 	d.kmemAssistRefresh(a)
 }
 

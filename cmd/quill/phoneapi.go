@@ -225,7 +225,7 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 		kmemOn = a.d.kmemOn()
 		endCheck = kmemOn && a.d.kmemFeatureCached(endCheckFeature)
 		topics = a.d.topicMode()
-		quillOn = a.d.quillOpOn()
+		quillOn = a.d.phoneQuillOperatorOn()
 	})
 	folders.WriteJSON(w, http.StatusOK, map[string]any{"v": 1, "phoneId": phone, "control": ctl, "boot": a.boot, "quill": version, "unlock": unlock, "lanUnlock": lan,
 		"kmem": map[string]any{"api": kmemPhoneAPI, "on": kmemOn}, "files": map[string]any{"api": filesPhoneAPI, "on": files},
@@ -511,6 +511,7 @@ type itemTrack struct {
 	epoch    int
 	rev      int
 	lastSeq  int
+	choice   int
 	queueSig string
 	ptr      map[int]*chat.Item
 	sig      map[int]itemTag
@@ -537,7 +538,7 @@ func newItemTrack(now time.Time) *itemTrack {
 func (t *itemTrack) reset(c *chat.Conversation) {
 	t.conv = c
 	t.epoch++
-	t.lastSeq = 0
+	t.lastSeq, t.choice = 0, 0
 	t.ptr, t.sig, t.irev, t.cheap = map[int]*chat.Item{}, map[int]itemTag{}, map[int]int{}, map[int]uint64{}
 }
 
@@ -587,6 +588,21 @@ func (t *itemTrack) update(s *deskSession) {
 		}
 	}
 	t.lastSeq = last
+	if s.codex {
+		seq := 0
+		if item := openSessionChoiceItem(s); item != nil {
+			seq = item.Seq
+		}
+		if t.choice != seq {
+			t.rev++
+			for _, changed := range []int{t.choice, seq} {
+				if t.ptr[changed] != nil {
+					t.irev[changed] = t.rev
+				}
+			}
+			t.choice = seq
+		}
+	}
 	if q := strings.Join(s.queue, "\x00"); q != t.queueSig {
 		t.queueSig = q
 		t.rev++
@@ -940,6 +956,14 @@ func (a *phoneAPI) item(s *deskSession, it *chat.Item, rev int, open *chat.Item)
 	return m
 }
 
+func openSessionChoiceItem(s *deskSession) *chat.Item {
+	it := openChoiceItem(s.conv)
+	if it != nil && codexQuestionSupersedes(s, it) {
+		return nil
+	}
+	return it
+}
+
 func openChoiceItem(c *chat.Conversation) *chat.Item {
 	for i := len(c.Items) - 1; i >= 0; i-- {
 		it := c.Items[i]
@@ -1068,7 +1092,7 @@ func (a *phoneAPI) items(w http.ResponseWriter, r *http.Request, id string) {
 func (a *phoneAPI) itemsBody(s *deskSession, id string, iq itemsQuery) map[string]any {
 	t := a.track(s)
 	items := s.conv.Items
-	open := openChoiceItem(s.conv)
+	open := openSessionChoiceItem(s)
 	reset := false
 	incremental := false
 	var pick []*chat.Item

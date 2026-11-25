@@ -67,6 +67,7 @@ type Item struct {
 
 type Stats struct {
 	CostUSD     float64
+	CodexUsage  *protocol.CodexUsage
 	ContextUsed int
 	ContextMax  int
 	Turns       int
@@ -686,6 +687,15 @@ func (c *Conversation) Apply(ev *protocol.Event) []*Item {
 		return c.applyStream(ev)
 	case "control_request":
 		return c.applyControl(ev)
+	case "codex_token_usage":
+		if ev.CodexUsage != nil {
+			c.Stats.CodexUsage = ev.CodexUsage
+			c.Stats.ContextUsed = int(ev.CodexUsage.Last.Total)
+			if ev.CodexUsage.ModelContextWindow > 0 {
+				c.Stats.ContextMax = ev.CodexUsage.ModelContextWindow
+			}
+		}
+		return nil
 	case "prompt_suggestion":
 		c.Suggestion = strings.TrimSpace(ev.Suggestion)
 		return nil
@@ -712,7 +722,7 @@ func (c *Conversation) applySystem(ev *protocol.Event) []*Item {
 		c.Mode = ev.PermissionMode
 		c.Cwd = ev.Cwd
 		c.Stats.Model = ev.Model
-	case "status":
+	case "status", protocol.CodexParentTurnStarted:
 		c.Busy = true
 	case "thinking_tokens":
 		c.Thinking = true
@@ -753,7 +763,7 @@ func (c *Conversation) applyResult(ev *protocol.Event) []*Item {
 	if strings.HasPrefix(ev.TerminalReason, "aborted") {
 		return out
 	}
-	if ev.IsError || (ev.Subtype != "" && ev.Subtype != "success") {
+	if ev.IsError || (ev.Subtype != "" && ev.Subtype != "success" && ev.Subtype != protocol.ResultContinuing) {
 		msg := ev.Result
 		if msg == "" && len(ev.Errors) > 0 {
 			msg = strings.Join(ev.Errors, "\n")
@@ -1018,7 +1028,10 @@ func (c *Conversation) applyStream(ev *protocol.Event) []*Item {
 }
 
 func (c *Conversation) applyControl(ev *protocol.Event) []*Item {
-	if ev.Request == nil || ev.Request.Subtype != "can_use_tool" {
+	if ev.Request == nil || ev.Request.Subtype != "can_use_tool" || ev.RequestID == "" {
+		return nil
+	}
+	if it := c.byRequest[ev.RequestID]; it != nil && it.PermState == PermPending {
 		return nil
 	}
 	it := c.add(&Item{

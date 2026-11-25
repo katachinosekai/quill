@@ -3,16 +3,28 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const kmemAPI = 1
+const supportedKmemSeries = "1.15.x (1.15.1 or later)"
+
+func supportedKmemVersion(api int, version string) bool {
+	parts := strings.Split(version, ".")
+	if api != kmemAPI || len(parts) != 3 || parts[0] != "1" || parts[1] != "15" {
+		return false
+	}
+	patch, err := strconv.Atoi(parts[2])
+	return err == nil && patch >= 1 && parts[2] == strconv.Itoa(patch)
+}
 
 type kmemVersion struct {
 	mu  sync.Mutex
 	api int
+	bin string
 	ver string // the installed kmem's version ("" if unknown)
 	// features: `kmem version --json` "features" (1.10.0+: "topic-context",
 	// "end-check", "sessions"); nil before.
@@ -22,7 +34,7 @@ type kmemVersion struct {
 
 func (v *kmemVersion) reset() {
 	v.mu.Lock()
-	v.api, v.ver, v.features, v.at = 0, "", nil, time.Time{}
+	v.api, v.bin, v.ver, v.features, v.at = 0, "", "", nil, time.Time{}
 	v.mu.Unlock()
 }
 
@@ -39,18 +51,22 @@ func (d *desk) kmemAPILevel() int {
 	v := &d.kmemVer
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if !v.at.IsZero() && time.Since(v.at) < policyRefresh {
+	bin := kmemBin()
+	if v.bin == bin && !v.at.IsZero() && time.Since(v.at) < policyRefresh {
 		return v.api
 	}
-	v.api, v.ver, v.features, v.at = 0, "", nil, time.Now()
-	out, err := d.runKmem("kmem", "version", "--json")
+	v.api, v.bin, v.ver, v.features, v.at = 0, bin, "", nil, time.Now()
+	out, err := d.runKmemRaw("kmem", "version", "--json")
 	var r struct {
 		API      int      `json:"api"`
 		Version  string   `json:"kmem"`
 		Features []string `json:"features"`
 	}
 	if err == nil && json.Unmarshal([]byte(strings.TrimSpace(out)), &r) == nil {
-		v.api, v.ver, v.features = r.API, r.Version, r.Features
+		v.ver = r.Version
+		if d.kmemRun != nil || supportedKmemVersion(r.API, r.Version) {
+			v.api, v.features = r.API, r.Features
+		}
 	}
 	return v.api
 }
@@ -75,7 +91,7 @@ func (d *desk) kmemFeatureCached(f string) bool {
 	known, stale := !v.at.IsZero(), time.Since(v.at) >= policyRefresh
 	ok := known && v.api == kmemAPI && contains(v.features, f)
 	v.mu.Unlock()
-	if stale && d.kmemAvailable() {
+	if stale && !d.kmemOff && (d.kmemRun != nil || kmemBin() != "") {
 		go d.kmemAPILevel()
 	}
 	return ok

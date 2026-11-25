@@ -17,8 +17,8 @@ import (
 // box is open over the chat, the rest of the main area (tab strip, toolbar,
 // chat, all panes) is dimmed by ~30 %, except the box itself and the main
 // message box that messages its assistant. That message box gets a frame and
-// a send button in the assistant's colour and a name chip at its left
-// ("Quill operator ▸") that stays while typing. A click on the dimmed area
+// a send button in the assistant's colour. The kmem assistant also has a
+// name chip at the left of the composer. A click on the dimmed area
 // closes the box like Escape. Docked: none of this.
 
 const (
@@ -96,6 +96,7 @@ func (c *targetCue) set(role string) {
 	c.role = role
 	if role == "" {
 		c.chip.Hide()
+		relayoutTree(c.card)
 		if c.frame != nil {
 			c.frame.StrokeWidth = 0
 			c.frame.StrokeColor = color.Transparent
@@ -111,8 +112,9 @@ func (c *targetCue) set(role string) {
 	c.chipBg.FillColor = fade(ac, 0.16)
 	c.chipBg.StrokeColor = fade(ac, 0.5)
 	c.chipBg.StrokeWidth = 1
-	c.chip.Show()
+	setShown(c.chip, operatorButtonRole(role) != boxQuill)
 	c.chip.Refresh()
+	relayoutTree(c.card)
 	if c.frame != nil {
 		c.frame.StrokeColor = ac
 		c.frame.StrokeWidth = cueFrame
@@ -199,9 +201,19 @@ func (p *dimPiece) MouseOut()                           {}
 func (p *dimPiece) Dragged(*fyne.DragEvent)             {}
 func (p *dimPiece) DragEnd()                            {}
 
-// dimTapped: a click on the dimmed area closes the box (like Escape); on a
-// tab it then switches to that tab, as before the dimming (user 2026-11-23).
 func (d *desk) dimTapped(abs fyne.Position) {
+	for _, bt := range d.abox.btns {
+		btn := bt.btn
+		if btn == nil || !btn.Visible() {
+			continue
+		}
+		pos := abs.Subtract(d.app.Driver().AbsolutePositionForObject(btn))
+		sz := btn.Size()
+		if pos.X >= 0 && pos.X < sz.Width && pos.Y >= 0 && pos.Y < sz.Height {
+			btn.Tapped(&fyne.PointEvent{AbsolutePosition: abs, Position: pos})
+			return
+		}
+	}
 	if !d.assistOverlayOpen() {
 		return
 	}
@@ -317,9 +329,10 @@ func (d *desk) layoutDim() {
 	m := b.dim
 	var rects []rectF
 	if d.dimShown() {
+		d.layoutOverlay()
 		size := b.ghostL.Size()
 		var holes []rectF
-		if r, ok := d.underRect(b.card, b.layer); ok {
+		if r, ok := d.underRect(b.card, b.layer); ok && len(b.layer.Objects) != 0 {
 			holes = append(holes, r)
 		}
 		if in := d.main.in; in != nil && in.cue != nil && in.cue.card != nil {
@@ -347,6 +360,7 @@ func (d *desk) layoutDim() {
 		p.rect.Refresh()
 	}
 	m.root.Resize(b.ghostL.Size())
+	canvas.Refresh(m.root)
 }
 
 // underRect: o's rect in the animation layer, by its parent's position (o

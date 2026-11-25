@@ -71,6 +71,9 @@ func (a *agentStrip) schedule() {
 	time.AfterFunc(agentStripTick, func() {
 		a.d.do(func() {
 			a.sync()
+			if a.d.layoutMode() == layoutVertical {
+				a.d.syncSidebarAgents()
+			}
 			a.schedule()
 		})
 	})
@@ -264,6 +267,9 @@ func (a *agentStrip) sync() {
 		}
 	}
 	s := a.d.current
+	if role := a.d.assistBoxRole(); role != "" {
+		s = a.d.assistantBoxSession(role)
+	}
 	if (s == nil || s.conv == nil || (s.conv.AgentsRev() == 0 && s.conv.Background() == 0)) && !a.root.Visible() {
 		return
 	}
@@ -355,7 +361,7 @@ func (a *agentStrip) items(s *deskSession, g chat.AgentUse) []*fyne.MenuItem {
 		log := g.Log
 		out = append(out, fyne.NewMenuItem("Open log", func() { a.d.openPath(log) }))
 	}
-	if g.Running() && g.Background && g.ID != g.ToolID {
+	if s != nil && !s.codex && g.Running() && g.Background && g.ID != g.ToolID {
 		id := g.ID
 		out = append(out, fyne.NewMenuItemSeparator(), fyne.NewMenuItem("Stop this subagent", func() {
 			a.d.sendTo(s, "Please stop background task "+id+" with TaskStop.")

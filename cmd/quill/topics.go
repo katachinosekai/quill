@@ -431,6 +431,10 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 		return
 	}
 	d.setDormant(t.Slug, false)
+	if isCodexAssistant(t.Slug) {
+		d.resumeHandoffNamed(t.Slug)
+		return
+	}
 	if owner := d.topicOwner(t.Slug, s); owner != nil {
 		d.noteRecentTopic(t.Slug)
 		d.openOwner(owner)
@@ -448,6 +452,9 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 		return
 	}
 	d.noteRecentTopic(t.Slug)
+	if dir := d.org.CodexTopics[t.Slug]; dir != "" {
+		s.cwd = dir
+	}
 	s.pickPending = false
 	if isNew && t.Title != "" {
 		if d.org.TopicTitles == nil {
@@ -460,6 +467,10 @@ func (d *desk) pickTopic(s *deskSession, t topicInfo, isNew bool) {
 	d.org.Titles[s.id] = t.Title
 	d.org.Kmem[s.id] = t.Slug
 	d.afterPick(s, false)
+	if s.codex {
+		d.sendTo(s, "Load the assigned kmem topic briefing and checkpoint. Tell me where the work stands and wait for my next instruction.")
+		return
+	}
 	go func() {
 		p := d.topicPrompt(t, isNew)
 		d.do(func() { d.sendResume(s, t.Slug, p) })
@@ -502,6 +513,9 @@ func (d *desk) openTopic(slug string) *deskSession {
 // live outside Quill Desktop (K6) is refused (nil), otherwise a fresh
 // coordinator starts in cwd (isNew: the topic has no facts yet).
 func (d *desk) openTopicInfo(t topicInfo, isNew bool, cwd string) *deskSession {
+	if isCodexAssistant(t.Slug) {
+		return d.resumeHandoffNamed(t.Slug)
+	}
 	if owner := d.topicOwner(t.Slug, &deskSession{}); owner != nil {
 		d.setDormant(t.Slug, false)
 		d.noteRecentTopic(t.Slug)
@@ -520,6 +534,9 @@ func (d *desk) openTopicInfo(t topicInfo, isNew bool, cwd string) *deskSession {
 	}
 	if _, ext := d.topicExternal(t.Slug); ext {
 		return nil // live outside Quill Desktop (K6): refused, no tab
+	}
+	if dir := d.org.CodexTopics[t.Slug]; dir != "" {
+		return d.openCodexTopic(t, dir)
 	}
 	ns := d.createSession(cwd, "default", "default")
 	ns.pickPending = true

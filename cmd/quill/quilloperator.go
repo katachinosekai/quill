@@ -56,10 +56,9 @@ func newQuillRole() *assistRole {
 		dirFor:      func(d *desk) string { return d.quillOpDir() },
 		startNote:   quillOpStartNote,
 		stopMessage: func() string { return "" }, // stop replaces the handoff save
-		bootOK:      func(d *desk) bool { return d.kmemMemory() },
-		available:   func(d *desk) bool { return d.kmemAvailable() },
+		bootOK:      func(d *desk) bool { return true },
+		available:   func(d *desk) bool { return true },
 		model:       func(d *desk) string { return d.quillOpModel() },
-		unavailable: "kmem is not available, so the Quill operator can't run.",
 		offReason:   "The Quill operator is off.",
 		items:       func(d *desk) []badgeItem { return quillIssueItems(d.kmemNeedsNow.QuillIssues) },
 		ready:       func(d *desk) bool { return d.kmemGot },
@@ -70,10 +69,15 @@ func newQuillRole() *assistRole {
 		attach:      quillBoxAttach,
 		refresh:     quillBoxRefresh,
 		dot:         func(d *desk, on bool) { d.setAssistRunDot(roleQuill, on) },
-		prompt:      func(d *desk) string { return d.topicPrompt(quillTopic(), false) },
-		stop:        quillOpStop,
-		elsewhere:   quillOpElsewhere,
-		blocked:     quillOpBlocked,
+		prompt: func(d *desk) string {
+			if d.kmemMemory() {
+				return d.topicPrompt(quillTopic(), false)
+			}
+			return "Start as the Quill operator using the current Quill configuration. Wait for the user's request."
+		},
+		stop:      quillOpStop,
+		elsewhere: quillOpElsewhere,
+		blocked:   quillOpBlocked,
 	}
 }
 
@@ -88,13 +92,12 @@ func quillTopic() topicInfo {
 }
 
 // quillOperatorHint: the settings role, for every user (§3.1, Q3, Q5-Q7).
-const quillOperatorHint = "You are the Quill operator, Quill Desktop's coordinator for Quill Desktop and Quill Android; use kmem --as quill. " +
+const quillOperatorHint = "You are the Quill operator, Quill Desktop's coordinator for Quill Desktop and Quill Android. " +
 	"You run hidden behind the Quill button; the user talks to you in its box. " +
 	"Settings: change Quill Desktop settings only when the user asks in this chat, only with `quill settings`: " +
 	"`list` and `get ID` are free; `set ID VALUE --why \"<the user's request>\"` and `undo [N]` need the approved plan; " +
 	"never edit preference files. " +
-	"Security settings are the user's: say where they are. " +
-	"Other sessions report problems as `quill issue:` tasks (topic quill); list and plan them at start."
+	"Security settings are the user's: say where they are."
 
 // quillDeveloperHint: the developer role, only with a Quill source folder.
 const quillDeveloperHint = "Developer: improve Quill Desktop and Quill Android in the Quill source folder %s " +
@@ -123,8 +126,15 @@ func quillOperatorHintFor(src string) string {
 // role, the operator hint and, as for every session, plan-first.
 func (d *desk) quillOperatorPrompt(s *deskSession) string {
 	src := d.quillSource()
-	t := topicHints{topic: quillOpName, endCheck: d.kmemFeatureCached(endCheckFeature)}
-	p := sessionPromptWith(true, src != "" && d.buildGateOn(), src != "", t) + " " + quillOperatorHintFor(src)
+	linked := d.kmemMemory()
+	var t topicHints
+	if linked {
+		t = topicHints{topic: quillOpName, endCheck: d.kmemFeatureCached(endCheckFeature)}
+	}
+	p := sessionPromptWith(linked, src != "" && d.buildGateOn(), src != "" && d.coordinatorOn(s.model), t) + " " + quillOperatorHintFor(src)
+	if linked {
+		p += " Use kmem --as quill. Other sessions report problems as `quill issue:` tasks in topic quill; list and plan them at start."
+	}
 	s.approvalHint = d.planFirst
 	if d.planFirst {
 		p += " " + planApprovalHint
@@ -260,10 +270,13 @@ func quillIssueItems(ts []kmemTask) []badgeItem {
 	return items
 }
 
-// assistantsBoot starts every assistant with Quill Desktop (desk.go watch).
+// assistantsBoot reattaches processes from a live reload.
 func (d *desk) assistantsBoot() {
-	d.kmemAssistBoot()
-	d.assistBoot(d.quillAssist())
+	for _, a := range []*assistant{d.assist(), d.quillAssist()} {
+		if s := d.assistOwner(a); s != nil && hiddenRole(s) == a.role.hidden && s.running() && !s.stopping {
+			d.assistAdopt(a, s)
+		}
+	}
 }
 
 // assistantsExited: a hidden session's process ended (handleExit).
@@ -509,6 +522,9 @@ func (d *desk) quillAdopt(a *assistant, o *deskSession, note string) {
 // quillOpBlocked: topic quill is live outside Quill Desktop (K6): the box
 // shows "running elsewhere" with Take over, as the topic card does.
 func quillOpBlocked(d *desk, a *assistant) bool {
+	if !d.kmemMemory() {
+		return false
+	}
 	e, ok := d.topicExternal(quillOpName)
 	if !ok {
 		return false
@@ -519,15 +535,8 @@ func quillOpBlocked(d *desk, a *assistant) bool {
 	return true
 }
 
-// openQuillOperator brings up the operator's box and starts it if it is not
-// running (topic quill from the card, the phone or --resume-all).
+// openQuillOperator brings up the operator's box.
 func (d *desk) openQuillOperator() {
-	a := d.quillAssist()
-	switch a.state {
-	case asClosed, asPanels:
-		a.userStopped = false
-		d.assistProbe(a)
-	}
 	if h := d.hostFor(roleQuill); h.open != nil {
 		h.open()
 	}
