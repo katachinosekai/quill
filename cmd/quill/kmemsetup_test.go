@@ -22,6 +22,13 @@ func installFakeKmem(t *testing.T, home string, files ...string) {
 			t.Fatal(err)
 		}
 	}
+	_, kmemErr := os.Stat(filepath.Join(bin, "kmem"))
+	_, guardErr := os.Stat(filepath.Join(bin, "kmem-guard"))
+	if kmemErr == nil && guardErr == nil {
+		if err := signFixtureKmem(home, bin); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestKmemNotBundled(t *testing.T) {

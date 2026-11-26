@@ -153,9 +153,12 @@ func (d *desk) runKmemRaw(prog string, args ...string) (string, error) {
 	}
 	timeout := kmemTimeout
 	if prog == "kmem" {
-		bin := kmemBin()
-		if bin == "" || d.kmemOff {
+		if d.kmemOff {
 			return "", fmt.Errorf("kmem is unavailable")
+		}
+		bin, err := verifiedKmemBin()
+		if err != nil {
+			return "", err
 		}
 		if slices.Equal(args, []string{"version", "--json"}) {
 			timeout = 3 * time.Second
@@ -204,7 +207,7 @@ func (d *desk) kmemTaken(hs []kmemHandoff) func(string) bool {
 }
 
 func (d *desk) resumePrompt(name string) string {
-	if out, err := d.runKmem("kmem-resume", name, "--print"); err == nil && strings.TrimSpace(out) != "" {
+	if out, err := d.runKmem("kmem", "resume", name); err == nil && strings.TrimSpace(out) != "" {
 		return strings.TrimSpace(out)
 	}
 	return fmt.Sprintf("You are the session for kmem handoff %q; use kmem name %q (kmem --as %q ...). "+

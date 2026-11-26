@@ -154,7 +154,12 @@ func (b *binView) showBinItem(it binItem) {
 				if !ok {
 					return
 				}
-				cmd := terminalCmd(firstNonEmpty(kmemBin(), "kmem"), it.ID)
+				path, err := verifiedKmemBin()
+				if err != nil {
+					dialog.ShowError(err, b.parent)
+					return
+				}
+				cmd := terminalCmd(path, it.ID)
 				if err := cmd.Start(); err != nil {
 					dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty %s` in a terminal yourself", err, it.ID), b.parent)
 					return
@@ -185,7 +190,11 @@ func (b *binView) emptyBin() {
 			if !ok {
 				return
 			}
-			path := firstNonEmpty(kmemBin(), "kmem")
+			path, err := verifiedKmemBin()
+			if err != nil {
+				dialog.ShowError(err, b.parent)
+				return
+			}
 			cmd := terminalCmd(path)
 			if err := cmd.Start(); err != nil {
 				dialog.ShowError(fmt.Errorf("could not open a terminal (%v); run `kmem trash empty` in a terminal yourself", err), b.parent)

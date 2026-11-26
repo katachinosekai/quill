@@ -95,6 +95,11 @@ func runIsolated(m *testing.M) int {
 			"  esac\nfi\n" +
 			"echo \"kmem $*\" >> '" + calls + "'\nexit 1\n"
 		os.WriteFile(filepath.Join(bin, "kmem"), []byte(script), 0o755)
+		os.WriteFile(filepath.Join(bin, "kmem-guard"), []byte(script), 0o755)
+		if err := signFixtureKmem(home, bin); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 		os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	code := m.Run()

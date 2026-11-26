@@ -22,6 +22,7 @@ type Options struct {
 	Binary, Cwd, SessionID                              string
 	Instructions, SettingsBinary, Sandbox               string
 	ComposerSettings, Coordinate                        bool
+	VerifyKmem                                          func() error `json:"-"`
 	KmemCommand                                         []string
 	KmemTopic, KmemTopicTitle                           string
 	Ephemeral, Steer, SteerOnlyWhileWaiting, ForceSteer bool

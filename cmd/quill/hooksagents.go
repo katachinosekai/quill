@@ -104,7 +104,7 @@ func (d *desk) hooksPane(cwd string) fyne.CanvasObject {
 				msg.Wrapping = fyne.TextWrapWord
 				msg.Importance = widget.WarningImportance
 				repair := widget.NewButtonWithIcon("Repair kmem hooks", theme.ConfirmIcon(), func() {
-					changed, backup, err := mergeKmemHooks(userFile, home, time.Now())
+					changed, backup, err := mergeVerifiedKmemHooks(userFile, home, time.Now())
 					if err != nil {
 						dialog.ShowError(err, d.win)
 						return

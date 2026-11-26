@@ -28,7 +28,8 @@ func dieWithParent(cmd *exec.Cmd) {}
 // terminalCmd opens a console window running kmem's purge, where kmem asks
 // the user to type the confirmation.
 var terminalCmd = func(kmemPath string, id ...string) *exec.Cmd {
-	args := []string{"/c", "start", "kmem: empty the recycle bin", "cmd", "/k", firstNonEmpty(windowsPython(), "python"), kmemPath, "trash", "empty"}
+	program, invocation := kmemCommand("windows", windowsPython(), kmemPath, "trash", "empty")
+	args := append([]string{"/c", "start", "kmem: empty the recycle bin", "cmd", "/k", program}, invocation...)
 	if len(id) > 0 && validBinID(id[0]) {
 		args = append(args, id[0])
 	}

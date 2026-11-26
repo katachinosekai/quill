@@ -89,21 +89,30 @@ func kmemJSONOut(out string, v any) error {
 func (d *desk) kmemSwitchDetect(home string) kmemSwitchCheck {
 	var c kmemSwitchCheck
 	if !d.kmemOff {
-		c.Bin = kmemBin()
 		if d.kmemRun != nil {
-			c.Bin = firstNonEmpty(c.Bin, "kmem")
+			c.Bin = firstNonEmpty(kmemBin(), "kmem")
+		} else if kmemBin() != "" {
+			var err error
+			c.Bin, err = verifiedKmemBin()
+			if err != nil {
+				c.Problems = append(c.Problems, err.Error())
+				return c
+			}
 		}
 	}
 	if c.Bin == "" {
 		c.Problems = append(c.Problems, "kmem is not installed (not on PATH or in ~/.local/bin). Install kmem first; it is available to Patreon patrons.")
 		return c
 	}
-	c.Guard = findKmemGuard(home, c.Bin)
+	c.Guard = kmemGuardSibling(c.Bin)
+	if d.kmemRun != nil {
+		c.Guard = findKmemGuard(home, c.Bin)
+	}
 	if c.Guard == "" {
 		c.Problems = append(c.Problems, "kmem-guard is missing (not on PATH or in ~/.local/bin). Reinstall kmem with its installer, which puts kmem-guard next to kmem.")
 	}
 	c.Python = switchPython()
-	if c.Python == "" {
+	if c.Python == "" && !strings.EqualFold(filepath.Ext(c.Bin), ".exe") {
 		c.Problems = append(c.Problems, "python3 is not installed; kmem runs on it. Install Python 3 and try again.")
 	}
 	var ver struct {

@@ -19,12 +19,12 @@ func dieWithParent(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Pdeat
 // the user to type the confirmation.
 // With an id it purges only that item ("kmem trash empty ID").
 var terminalCmd = func(kmemPath string, id ...string) *exec.Cmd {
-	target := ""
+	args := []string{"--title", "kmem: empty the recycle bin", "-e", "bash", "-c",
+		`"$@"; echo; read -r -p 'Press Enter to close this window. ' _`, "kmem", kmemPath, "trash", "empty"}
 	if len(id) > 0 && validBinID(id[0]) {
-		target = " " + id[0]
+		args = append(args, id[0])
 	}
-	script := fmt.Sprintf("%q trash empty%s; echo; read -r -p 'Press Enter to close this window. ' _", kmemPath, target)
-	return exec.Command("konsole", "--title", "kmem: empty the recycle bin", "-e", "bash", "-c", script)
+	return exec.Command("konsole", args...)
 }
 
 // openTerminal runs a shell script in a visible terminal window (Setup's

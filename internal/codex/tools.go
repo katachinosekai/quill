@@ -238,6 +238,11 @@ func (b *bridge) runTool(id json.RawMessage, binary string, args []string) error
 }
 
 func (b *bridge) commandOutput(argv []string, settings, includeStderr bool) (string, error) {
+	if !settings && b.opts.VerifyKmem != nil {
+		if err := b.opts.VerifyKmem(); err != nil {
+			return "", err
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)

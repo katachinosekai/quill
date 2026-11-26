@@ -2,7 +2,7 @@
 
 - The kmem panel shows whether Codex can run the configured kmem guard and startup hooks. Review changed or untrusted hooks in Codex with `/hooks`.
 - Quill looks up guard evidence using the active Codex thread. With a compatible staged kmem, it can verify an idle staged session using one read-only probe per thread and rollout round.
-- Existing kmem installations retain their usual operation. Per-session rollout evidence requires kmem's `rollout-session-guard` capability and its matching launcher.
+- Existing kmem installations require a signed release and an independently provisioned trust key. Per-session rollout evidence requires kmem's `rollout-session-guard` capability and its matching launcher.
 
 # Quill 0.1.29
 

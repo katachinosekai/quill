@@ -540,8 +540,8 @@ func TestKmemNewSessionAndResume(t *testing.T) {
 		switch {
 		case prog == "kmem" && len(args) > 1 && args[1] == "list":
 			return "quill  4 items, saved 2026-11-20T12:16:10-08:00\n", nil
-		case prog == "kmem-resume":
-			return "RESUME PROMPT for " + args[0], nil
+		case prog == "kmem" && len(args) == 2 && args[0] == "resume":
+			return "RESUME PROMPT for " + args[1], nil
 		}
 		return "", errors.New("unexpected")
 	}
@@ -599,7 +599,7 @@ func TestKmemRestartSavesThenDeletes(t *testing.T) {
 			return saved, nil
 		case prog == "kmem" && len(args) > 1 && args[1] == "get":
 			return savedBy, nil
-		case prog == "kmem-resume":
+		case prog == "kmem" && len(args) == 2 && args[0] == "resume":
 			return "", errors.New("unknown name")
 		}
 		return "", errors.New("unexpected")

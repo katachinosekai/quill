@@ -169,13 +169,19 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 	r = setupRow{title: "kmem (shared memory)", optional: true}
 	home := homeDir()
 	kb := firstNonEmpty(kmemBin(), "kmem")
+	var trustErr error
+	if !d.kmemOff && d.kmemRun == nil && kmemBin() != "" {
+		_, trustErr = verifiedKmemBin()
+	}
 	switch {
+	case trustErr != nil:
+		r.state = trustErr.Error()
 	case !d.kmemAvailable() && kmemBin() != "" && !d.kmemOff:
 		r.state = "installed but incompatible; supported versions: " + supportedKmemSeries
 	case !d.kmemAvailable():
 		r.state, r.action = kmemGetHint, "Get kmem..."
 		r.do = d.openKmemPatreon
-	case win && windowsPython() == "":
+	case win && !strings.EqualFold(filepath.Ext(kb), ".exe") && windowsPython() == "":
 		r.state = "installed, but needs Python 3 (see the Python row)"
 	case d.kmemSwitchWanted():
 		r.state, r.action = "detected; preview the recommended Quill and kmem setup and shared import", "Review setup…"

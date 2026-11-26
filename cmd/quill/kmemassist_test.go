@@ -30,8 +30,8 @@ func (k *kmemAssistStub) run(prog string, args ...string) (string, error) {
 	defer k.mu.Unlock()
 	k.calls = append(k.calls, prog+" "+strings.Join(args, " "))
 	switch {
-	case prog == "kmem-resume" && len(args) > 0:
-		return "RESUME " + args[0], nil
+	case prog == "kmem" && len(args) == 2 && args[0] == "resume":
+		return "RESUME " + args[1], nil
 	case prog == "kmem" && len(args) == 2 && args[0] == "handoff" && args[1] == "list":
 		out := ""
 		for name, t := range k.saved {
@@ -118,7 +118,7 @@ func resumeCalls(k *kmemAssistStub) int {
 	defer k.mu.Unlock()
 	n := 0
 	for _, c := range k.calls {
-		if strings.HasPrefix(c, "kmem-resume") {
+		if strings.HasPrefix(c, "kmem resume ") {
 			n++
 		}
 	}
@@ -562,7 +562,7 @@ func TestKmemAssistPanelsOnly(t *testing.T) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	for _, c := range k.calls {
-		if strings.HasPrefix(c, "kmem-resume") {
+		if strings.HasPrefix(c, "kmem resume ") {
 			t.Fatal("nothing started")
 		}
 	}

@@ -86,6 +86,15 @@ func installation(path string) (dir, layout string, err error) {
 // VerifyInstalled checks portable bytes against the build pin. A managed
 // install uses a separately provisioned key shared with its signed launcher.
 func VerifyInstalled(path string) (Release, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Release{}, fmt.Errorf("find managed kmem trust key: %w", err)
+	}
+	return VerifyInstalledAt(path, home)
+}
+
+// VerifyInstalledAt uses the managed trust anchor in the specified user home.
+func VerifyInstalledAt(path, home string) (Release, error) {
 	dir, layout, err := installation(path)
 	if err != nil {
 		return Release{}, err
@@ -96,10 +105,6 @@ func VerifyInstalled(path string) (Release, error) {
 			return Release{}, errors.New("this Quill build has no trusted key for portable kmem")
 		}
 		return verify(dir, layout, ed25519.PublicKey(key))
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return Release{}, err
 	}
 	config, err := filepath.EvalSymlinks(filepath.Join(home, ".config", "kmem"))
 	if err != nil {

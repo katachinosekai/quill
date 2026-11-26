@@ -18,6 +18,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/katachinosekai/quill/internal/kmemrelease"
 )
 
 // kmem is not part of Quill Desktop (user 2026-11-24): it is distributed to
@@ -41,12 +43,21 @@ func userKmemPath() string {
 	return filepath.Join(home, ".local", "bin", "kmem")
 }
 
+// kmemBin locates a candidate. Verify it before invoking the command.
 func kmemBin() string {
 	if p, err := exec.LookPath("kmem"); err == nil {
-		return p
+		if abs, err := filepath.Abs(p); err == nil {
+			return abs
+		}
 	}
-	if st, err := os.Stat(userKmemPath()); err == nil && !st.IsDir() {
-		return userKmemPath()
+	path := userKmemPath()
+	if runtime.GOOS == "windows" {
+		if st, err := os.Stat(path + ".exe"); err == nil && st.Mode().IsRegular() {
+			return path + ".exe"
+		}
+	}
+	if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() {
+		return path
 	}
 	return ""
 }
@@ -76,8 +87,13 @@ func kmemHooksForPaths(goos, kmem, kmemGuard, python string) map[string]map[stri
 	guard := shellQuote(kmemGuard)
 	if goos == "windows" {
 		fwd := func(p string) string { return `"` + strings.ReplaceAll(p, `\`, "/") + `"` }
-		brief = python + " " + fwd(kmem) + " brief"
-		guard = python + " " + fwd(kmemGuard)
+		if strings.EqualFold(filepath.Ext(kmem), ".exe") {
+			brief = fwd(kmem) + " brief"
+			guard = fwd(kmemGuard)
+		} else {
+			brief = python + " " + fwd(kmem) + " brief"
+			guard = python + " " + fwd(kmemGuard)
+		}
 	}
 	return map[string]map[string]any{
 		"SessionStart": {"hooks": []any{map[string]any{"type": "command", "command": brief, "timeout": 10}}},
@@ -105,7 +121,7 @@ var windowsPython = func() string {
 
 // kmemCommand builds the command that runs kmem (through Python on Windows).
 func kmemCommand(goos, python, path string, args ...string) (string, []string) {
-	if goos == "windows" {
+	if goos == "windows" && !strings.EqualFold(filepath.Ext(path), ".exe") {
 		return firstNonEmpty(python, "python"), append([]string{path}, args...)
 	}
 	return path, args
@@ -160,6 +176,14 @@ func hasHookCommand(groups []any, needle string) bool {
 		}
 	}
 	return false
+}
+
+func mergeVerifiedKmemHooks(settingsPath, home string, now time.Time) (bool, string, error) {
+	path := filepath.Join(home, ".local", "bin", "kmem")
+	if _, err := kmemrelease.VerifyInstalledAt(path, home); err != nil {
+		return false, "", fmt.Errorf("kmem signature verification failed: %w", err)
+	}
+	return mergeKmemHooks(settingsPath, home, now)
 }
 
 func mergeKmemHooks(settingsPath, home string, now time.Time) (bool, string, error) {
@@ -339,7 +363,7 @@ func addKmemHooks(home string, now time.Time) ([]string, error) {
 	if !kmemGuardInstalled(home) {
 		return nil, errors.New("kmem and kmem-guard are not in ~/.local/bin; install kmem first")
 	}
-	changed, backup, err := mergeKmemHooks(claudeSettingsFile(home), home, now)
+	changed, backup, err := mergeVerifiedKmemHooks(claudeSettingsFile(home), home, now)
 	if err != nil {
 		return nil, err
 	}
@@ -377,6 +401,11 @@ func (d *desk) kmemSettings() fyne.CanvasObject {
 			bin = kmemBin()
 		}
 		text, offer := kmemStatus(homeDir(), bin)
+		if bin == "" && !d.kmemOff && d.kmemRun == nil && kmemBin() != "" {
+			if _, err := verifiedKmemBin(); err != nil {
+				text = err.Error()
+			}
+		}
 		status.SetText(text)
 		d.syncKmemAdverts()
 		btn.Hidden = !offer

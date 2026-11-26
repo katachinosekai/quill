@@ -91,7 +91,7 @@ func (d *desk) codexProcessOptions(s *deskSession) (session.Options, error) {
 		opts.Instructions += " " + codexCoordinatorHint
 	}
 	if d.kmemMemory() || role == roleCodexKmem && d.kmemAvailable() {
-		if path := kmemBin(); path != "" {
+		if path, err := verifiedKmemBin(); err == nil {
 			command, args := kmemCommand(runtime.GOOS, windowsPython(), path)
 			opts.KmemCommand = append([]string{command}, args...)
 			opts.KmemTopic = d.codexTopic(s)
@@ -176,6 +176,14 @@ func runCodexBridge(args []string) int {
 		opts.Binary == "" || opts.Cwd == "" || !sessionIDRe.MatchString(opts.SessionID) {
 		fmt.Fprintln(os.Stderr, "invalid Codex bridge arguments")
 		return 2
+	}
+	if argc := len(opts.KmemCommand); argc != 0 {
+		opts.VerifyKmem = func() error {
+			if argc != 1 && !(runtime.GOOS == "windows" && argc == 2) {
+				return fmt.Errorf("invalid kmem command")
+			}
+			return verifyKmemInstallation(opts.KmemCommand[argc-1])
+		}
 	}
 	if err := codex.Run(opts, os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
