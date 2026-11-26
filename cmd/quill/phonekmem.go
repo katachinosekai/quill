@@ -349,7 +349,7 @@ func kmemOverviewBody(boot string, data *kmemPanelData, assistant map[string]any
 // change carries only state, waiting, epoch and rev.
 func (a *phoneAPI) kmemAssistSummary(full bool) map[string]any {
 	d := a.d
-	as := d.assist()
+	as := d.phoneOperator(kmemRole)
 	s := as.s
 	state := assistStateName(as)
 	waiting := assistWaiting(s)
@@ -357,10 +357,8 @@ func (a *phoneAPI) kmemAssistSummary(full bool) map[string]any {
 		waiting = "saveTimeout"
 	}
 	out := map[string]any{"state": state, "waiting": waiting, "epoch": 0, "rev": 0}
-	if s != nil {
-		if t := a.tracks[s.id]; t != nil {
-			out["epoch"], out["rev"] = t.epoch, t.rev
-		}
+	if t := a.operatorTrack(as); t != nil {
+		out["epoch"], out["rev"] = t.epoch, t.rev
 	}
 	if !full {
 		return out
@@ -373,6 +371,12 @@ func (a *phoneAPI) kmemAssistSummary(full bool) map[string]any {
 	src := "kmem assistant setting"
 	if d.app.Preferences().String(prefKmemAssistModel) == "" {
 		src = optAssistSame // "Online Claude (default)": the setting is unset
+	}
+	if isCodexAssistant(as.role.id) {
+		src = codexAgent
+		if s == nil || s.model == "" {
+			model = "default"
+		}
 	}
 	out["model"], out["modelSource"] = model, src
 	out["actions"] = d.kmemAssistActions(as) // phase 2: what /phone/kmem/assistant/* accepts now
@@ -402,7 +406,7 @@ func (a *phoneAPI) kmemAssistSummary(full bool) map[string]any {
 // kmemAssistTrackID: the assistant's session id while a tracker is kept for
 // it (scan keeps that one hidden tracker; "" when there is no assistant).
 func (a *phoneAPI) kmemAssistTrackID() string {
-	if s := a.d.assist().s; s != nil {
+	if s := a.d.phoneOperator(kmemRole).s; s != nil {
 		return s.id
 	}
 	return ""

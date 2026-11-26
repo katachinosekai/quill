@@ -43,13 +43,14 @@ type phoneAPI struct {
 	streams map[string]chan struct{}
 	stop    chan struct{}
 
-	tracks     map[string]*itemTrack
-	lastSess   map[string]string
-	lastIDs    string
-	lastUse    string
-	lastCtl    map[string]bool
-	lastSet    string
-	lastTopics string // the topics list last sent as a "topics" change
+	tracks         map[string]*itemTrack
+	operatorTracks map[string]*itemTrack
+	lastSess       map[string]string
+	lastIDs        string
+	lastUse        string
+	lastCtl        map[string]bool
+	lastSet        string
+	lastTopics     string // the topics list last sent as a "topics" change
 
 	lan *lanMem // home-network unlock (phoneunlock.go)
 

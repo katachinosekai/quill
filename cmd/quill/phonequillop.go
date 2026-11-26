@@ -48,6 +48,9 @@ func (d *desk) phoneActions() []string {
 // quillOpActions: what the phone may do with the operator in its current
 // state (UI thread); the write routes refuse the others with 409 stale.
 func (d *desk) quillOpActions(a *assistant) []string {
+	if isCodexAssistant(a.role.id) {
+		return d.phoneCodexOperatorActions(a)
+	}
 	s := a.s
 	running := s != nil && s.running() && !s.stopping
 	live := a.state == asLive || a.state == asStarting
@@ -71,15 +74,13 @@ func (d *desk) quillOpActions(a *assistant) []string {
 // change carries only state, waiting, epoch and rev.
 func (a *phoneAPI) quillOpSummary(full bool) map[string]any {
 	d := a.d
-	as := d.quillAssist()
+	as := d.phoneOperator(quillRole)
 	s := as.s
 	state := assistStateName(as)
 	waiting := assistWaiting(s)
 	out := map[string]any{"state": state, "waiting": waiting, "epoch": 0, "rev": 0}
-	if s != nil {
-		if t := a.tracks[s.id]; t != nil {
-			out["epoch"], out["rev"] = t.epoch, t.rev
-		}
+	if t := a.operatorTrack(as); t != nil {
+		out["epoch"], out["rev"] = t.epoch, t.rev
 	}
 	if !full {
 		return out
@@ -99,6 +100,12 @@ func (a *phoneAPI) quillOpSummary(full bool) map[string]any {
 	out["dot"] = d.assistRunning(as)
 	out["label"] = quillRole.label
 	out["model"] = d.quillOpModel()
+	if isCodexAssistant(as.role.id) {
+		out["model"] = "default"
+		if s != nil && s.model != "" {
+			out["model"] = s.model
+		}
+	}
 	out["actions"] = d.quillOpActions(as)
 	out["unread"] = d.assistUnread(as)
 	if state == "failed" && s != nil && s.failed != "" {
@@ -188,7 +195,7 @@ func (a *phoneAPI) quillChange() map[string]any {
 
 // quillOpTrackID: the operator's session id while a tracker is kept for it.
 func (a *phoneAPI) quillOpTrackID() string {
-	if s := a.d.quillAssist().s; s != nil {
+	if s := a.d.phoneOperator(quillRole).s; s != nil {
 		return s.id
 	}
 	return ""
@@ -209,7 +216,7 @@ func (a *phoneAPI) quillRoute(w http.ResponseWriter, r *http.Request, path strin
 		})
 		folders.WriteJSON(w, http.StatusOK, body)
 	case "quill/operator/items":
-		a.assistItems(w, r, quillOpPhoneID, "operator", func() *assistant { return a.d.quillAssist() },
+		a.assistItems(w, r, quillOpPhoneID, "operator", func() *assistant { return a.d.phoneOperator(quillRole) },
 			func() map[string]any { return a.quillOpSummary(true) })
 	case "quill/settings/changes":
 		var list []apiSettingChange
@@ -257,7 +264,7 @@ func (a *phoneAPI) quillUndo(_ string, in writeBody) (map[string]any, *apiErr) {
 		return nil, badReq("change is the number of an entry of the Changes list")
 	}
 	d := a.d
-	c, err := d.undoSettingChange(d.quillAssist().s, *in.Change)
+	c, err := d.undoSettingChange(d.phoneOperator(quillRole).s, *in.Change)
 	if err != nil {
 		if strings.Contains(err.Error(), "no change ") {
 			return nil, notFound(err.Error())
@@ -270,7 +277,7 @@ func (a *phoneAPI) quillUndo(_ string, in writeBody) (map[string]any, *apiErr) {
 // quillOpDo runs one operator write (UI thread).
 func (a *phoneAPI) quillOpDo(op string, in writeBody) (map[string]any, *apiErr) {
 	d := a.d
-	as := d.quillAssist()
+	as := d.phoneOperator(quillRole)
 	can := d.quillOpActions(as)
 	offered := func(action string) *apiErr {
 		if !slices.Contains(can, action) {
@@ -282,6 +289,10 @@ func (a *phoneAPI) quillOpDo(op string, in writeBody) (map[string]any, *apiErr) 
 	case "start":
 		if fail := offered("start"); fail != nil {
 			return nil, fail
+		}
+		if isCodexAssistant(as.role.id) {
+			d.startPhoneCodexOperator(as)
+			return nil, nil
 		}
 		as.userStopped = false
 		d.assistProbe(as) // as the Quill button
@@ -297,6 +308,10 @@ func (a *phoneAPI) quillOpDo(op string, in writeBody) (map[string]any, *apiErr) 
 		if fail := offered("restart"); fail != nil {
 			return nil, fail
 		}
+		if isCodexAssistant(as.role.id) {
+			d.startPhoneCodexOperator(as)
+			return nil, nil
+		}
 		if d.assistModelChanged(as) {
 			d.assistReboot(as)
 		} else if !d.assistRestartNow(as) {
@@ -309,4 +324,6 @@ func (a *phoneAPI) quillOpDo(op string, in writeBody) (map[string]any, *apiErr) 
 
 // The phone operator workflow depends on a shared topic. The desktop
 // operator can also run on its own.
-func (d *desk) phoneQuillOperatorOn() bool { return d.kmemMemory() && d.quillOpOn() }
+func (d *desk) phoneQuillOperatorOn() bool {
+	return d.kmemMemory() && (d.quillOpOn() || d.app.Preferences().Bool("quillAgentCodex"))
+}

@@ -24,11 +24,66 @@ import (
 // Claude session id is not sent; a new session shows as a new epoch).
 const kmemAssistPhoneID = "kmem-assistant"
 
+// phoneOperator resolves the assistant selected in the Desktop operator window.
+func (d *desk) phoneOperator(role *assistRole) *assistant {
+	switch role {
+	case quillRole:
+		if d.app.Preferences().Bool("quillAgentCodex") {
+			role = codexQuillRole
+		}
+	case kmemRole:
+		if d.app.Preferences().Bool("kmemAgentCodex") {
+			role = codexKmemRole
+		}
+	}
+	return d.assistFor(role)
+}
+
+// operatorTrack keeps one epoch sequence per phone panel as its backend or
+// session changes. A new conversation resets the tracker even within one second.
+func (a *phoneAPI) operatorTrack(as *assistant) *itemTrack {
+	if as.s == nil {
+		return nil
+	}
+	role := operatorButtonRole(as.role.id)
+	if a.operatorTracks == nil {
+		a.operatorTracks = make(map[string]*itemTrack)
+	}
+	t := a.operatorTracks[role]
+	if t == nil {
+		t = newItemTrack(trackClock())
+		a.operatorTracks[role] = t
+	}
+	t.update(as.s)
+	a.tracks[as.s.id] = t
+	return t
+}
+
+func (d *desk) phoneCodexOperatorActions(as *assistant) []string {
+	if d.agentCanStart(as) {
+		if as.s == nil {
+			return []string{"start"}
+		}
+		return []string{"restart", "send"}
+	}
+	if d.assistRunning(as) {
+		return []string{"send"}
+	}
+	return []string{}
+}
+
+func (d *desk) startPhoneCodexOperator(as *assistant) {
+	d.startAgent(d.codexAssistant(as.role))
+}
+
 // kmemAssistActions: what the phone may do with the assistant in its current
 // state (UI thread); the write routes refuse the others with 409 stale.
 // start, stop, restart and save are Quill Desktop's header buttons; send is
 // the input; choose answers the save-timeout question.
 func (d *desk) kmemAssistActions(a *kmemAssist) []string {
+	if isCodexAssistant(a.role.id) {
+		return d.phoneCodexOperatorActions(a)
+	}
 	s := a.s
 	running := s != nil && s.running() && !s.stopping
 	live := a.state == asLive || a.state == asStarting
@@ -64,7 +119,7 @@ func (d *desk) kmemAssistQuestion(a *kmemAssist) map[string]any {
 // kmemAssistItems serves GET /phone/kmem/assistant/items: the same query and
 // item JSON as /phone/session/{id}/items, plus the assistant's state.
 func (a *phoneAPI) kmemAssistItems(w http.ResponseWriter, r *http.Request) {
-	a.assistItems(w, r, kmemAssistPhoneID, "assistant", func() *assistant { return a.d.assist() },
+	a.assistItems(w, r, kmemAssistPhoneID, "assistant", func() *assistant { return a.d.phoneOperator(kmemRole) },
 		func() map[string]any { return a.kmemAssistSummary(true) })
 }
 
@@ -77,8 +132,9 @@ func (a *phoneAPI) assistItems(w http.ResponseWriter, r *http.Request, id, key s
 	}
 	var body map[string]any
 	a.ui(func() {
-		if s := as().s; s != nil {
-			body = a.itemsBody(s, id, iq)
+		if operator := as(); operator.s != nil {
+			a.operatorTrack(operator)
+			body = a.itemsBody(operator.s, id, iq)
 		} else {
 			body = map[string]any{"v": 1, "id": id, "epoch": 0, "rev": 0, "reset": iq.hasEpoch && iq.epoch != 0,
 				"hasMore": false, "items": []map[string]any{}, "queue": []map[string]any{}}
@@ -209,7 +265,7 @@ func (a *phoneAPI) assistSessionWrite(as *assistant, what, op string, in writeBo
 // kmemAssistDo runs one assistant write (UI thread).
 func (a *phoneAPI) kmemAssistDo(op string, in writeBody) (map[string]any, *apiErr) {
 	d := a.d
-	as := d.assist()
+	as := d.phoneOperator(kmemRole)
 	can := d.kmemAssistActions(as)
 	offered := func(action string) *apiErr {
 		if !slices.Contains(can, action) {
@@ -225,6 +281,10 @@ func (a *phoneAPI) kmemAssistDo(op string, in writeBody) (map[string]any, *apiEr
 		if fail := offered("start"); fail != nil {
 			return nil, fail
 		}
+		if isCodexAssistant(as.role.id) {
+			d.startPhoneCodexOperator(as)
+			return nil, nil
+		}
 		as.userStopped = false
 		d.kmemAssistProbe(as) // as the window's "Start assistant"
 		return nil, nil
@@ -237,6 +297,10 @@ func (a *phoneAPI) kmemAssistDo(op string, in writeBody) (map[string]any, *apiEr
 	case "restart":
 		if fail := offered("restart"); fail != nil {
 			return nil, fail
+		}
+		if isCodexAssistant(as.role.id) {
+			d.startPhoneCodexOperator(as)
+			return nil, nil
 		}
 		if d.kmemAssistModelChanged(as) {
 			d.kmemAssistReboot(as)
