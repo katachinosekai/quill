@@ -103,7 +103,7 @@ func Run(opts Options, in io.Reader, out, stderr io.Writer) error {
 		args = append(args, "--enable", "multi_agent_v2")
 	}
 	cmd := exec.CommandContext(ctx, opts.Binary, args...)
-	cmd.Dir, cmd.Stderr, cmd.Env = opts.Cwd, stderr, serverEnv()
+	cmd.Dir, cmd.Stderr, cmd.Env = opts.Cwd, stderr, kmemTopicEnvironment(serverEnv(), opts.KmemTopic)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -284,6 +284,8 @@ func (b *bridge) input(ev *protocol.Event) error {
 		switch ev.Request.Subtype {
 		case "initialize":
 			return b.initialize(ev.RequestID)
+		case "kmem_hooks":
+			return b.readKmemHooks(ev.RequestID)
 		case "interrupt":
 			if !b.ready && len(b.queued) > 0 {
 				b.queued = nil

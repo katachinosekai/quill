@@ -2196,10 +2196,16 @@ func (d *desk) sendTurn(s *deskSession, text string) bool {
 }
 
 func (d *desk) deliverTurn(s *deskSession, text string, steer bool) bool {
+	return d.deliverTurnWithOrigin(s, text, steer, false)
+}
+
+func (d *desk) deliverTurnWithOrigin(s *deskSession, text string, steer, peer bool) bool {
 	typed := text
-	cardGo := s.cardGo // the plan card's own Approve (answerPlanMsg)
-	s.cardGo = false
-	defer d.autoStartFailed(s) // auto-approve this message turned on, if it never went out
+	cardGo := !peer && s.cardGo // the plan card's own Approve (answerPlanMsg)
+	if !peer {
+		s.cardGo = false
+		defer d.autoStartFailed(s) // auto-approve this message turned on, if it never went out
+	}
 	if s.remote != nil {
 		d.remoteWrite(s, "send", map[string]string{"text": text})
 		return true
@@ -2224,7 +2230,7 @@ func (d *desk) deliverTurn(s *deskSession, text string, steer bool) bool {
 		text = forkIntro(s.forkOf, d.org.Kmem[s.id]) + text
 		s.forkOf = ""
 	}
-	if !s.codex && d.planFirst {
+	if !peer && !s.codex && d.planFirst {
 		// "Approved." is the card's own text: it keeps the plan going when the
 		// card sent it, or when a plan or approval question waits for it; typed
 		// with nothing pending it is an ordinary message (user 2026-11-23).
@@ -2265,8 +2271,12 @@ func (d *desk) deliverTurn(s *deskSession, text string, steer bool) bool {
 		s.resumeAs, s.resumeNext = s.resumeNext, ""
 	}
 	s.lastSent = text + note
+	if peer {
+		notUserMessage(s, text)
+	} else {
+		s.autoPeer = false
+	}
 	s.inTurn = true
-	s.autoPeer = false  // the user's message: auto-approve covers the turn again
 	defer d.keepGate(s) // the message may have ended or started the plan's approval
 	send := s.proc.Send
 	if steer {
@@ -2278,8 +2288,11 @@ func (d *desk) deliverTurn(s *deskSession, text string, steer bool) bool {
 	} else {
 		err = send(text + note)
 	}
-	if err != nil && s.codex && cardGo {
+	if err != nil && (peer || s.codex && cardGo) {
 		s.inTurn = false
+		if peer {
+			turnEnded(s)
+		}
 		d.chatFor(s, []*chat.Item{s.conv.AddError("Send failed: " + err.Error())})
 		return false
 	}

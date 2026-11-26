@@ -30,6 +30,7 @@ func runHandoffTestServer() {
 			Params struct {
 				Input    []struct{ Text string }
 				ThreadID string
+				Cwds     []string
 			}
 		}
 		if json.Unmarshal(in.Bytes(), &m) != nil {
@@ -49,6 +50,17 @@ func runHandoffTestServer() {
 				thread = session.NewUUID()
 			}
 			reply(map[string]any{"thread": map[string]string{"id": thread}})
+		case "hooks/list":
+			data := []map[string]any{}
+			if os.Getenv("QUILL_TEST_KMEM_HOOKS") == "1" && len(m.Params.Cwds) == 1 {
+				hooks := []map[string]any{
+					{"eventName": "preToolUse", "command": "kmem-guard", "matcher": "Bash", "trustStatus": "trusted", "enabled": true},
+					{"eventName": "sessionStart", "command": "pzlock ensure", "trustStatus": "trusted", "enabled": true},
+					{"eventName": "sessionStart", "command": "kmem brief", "trustStatus": "trusted", "enabled": true},
+				}
+				data = append(data, map[string]any{"cwd": m.Params.Cwds[0], "hooks": hooks})
+			}
+			reply(map[string]any{"data": data})
 		case "turn/interrupt":
 			reply(map[string]any{})
 			time.Sleep(120 * time.Millisecond)

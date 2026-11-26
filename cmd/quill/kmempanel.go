@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/katachinosekai/quill/internal/transcript"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +16,9 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/katachinosekai/quill/internal/session"
+	"github.com/katachinosekai/quill/internal/transcript"
 )
 
 // The kmem panel (user 2026-11-21; the left side of the kmem window since
@@ -129,6 +131,10 @@ type kmemPanel struct {
 	memIDs            *widget.Select
 	memTopic          string
 	data              *kmemPanelData // the last reload, nil while loading
+	hookReading       bool
+	hookTarget        *session.Process
+	hookStatus        string
+	hookProbeStatus   string
 }
 
 // kmemPanelData is what one reload read from kmem.
@@ -221,6 +227,7 @@ func setBox(c *fyne.Container, objs ...fyne.CanvasObject) {
 func (p *kmemPanel) reload() {
 	d := p.d
 	d.reconcileKmemNames(true, nil) // tab links follow handoffs renamed outside Quill Desktop
+	p.refreshHookReadiness()
 	go func() {
 		data, _ := d.readKmemPanelData(true)
 		needs := data.needs
@@ -330,6 +337,12 @@ func (p *kmemPanel) render() {
 		}
 	}
 	ov := append(p.waitingRows(needs), boldLabel("kmem brief"), wrapLabel(strings.TrimSpace(firstNonEmpty(data.brief, "kmem didn't answer."))))
+	if p.hookStatus != "" {
+		ov = append(ov, widget.NewSeparator(), wrapLabel(p.hookStatus))
+		if p.hookProbeStatus != "" {
+			ov = append(ov, wrapLabel(p.hookProbeStatus))
+		}
+	}
 	if len(big) > 0 {
 		ov = append(ov, widget.NewSeparator(), boldLabel("Sections over 8 KB (maintenance asks to split them)"))
 		list := wrapLabel(strings.Join(big, ", "))
