@@ -120,8 +120,8 @@ func TestKmemWindow(t *testing.T) {
 		if sz := w.win.Canvas().Size(); sz.Width < 1000 || sz.Width > 1200 {
 			t.Fatalf("the saved width is used: %v", sz)
 		}
-		if w.split.Offset != kmemWinDefaultSplit {
-			t.Fatalf("default split: %v", w.split.Offset)
+		if w.panel.tabs.SelectedIndex() != kmemTabAssistant {
+			t.Fatal("a new window opens on Assistant")
 		}
 		if !strings.Contains(labelsIn([]fyne.CanvasObject{w.right}), "assistant is off") {
 			t.Fatal("without an assistant the right side says why in one line")
@@ -150,6 +150,10 @@ func TestKmemWindow(t *testing.T) {
 				t.Fatalf("%q fills the chat input; hidden while the chat is off", b)
 			}
 		}
+		if !h.d.kmemBubble.box.Visible() {
+			t.Fatal("opening Assistant keeps the Overview items unread")
+		}
+		w.panel.tabs.SelectIndex(kmemTabOverview)
 		if h.d.kmemBubble.box.Visible() {
 			t.Fatalf("the open window lists the issue and the rollout, so they count as seen: %q", h.d.kmemBubble.text.Text)
 		}
@@ -163,7 +167,12 @@ func TestKmemWindow(t *testing.T) {
 			t.Fatalf("with the chat on the panel offers to ask: %s", labelsIn(w.panel.over.Objects))
 		}
 		test.Tap(ask)
+		if w.panel.tabs.SelectedIndex() != kmemTabAssistant {
+			t.Fatal("a utility action opens Assistant with its draft")
+		}
+		w.panel.tabs.SelectIndex(kmemTabOverview)
 		test.Tap(explain)
+		w.panel.tabs.SelectIndex(kmemTabOverview)
 		test.Tap(split)
 		if len(filled) != 3 || !strings.Contains(filled[0], "t0000c1") || !strings.Contains(filled[1], "chain gap") || !strings.Contains(filled[2], "demo/big") {
 			t.Fatalf("prefills: %q", filled)
@@ -203,7 +212,6 @@ func TestKmemWindow(t *testing.T) {
 		if w.panel.tabs.SelectedIndex() != kmemTabTasks {
 			t.Fatal("showKmemPanelTab selects the tab in the open window")
 		}
-		w.split.SetOffset(0.6)
 		w.win.Resize(fyne.NewSize(1000, 700))
 		w.win.Canvas().OnTypedKey()(&fyne.KeyEvent{Name: fyne.KeyEscape})
 		if h.d.kmemWin != nil || h.d.kmemPanelNow != nil || closed != 1 || closedWith != w {
@@ -214,12 +222,12 @@ func TestKmemWindow(t *testing.T) {
 			t.Fatal("the close flow runs once")
 		}
 		prefs := h.d.app.Preferences()
-		if prefs.Float("kmemWinSplit") != 0.6 || prefs.Float("win.kmem.w") != 1000 || prefs.Float("win.kmem.h") != 700 {
-			t.Fatalf("size and split saved: %v %v %v", prefs.Float("kmemWinSplit"), prefs.Float("win.kmem.w"), prefs.Float("win.kmem.h"))
+		if prefs.Float("win.kmem.w") != 1000 || prefs.Float("win.kmem.h") != 700 {
+			t.Fatalf("size saved: %v %v", prefs.Float("win.kmem.w"), prefs.Float("win.kmem.h"))
 		}
 		h.d.popOutKmem()
-		if h.d.kmemWin == nil || h.d.kmemWin == w || h.d.kmemWin.split.Offset != 0.6 || opened != 2 {
-			t.Fatal("reopening builds a new window with the saved split")
+		if h.d.kmemWin == nil || h.d.kmemWin == w || h.d.kmemWin.panel.tabs.SelectedIndex() != kmemTabAssistant || opened != 2 {
+			t.Fatal("reopening builds a new window on Assistant")
 		}
 		if sz := h.d.kmemWin.win.Canvas().Size(); sz.Width != 1000 || sz.Height != 700 {
 			t.Fatalf("reopening restores the saved size: %v", sz)

@@ -62,6 +62,7 @@ type bridge struct {
 	activeItems                 map[string]bool
 	waitingForAgents            bool
 	workers                     map[string]bool
+	workerActivityIDs           map[string]struct{}
 	threadID                    string
 	turnID                      string
 	announcedTurn               string
@@ -580,6 +581,11 @@ func (b *bridge) notification(msg rpcMessage) error {
 			return b.emitWorkerActivity(true)
 		}
 		return nil
+	}
+	// Worker lifecycle belongs to the owning thread and can arrive while its
+	// parent is idle or on a subsequent turn.
+	if p.Item.Type == "subAgentActivity" && (msg.Method == "item/started" || msg.Method == "item/completed") {
+		return b.subAgentActivity(p.Item)
 	}
 	if strings.HasPrefix(msg.Method, "item/") && (b.turnID == "" || p.TurnID != "" && p.TurnID != b.turnID) {
 		return nil

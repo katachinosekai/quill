@@ -8,8 +8,8 @@ it with your OK:
 - your Claude sign-in
 - Codex CLI and its existing sign-in, for Codex sessions
 - a device password, so Quill for Android and other PCs can connect
-- kmem, if you have it (shared memory: handoffs, tasks, rules; optional, see
-  Setup; it needs Python 3, which Setup can install with winget)
+- kmem, if you have it (shared memory: handoffs, tasks, rules). Setup can
+  install Python 3 with winget when the selected kmem is a Python script.
 - local open-weight models through Ollama or another server with an
   Anthropic-compatible API (optional)
 

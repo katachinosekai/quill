@@ -223,12 +223,13 @@ func TestKmemSwitchDetect(t *testing.T) {
 		{"ready", fakeKmemOpts{}, nil, ""},
 		{"old kmem", fakeKmemOpts{old: true}, nil, "needs kmem 1.14.0"},
 		{"no core rules", fakeKmemOpts{noRules: true}, nil, "core rules"},
-		{"no python", fakeKmemOpts{}, func() { switchPython = func() string { return "" } }, "python3"},
+		{"shell fixture without Python", fakeKmemOpts{}, func() { switchPython = func() string { return "" } }, ""},
 		{"no kmem-guard", fakeKmemOpts{}, func() { os.Remove(filepath.Join(homeDir(), ".local", "bin", "kmem-guard")) }, "kmem-guard is missing"},
 	}
 	for _, c := range cases {
 		switchPython = func() string { return "/placeholder/python3" }
 		bin, _ := fakeKmemBinary(t, c.o)
+		t.Setenv("PATH", filepath.Dir(bin))
 		useFakeKmem(h.d, bin)
 		if c.setup != nil {
 			c.setup()

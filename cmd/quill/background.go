@@ -158,9 +158,29 @@ func (d *desk) listenInstance(path string) {
 					_, _ = c.Write([]byte("ok\n" + d.settingsSocket(req, c) + "\n"))
 					return
 				}
+				if req, ok := strings.CutPrefix(cmdLine, "operator-message "); ok {
+					var r operatorMessageRequest
+					rep := operatorMessageReceipt{Error: "invalid operator message request"}
+					if len(req) <= 6*(operatorMessageBytes+256)+256 && json.Unmarshal([]byte(req), &r) == nil {
+						rep = d.operatorMessageReply(r, peerChain(c))
+					}
+					_, _ = c.Write([]byte("ok\n" + replyJSON(rep) + "\n"))
+					return
+				}
+				if req, ok := strings.CutPrefix(cmdLine, "session-restart "); ok {
+					var r sessionRestartRequest
+					reply := sessionRestartReply{Error: "invalid session restart request"}
+					if len(req) <= 2048 && json.Unmarshal([]byte(req), &r) == nil {
+						reply = d.restartSessionReply(r)
+					}
+					_, _ = c.Write([]byte("ok\n" + replyJSON(reply) + "\n"))
+					return
+				}
 				if text, ok := strings.CutPrefix(cmdLine, "kmem-message "); ok {
-					d.do(func() { fmt.Fprintln(os.Stderr, "Quill Desktop: kmem message:", d.kmemAssistDeliver(text)) })
-					_, _ = c.Write([]byte("ok\n"))
+					rep := d.operatorMessageReply(operatorMessageRequest{To: kmemAssistName, Text: text}, peerChain(c))
+					if rep.Error == "" {
+						_, _ = c.Write([]byte("ok\n" + replyJSON(rep) + "\n"))
+					}
 					return
 				}
 				for _, verb := range []string{"hide-topic ", "show-topic "} {
@@ -238,6 +258,20 @@ func (d *desk) settingsSocket(line string, c net.Conn) string {
 		return replyJSON(rep)
 	case <-time.After(1500 * time.Millisecond):
 		return replyJSON(settingsReply{Error: "Quill Desktop is busy; try again"})
+	}
+}
+
+func (d *desk) operatorMessageReply(r operatorMessageRequest, chain []int) operatorMessageReceipt {
+	out := make(chan operatorMessageReceipt, 1)
+	d.do(func() {
+		r.from = d.peerSender(chain)
+		out <- d.routeOperatorMessage(r)
+	})
+	select {
+	case rep := <-out:
+		return rep
+	case <-time.After(1500 * time.Millisecond):
+		return operatorMessageReceipt{Error: "receipt timed out; delivery may already be pending"}
 	}
 }
 

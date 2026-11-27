@@ -796,6 +796,13 @@ func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
+		if msg, ok := readPeerEnvelope(it.Text); ok {
+			label := widget.NewLabel("Peer message from " + msg.From + " · submitted\n" + msg.Text)
+			label.Selectable = true
+			label.Wrapping = fyne.TextWrapWord
+			label.Alignment = v.align()
+			return msgText(label)
+		}
 		if strings.Contains(it.Text, "```") {
 			return bgPad(colBubble, 14, 4, 10, msgText(v.markdown(it.Text)))
 		}

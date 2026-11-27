@@ -69,11 +69,19 @@ func (d *desk) mainEntry() (*sendEntry, string) {
 // back to the tab, keeping each one's draft. Called when the box opens,
 // closes, docks or undocks.
 func (d *desk) syncMainTarget() {
+	d.syncAgentStripTarget()
+	oldRole := d.main.role
 	want := ""
 	if d.assistOverlayOpen() {
 		want = d.abox.role
-		if w := d.kmemWin; want == boxKmem && w != nil && w.codexShown {
-			want = roleCodexKmem
+		if want == boxKmem {
+			codex := d.app.Preferences().Bool("kmemAgentCodex")
+			if w := d.kmemWin; w != nil {
+				codex = w.codexShown
+			}
+			if codex {
+				want = roleCodexKmem
+			}
 		}
 	}
 	in, key := d.mainEntry()
@@ -86,7 +94,13 @@ func (d *desk) syncMainTarget() {
 		if s := d.targetSession(old.role); s != nil && s.qedit != nil && s.qedit.in == old.in {
 			d.finishQueueEdit(s, s.qedit.text)
 		}
-		d.strip.keepBox(assistDraftKey(old.role), old.in)
+		draftKey := assistDraftKey(old.role)
+		d.strip.keepBox(draftKey, old.in)
+		if operatorButtonRole(old.role) == boxKmem && old.role != want {
+			if a := d.assistByRole(old.role); a != nil && a.input != nil {
+				d.strip.fillBox(draftKey, a.input)
+			}
+		}
 		d.strip.fillBox(tabDraftKey(old.key), old.in)
 		s := d.entrySession(old.in)
 		setHint(old.in, s.messageHint(), d.tabSuggestion(s), false)
@@ -103,7 +117,13 @@ func (d *desk) syncMainTarget() {
 			d.finishQueueEdit(s, s.qedit.text)
 		}
 		d.strip.keepBox(tabDraftKey(key), in)
-		d.strip.fillBox(assistDraftKey(want), in)
+		draftKey := assistDraftKey(want)
+		if operatorButtonRole(want) == boxKmem && oldRole != want {
+			if a := d.assistByRole(want); a != nil && a.input != nil {
+				d.strip.keepBox(draftKey, a.input)
+			}
+		}
+		d.strip.fillBox(draftKey, in)
 		d.main = mainTarget{role: want, in: in, key: key}
 		setHint(in, targetLabel(want), d.targetSuggestion(want), true)
 		if d.cmds != nil {

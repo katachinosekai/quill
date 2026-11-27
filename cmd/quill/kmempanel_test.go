@@ -108,8 +108,8 @@ func TestKmemPanel(t *testing.T) {
 				t.Fatalf("topics tab misses %q: %s", want, tt)
 			}
 		}
-		if buttonIn(p.hand.Objects, "Resume") != nil || buttonContaining(p.hand.Objects, "Delete") != nil || p.tabs.Items[1].Text != "Topics" {
-			t.Fatal("the Topics tab has no Resume or Delete")
+		if buttonIn(p.hand.Objects, "Resume") != nil || buttonContaining(p.hand.Objects, "Delete") != nil || p.tabs.Items[kmemTabHandoffs].Text != "Handoffs" {
+			t.Fatal("the Handoffs tab has no Resume or Delete")
 		}
 		review := buttonIn(p.over.Objects, "Review bin")
 		if review == nil {
@@ -171,7 +171,7 @@ func TestKmemPanel(t *testing.T) {
 		dir, _ := filepath.Abs(filepath.Join("..", "..", ".shots"))
 		os.MkdirAll(dir, 0o755)
 		h.ui(func() {
-			p.tabs.SelectIndex(1)
+			p.tabs.SelectIndex(kmemTabHandoffs)
 			shot(t, kw, dir, "kmem-topics-tab.png")
 		})
 	}

@@ -23,8 +23,8 @@ import (
 //
 //	Fix join stall   ELTF build   +3
 //
-// Finished ones stay greyed for a while; the row hides when nothing ran
-// lately. A chip opens a menu with the agent's details, its log and "Stop
+// Finished ones stay greyed for a while. The strip shows a status when idle.
+// A chip opens a menu with the agent's details, its log and "Stop
 // this subagent" (TaskStop only, kmem task tf0ac88). Background shell jobs
 // (long test runs, ...) are listed after the agents in the same style; a
 // click opens the tasks dialog. Right-click on a chip: "Show background
@@ -42,14 +42,18 @@ const (
 	agentKeepAlone = time.Minute      // … and this long once none runs
 )
 
+const agentStripEmpty = "No subagents or background jobs"
+
 type agentStrip struct {
-	d     *desk
-	root  *fyne.Container // hidden while nothing is listed
-	row   *fyne.Container
-	col   *fyne.Container // the row inside the chat-width column
-	shown string          // the texts on screen, to skip unchanged refreshes
-	now   func() time.Time
-	tips  *agentTipHost // the one tooltip all chips share
+	d       *desk
+	root    *fyne.Container
+	row     *fyne.Container
+	empty   fyne.CanvasObject
+	session *deskSession
+	col     *fyne.Container // the row inside the chat-width column
+	shown   string          // the texts on screen, to skip unchanged refreshes
+	now     func() time.Time
+	tips    *agentTipHost // the one tooltip all chips share
 }
 
 func newAgentStrip(d *desk) *agentStrip {
@@ -57,12 +61,12 @@ func newAgentStrip(d *desk) *agentStrip {
 		d.tipLayer = container.NewWithoutLayout()
 	}
 	a := &agentStrip{d: d, now: time.Now, tips: newAgentTipHost(d.tipLayer)}
-	a.row = container.NewHBox()
+	a.empty = container.New(layout.NewCustomPaddedLayout(2, 2, 8, 8), mutedText(agentStripEmpty, fontMeta))
+	a.row = container.NewHBox(a.empty)
 	// The chat column's width and shift (chatview.go), so the strip sits over
 	// the chat: chips centred with centring on, else on its left edge.
 	a.col = windowCentered(d.chatWidth, d.sidebarWidth, container.New(&stripLayout{center: func() bool { return d.center }}, a.row))
 	a.root = container.New(layout.NewCustomPaddedLayout(0, 2, 8, 8), a.col)
-	a.root.Hide()
 	a.schedule()
 	return a
 }
@@ -259,6 +263,19 @@ func (a *agentStrip) shellItems(s *deskSession, t chat.BgTask) []*fyne.MenuItem 
 	return append(out, a.d.taskItems(s)...)
 }
 
+func (a *agentStrip) targetSession() *deskSession {
+	if role := a.d.assistBoxRole(); role != "" {
+		return a.d.assistantBoxSession(role)
+	}
+	return a.d.current
+}
+
+func (d *desk) syncAgentStripTarget() {
+	if a := d.agentStrip; a != nil && a.session != a.targetSession() {
+		a.sync()
+	}
+}
+
 func (a *agentStrip) sync() {
 	// A hovered chip's tooltip follows time and tokens in place (no resize).
 	for _, o := range a.row.Objects {
@@ -266,13 +283,7 @@ func (a *agentStrip) sync() {
 			c.updateTip()
 		}
 	}
-	s := a.d.current
-	if role := a.d.assistBoxRole(); role != "" {
-		s = a.d.assistantBoxSession(role)
-	}
-	if (s == nil || s.conv == nil || (s.conv.AgentsRev() == 0 && s.conv.Background() == 0)) && !a.root.Visible() {
-		return
-	}
+	s := a.targetSession()
 	list := a.entries(s)
 	texts := make([]string, 0, len(list)+1)
 	for i, e := range list {
@@ -282,15 +293,11 @@ func (a *agentStrip) sync() {
 		}
 		texts = append(texts, e.text)
 	}
-	sig := fmt.Sprintf("%p|", s) + strings.Join(texts, "\x00")
-	if len(list) == 0 {
-		sig = ""
-	}
-	if sig == a.shown {
+	sig := strings.Join(texts, "\x00")
+	if s == a.session && sig == a.shown {
 		return
 	}
-	a.shown = sig
-	wasVisible := a.root.Visible()
+	a.session, a.shown = s, sig
 	objs := make([]fyne.CanvasObject, 0, len(texts))
 	menu := func() []*fyne.MenuItem { return a.d.taskItems(s) }
 	for i, t := range texts {
@@ -306,20 +313,12 @@ func (a *agentStrip) sync() {
 		c.onMenu = menu
 		objs = append(objs, c)
 	}
+	if len(objs) == 0 {
+		objs = append(objs, a.empty)
+	}
 	a.tips.hideNow() // a rebuilt chip must not leave its tooltip up
 	a.row.Objects = objs
-	a.row.Refresh()
-	if len(objs) > 0 {
-		a.root.Show()
-	} else {
-		a.root.Hide()
-	}
-	if a.root.Visible() != wasVisible && a.d.headerBox != nil {
-		a.d.headerBox.Refresh()
-		if a.d.mainPane != nil {
-			relayout(a.d.mainPane)
-		}
-	}
+	a.root.Refresh()
 }
 
 // chip: a chip sharing the strip's tooltip.

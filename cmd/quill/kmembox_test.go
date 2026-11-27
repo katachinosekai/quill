@@ -37,17 +37,15 @@ func TestKmemBoxContentHasRailAndChat(t *testing.T) {
 	h.ui(func() {
 		obj := h.d.kmemBoxContent()
 		w := h.d.kmemWin
-		if w == nil || w.win != nil || obj != fyne.CanvasObject(w.split) {
-			t.Fatal("the content is the split, built without a window")
+		if w == nil || w.win != nil || obj != fyne.CanvasObject(w.panel.tabs) {
+			t.Fatal("the content is the sidebar and selected page, built without a window")
 		}
 		names := ""
 		for _, it := range w.panel.tabs.Items {
 			names += it.Text + ","
 		}
-		for _, want := range []string{"Overview", "Topics", "Tasks", "Memory"} {
-			if !strings.Contains(names, want) {
-				t.Fatalf("tab %q missing: %s", want, names)
-			}
+		if names != "Assistant,Overview,Handoffs,Tasks,Memory," || w.panel.tabs.SelectedIndex() != kmemTabAssistant {
+			t.Fatalf("unexpected sidebar pages or default: %s, %d", names, w.panel.tabs.SelectedIndex())
 		}
 		if w.agent == nil || w.agent.Selected != claudeAgent || len(w.chatSlot.Objects) != 1 ||
 			w.chatSlot.Objects[0] != w.right || len(w.right.Objects) != 1 {
@@ -96,7 +94,7 @@ func TestShowKmemFromButtonAndCommand(t *testing.T) {
 		d := h.d
 		test.Tap(d.kmemBtn)
 		w := d.kmemWin
-		if d.assistBoxRole() != boxKmem || w == nil || w.win != nil || d.box().body.Objects[0] != fyne.CanvasObject(w.split) {
+		if d.assistBoxRole() != boxKmem || w == nil || w.win != nil || d.box().body.Objects[0] != fyne.CanvasObject(w.panel.tabs) {
 			t.Fatal("the kmem button calls showKmem, which opens the kmem box with kmemBoxContent")
 		}
 		if !d.box().popBtn.Visible() || d.box().title.Text != "kmem assistant" {
@@ -118,9 +116,73 @@ func TestShowKmemFromButtonAndCommand(t *testing.T) {
 		}
 		pop.close()
 		d.showKmem()
-		if d.assistBoxRole() != boxKmem || d.kmemWin == nil || d.kmemWin == pop || d.box().body.Objects[0] != fyne.CanvasObject(d.kmemWin.split) {
+		if d.assistBoxRole() != boxKmem || d.kmemWin == nil || d.kmemWin == pop || d.box().body.Objects[0] != fyne.CanvasObject(d.kmemWin.panel.tabs) {
 			t.Fatal("after the window closes, the box shows a fresh content")
 		}
 		d.closeAssistBox()
 	})
+}
+
+func TestKmemSidebarPreservesDraftAndApproval(t *testing.T) {
+	for _, codex := range []bool{false, true} {
+		name := claudeAgent
+		if codex {
+			name = codexAgent
+		}
+		t.Run(name, func(t *testing.T) {
+			h := kmemBoxHarness(t)
+			h.ui(func() {
+				d := h.d
+				d.win.Resize(fyne.NewSize(1800, 1000))
+				d.app.Preferences().SetBool("kmemAgentCodex", codex)
+				d.showKmem()
+				w := d.kmemWin
+				s := d.addSessionWithBackend(h.proj, "default", "default", false, codex)
+				if codex {
+					d.markHiddenAs(s, roleCodexKmem)
+					a := d.codexAssistant(codexKmemRole)
+					a.s = s
+					a.view.show(s)
+				} else {
+					d.markHiddenAs(s, roleKmem)
+					a := d.assist()
+					a.s, a.w, a.state = s, w, asLive
+					kmemWinAttach(d, a)
+				}
+				w.composer().SetText("draft for kmem")
+				s.conv.AddPlan()
+				w.panel.tabs.SelectIndex(kmemTabTasks)
+				if d.hostShown(s) || len(s.conv.PendingPermissions()) != 1 {
+					t.Fatal("the utility page should hide the chat and preserve the approval")
+				}
+				w.panel.tabs.SelectIndex(kmemTabAssistant)
+				if !d.hostShown(s) || w.composer().Text != "draft for kmem" || len(s.conv.PendingPermissions()) != 1 {
+					t.Fatal("switching pages lost the chat, draft, or approval")
+				}
+				w.panel.tabs.SelectIndex(kmemTabTasks)
+				test.Tap(d.box().popBtn)
+				if w.win == nil || w.panel.tabs.SelectedIndex() != kmemTabTasks || w.composer().Text != "draft for kmem" {
+					t.Fatal("pop out lost the page or draft")
+				}
+				d.hostFor(hiddenRole(s)).open()
+				if w.panel.tabs.SelectedIndex() != kmemTabAssistant || !d.hostShown(s) {
+					t.Fatal("approval notification did not reveal the assistant in the pop-out")
+				}
+				w.panel.tabs.SelectIndex(kmemTabTasks)
+				w.panel.prefill()("Review the task")
+				if w.panel.tabs.SelectedIndex() != kmemTabAssistant || w.composer().Text != "Review the task" {
+					t.Fatal("a utility action did not fill the visible assistant composer")
+				}
+				w.panel.tabs.SelectIndex(kmemTabTasks)
+				w.composer().TypedKey(&fyne.KeyEvent{Name: fyne.KeyEscape})
+				if !w.closed || len(s.conv.PendingPermissions()) != 1 {
+					t.Fatal("closing a utility page interrupted the pending approval")
+				}
+				d.showKmem()
+				if w := d.kmemWin; !w.assistantSelected() || w.composer().Text != "Review the task" {
+					t.Fatal("reopening did not restore the draft on Assistant")
+				}
+			})
+		})
+	}
 }

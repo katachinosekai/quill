@@ -220,6 +220,14 @@ func (d *desk) sessionMenuItems(id string) []*fyne.MenuItem {
 	)
 	if s := d.sessions[id]; s == nil || !s.running() {
 		items = append(items, fyne.NewMenuItem("Start", func() { d.resumeSession(id) }))
+	} else if !isHiddenSession(s) {
+		if s.restartPending {
+			items = append(items, fyne.NewMenuItem("Cancel session restart", func() {
+				d.requestSessionRestart(s, sessionRestartRequest{Cancel: true})
+			}))
+		} else {
+			items = append(items, fyne.NewMenuItem("Restart session…", func() { d.askSessionRestart(s) }))
+		}
 	}
 	if d.isCodexSession(id) {
 		return append(items,

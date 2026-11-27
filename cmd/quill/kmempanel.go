@@ -121,7 +121,7 @@ func factIDs(out string) []string {
 
 type kmemPanel struct {
 	d                 *desk
-	w                 *kmemWindow // the window the panel is the left side of
+	w                 *kmemWindow
 	tabs              *container.AppTabs
 	over, hand, tasks *fyne.Container
 	topics            *widget.List
@@ -169,13 +169,24 @@ func (d *desk) newKmemPanel(w *kmemWindow) *kmemPanel {
 	loading := func() *fyne.Container { return container.NewVBox(widget.NewLabel("Loading from kmem...")) }
 	p.over, p.hand, p.tasks = loading(), loading(), loading()
 	p.tabs = container.NewAppTabs(
+		container.NewTabItem("Assistant", w.agentChat()),
 		container.NewTabItem("Overview", container.NewVScroll(p.over)),
-		container.NewTabItem("Topics", container.NewVScroll(p.hand)),
+		container.NewTabItem("Handoffs", container.NewVScroll(p.hand)),
 		container.NewTabItem("Tasks", container.NewVScroll(p.tasks)),
 		container.NewTabItem("Memory", p.memoryTab()),
 	)
+	p.tabs.SetTabLocation(container.TabLocationLeading)
 	d.kmemPanelNow = p
-	p.tabs.OnSelected = func(*container.TabItem) { p.shown() }
+	p.tabs.OnSelected = func(*container.TabItem) {
+		p.shown()
+		d.syncAssistButtons()
+		if w.assistantSelected() && (w.win != nil || d.assistBoxShowing(boxKmem)) {
+			d.syncVisibleChatFollow()
+			if input := w.composer(); input != nil {
+				p.parent().Canvas().Focus(input)
+			}
+		}
+	}
 	return p
 }
 
@@ -192,10 +203,17 @@ func (p *kmemPanel) prefill() func(string) {
 	if p.w == nil {
 		return nil
 	}
+	fill := p.w.prefill
 	if p.w.codexShown {
-		return p.w.prefillCodex
+		fill = p.w.fillComposer
 	}
-	return p.w.prefill
+	if fill == nil {
+		return nil
+	}
+	return func(text string) {
+		p.tabs.SelectIndex(kmemTabAssistant)
+		fill(text)
+	}
 }
 
 func caption(t string) *widget.Label {
@@ -314,6 +332,9 @@ func (p *kmemPanel) shown() {
 		return
 	}
 	d := p.d
+	if p.w.win == nil && !d.assistBoxShowing(boxKmem) {
+		return
+	}
 	if d.kmemUnread() == 0 {
 		return
 	}

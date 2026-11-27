@@ -28,6 +28,7 @@ type agentHandoff struct {
 	name     string
 	previous string
 	fromItem int
+	restart  bool
 }
 
 func (d *desk) selectTabAgent(s *deskSession, codex bool) {
@@ -115,7 +116,11 @@ func (d *desk) handoffAgent(s *deskSession, h *agentHandoff) {
 	}
 	s.agentHandoff = h
 	d.cancelQueueEdit(s)
-	d.notify(s, fmt.Sprintf("Switching agents through kmem handoff %q.", h.name))
+	if h.restart {
+		d.notify(s, fmt.Sprintf("Saving kmem handoff %q before restarting.", h.name))
+	} else {
+		d.notify(s, fmt.Sprintf("Switching agents through kmem handoff %q.", h.name))
+	}
 	if s.running() && (s.proc.Busy() || s.conv.Busy) {
 		return
 	}
@@ -246,13 +251,21 @@ func (d *desk) failAgentHandoff(s *deskSession, h *agentHandoff, err error) {
 		return
 	}
 	s.agentHandoff = nil
-	d.notify(s, "Agent switch cancelled: "+err.Error())
+	if h.restart {
+		d.notify(s, "Session restart cancelled: "+err.Error())
+	} else {
+		d.notify(s, "Agent switch cancelled: "+err.Error())
+	}
 	d.updateChrome()
 	d.flushQueue(s)
 	d.trySwap()
 }
 
 func (d *desk) finishAgentHandoff(old *deskSession, h *agentHandoff, saved string) {
+	if h.restart {
+		d.checkSessionRestartHandoff(old, h, saved)
+		return
+	}
 	name := h.name
 	model, mode := "default", "default"
 	if !h.toCodex {

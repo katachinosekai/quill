@@ -640,8 +640,8 @@ func (d *desk) swapBlockers() []string {
 	}
 	var taken []string
 	for _, s := range d.sessions {
-		if s.agentHandoff != nil {
-			why = append(why, "an agent switch is saving a kmem handoff")
+		if s.agentHandoff != nil || s.restartActive {
+			why = append(why, "a session is switching agents or restarting")
 			break
 		}
 	}

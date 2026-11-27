@@ -11,7 +11,7 @@ import (
 // identity, so rename also renames the kmem name and there is no separate
 // kmem action.
 
-var menuActions = []string{"rename", "resume", "end", "delete", "project"}
+var menuActions = []string{"rename", "resume", "end", "delete", "project", "restart-session", "cancel-restart"}
 
 const apiTitleMax = 200
 
@@ -61,6 +61,14 @@ func (a *phoneAPI) menuAction(s *deskSession, action string, in writeBody) (map[
 	d := a.d
 	id := s.id
 	switch action {
+	case "restart-session", "cancel-restart":
+		reply := d.requestSessionRestart(s, sessionRestartRequest{Cancel: action == "cancel-restart", FromHandoff: in.FromHandoff})
+		if reply.Error != "" {
+			return nil, stale(reply.Error)
+		}
+		out := a.sessionOut(id)
+		out["restartStatus"] = reply.Status
+		return out, nil
 	case "rename":
 		if in.Title == nil {
 			return nil, badReq("title is required (empty restores the original name)")

@@ -479,6 +479,10 @@ func (d *desk) assistBoxEscape() bool {
 	if d.win != nil && d.win.Canvas().Overlays().Top() != nil && d.escapeOverlay() {
 		return true
 	}
+	if b.role == boxKmem && !d.kmemWin.assistantSelected() {
+		d.closeAssistBox()
+		return true
+	}
 	if v := d.viewOf(b.role); v.escape != nil && v.escape() {
 		return true
 	}
@@ -1413,8 +1417,7 @@ func (v *assistBoxView) focusable() fyne.Focusable {
 	return v.input
 }
 
-// registerKmemBox: the kmem box (kmemBoxContent: panels left, the
-// assistant's chat right) as the kmem role's box content. Opening attaches
+// registerKmemBox uses the assistant and utility sidebar as the kmem box. Opening attaches
 // the assistant's chat (kmemWindowOpenHook: kmemAssistOpen), closing hides it
 // (the assistant keeps running); Pop out moves the content to its window.
 func (d *desk) registerKmemBox() {
@@ -1423,7 +1426,11 @@ func (d *desk) registerKmemBox() {
 		title:   "kmem assistant",
 		content: content,
 		inputFn: func() fyne.Focusable {
-			if w := d.kmemWin; w != nil && w.codexShown {
+			w := d.kmemWin
+			if !w.assistantSelected() {
+				return nil
+			}
+			if w.codexShown {
 				return d.codexAssistant(codexKmemRole).input
 			}
 			if a := d.assist(); a.input != nil && d.kmemAssistChatOn() {
@@ -1455,7 +1462,7 @@ func (d *desk) registerKmemBox() {
 	}
 	v.shown = func(on bool) {
 		w := d.kmemWin
-		if w == nil || w.closed || w.split != content {
+		if w == nil || w.closed || w.panel == nil || w.panel.tabs != content {
 			// The pop-out window closed meanwhile: a fresh content.
 			if !on {
 				return
@@ -1464,15 +1471,13 @@ func (d *desk) registerKmemBox() {
 			v.content = content
 			d.showBoxContent(boxKmem)
 			w = d.kmemWin
+			d.syncMainTarget()
 		}
 		if on {
+			w.panel.tabs.SelectIndex(kmemTabAssistant)
 			if kmemWindowOpenHook != nil {
 				kmemWindowOpenHook(d, w)
 			}
-			if a := d.assist(); a.input != nil && a.input.onEscape == nil {
-				a.input.onEscape = d.assistBoxEscape
-			}
-			d.markAssistSeen(d.assist(), false)
 			return
 		}
 		if kmemWindowCloseHook != nil {
@@ -1490,8 +1495,8 @@ func (d *desk) registerKmemBox() {
 		},
 		shown: func() bool {
 			w := d.kmemWin
-			return w != nil && !w.codexShown && (d.assistBoxShowing(boxKmem) || w.win != nil && !w.closed && w.s != nil)
+			return w.assistantSelected() && !w.codexShown && (d.assistBoxShowing(boxKmem) || w.win != nil && w.s != nil)
 		},
-		open: d.showKmem,
+		open: d.openKmemAssistant,
 	})
 }

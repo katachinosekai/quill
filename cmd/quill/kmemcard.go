@@ -255,7 +255,7 @@ func (d *desk) kmemCard(s *deskSession) fyne.CanvasObject {
 			}
 		})
 	}()
-	return container.NewVBox(padTop(60), container.NewCenter(sized(560, 0, card)))
+	return container.NewVBox(padTop(36), container.NewCenter(sized(560, 0, card)))
 }
 
 // recentRows: the empty-search body: Recent, and "Browse all" which

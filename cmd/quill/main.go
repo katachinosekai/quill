@@ -56,6 +56,12 @@ func main() {
 		return
 	}
 	sock := instanceSocket()
+	if flag.Arg(0) == "message" {
+		os.Exit(operatorMessageCLI(sock, flag.Args()[1:], os.Stdout, os.Stderr))
+	}
+	if flag.Arg(0) == "restart" {
+		os.Exit(sessionRestartCLI(sock, flag.Args()[1:], os.Stdout, os.Stderr))
+	}
 	if flag.Arg(0) == "settings" {
 		os.Exit(settingsCLI(sock, flag.Args()[1:], os.Getenv, os.Stdout, os.Stderr))
 	}
@@ -74,11 +80,7 @@ func main() {
 		return
 	}
 	if *kmemMessage != "" {
-		if !sendCommand(sock, "kmem-message "+strings.Join(strings.Fields(*kmemMessage), " ")) {
-			fmt.Fprintln(os.Stderr, "no running Quill answered")
-			os.Exit(1)
-		}
-		return
+		os.Exit(operatorMessageCLI(sock, []string{kmemAssistName, *kmemMessage}, os.Stdout, os.Stderr))
 	}
 	for verb, list := range map[string]string{"hide-topic": *hideTopic, "show-topic": *showTopic} {
 		if list == "" {

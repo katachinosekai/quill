@@ -459,6 +459,69 @@ func TestCodexWorkerStateOutlivesParentTurn(t *testing.T) {
 	}
 }
 
+func TestCodexSubAgentActivity(t *testing.T) {
+	var events bytes.Buffer
+	b := &bridge{threadID: "parent", turnID: "parent-turn", toQuill: json.NewEncoder(&events)}
+	conversation := chat.New()
+	notify := func(method, thread, item, kind, worker string) {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"threadId": thread, "turnId": "parent-turn",
+			"item": map[string]string{"type": "subAgentActivity", "id": item, "kind": kind,
+				"agentThreadId": worker, "agentPath": "/root/" + worker},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := b.notification(rpcMessage{Method: method, Params: body}); err != nil {
+			t.Fatal(err)
+		}
+		for events.Len() > 0 {
+			line, _ := events.ReadBytes('\n')
+			ev, err := protocol.ParseLine(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch ev.Subtype {
+			case "task_progress", "task_notification", protocol.CodexWorkersStarted, protocol.CodexWorkersEnded:
+			default:
+				t.Fatalf("unexpected lifecycle event %q", ev.Subtype)
+			}
+			conversation.Apply(ev)
+		}
+	}
+	notify("item/started", "foreign", "a", "started", "first")
+	notify("item/completed", "", "b", "started", "second")
+	notify("item/completed", "parent", "c", "started", "parent")
+	notify("item/completed", "parent", "d", "interacted", "first")
+	notify("item/completed", "parent", "e", "interrupted", "unknown")
+	if len(conversation.Agents()) != 0 {
+		t.Fatal("only a confirmed worker on the owning thread should appear")
+	}
+	notify("item/started", "parent", "a", "started", "first")
+	notify("item/completed", "parent", "b", "started", "second")
+	agents := conversation.Agents()
+	if len(agents) != 2 || agents[0].ID != "first" || agents[0].Name != "/root/first" || conversation.RunningAgents() != 2 {
+		t.Fatalf("expected both named workers: %+v", agents)
+	}
+	b.turnID = "" // Workers can finish after the parent turn.
+	notify("item/completed", "foreign", "x", "interrupted", "first")
+	notify("item/completed", "parent", "f", "completed", "first")
+	notify("item/completed", "parent", "a", "started", "first") // Late second announcement of a.
+	notify("item/completed", "parent", "g", "interacted", "first")
+	agents = conversation.Agents()
+	if agents[0].Status != "completed" || !agents[1].Running() {
+		t.Fatalf("completion or replay changed the wrong workers: %+v", agents)
+	}
+	notify("item/started", "parent", "h", "started", "first")
+	notify("item/completed", "parent", "f", "completed", "first") // Old completion after a fresh start.
+	notify("item/completed", "parent", "i", "interrupted", "second")
+	agents = conversation.Agents()
+	if len(agents) != 2 || !agents[0].Running() || agents[1].Status != "stopped" {
+		t.Fatalf("expected one resumed worker and one stopped worker: %+v", agents)
+	}
+}
+
 func TestCodexIndividualWorkersReachConversation(t *testing.T) {
 	var events bytes.Buffer
 	b := &bridge{threadID: "parent", turnID: "parent-turn", toQuill: json.NewEncoder(&events)}

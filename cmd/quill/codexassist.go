@@ -45,12 +45,13 @@ func (d *desk) codexAssistant(role *assistRole) *assistant {
 		d.syncReasoningControl(a.reasoning, s)
 	}
 	if role == codexKmemRole {
+		a.input.onEscape = d.kmemComposerEscape
 		d.setHiddenHost(roleCodexKmem, &hiddenHost{
 			session: func() *deskSession { return a.s },
 			view:    func() *chatView { return a.view },
 			shown: func() bool {
 				w := d.kmemWin
-				return w != nil && w.codexShown && !w.closed && (w.win != nil || d.assistBoxShowing(boxKmem))
+				return w.assistantSelected() && w.codexShown && (w.win != nil || d.assistBoxShowing(boxKmem))
 			},
 			open: d.openKmemCodex,
 		})
@@ -139,7 +140,7 @@ func (d *desk) openQuillCodex() {
 }
 
 func (d *desk) openKmemCodex() {
-	d.showKmem()
+	d.openKmemAssistant()
 	if w := d.kmemWin; w != nil && w.agent != nil {
 		w.showAgent(true)
 	}
@@ -194,6 +195,9 @@ func (w *kmemWindow) showAgent(codex bool) {
 	d.syncMainTarget()
 	w.panel.render()
 	d.refreshBoxHeader()
+	if !w.assistantSelected() {
+		return
+	}
 	if w.win == nil && d.assistBoxShowing(boxKmem) {
 		d.focusBox()
 	} else if w.win != nil && codex {
@@ -201,14 +205,17 @@ func (w *kmemWindow) showAgent(codex bool) {
 	}
 }
 
-func (w *kmemWindow) prefillCodex(text string) {
-	d := w.d
-	input, win := d.codexAssistant(codexKmemRole).input, d.win
-	if w.win != nil {
-		win = w.win
-	} else if d.main.role == roleCodexKmem {
-		input = d.main.in
+func (w *kmemWindow) composer() *sendEntry {
+	if w.win == nil && operatorButtonRole(w.d.main.role) == boxKmem {
+		return w.d.main.in
 	}
-	input.SetText(text)
-	win.Canvas().Focus(input)
+	return w.selectedAgent().input
+}
+
+func (w *kmemWindow) fillComposer(text string) {
+	if input := w.composer(); input != nil {
+		input.SetText(text)
+		input.SetCursorTextOffset(len([]rune(text)))
+		w.panel.parent().Canvas().Focus(input)
+	}
 }

@@ -47,7 +47,7 @@ func (s *deskSession) shouldQueue() bool {
 }
 
 func (s *deskSession) queueBlocked() bool {
-	return s.remote == nil && (s.agentHandoff != nil || s.pendingRevision != nil || s.pickPending || s.compacting || s.codexUpgrading)
+	return s.remote == nil && (s.agentHandoff != nil || s.restartActive || s.pendingRevision != nil || s.pickPending || s.compacting || s.codexUpgrading)
 }
 
 // sendOrQueue uses the same turn delivery rules as the main message box.
@@ -61,6 +61,7 @@ func (d *desk) sendOrQueue(s *deskSession, text string) {
 }
 
 func (d *desk) flushQueue(s *deskSession) {
+	defer d.flushPeerMessage(s)
 	if len(s.queue) == 0 || s.qedit != nil || !s.running() || s.stopping || s.loading || s.takeover || s.shouldQueue() || d.usagePaused && !s.codex {
 		return
 	}
@@ -116,6 +117,25 @@ func (d *desk) drawQueue(v *chatView, s *deskSession) {
 			m.Alignment = fyne.TextAlignCenter
 		}
 		return m
+	}
+	var peerRows []fyne.CanvasObject
+	store := d.loadPeerMessages(time.Now())
+	for _, msg := range store.Pending {
+		if target, _ := d.peerRecipient(msg.To); target == s {
+			status := "received · waiting for " + s.engineName()
+			if store.Submitting[msg.ID] != "" {
+				status = "submission unconfirmed"
+			}
+			label := widget.NewLabel("Peer context from " + msg.From + " · " + status + "\n" + msg.Text)
+			label.Selectable = true
+			label.Wrapping = fyne.TextWrapWord
+			peerRows = append(peerRows, label)
+		}
+	}
+	if len(peerRows) > 0 {
+		inbox := container.NewVScroll(container.NewVBox(peerRows...))
+		inbox.SetMinSize(fyne.NewSize(0, 3*theme.TextSize()+2*theme.InnerPadding()))
+		rows = append(rows, inbox)
 	}
 	if len(s.queue) > 0 {
 		rows = append(rows, head("Queued, sent when "+s.engineName()+" finishes · ↑ in an empty box edits the last one"))

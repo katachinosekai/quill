@@ -409,6 +409,12 @@ Body `{}`. Same as Escape / Stop on the desktop. Response `{"v": 1, "wasBusy": t
 
 Body `{}`. Turns the session's auto-approve off (as the desktop's chip and session menu do); a no-op when it is off. Response `{"v": 1, "autoApprove": false}`.
 
+### POST /phone/session/{id}/restart-session and /cancel-restart
+
+Show these controls only when `actions` in `GET /phone/sessions` advertises them. The session has optional booleans `codex` and `restartPending`. Confirm the Codex handoff with `{"fromHandoff":true}` when requesting a restart. For Claude and for cancellation, send `{}`.
+
+Both actions require the paired device's existing session control permission. They return the updated `session` and a `restartStatus` description. If an approval, turn or background work is pending, restart waits and the session reports `restartPending: true` until it starts or the user cancels it.
+
 ### POST /phone/session/{id}/queue/delete and /queue/send-now
 
 Body: `{"index": 0, "text": "also check the tests"}`. `text` must equal the entry at `index` (`409 stale` otherwise). Response: `{"v": 1, "queue": [...]}`.

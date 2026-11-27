@@ -302,8 +302,11 @@ func (d *desk) watchKmemNeeds(ctx context.Context) {
 }
 
 const (
-	kmemTabOverview = 0
-	kmemTabTasks    = 2
+	kmemTabAssistant = iota
+	kmemTabOverview
+	kmemTabHandoffs
+	kmemTabTasks
+	kmemTabMemory
 )
 
 // showKmemPanelTab opens (or raises) the kmem window on one of its tabs.

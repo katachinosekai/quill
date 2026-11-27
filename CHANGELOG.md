@@ -1,5 +1,8 @@
 # Quill 0.1.30 release candidate
 
+- Messages to named sessions appear in the recipient’s inbox on arrival. Quill submits them at idle and shows a receipt.
+- The worker strip shows subagents and background jobs for the active session. Codex worker activity stays visible across parent turns.
+- The optional kmem panel opens to the assistant, with tasks, memory and other utilities in the sidebar.
 - The kmem panel shows whether Codex can run the configured kmem guard and startup hooks. Review changed or untrusted hooks in Codex with `/hooks`.
 - Quill looks up guard evidence using the active Codex thread. With a compatible staged kmem, it can verify an idle staged session using one read-only probe per thread and rollout round.
 - Existing kmem installations require a signed release and an independently provisioned trust key. Per-session rollout evidence requires kmem's `rollout-session-guard` capability and its matching launcher.

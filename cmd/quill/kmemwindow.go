@@ -7,22 +7,16 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// The kmem operations window (docs/design/kmem-window.md §3, user
-// 2026-11-22): a second fyne window opened by the toolbar's kmem button. The
-// left side is the kmem panel (Overview, Handoffs, Tasks, Memory); the right
-// side is the chat of the kmem assistant, kmem-lock-audit, which the assistant
-// lifecycle (kmemassist.go) puts there through setChat, or a one-line reason
-// through setChatReason when the window runs panels-only. Wayland allows no
-// positioning, so only the size and the split are remembered.
+// The kmem operator opens to the assistant, with utility pages in a sidebar.
+// The same content can move from the overlay into a separate window.
 
 // kmemWinOperator is the kmem name of the window's assistant.
 const kmemWinOperator = "kmem-lock-audit"
 
 const (
-	kmemWinTitle        = "kmem — Quill Desktop"
-	kmemWinDefaultW     = 1280
-	kmemWinDefaultH     = 800
-	kmemWinDefaultSplit = 0.45
+	kmemWinTitle    = "kmem — Quill Desktop"
+	kmemWinDefaultW = 1280
+	kmemWinDefaultH = 800
 )
 
 // kmemWindowOpenHook runs after the window is shown (the running assistant's
@@ -32,30 +26,33 @@ const (
 var kmemWindowOpenHook, kmemWindowCloseHook func(d *desk, w *kmemWindow)
 
 // kmemChatOffReason is the right side until the assistant puts its chat there.
-const kmemChatOffReason = "The kmem assistant is off; the panels on the left work without it."
+const kmemChatOffReason = "The kmem assistant is off. You can still use the utility pages."
 
 // showKmem is the one entry for the kmem button, the menu and
 // `quill --kmem-window`: the kmem box (assistbox.go; its Pop out button
 // opens the window, and a popped-out window is raised instead).
-func (d *desk) showKmem() { d.openAssistBox(boxKmem) }
+func (d *desk) showKmem() {
+	d.openAssistBox(boxKmem)
+	if w := d.kmemWin; w != nil && !w.closed && w.win == nil {
+		w.panel.tabs.SelectIndex(kmemTabAssistant)
+	}
+}
 
-// kmemBoxContent is the kmem box: the kmem panels as tabs on the left rail
-// and the assistant's chat (own message box and status line, put there by
-// setChat) on the right. It is built once; asking again returns the same
-// object, so a Pop out keeps the selected tab and the scroll positions.
+// openKmemAssistant brings the chat to the front for a notification.
+func (d *desk) openKmemAssistant() {
+	d.showKmem()
+	if w := d.kmemWin; w != nil && !w.closed && w.panel != nil {
+		w.panel.tabs.SelectIndex(kmemTabAssistant)
+	}
+}
+
+// kmemBoxContent keeps the assistant and utility pages mounted in one
+// navigation container so moving it into a window preserves the current page.
 func (d *desk) kmemBoxContent() fyne.CanvasObject {
 	w := d.kmemWin
-	if w == nil || w.split == nil || w.closed {
-		w = &kmemWindow{d: d}
+	if w == nil || w.panel == nil || w.closed {
+		w = &kmemWindow{d: d, right: container.NewStack()}
 		w.panel = d.newKmemPanel(w)
-		w.panel.tabs.SetTabLocation(container.TabLocationLeading)
-		w.right = container.NewStack()
-		w.split = container.NewHSplit(w.panel.tabs, w.agentChat())
-		off := d.app.Preferences().FloatWithFallback("kmemWinSplit", kmemWinDefaultSplit)
-		if off < 0.1 || off > 0.9 {
-			off = kmemWinDefaultSplit
-		}
-		w.split.Offset = off
 		d.kmemWin = w
 		w.setChatReason(kmemChatOffReason)
 		if d.app.Preferences().Bool("kmemAgentCodex") {
@@ -63,7 +60,11 @@ func (d *desk) kmemBoxContent() fyne.CanvasObject {
 		}
 		w.panel.reload()
 	}
-	return w.split
+	return w.panel.tabs
+}
+
+func (w *kmemWindow) assistantSelected() bool {
+	return w != nil && !w.closed && (w.panel == nil || w.panel.tabs.SelectedIndex() == kmemTabAssistant)
 }
 
 // popOutKmem shows the box content in its own window (raises it when open).
@@ -100,8 +101,7 @@ func (d *desk) popOutKmem() {
 	}
 }
 
-// close is the one close flow for X, Escape and code: it remembers the size
-// and split, clears d.kmemWin, calls the close hook and destroys the window.
+// close remembers the size, clears d.kmemWin and calls the close hook.
 func (w *kmemWindow) close() {
 	if w == nil || w.closed {
 		return
@@ -109,12 +109,8 @@ func (w *kmemWindow) close() {
 	w.d.cancelQueueEdit(w.selectedAgent().s)
 	w.closed = true
 	d := w.d
-	prefs := d.app.Preferences()
 	if w.saveGeom != nil {
 		w.saveGeom()
-	}
-	if w.split != nil {
-		prefs.SetFloat("kmemWinSplit", w.split.Offset)
 	}
 	if d.kmemWin == w {
 		d.kmemWin = nil
@@ -177,13 +173,17 @@ func (w *kmemWindow) setPrefill(f func(text string)) {
 func (w *kmemWindow) setupKeys() {
 	c := w.win.Canvas()
 	c.AddShortcut(&fyne.ShortcutCopy{}, func(fyne.Shortcut) {
-		if v := w.view; v != nil && v.sel != nil {
-			v.sel.copy()
+		if w.assistantSelected() {
+			if v := w.selectedAgent().view; v != nil && v.sel != nil {
+				v.sel.copy()
+			}
 		}
 	})
 	c.AddShortcut(&fyne.ShortcutSelectAll{}, func(fyne.Shortcut) {
-		if v := w.view; v != nil && v.sel != nil {
-			v.sel.selectAll()
+		if w.assistantSelected() {
+			if v := w.selectedAgent().view; v != nil && v.sel != nil {
+				v.sel.selectAll()
+			}
 		}
 	})
 	c.SetOnTypedKey(func(k *fyne.KeyEvent) {
@@ -191,6 +191,14 @@ func (w *kmemWindow) setupKeys() {
 			w.escape()
 		}
 	})
+}
+
+func (d *desk) kmemComposerEscape() bool {
+	if w := d.kmemWin; w != nil && w.win != nil && !w.closed {
+		w.escape()
+		return true
+	}
+	return d.assistBoxEscape()
 }
 
 // escape closes the top overlay, then a selection in the chat, then the
@@ -211,6 +219,10 @@ func (w *kmemWindow) escape() {
 			return
 		}
 		dialog.DismissOverlay(top)
+		return
+	}
+	if !w.assistantSelected() {
+		w.close()
 		return
 	}
 	a := w.selectedAgent()

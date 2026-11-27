@@ -72,7 +72,7 @@ func (d *desk) assistAlerting(role string) bool {
 			continue
 		}
 		boxShowsRole := d.assistBoxShowing(id)
-		if id == boxKmem && d.kmemWin != nil && d.kmemWin.codexShown {
+		if id == boxKmem && (!d.kmemWin.assistantSelected() || d.kmemWin.codexShown) {
 			boxShowsRole = false
 		}
 		if d.hidden || !(boxShowsRole || d.hostShown(a.s)) {

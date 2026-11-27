@@ -74,3 +74,24 @@ func TestKmemRuntimeRefusesModifiedModule(t *testing.T) {
 		t.Fatalf("tampered payload must fail before running: %q %v", out, err)
 	}
 }
+
+func TestKmemNeedsPython(t *testing.T) {
+	for _, tc := range []struct {
+		name, entry string
+		want        bool
+	}{
+		{"managed", "#!/usr/bin/env python3\n", true},
+		{"native Linux", "\x7fELF", false},
+		{"native Windows", "MZ", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "kmem")
+			if err := os.WriteFile(path, []byte(tc.entry), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if kmemNeedsPython(path) != tc.want {
+				t.Fatalf("unexpected Python requirement for %s", tc.name)
+			}
+		})
+	}
+}

@@ -5,7 +5,7 @@
 %global _lto_cflags %{nil}
 
 Name:           quill
-Version:        0.1.29
+Version:        0.1.30
 Release:        1%{?dist}
 Summary:        Desktop app for Claude Code and Codex sessions
 License:        GPL-3.0-or-later AND MIT AND BSD-3-Clause AND Apache-2.0 AND ISC AND (MIT-0 OR Unlicense) AND (Unlicense OR BSD-3-Clause)

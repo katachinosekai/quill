@@ -78,6 +78,7 @@ type deskSession struct {
 	claudeCoordination             string
 	claudeCoordinationSet          bool
 	codexUpgrading                 bool
+	restartPending, restartActive  bool
 
 	codex          bool
 	agentHandoff   *agentHandoff
@@ -181,7 +182,7 @@ func (s *deskSession) status() status {
 	if s.terminal != nil && !s.running() {
 		return stTerminal
 	}
-	restarting := s.restarting || s.compacting || s.agentHandoff != nil || s.kmemSave != nil || s.endWait != nil
+	restarting := s.restarting || s.restartActive || s.compacting || s.agentHandoff != nil || s.kmemSave != nil || s.endWait != nil
 	if !s.running() {
 		if s.failed != "" {
 			return stError
@@ -229,7 +230,8 @@ type sideRow struct {
 }
 
 type desk struct {
-	statusRun      bool // the status ticker runs (status.go)
+	peerMessages   *peerMessages // mutated on the UI thread
+	statusRun      bool          // the status ticker runs (status.go)
 	nameClose      func()
 	limitMsg       string
 	notifier       *notifier
@@ -1296,6 +1298,7 @@ func (d *desk) buildMain() fyne.CanvasObject {
 }
 
 func (d *desk) updateChrome() {
+	d.syncAgentStripTarget()
 	d.keepView()
 	defer d.syncMainOperatorControls()
 	defer d.syncQuillMoveBanner()
@@ -1761,6 +1764,7 @@ func (d *desk) processOptions(s *deskSession) session.Options {
 	} else {
 		opts.SessionID = s.id
 	}
+	opts.Prompt += operatorRouteHint
 	if isHiddenSession(s) {
 		// Other sessions find a hidden assistant by this name (ListAgents,
 		// SendMessage), not by its folder ("kmem-window-51").
@@ -2041,6 +2045,9 @@ func (d *desk) handleExit(s *deskSession, p *session.Process, err error) {
 		v.update(items)
 	}
 	d.refreshSidebar()
+	if s.restartActive {
+		s.proc = nil
+	}
 	d.trySwap()
 }
 
@@ -2184,7 +2191,7 @@ func (d *desk) takeOverThen(s *deskSession, t live.Process, text string, after f
 }
 
 func (d *desk) sendTo(s *deskSession, text string) {
-	if s.agentHandoff != nil || s.pendingRevision != nil || s.codexUpgrading {
+	if s.agentHandoff != nil || s.restartActive || s.pendingRevision != nil || s.codexUpgrading {
 		d.enqueue(s, text)
 		return
 	}
@@ -2754,6 +2761,7 @@ func (d *desk) watch(ctx context.Context) {
 	d.do(d.pruneStaleTabs)
 	d.do(d.reopenLastTab)
 	d.do(d.assistantsBoot)
+	d.do(func() { d.pollPeerMessages(time.Now()) })
 	go d.watchBinary(ctx)
 	go d.glowLoop(ctx)
 	go d.usageLoop(ctx)
@@ -2774,7 +2782,12 @@ func (d *desk) watch(ctx context.Context) {
 			return
 		case <-t.C:
 			d.refresh()
-			d.do(func() { d.unloadIdle(time.Now()) })
+			d.do(func() {
+				now := time.Now()
+				d.unloadIdle(now)
+				d.pollSessionRestarts()
+				d.pollPeerMessages(now)
+			})
 			if n++; n%12 == 0 {
 				d.do(d.refreshCodexAccount)
 				d.refreshAccount()

@@ -264,6 +264,14 @@ func TestPhoneAPIWrites(t *testing.T) {
 		}
 		return reqID != ""
 	})
+	if code, m, _ := a.do("POST", base+"/restart-session", key(), map[string]any{}); code != 200 ||
+		m["session"].(map[string]any)["restartPending"] != true {
+		t.Fatalf("restart waits for the existing approval: %d %v", code, m)
+	}
+	if code, m, _ := a.do("POST", base+"/cancel-restart", key(), map[string]any{}); code != 200 ||
+		m["session"].(map[string]any)["restartPending"] == true {
+		t.Fatalf("cancel waiting restart: %d %v", code, m)
+	}
 	if code, _, hdr := a.do("POST", base+"/send", sendKey, map[string]string{"text": "write"}); code != 200 || hdr.Get("Idempotent-Replay") != "true" {
 		t.Fatal("a retried send is replayed, not sent again")
 	}

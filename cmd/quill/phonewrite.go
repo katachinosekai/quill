@@ -57,6 +57,7 @@ type writeBody struct {
 	Title         *string `json:"title"`
 	Project       *string `json:"project"`
 	Old           bool    `json:"old"`
+	FromHandoff   bool    `json:"fromHandoff"`
 	// Change: POST /phone/quill/settings/undo, the number of a Changes entry.
 	Change *int `json:"change"`
 }

@@ -122,6 +122,9 @@ func TestMemoryModeRadioGoesThroughSwitch(t *testing.T) {
 func TestClaudeSettingsFileConfigDir(t *testing.T) {
 	home := switchHome(t, userSettings)
 	os.WriteFile(filepath.Join(home, ".local", "bin", "kmem"), []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	if err := signFixtureKmem(home, filepath.Join(home, ".local", "bin")); err != nil {
+		t.Fatal(err)
+	}
 	if got := claudeSettingsFile(home); got != filepath.Join(home, ".claude", "settings.json") {
 		t.Fatalf("default %s", got)
 	}

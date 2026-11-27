@@ -170,19 +170,22 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 	home := homeDir()
 	kb := firstNonEmpty(kmemBin(), "kmem")
 	var trustErr error
+	var needsPython bool
 	if !d.kmemOff && d.kmemRun == nil && kmemBin() != "" {
-		_, trustErr = verifiedKmemBin()
+		var verifiedPath string
+		verifiedPath, trustErr = verifiedKmemBin()
+		needsPython = trustErr == nil && kmemNeedsPython(verifiedPath)
 	}
 	switch {
 	case trustErr != nil:
 		r.state = trustErr.Error()
+	case needsPython && switchPython() == "":
+		r.state = "installed, but needs Python 3 (see the Python row)"
 	case !d.kmemAvailable() && kmemBin() != "" && !d.kmemOff:
 		r.state = "installed but incompatible; supported versions: " + supportedKmemSeries
 	case !d.kmemAvailable():
 		r.state, r.action = kmemGetHint, "Get kmem..."
 		r.do = d.openKmemPatreon
-	case win && !strings.EqualFold(filepath.Ext(kb), ".exe") && windowsPython() == "":
-		r.state = "installed, but needs Python 3 (see the Python row)"
 	case d.kmemSwitchWanted():
 		r.state, r.action = "detected; preview the recommended Quill and kmem setup and shared import", "Review setup…"
 		r.do = d.showKmemSwitch
@@ -194,7 +197,7 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 	}
 	rows = append(rows, r)
 
-	if win {
+	if win && needsPython {
 		r = setupRow{title: "Python 3", optional: true}
 		if py := windowsPython(); py != "" {
 			r.ok, r.state = true, "installed ("+py+"; kmem needs it)"
@@ -207,7 +210,7 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 		}
 		rows = append(rows, r)
 	}
-	if !win {
+	if !win && needsPython {
 		r = setupRow{title: "Python 3", optional: true}
 		if lookPath("python3") != "" {
 			r.ok, r.state = true, "installed (kmem needs it)"
@@ -218,7 +221,9 @@ func (d *desk) setupRows(refresh func()) []setupRow {
 			r.state = "missing: install python3 with your package manager (kmem needs it)"
 		}
 		rows = append(rows, r)
+	}
 
+	if !win {
 		r = setupRow{title: "Spell checking (hunspell)", optional: true}
 		if lookPath("hunspell") != "" {
 			r.ok, r.state = true, "installed"

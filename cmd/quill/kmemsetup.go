@@ -62,6 +62,31 @@ func kmemBin() string {
 	return ""
 }
 
+// kmemNeedsPython examines the entry point, including portable Linux
+// executables whose filename has no extension.
+func kmemNeedsPython(path string) bool {
+	if path == "" {
+		return false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	var prefix [256]byte
+	n, _ := file.Read(prefix[:])
+	line, _, _ := strings.Cut(string(prefix[:n]), "\n")
+	if !strings.HasPrefix(line, "#!") {
+		return false
+	}
+	for _, word := range strings.Fields(line[2:]) {
+		if strings.HasPrefix(filepath.Base(word), "python") {
+			return true
+		}
+	}
+	return false
+}
+
 func shellQuote(p string) string {
 	if !strings.ContainsAny(p, " \t'\"$`\\") {
 		return p

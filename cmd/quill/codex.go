@@ -64,7 +64,7 @@ func (d *desk) codexProcessOptions(s *deskSession) (session.Options, error) {
 		return session.Options{}, err
 	}
 	opts := codex.Options{Binary: bin, Cwd: s.cwd, SessionID: s.id, Ephemeral: true, Steer: true, SteerOnlyWhileWaiting: true, ForceSteer: true, ComposerSettings: true,
-		Instructions: "You are running in Quill Desktop. " + screenshotReplyHint}
+		Instructions: "You are running in Quill Desktop. " + screenshotReplyHint + operatorRouteHint}
 	process := session.Options{Binary: self, Cwd: s.cwd}
 	role := hiddenRole(s)
 	switch role {

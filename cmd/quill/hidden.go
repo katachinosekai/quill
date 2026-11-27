@@ -166,8 +166,11 @@ func (d *desk) hostFor(role string) hiddenHost {
 				}
 				return nil
 			},
-			shown: func() bool { return d.kmemWin.session() != nil },
-			open:  d.showKmem,
+			shown: func() bool {
+				w := d.kmemWin
+				return w.assistantSelected() && !w.codexShown && w.session() != nil
+			},
+			open: d.openKmemAssistant,
 		}
 	}
 	return hiddenHost{}

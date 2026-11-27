@@ -53,6 +53,14 @@ func shownOnCanvas(d *desk, o fyne.CanvasObject) bool {
 	return walkUp(d.headerBox) && found
 }
 
+func checkEmptyAgentStrip(t *testing.T, d *desk) {
+	t.Helper()
+	a := d.agentStrip
+	if len(a.row.Objects) != 1 || a.row.Objects[0] != a.empty || !shownOnCanvas(d, a.empty) {
+		t.Fatalf("expected the visible empty strip, got chips %q", stripTexts(a))
+	}
+}
+
 // The event shapes are the CLI's; ids and descriptions are placeholders.
 func TestAgentStrip(t *testing.T) {
 	h := newHarness(t)
@@ -63,9 +71,7 @@ func TestAgentStrip(t *testing.T) {
 		h.d.current = s
 		h.d.agentStrip.now = func() time.Time { return start }
 		h.d.agentStrip.sync()
-		if h.d.agentStrip.root.Visible() {
-			t.Fatal("hidden while no subagent runs")
-		}
+		checkEmptyAgentStrip(t, h.d)
 		feed(t, h, s, `{"type":"system","subtype":"task_started","task_id":"agentA","tool_use_id":"toolu_A","description":"Fix join stall","subagent_type":"Explore","task_type":"local_agent","is_backgrounded":true}`)
 		feed(t, h, s, `{"type":"system","subtype":"task_started","task_id":"agentB","tool_use_id":"toolu_B","description":"Release build","subagent_type":"general-purpose","task_type":"local_agent","is_backgrounded":true}`)
 		feed(t, h, s, `{"type":"system","subtype":"task_started","task_id":"sh1","tool_use_id":"toolu_S","description":"go test","task_type":"local_bash"}`)
@@ -114,7 +120,7 @@ func TestAgentStrip(t *testing.T) {
 		if got := stripTexts(h.d.agentStrip); len(got) != 4 || got[3] != "+2" {
 			t.Fatalf("overflow: %q", got)
 		}
-		// Finished ones grey out, then the strip hides.
+		// Finished ones grey out before the empty state returns.
 		h.d.agentStrip.now = time.Now
 		for _, id := range []string{"agentA", "agentB", "agentC", "agentD", "agentE"} {
 			feed(t, h, s, `{"type":"system","subtype":"task_notification","task_id":"`+id+`","status":"completed","usage":{"total_tokens":52000}}`)
@@ -125,9 +131,7 @@ func TestAgentStrip(t *testing.T) {
 		}
 		h.d.agentStrip.now = func() time.Time { return time.Now().Add(5 * time.Minute) }
 		h.d.agentStrip.sync()
-		if h.d.agentStrip.root.Visible() {
-			t.Fatalf("hidden once none runs: %q", stripTexts(h.d.agentStrip))
-		}
+		checkEmptyAgentStrip(t, h.d)
 	})
 }
 
@@ -435,13 +439,11 @@ func TestAgentStripShellJob(t *testing.T) {
 				t.Fatalf("Stop everything offered for a session that is not running")
 			}
 		}
-		// The job ends: the strip hides again.
+		// The job ends and the empty state returns.
 		s.conv.Apply(&protocol.Event{Type: "assistant", Message: &protocol.Message{Role: "assistant", Content: []byte(`[{"type":"tool_use","id":"stop1","name":"TaskStop","input":{"task_id":"job1"}}]`)}})
 		s.conv.Apply(&protocol.Event{Type: "user", Message: &protocol.Message{Role: "user", Content: []byte(`[{"type":"tool_result","tool_use_id":"stop1","content":"stopped"}]`)}})
 		h.d.agentStrip.sync()
-		if h.d.agentStrip.root.Visible() {
-			t.Fatalf("hidden once the job ended: %q", stripTexts(h.d.agentStrip))
-		}
+		checkEmptyAgentStrip(t, h.d)
 	})
 }
 
@@ -516,6 +518,30 @@ func TestPortraitSessionSubagentsAndActiveOperator(t *testing.T) {
 		d.agentStrip.sync()
 		if got := stripTexts(d.agentStrip); len(got) != 1 || !strings.Contains(got[0], "Claude worker") {
 			t.Fatalf("closing the operator should restore the tab strip: %v", got)
+		}
+	})
+}
+
+func TestAgentStripIndependentOfActivityChips(t *testing.T) {
+	h := newDeskHarness(t, false)
+	h.ui(func() {
+		d := h.d
+		workerTab := d.addSession(h.proj, "default", "default", false)
+		emptyTab := d.addSessionWithBackend(h.proj, "default", "default", true, true)
+		feed(t, h, workerTab, `{"type":"system","subtype":"task_started","task_id":"worker","description":"Background review","task_type":"local_agent"}`)
+
+		d.setCollapseChips(true)
+		d.setAllChips(false)
+		d.setShowChips(false)
+		for _, mode := range []string{layoutHorizontal, layoutVertical} {
+			d.setLayoutMode(mode)
+			d.open(emptyTab.id)
+			checkEmptyAgentStrip(t, d)
+			d.open(workerTab.id)
+			got := stripTexts(d.agentStrip)
+			if !shownOnCanvas(d, d.agentStrip.root) || len(got) != 1 || got[0] != "● Background review" {
+				t.Fatalf("%s with Activity chips hidden: %q", mode, got)
+			}
 		}
 	})
 }

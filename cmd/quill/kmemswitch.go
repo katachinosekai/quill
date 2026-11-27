@@ -112,7 +112,7 @@ func (d *desk) kmemSwitchDetect(home string) kmemSwitchCheck {
 		c.Problems = append(c.Problems, "kmem-guard is missing (not on PATH or in ~/.local/bin). Reinstall kmem with its installer, which puts kmem-guard next to kmem.")
 	}
 	c.Python = switchPython()
-	if c.Python == "" && !strings.EqualFold(filepath.Ext(c.Bin), ".exe") {
+	if c.Python == "" && kmemNeedsPython(c.Bin) {
 		c.Problems = append(c.Problems, "python3 is not installed; kmem runs on it. Install Python 3 and try again.")
 	}
 	var ver struct {

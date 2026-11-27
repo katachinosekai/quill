@@ -262,6 +262,10 @@ func (d *desk) kmemAssistChat(a *kmemAssist) fyne.CanvasObject {
 		container.NewBorder(nil, nil, nil, container.NewHBox(a.restart, a.reboot, save, a.stopBtn), a.modelLbl),
 		widget.NewSeparator())
 	a.input = newSendEntry(d.kmemAssistSend)
+	a.input.onEscape = d.kmemComposerEscape
+	if d.strip != nil {
+		d.strip.fillBox(assistDraftKey(roleKmem), a.input)
+	}
 	a.input.onHistory = func(k *fyne.KeyEvent) bool { return d.historyKey(a.input, a.s, k) }
 	a.input.onSendNow = func(text string) {
 		if !d.saveQueueEdit(a.s, a.input, text) && !d.reviseApproval(a.s, a.input, text) {
@@ -392,8 +396,10 @@ func (d *desk) kmemAssistPrefill(text string) {
 	if !d.kmemAssistChatOn() {
 		return
 	}
-	a.input.SetText(text)
-	a.input.SetCursorTextOffset(len([]rune(text)))
+	if input := d.queueInputFor(a.s); input != nil {
+		input.SetText(text)
+		input.SetCursorTextOffset(len([]rune(text)))
+	}
 }
 
 func (d *desk) kmemAssistSend(text string) {

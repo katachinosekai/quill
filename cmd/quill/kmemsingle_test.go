@@ -101,5 +101,8 @@ func TestKmemMessageIPC(t *testing.T) {
 	if !sendCommand(path, "kmem-message check in please") {
 		t.Fatal("answered")
 	}
-	h.eventually("delivered", func() bool { return lastUser(s) == "check in please" })
+	h.eventually("delivered as a peer message", func() bool {
+		text := lastUser(s)
+		return strings.Contains(text, "check in please") && notFromUser(text)
+	})
 }

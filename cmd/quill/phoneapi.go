@@ -235,29 +235,31 @@ func (a *phoneAPI) hello(w http.ResponseWriter, r *http.Request) {
 }
 
 type apiSession struct {
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Folder     string     `json:"folder"`
-	FolderName string     `json:"folderName"`
-	Group      string     `json:"group"`
-	Status     string     `json:"status"`
-	Error      string     `json:"error,omitempty"`
-	Busy       bool       `json:"busy"`
-	Kmem       string     `json:"kmem,omitempty"`
-	Model      string     `json:"model"`
-	Mode       string     `json:"mode"`
-	Backend    string     `json:"backend"`
-	Context    apiContext `json:"context"`
-	Pending    apiPending `json:"pending"`
-	Queue      int        `json:"queue"`
-	Background int        `json:"background"`
-	Epoch      int        `json:"epoch"`
-	Rev        int        `json:"rev"`
-	UpdatedMs  int64      `json:"updatedMs"`
-	Focused    bool       `json:"focused"`
-	Tokens     int64      `json:"tokens"`
-	Project    string     `json:"project"`
-	Renamed    bool       `json:"renamed,omitempty"`
+	ID             string     `json:"id"`
+	Title          string     `json:"title"`
+	Folder         string     `json:"folder"`
+	FolderName     string     `json:"folderName"`
+	Group          string     `json:"group"`
+	Status         string     `json:"status"`
+	Error          string     `json:"error,omitempty"`
+	Busy           bool       `json:"busy"`
+	Kmem           string     `json:"kmem,omitempty"`
+	Model          string     `json:"model"`
+	Mode           string     `json:"mode"`
+	Backend        string     `json:"backend"`
+	Codex          bool       `json:"codex,omitempty"`
+	RestartPending bool       `json:"restartPending,omitempty"`
+	Context        apiContext `json:"context"`
+	Pending        apiPending `json:"pending"`
+	Queue          int        `json:"queue"`
+	Background     int        `json:"background"`
+	Epoch          int        `json:"epoch"`
+	Rev            int        `json:"rev"`
+	UpdatedMs      int64      `json:"updatedMs"`
+	Focused        bool       `json:"focused"`
+	Tokens         int64      `json:"tokens"`
+	Project        string     `json:"project"`
+	Renamed        bool       `json:"renamed,omitempty"`
 	// Tab: 0-based position among the open tabs the phone can see (Quill
 	// Desktop's tab bar, left to right), -1 when the session is not an open
 	// tab. Quill Android's portrait list follows it.
@@ -368,6 +370,8 @@ func (a *phoneAPI) session(id, group string) apiSession {
 		out.UpdatedMs = info.Last.UnixMilli()
 	}
 	if s := d.sessions[id]; s != nil {
+		out.Codex = s.codex
+		out.RestartPending = s.restartPending
 		out.Folder = firstNonEmpty(s.cwd, out.Folder)
 		out.Model, out.Mode = s.model, s.mode
 		if isLocal(s.model) {

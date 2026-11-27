@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -23,9 +22,8 @@ type kmemWindow struct {
 
 	d          *desk
 	win        fyne.Window
-	panel      *kmemPanel       // the left side
-	saveGeom   func()           // saves the window size now
-	split      *container.Split // panels | chat
+	panel      *kmemPanel // the assistant and utility pages
+	saveGeom   func()     // saves the window size now
 	agent      *widget.Select
 	agentStart *widget.Button
 	chatSlot   *fyne.Container

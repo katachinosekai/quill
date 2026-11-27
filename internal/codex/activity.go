@@ -18,7 +18,8 @@ type activityContent struct {
 type activityItem struct {
 	Type, ID, Text, Command, Cwd, Status string
 	Tool, Server, Namespace, Prompt      string
-	SenderThreadID                       string
+	SenderThreadID, AgentThreadID        string
+	AgentPath, Kind                      string
 	ReceiverThreadIDs                    []string
 	AgentsStates                         map[string]struct{ Status string }
 	Query, AggregatedOutput              string
@@ -103,6 +104,37 @@ func (b *bridge) activity(it activityItem, completed bool) error {
 		b.activeItems[it.ID] = it.Type == "collabAgentToolCall" && it.Tool == "wait"
 	}
 	return b.syncAgentWait()
+}
+
+// subAgentActivity is a lifecycle item on the parent's native thread. App
+// Server can announce the same item at both item/started and item/completed.
+func (b *bridge) subAgentActivity(it activityItem) error {
+	if it.ID == "" || it.AgentThreadID == "" || it.AgentThreadID == b.threadID {
+		return nil
+	}
+	if _, seen := b.workerActivityIDs[it.ID]; seen {
+		return nil
+	}
+	wasActive := len(b.workers) != 0
+	var err error
+	switch it.Kind {
+	case "started":
+		err = b.startWorker(it.AgentThreadID, it.AgentPath)
+	case "completed":
+		err = b.endWorker(it.AgentThreadID, "completed")
+	case "interrupted":
+		err = b.endWorker(it.AgentThreadID, "stopped")
+	default:
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if b.workerActivityIDs == nil {
+		b.workerActivityIDs = make(map[string]struct{})
+	}
+	b.workerActivityIDs[it.ID] = struct{}{}
+	return b.emitWorkerActivity(wasActive)
 }
 
 // Worker state survives the end of the parent turn.
