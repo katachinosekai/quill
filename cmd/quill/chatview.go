@@ -93,6 +93,7 @@ type chatView struct {
 	autoScrolling bool
 	gliding       bool
 	queueBox      *fyne.Container
+	pendingPeers  map[string]pendingPeerView
 	dismissed     map[*chat.Item]bool
 	stickTimer    *time.Timer
 	qcards        map[*chat.Item]fyne.CanvasObject
@@ -311,6 +312,7 @@ func (v *chatView) show(s *deskSession) {
 			v.views, v.shownFrom, v.placeholder, v.moreObj = sv.views, sv.shownFrom, sv.placeholder, sv.more
 			v.setBox(sv.box)
 			v.catchUp(sv.count)
+			v.syncPeerTimeline()
 			if sv.follow {
 				v.scrollBottom()
 				return
@@ -389,6 +391,7 @@ func (v *chatView) loadEarlier() {
 	v.box.Objects = append(objs, rest...)
 	v.moreObj = more
 	v.shownFrom = from
+	v.syncPeerTimeline()
 	relayout(v.box)
 	v.reflow()
 	v.reflow()
@@ -402,6 +405,7 @@ func (v *chatView) loadEarlier() {
 
 func (v *chatView) rebuild() {
 	v.box.RemoveAll()
+	v.pendingPeers = nil
 	v.views = map[int]*itemView{}
 	items := v.s.conv.Items
 	v.moreObj = nil
@@ -418,6 +422,7 @@ func (v *chatView) rebuild() {
 	for _, it := range items[v.shownFrom:] {
 		v.box.Add(v.viewFor(it).holder)
 	}
+	v.syncPeerTimeline()
 	relayout(v.box)
 }
 
@@ -627,6 +632,7 @@ func (v *chatView) update(items []*chat.Item) {
 		return
 	}
 	added := false
+	peerAdded := false
 	heads := map[*chat.Item]bool{}
 	firstSeq := 0
 	if v.shownFrom > 0 && v.shownFrom < len(v.s.conv.Items) {
@@ -645,6 +651,9 @@ func (v *chatView) update(items []*chat.Item) {
 			}
 			v.box.Add(v.viewFor(it).holder)
 			added = true
+			if it.Kind == chat.User && strings.HasPrefix(it.Text, peerEnvelopeStart) {
+				peerAdded = true
+			}
 		}
 		if it.Kind == chat.Tool && !v.steps {
 			if h := v.runHead(it); h != it {
@@ -664,6 +673,9 @@ func (v *chatView) update(items []*chat.Item) {
 		}
 	}
 	if added {
+		if peerAdded || len(v.pendingPeers) > 0 {
+			v.syncPeerTimeline()
+		}
 		relayout(v.box)
 	}
 	if v.sel != nil && v.sel.has {
@@ -776,7 +788,13 @@ func (v *chatView) centered(o fyne.CanvasObject) fyne.CanvasObject {
 func (v *chatView) render(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	o := v.renderItem(it, iv)
 	if it.Kind == chat.User || it.Kind == chat.Assistant {
-		o = v.withTime(o, it.Time)
+		at := it.Time
+		if it.Kind == chat.User {
+			if msg, ok := readPeerEnvelope(it.Text); ok && !msg.ReceivedAt.IsZero() {
+				at = msg.ReceivedAt
+			}
+		}
+		o = v.withTime(o, at)
 	}
 	if (it.Kind == chat.User || it.Kind == chat.Assistant) && v.s != nil {
 		s := v.s
@@ -797,11 +815,7 @@ func (v *chatView) renderItem(it *chat.Item, iv *itemView) fyne.CanvasObject {
 	switch it.Kind {
 	case chat.User:
 		if msg, ok := readPeerEnvelope(it.Text); ok {
-			label := widget.NewLabel("Peer message from " + msg.From + " · submitted\n" + msg.Text)
-			label.Selectable = true
-			label.Wrapping = fyne.TextWrapWord
-			label.Alignment = v.align()
-			return msgText(label)
+			return v.peerLabel(msg, "submitted")
 		}
 		if strings.Contains(it.Text, "```") {
 			return bgPad(colBubble, 14, 4, 10, msgText(v.markdown(it.Text)))

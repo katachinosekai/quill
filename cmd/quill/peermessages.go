@@ -20,11 +20,12 @@ const (
 )
 
 type peerMessage struct {
-	ID        string    `json:"id"`
-	To        string    `json:"to"`
-	From      string    `json:"from"`
-	Text      string    `json:"text"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID         string    `json:"id"`
+	To         string    `json:"to"`
+	From       string    `json:"from"`
+	Text       string    `json:"text"`
+	ReceivedAt time.Time `json:"received_at,omitzero"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }
 
 type peerMessages struct {
@@ -66,7 +67,7 @@ func (d *desk) loadPeerMessages(now time.Time) *peerMessages {
 			continue
 		}
 		for _, msg := range legacy {
-			msg.To, msg.From, msg.ExpiresAt = operatorAddress(role), "local", now.Add(peerMessageTTL)
+			msg.To, msg.From, msg.ReceivedAt, msg.ExpiresAt = operatorAddress(role), "local", now, now.Add(peerMessageTTL)
 			store.Pending = append(store.Pending, msg)
 		}
 	}
@@ -104,7 +105,7 @@ func (d *desk) cleanPeerMessages(now time.Time) *peerMessages {
 	}
 	for _, msg := range redraw {
 		if target, _ := d.peerRecipient(msg.To); target != nil {
-			d.syncQueue(target)
+			d.syncPeerTimeline(target)
 		}
 	}
 	return store
@@ -281,7 +282,7 @@ func newPeerMessage(to, from string, r operatorMessageRequest, now time.Time) (p
 	if ttl == 0 {
 		ttl = peerMessageTTL
 	}
-	return peerMessage{ID: session.NewUUID(), To: to, From: from, Text: r.Text, ExpiresAt: now.Add(ttl)}, ""
+	return peerMessage{ID: session.NewUUID(), To: to, From: from, Text: r.Text, ReceivedAt: now, ExpiresAt: now.Add(ttl)}, ""
 }
 
 func (d *desk) changePeerMessage(store *peerMessages, i int, r operatorMessageRequest, now time.Time) operatorMessageReceipt {
@@ -301,7 +302,7 @@ func (d *desk) changePeerMessage(store *peerMessages, i int, r operatorMessageRe
 		store.Receipts = append(store.Receipts, rep)
 		d.savePeerMessages()
 		if target, _ := d.peerRecipient(msg.To); target != nil {
-			d.syncQueue(target)
+			d.syncPeerTimeline(target)
 		}
 		return rep
 	case "replace":
@@ -323,7 +324,7 @@ func (d *desk) changePeerMessage(store *peerMessages, i int, r operatorMessageRe
 func (d *desk) peerSendReceipt(target *deskSession, store *peerMessages, msg peerMessage) operatorMessageReceipt {
 	if target != nil {
 		d.flushPeerMessage(target)
-		d.syncQueue(target)
+		d.syncPeerTimeline(target)
 		if !d.seen(target) && d.notifyOn() {
 			d.desktopNotifyAs(target.id, "Peer message from "+msg.From, "Open Quill to read it.", false)
 		}
@@ -391,7 +392,7 @@ func (d *desk) flushPeerMessage(s *deskSession) {
 		store.Pending = slices.Delete(store.Pending, i, i+1)
 		store.Receipts = append(store.Receipts, msg.receipt("submitted", now))
 		d.savePeerMessages()
-		d.syncQueue(s)
+		d.syncPeerTimeline(s)
 		return
 	}
 }

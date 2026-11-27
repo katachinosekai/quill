@@ -2224,6 +2224,9 @@ func (d *desk) deliverTurnWithOrigin(s *deskSession, text string, steer, peer bo
 		return false
 	}
 	if s.codexUpgrading {
+		if peer {
+			return false // the durable peer pool retries after the bridge initializes
+		}
 		d.enqueue(s, text)
 		return true
 	}

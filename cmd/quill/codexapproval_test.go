@@ -127,3 +127,70 @@ func TestPlanMirrorsFollowQuillOperatorEngine(t *testing.T) {
 		}
 	})
 }
+
+func TestCodexOperatorOpenedBeforeRestore(t *testing.T) {
+	for _, role := range []*assistRole{codexQuillRole, codexKmemRole} {
+		t.Run(role.id, func(t *testing.T) {
+			h := newHarness(t)
+			self, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("QUILL_CODEX_BIN", self)
+			t.Setenv("QUILL_HANDOFF_FAKE", "1")
+			h.d.cfg.CodexRoot = t.TempDir()
+			var a *assistant
+			var s *deskSession
+			const message = "Wait for command approval"
+			h.ui(func() {
+				d := h.d
+				const id = "12345678-90ab-4def-8123-456789abcdef"
+				d.app.Preferences().SetString(role.id+"Session", id)
+				a = d.codexAssistant(role)
+				if a.s != nil || a.view.s != nil {
+					t.Fatal("fixture should construct the operator view before restoring its session")
+				}
+				d.applyRestore(&restoreState{Meta: map[string]sessMeta{
+					id: {Codex: true, Cwd: h.proj, Hidden: true, Role: role.id},
+				}})
+				s = d.sessions[id]
+				if s == nil || a.s != s || a.view.s != s || d.hostView(s) != a.view {
+					t.Fatal("operator view should bind to the restored session")
+				}
+				if err := d.ensureProcess(s); err != nil {
+					t.Fatal(err)
+				}
+				d.assistDeliver(a, message)
+			})
+			h.eventually("the native command approval reaches the restored operator", func() bool {
+				return len(s.conv.PendingPermissions()) == 1
+			})
+			h.ui(func() {
+				h.d.flushWinUI()
+				var user *chat.Item
+				for _, item := range s.conv.Items {
+					if item.Kind == chat.User && item.Text == message {
+						user = item
+					}
+				}
+				if user == nil || a.view.views[user.Seq] == nil {
+					t.Fatal("sent user message was missing from the operator chat")
+				}
+				approval := s.conv.PendingPermissions()[0]
+				row := a.view.views[approval.Seq]
+				if row == nil || !slices.Contains(a.view.box.Objects, fyne.CanvasObject(row.holder)) {
+					t.Fatal("native approval was missing from the operator chat")
+				}
+				var allows bool
+				deepWalk(row.holder, func(o fyne.CanvasObject) {
+					if button, ok := o.(*widget.Button); ok && button.Text == "Allow" && !button.Disabled() {
+						allows = true
+					}
+				})
+				if !allows {
+					t.Fatal("the restored operator approval should be actionable")
+				}
+			})
+		})
+	}
+}

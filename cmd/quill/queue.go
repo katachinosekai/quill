@@ -118,25 +118,6 @@ func (d *desk) drawQueue(v *chatView, s *deskSession) {
 		}
 		return m
 	}
-	var peerRows []fyne.CanvasObject
-	store := d.loadPeerMessages(time.Now())
-	for _, msg := range store.Pending {
-		if target, _ := d.peerRecipient(msg.To); target == s {
-			status := "received · waiting for " + s.engineName()
-			if store.Submitting[msg.ID] != "" {
-				status = "submission unconfirmed"
-			}
-			label := widget.NewLabel("Peer context from " + msg.From + " · " + status + "\n" + msg.Text)
-			label.Selectable = true
-			label.Wrapping = fyne.TextWrapWord
-			peerRows = append(peerRows, label)
-		}
-	}
-	if len(peerRows) > 0 {
-		inbox := container.NewVScroll(container.NewVBox(peerRows...))
-		inbox.SetMinSize(fyne.NewSize(0, 3*theme.TextSize()+2*theme.InnerPadding()))
-		rows = append(rows, inbox)
-	}
 	if len(s.queue) > 0 {
 		rows = append(rows, head("Queued, sent when "+s.engineName()+" finishes · ↑ in an empty box edits the last one"))
 	}

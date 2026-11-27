@@ -38,12 +38,7 @@ func (d *desk) codexAssistant(role *assistRole) *assistant {
 		d.codexQuillChat = c
 	}
 	a.chat, a.input, a.view = c.root, c.input, c.view
-	id := d.app.Preferences().String(role.id + "Session")
-	if s := d.sessions[id]; s != nil && s.codex && hiddenRole(s) == role.id {
-		a.s, a.state = s, asLive
-		c.view.show(s)
-		d.syncReasoningControl(a.reasoning, s)
-	}
+	d.bindSavedCodexAssistant(a)
 	if role == codexKmemRole {
 		a.input.onEscape = d.kmemComposerEscape
 		d.setHiddenHost(roleCodexKmem, &hiddenHost{
@@ -57,6 +52,19 @@ func (d *desk) codexAssistant(role *assistRole) *assistant {
 		})
 	}
 	return a
+}
+
+// bindSavedCodexAssistant redraws an existing operator once its session is restored.
+func (d *desk) bindSavedCodexAssistant(a *assistant) {
+	if a.view == nil {
+		return
+	}
+	id := d.app.Preferences().String(a.role.id + "Session")
+	if s := d.sessions[id]; s != nil && s.codex && hiddenRole(s) == a.role.id && (a.s == nil || a.s == s) {
+		a.s, a.state = s, asLive
+		a.view.show(s)
+		d.syncReasoningControl(a.reasoning, s)
+	}
 }
 
 func (d *desk) startCodexAssistant(a *assistant) {

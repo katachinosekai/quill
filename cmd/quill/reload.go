@@ -536,6 +536,11 @@ func (d *desk) applyRestore(st *restoreState) {
 			}
 		}
 	}
+	for _, role := range []*assistRole{codexQuillRole, codexKmemRole} {
+		if a := d.assistByRole(role.id); a != nil {
+			d.bindSavedCodexAssistant(a)
+		}
+	}
 	for _, id := range st.Running {
 		if s := d.session(id); s != nil && !s.running() && s.terminal == nil {
 			if s.codex && hiddenRole(s) == roleCodexQuill {

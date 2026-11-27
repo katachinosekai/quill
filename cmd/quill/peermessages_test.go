@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/katachinosekai/quill/internal/chat"
@@ -243,14 +242,9 @@ func TestPendingPeerInboxPreservesWork(t *testing.T) {
 				}
 				check := func() {
 					t.Helper()
-					objects := d.chat.queueBox.Objects
-					if len(objects) != 1 {
-						t.Fatalf("expected one peer inbox, got %d", len(objects))
-					}
-					pane := objects[0].(*container.Scroll)
-					label := pane.Content.(*fyne.Container).Objects[0].(*widget.Label)
-					if !strings.Contains(label.Text, "Peer context from Peer") || !strings.Contains(label.Text, body) {
-						t.Fatal(label.Text)
+					label := "Peer message from Peer · received · waiting for " + s.engineName() + "\n" + body
+					if len(d.chat.queueBox.Objects) != 0 || peerRowIndex(t, d.chat, label) < 0 {
+						t.Fatal("expected one pending peer in chat and an empty queue footer")
 					}
 					if d.input.Text != "Unsent draft" || lastUser(s) != work || !s.conv.Busy || !s.inTurn || s.pendingRevision != nil || s.runAll {
 						t.Fatal("arrival changed work or its draft")
@@ -268,7 +262,7 @@ func TestPendingPeerInboxPreservesWork(t *testing.T) {
 				d.chat.show(s)
 				d.pollPeerMessages(time.Now())
 				check()
-				if result := d.routeOperatorMessage(operatorMessageRequest{Op: "withdraw", ID: r.ID}); result.Status != "withdrawn" || len(d.chat.queueBox.Objects) != 0 {
+				if result := d.routeOperatorMessage(operatorMessageRequest{Op: "withdraw", ID: r.ID}); result.Status != "withdrawn" || len(d.chat.pendingPeers) != 0 {
 					t.Fatal("withdrawal left context in the inbox")
 				}
 				r = send()
@@ -285,7 +279,7 @@ func TestPendingPeerInboxPreservesWork(t *testing.T) {
 					return strings.Contains(lastUser(s), id) && !s.conv.Busy
 				})
 				h.ui(func() {
-					if len(d.chat.queueBox.Objects) != 0 || d.routeOperatorMessage(operatorMessageRequest{Op: "status", ID: id}).Status != "submitted" {
+					if peerRowIndex(t, d.chat, "Peer message from Peer · submitted\nApproved. This concerns tomorrow.") < 0 || len(d.chat.pendingPeers) != 0 || d.routeOperatorMessage(operatorMessageRequest{Op: "status", ID: id}).Status != "submitted" {
 						t.Fatal("delivery left a stale pending inbox")
 					}
 				})
@@ -330,4 +324,110 @@ func TestPeerMessageReconcilesInterruptedSubmission(t *testing.T) {
 			t.Fatal("restored transcript did not reconcile the submission")
 		}
 	})
+}
+
+func peerRowIndex(t *testing.T, v *chatView, label string) int {
+	t.Helper()
+	pos := -1
+	for i, row := range v.box.Objects {
+		deepWalk(row, func(obj fyne.CanvasObject) {
+			if l, ok := obj.(*widget.Label); ok && l.Text == label {
+				if pos != -1 {
+					t.Fatalf("duplicate timeline row %q", label)
+				}
+				pos = i
+			}
+		})
+	}
+	return pos
+}
+
+func TestPeerTimelineKeepsReceiptOrder(t *testing.T) {
+	h := newHarness(t)
+	h.ui(func() {
+		d := h.d
+		s := d.createSession(h.proj, "default", "default")
+		d.org.Titles[s.id] = "Target"
+		d.open(s.id)
+		before := s.conv.AddUser("before")
+		d.chat.update([]*chat.Item{before})
+		now := time.Now()
+		r := d.routePeerMessage(operatorMessageRequest{To: "target", from: "Peer", Text: "context", TTL: time.Hour}, now)
+		if r.Status != "queued" {
+			t.Fatal(r)
+		}
+		after := s.conv.AddUser("after")
+		after.Time = now.Add(time.Minute)
+		d.chat.update([]*chat.Item{after})
+		check := func(status string) {
+			t.Helper()
+			i := peerRowIndex(t, d.chat, "Peer message from Peer · "+status+"\ncontext")
+			if i != 1 || d.chat.box.Objects[0] != d.chat.views[before.Seq].holder || d.chat.box.Objects[2] != d.chat.views[after.Seq].holder {
+				t.Fatalf("peer at %d, expected it between adjacent turns", i)
+			}
+		}
+		check("received · waiting for " + s.engineName())
+		d.peerMessages = nil
+		d.chat.show(s)
+		check("received · waiting for " + s.engineName())
+		it := s.conv.AddUser(d.peerMessages.Pending[0].envelope())
+		d.chat.update([]*chat.Item{it})
+		check("submitted")
+		if len(d.chat.pendingPeers) != 0 || len(d.chat.box.Objects) != 3 {
+			t.Fatal("pending and submitted rows overlapped")
+		}
+		d.chat.show(s)
+		check("submitted")
+		exp := d.routePeerMessage(operatorMessageRequest{To: "target", from: "Peer", Text: "expires", TTL: time.Minute}, now)
+		d.cleanPeerMessages(exp.ExpiresAt)
+		if len(d.chat.pendingPeers) != 0 || len(d.chat.box.Objects) != 3 {
+			t.Fatal("expiry left a peer row in the timeline")
+		}
+	})
+}
+
+func TestPeerTimelineAppearsInOperatorChat(t *testing.T) {
+	for _, role := range []string{roleCodexQuill, roleCodexKmem} {
+		t.Run(role, func(t *testing.T) {
+			h := kmemBoxHarness(t)
+			h.ui(func() {
+				d := h.d
+				s := d.addSessionWithBackend(h.proj, "default", "default", false, true)
+				d.markHiddenAs(s, role)
+				definition := codexQuillRole
+				want := quillOpName
+				if role == roleCodexKmem {
+					definition = codexKmemRole
+					want = kmemAssistName
+				}
+				a := d.codexAssistant(definition)
+				a.s, a.state = s, asLive
+				approval := s.conv.AddPlan()
+				a.view.show(s)
+				if role == roleCodexKmem {
+					d.app.Preferences().SetBool("kmemAgentCodex", true)
+					d.showKmem()
+				} else {
+					d.app.Preferences().SetBool("quillAgentCodex", true)
+					d.openAssistBox(roleCodexQuill)
+				}
+				receipt := d.routeOperatorMessage(operatorMessageRequest{To: want, from: "Peer", Text: "Fixture context"})
+				if receipt.Status != "queued" {
+					t.Fatal(receipt)
+				}
+				label := "Peer message from Peer · received · waiting for Codex\nFixture context"
+				if peerRowIndex(t, a.view, label) < 0 || len(a.view.queueBox.Objects) != 0 {
+					t.Fatal("peer message should appear in the operator timeline only")
+				}
+				if approval.PermState != chat.PermPending || len(s.conv.PendingPermissions()) != 1 {
+					t.Fatal("peer arrival changed the operator approval")
+				}
+				d.peerMessages = nil
+				a.view.show(s)
+				if peerRowIndex(t, a.view, label) < 0 || len(a.view.queueBox.Objects) != 0 {
+					t.Fatal("the operator peer row was lost on redraw")
+				}
+			})
+		})
+	}
 }
